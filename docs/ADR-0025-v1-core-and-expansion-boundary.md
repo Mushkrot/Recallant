@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The owner wants a full-quality product, not a quick demo. At the same time, AMP has a broad possible future: coding-agent memory, personal external memory, passive capture, connectors, visual memory management, public packaging, and specialized storage.
+The owner wants a full-quality product, not a quick demo. At the same time, Recallant has a broad possible future: coding-agent memory, personal external memory, passive capture, connectors, visual memory management, public packaging, and specialized storage.
 
 If all future directions are implemented at once, the project risks becoming infrastructure-heavy before the core daily workflow is reliable. If v1 is cut too aggressively, it will not solve the owner's real context-loss problem.
 
@@ -16,8 +16,8 @@ Define v1 as a **full working core for coding-agent memory**, not a throwaway MV
 
 v1 includes everything required for the owner's real agent workflow:
 
-- AMP server on the owner's Linux server,
-- `amp_agent_work` Postgres database in the accepted one-instance / domain-database architecture,
+- Recallant server on the owner's Linux server,
+- `recallant_agent_work` Postgres database in the accepted one-instance / domain-database architecture,
 - project separation through `project_id` plus developer-level shared memory where intentionally promoted,
 - raw conversation/event capture according to capture profiles,
 - raw workflow evidence and raw artifact metadata/pointers for large tool/terminal/media/transcript evidence,

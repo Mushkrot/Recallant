@@ -16,7 +16,7 @@ Different projects need different capture depth. Some important/complex projects
 
 ## Decision
 
-AMP v1 must implement **managed hybrid capture**.
+Recallant v1 must implement **managed hybrid capture**.
 
 The system captures raw evidence and derived memory separately:
 
@@ -26,7 +26,7 @@ The system captures raw evidence and derived memory separately:
 
 The owner must be able to change capture depth through explicit policy/profile settings. Capture behavior is not one-size-fits-all.
 
-New projects should receive an automatic optimal default instead of forcing the owner to answer during every `amp init`. The owner must be able to adjust that setting later from UI/CLI.
+New projects should receive an automatic optimal default instead of forcing the owner to answer during every `recallant init`. The owner must be able to adjust that setting later from UI/CLI.
 
 ## Capture Profiles
 
@@ -68,13 +68,13 @@ The effective policy must be inspectable in UI/CLI so the owner can understand w
 
 ## Default Selection
 
-`amp init` should assign a sensible default capture profile automatically.
+`recallant init` should assign a sensible default capture profile automatically.
 
 Initial rule:
 
 - default to `standard` for a normal coding project,
-- allow `amp init --capture-profile light|standard|detailed|custom` when the owner wants to override immediately,
-- allow later changes from Review UI/settings or CLI, for example `amp project set-capture-profile detailed`.
+- allow `recallant init --capture-profile light|standard|detailed|custom` when the owner wants to override immediately,
+- allow later changes from Review UI/settings or CLI, for example `recallant project set-capture-profile detailed`.
 
 The generated plan/dry-run should show the selected profile and how to change it. The user should not be interrupted with an extra setup question in the normal path.
 

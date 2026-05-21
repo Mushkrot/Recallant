@@ -9,9 +9,9 @@
 
 ## 1.1 Database placement
 
-This schema applies first to the `amp_agent_work` database inside the single AMP Postgres instance. See [ADR-0011-postgres-instance-domain-databases.md](ADR-0011-postgres-instance-domain-databases.md).
+This schema applies first to the `recallant_agent_work` database inside the single Recallant Postgres instance. See [ADR-0011-postgres-instance-domain-databases.md](ADR-0011-postgres-instance-domain-databases.md).
 
-Future domain databases such as `amp_personal_life` may reuse this base L0/L1/L2/L3 schema and extend it through ADRs. Keep `memory_domain` columns even inside a domain-specific database for provenance, export/import, and cross-domain recall traces.
+Future domain databases such as `recallant_personal_life` may reuse this base L0/L1/L2/L3 schema and extend it through ADRs. Keep `memory_domain` columns even inside a domain-specific database for provenance, export/import, and cross-domain recall traces.
 
 ## 2. Tables
 
@@ -24,7 +24,7 @@ Future domain databases such as `amp_personal_life` may reuse this base L0/L1/L2
 | `created_at` | TIMESTAMPTZ | |
 | `updated_at` | TIMESTAMPTZ | |
 
-Один `developer` объединяет несколько `projects`. Позволяет cross-project поиск и хранение общих паттернов с `scope=developer`. В v1 допускается один developer per AMP instance (single-user); multi-developer — через ADR.
+Один `developer` объединяет несколько `projects`. Позволяет cross-project поиск и хранение общих паттернов с `scope=developer`. В v1 допускается один developer per Recallant instance (single-user); multi-developer — через ADR.
 
 ### 2.1 `projects`
 
@@ -274,7 +274,7 @@ Unique index on (`project_id`, `dedup_key`).
 
 ### 2.13 `model_calls`
 
-Durable audit log for every embedding/LLM/rerank/classification call made by AMP. See [MODEL_ROUTING.md](MODEL_ROUTING.md) and [ADR-0012-local-first-model-router.md](ADR-0012-local-first-model-router.md).
+Durable audit log for every embedding/LLM/rerank/classification call made by Recallant. See [MODEL_ROUTING.md](MODEL_ROUTING.md) and [ADR-0012-local-first-model-router.md](ADR-0012-local-first-model-router.md).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -333,7 +333,7 @@ Default-profile paid API calls require explicit approval before execution. This 
 
 ### 2.14 `system_settings`
 
-Server/runtime defaults owned by the AMP server. Secrets themselves should stay in environment variables or a secret store; this table may store safe references or non-secret deployment policy.
+Server/runtime defaults owned by the Recallant server. Secrets themselves should stay in environment variables or a secret store; this table may store safe references or non-secret deployment policy.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -442,7 +442,7 @@ Do not store secrets in settings audit events.
 - `projects (developer_id, memory_domain, project_kind)`
 - `chunks (project_id)` + GIN(`tsv`)
 - `chunks (developer_id, scope)` — для cross-project developer-scope запросов
-- `chunks (project_id, last_accessed_at, archived_at)` — для amp analyze / cleanup queries
+- `chunks (project_id, last_accessed_at, archived_at)` — для recallant analyze / cleanup queries
 - `embeddings USING ivfflat` или `hnsw` на `vector` (выбор по размеру данных; v1 может начать с sequential scan при малых N — только для dev)
 - `edges (project_id, src_kind, src_id)` и `(project_id, dst_kind, dst_id)`
 - `agent_memories (project_id, status, use_policy, updated_at DESC)`

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The owner asked whether AMP should choose one implementation language or use a hybrid stack where each language is used where it is strongest.
+The owner asked whether Recallant should choose one implementation language or use a hybrid stack where each language is used where it is strongest.
 
 Upstream projects show different patterns:
 
@@ -20,7 +20,7 @@ Upstream projects show different patterns:
 
 Use a **controlled hybrid** architecture:
 
-- TypeScript is the preferred primary runtime for AMP core.
+- TypeScript is the preferred primary runtime for Recallant core.
 - Python may be used for optional worker jobs when it clearly improves implementation quality.
 - Core contracts remain language-neutral and must not be duplicated across runtimes.
 

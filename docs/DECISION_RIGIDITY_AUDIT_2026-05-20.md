@@ -17,11 +17,11 @@ These are intentionally strict and should stay strict unless a future ADR change
 - One Postgres instance with separate domain databases for major memory domains.
 - MCP as the primary v1 agent-facing interface.
 - Local-first model routing; cloud is escalation/fallback, not core dependency.
-- No silent broad import from `amp init` or closeout.
+- No silent broad import from `recallant init` or closeout.
 - Agent-created memory cannot silently become `instruction_grade`.
 - Source refs/provenance are required for generated governed memories.
 - Startup must not read all docs/logs/archive files by default.
-- Repo bootstrap files route to AMP; they do not become the long-term memory store.
+- Repo bootstrap files route to Recallant; they do not become the long-term memory store.
 - No plaintext secrets in memory/bootstrap.
 
 ## Refine to configurable policy

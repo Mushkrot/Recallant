@@ -6,7 +6,7 @@ Accepted, refined by [ADR-0031-subscription-first-api-last-model-escalation.md](
 
 ## Context
 
-AMP should not depend on one provider route or one "best" model. Model quality, latency, pricing, subscription limits, and availability change quickly. The owner wants local models, active-agent/subscription-backed routes, OpenAI, Gemini, and Claude available in perspective, with a practical baseline now and the ability to switch by project/task later.
+Recallant should not depend on one provider route or one "best" model. Model quality, latency, pricing, subscription limits, and availability change quickly. The owner wants local models, active-agent/subscription-backed routes, OpenAI, Gemini, and Claude available in perspective, with a practical baseline now and the ability to switch by project/task later.
 
 Accepted provider hierarchy:
 
@@ -83,7 +83,7 @@ Every model call, local/subscription-backed or paid API, must be logged in `mode
 
 ## Consequences
 
-- AMP has a practical starting point while keeping provider choice flexible.
+- Recallant has a practical starting point while keeping provider choice flexible.
 - OpenAI is the baseline paid API profile when direct API fallback/escalation is explicitly approved.
 - Gemini Flash/Flash-Lite and Claude Haiku are first-class optional cheap/fast router candidates, not afterthoughts.
 - Gemini 2.5 Flash is the default balanced Gemini route.

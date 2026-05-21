@@ -1,6 +1,6 @@
 # Model routing
 
-AMP uses a **local-first, subscription-first, API-last model router**. Local models are the default for basic memory work. Stronger non-local reasoning first tries the active agent or supported subscription-backed routes. Direct paid API providers are exceptional fallback/escalation paths and require explicit confirmation by default. See [ADR-0012-local-first-model-router.md](ADR-0012-local-first-model-router.md), [ADR-0031-subscription-first-api-last-model-escalation.md](ADR-0031-subscription-first-api-last-model-escalation.md), and [ADR-0032-paid-api-confirmation-and-cost-dashboard.md](ADR-0032-paid-api-confirmation-and-cost-dashboard.md).
+Recallant uses a **local-first, subscription-first, API-last model router**. Local models are the default for basic memory work. Stronger non-local reasoning first tries the active agent or supported subscription-backed routes. Direct paid API providers are exceptional fallback/escalation paths and require explicit confirmation by default. See [ADR-0012-local-first-model-router.md](ADR-0012-local-first-model-router.md), [ADR-0031-subscription-first-api-last-model-escalation.md](ADR-0031-subscription-first-api-last-model-escalation.md), and [ADR-0032-paid-api-confirmation-and-cost-dashboard.md](ADR-0032-paid-api-confirmation-and-cost-dashboard.md).
 
 ## 1. Accepted principle
 
@@ -14,18 +14,18 @@ Model routing is a product feature, not an afterthought.
 - Paid API providers are allowed for fallback/escalation where they materially improve quality or keep the pipeline available, but they are API-last and confirmation-first by default.
 - Paid API providers are not a dependency for core recall.
 - Cost, latency, privacy, and quality must be explicit routing inputs.
-- AMP must not use browser automation, scraping, hidden APIs, or limit-bypass behavior.
+- Recallant must not use browser automation, scraping, hidden APIs, or limit-bypass behavior.
 
 ## 1.1 Route classes
 
 | Route class | Meaning | Cost behavior |
 |-------------|---------|---------------|
 | `local_model` | Local/Ollama/Postgres/self-hosted model work | no external token bill |
-| `active_agent` | The currently open Codex or other agent session reasons and calls AMP tools | consumes the active agent/session subscription or quota |
+| `active_agent` | The currently open Codex or other agent session reasons and calls Recallant tools | consumes the active agent/session subscription or quota |
 | `subscription_worker` | Background/local/server worker using supported OAuth/sign-in subscription mechanisms | consumes existing plan limits/credits, not direct API billing |
 | `paid_api_provider` | Direct API call to OpenAI/Gemini/Claude/compatible provider | billed separately by provider/token/credit policy |
 
-If a subscription-backed route hits limits, AMP pauses, defers, downgrades to local models, or creates an approval request before using paid API. It never silently falls through to paid API.
+If a subscription-backed route hits limits, Recallant pauses, defers, downgrades to local models, or creates an approval request before using paid API. It never silently falls through to paid API.
 
 ## 2. Model task classes
 
@@ -116,7 +116,7 @@ Claude-specific routing note: use `anthropic/claude-haiku-4-5` as the cheap/fast
 - Browser automation, scraping, hidden APIs, and attempts to bypass subscription/provider limits are disallowed routes.
 - Default paid API mode is `confirm_each`: every direct paid API call creates an approval request before execution.
 - Automatic paid API requires an explicit future `auto_with_caps` project/task/profile setting and active cost dashboard monitoring.
-- The AMP management UI must expose near-real-time paid API cost and approval status.
+- The Recallant management UI must expose near-real-time paid API cost and approval status.
 
 ## 7. Open decisions
 

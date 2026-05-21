@@ -2,36 +2,36 @@
 
 ## 1. Server identity
 
-- **Name:** `agent-memory-platform`
+- **Name:** `recallant`
 - **Version:** semver в коде; при старте логируется.
 
 ## 2. Configuration (environment)
 
 | Variable | Required | Meaning |
 |----------|----------|---------|
-| `AMP_DATABASE_URL` | yes | Postgres connection string |
-| `AMP_DEVELOPER_ID` | yes | UUID developer-владельца; задаётся один раз при `amp init` |
-| `AMP_PROJECT_ID` | yes* | UUID проекта; берётся из `.amp/config` текущего проекта |
-| `AMP_EMBEDDING_MODEL` | yes | Model id for embeddings (default: `nomic-embed-text`) |
-| `AMP_EMBEDDING_DIMS` | yes | int (default: `768` для nomic-embed-text) |
-| `AMP_OLLAMA_URL` | no | URL Ollama instance (default: `http://localhost:11434`) |
-| `AMP_EMBED_BATCH_SIZE` | no | Размер батча для embedding (default: `32`); см. `INGESTION.md` |
-| `AMP_DECAY_ENABLED` | no | Score decay по возрасту (default: `true`); см. `CLEANUP.md` |
-| `AMP_DECAY_HALFLIFE_PROJECT_DAYS` | no | Half-life для project chunks (default: `90`) |
-| `AMP_DECAY_HALFLIFE_DEVELOPER_DAYS` | no | Half-life для developer chunks (default: `365`) |
-| `AMP_ANALYSIS_PROVIDER` | no | Провайдер LLM для amp analyze: `ollama` (default) \| `openai` \| `none` |
-| `AMP_ANALYSIS_MODEL` | no | Модель для analyze summaries (default: `llama3.2:3b`); для openai — например `gpt-4o-mini` |
-| `AMP_CLOUD_EMBEDDING_FALLBACK` | no | `disabled` \| `enabled`; default `disabled` until explicitly configured |
-| `AMP_MODEL_ROUTER_MODE` | no | `local_only` \| `local_first` \| `subscription_first_api_last` \| `paid_api_allowed`; default `subscription_first_api_last` when subscription routes are configured, otherwise `local_first` |
-| `AMP_SUBSCRIPTION_WORKER` | no | `disabled` \| `enabled`; enables supported OAuth/sign-in subscription worker route when configured |
-| `AMP_PAID_API_DAILY_BUDGET_USD` | no | optional daily paid API budget ceiling |
-| `AMP_PAID_API_MODE` | no | `disabled` \| `confirm_each` \| `auto_with_caps`; default `confirm_each` |
-| `AMP_OPENAI_API_KEY` | no* | API ключ OpenAI; *обязателен если `AMP_ANALYSIS_PROVIDER=openai` |
-| `AMP_OPENAI_BASE_URL` | no | Base URL для OpenAI-совместимых API (default: `https://api.openai.com/v1`) |
-| `AMP_LOG_LEVEL` | no | default `info` |
-| `AMP_RETRIEVAL_PROFILE` | no | retrieval/context tuning profile; default implementation profile |
+| `RECALLANT_DATABASE_URL` | yes | Postgres connection string |
+| `RECALLANT_DEVELOPER_ID` | yes | UUID developer-владельца; задаётся один раз при `recallant init` |
+| `RECALLANT_PROJECT_ID` | yes* | UUID проекта; берётся из `.recallant/config` текущего проекта |
+| `RECALLANT_EMBEDDING_MODEL` | yes | Model id for embeddings (default: `nomic-embed-text`) |
+| `RECALLANT_EMBEDDING_DIMS` | yes | int (default: `768` для nomic-embed-text) |
+| `RECALLANT_OLLAMA_URL` | no | URL Ollama instance (default: `http://localhost:11434`) |
+| `RECALLANT_EMBED_BATCH_SIZE` | no | Размер батча для embedding (default: `32`); см. `INGESTION.md` |
+| `RECALLANT_DECAY_ENABLED` | no | Score decay по возрасту (default: `true`); см. `CLEANUP.md` |
+| `RECALLANT_DECAY_HALFLIFE_PROJECT_DAYS` | no | Half-life для project chunks (default: `90`) |
+| `RECALLANT_DECAY_HALFLIFE_DEVELOPER_DAYS` | no | Half-life для developer chunks (default: `365`) |
+| `RECALLANT_ANALYSIS_PROVIDER` | no | Провайдер LLM для recallant analyze: `ollama` (default) \| `openai` \| `none` |
+| `RECALLANT_ANALYSIS_MODEL` | no | Модель для analyze summaries (default: `llama3.2:3b`); для openai — например `gpt-4o-mini` |
+| `RECALLANT_CLOUD_EMBEDDING_FALLBACK` | no | `disabled` \| `enabled`; default `disabled` until explicitly configured |
+| `RECALLANT_MODEL_ROUTER_MODE` | no | `local_only` \| `local_first` \| `subscription_first_api_last` \| `paid_api_allowed`; default `subscription_first_api_last` when subscription routes are configured, otherwise `local_first` |
+| `RECALLANT_SUBSCRIPTION_WORKER` | no | `disabled` \| `enabled`; enables supported OAuth/sign-in subscription worker route when configured |
+| `RECALLANT_PAID_API_DAILY_BUDGET_USD` | no | optional daily paid API budget ceiling |
+| `RECALLANT_PAID_API_MODE` | no | `disabled` \| `confirm_each` \| `auto_with_caps`; default `confirm_each` |
+| `RECALLANT_OPENAI_API_KEY` | no* | API ключ OpenAI; *обязателен если `RECALLANT_ANALYSIS_PROVIDER=openai` |
+| `RECALLANT_OPENAI_BASE_URL` | no | Base URL для OpenAI-совместимых API (default: `https://api.openai.com/v1`) |
+| `RECALLANT_LOG_LEVEL` | no | default `info` |
+| `RECALLANT_RETRIEVAL_PROFILE` | no | retrieval/context tuning profile; default implementation profile |
 
-\*`AMP_PROJECT_ID` автоматически подставляется из `.amp/config` при использовании `amp` CLI. При прямом запуске MCP server — передаётся явно.
+\*`RECALLANT_PROJECT_ID` автоматически подставляется из `.recallant/config` при использовании `recallant` CLI. При прямом запуске MCP server — передаётся явно.
 
 Default values in this table are implementation/profile defaults, not architecture invariants. Model/dimension changes must follow explicit reindex/migration rules because stored embeddings depend on the chosen dimensionality; see [ADR-0015-configurable-operational-heuristics.md](ADR-0015-configurable-operational-heuristics.md).
 
@@ -41,7 +41,7 @@ Default values in this table are implementation/profile defaults, not architectu
 
 ### 3.0 `memory_start_session`
 
-Starts or resumes an AMP-tracked agent session. This tool is universal: Codex, Cursor, Claude Code, Windsurf, and future agents all use the same contract with different `client_kind` values.
+Starts or resumes a Recallant-tracked agent session. This tool is universal: Codex, Cursor, Claude Code, Windsurf, and future agents all use the same contract with different `client_kind` values.
 
 **Input JSON:**
 

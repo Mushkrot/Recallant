@@ -6,11 +6,11 @@ Accepted
 
 ## Context
 
-AMP must distinguish proposed memories, trusted memories, rejected memories, old memories, replaced memories, and possibly stale memories. A flat "approved/pending" model is too weak for long-lived agent behavior because it blurs whether a record is a rule, evidence, candidate, or historical artifact.
+Recallant must distinguish proposed memories, trusted memories, rejected memories, old memories, replaced memories, and possibly stale memories. A flat "approved/pending" model is too weak for long-lived agent behavior because it blurs whether a record is a rule, evidence, candidate, or historical artifact.
 
 ## Decision
 
-AMP v1 uses these governed-memory lifecycle statuses:
+Recallant v1 uses these governed-memory lifecycle statuses:
 
 ```text
 candidate

@@ -1,14 +1,14 @@
 # Backup and restore
 
-AMP memory is only useful if it can be restored after a failure. This document is the practical backup/restore contract for v1. See [ADR-0028-practical-backup-restore-policy.md](ADR-0028-practical-backup-restore-policy.md).
+Recallant memory is only useful if it can be restored after a failure. This document is the practical backup/restore contract for v1. See [ADR-0028-practical-backup-restore-policy.md](ADR-0028-practical-backup-restore-policy.md).
 
 ## 1. Backup set
 
-Every complete AMP backup must include:
+Every complete Recallant backup must include:
 
 1. **Postgres domain database**
-   - required v1 database: `amp_agent_work`,
-   - future domain databases such as `amp_personal_life` when they exist.
+   - required v1 database: `recallant_agent_work`,
+   - future domain databases such as `recallant_personal_life` when they exist.
 
 2. **Raw artifact storage**
    - server filesystem or local/server spool-backed artifact files,
@@ -17,7 +17,7 @@ Every complete AMP backup must include:
 3. **Backup manifest**
    - backup id,
    - created timestamp,
-   - AMP version,
+   - Recallant version,
    - migration/schema version,
    - database names included,
    - raw artifact root(s),
@@ -40,7 +40,7 @@ Do not store provider API keys or raw secrets in backup manifests.
 v1 starts with a practical local target:
 
 ```text
-AMP server
+Recallant server
   ├── Postgres / pgvector
   ├── raw artifacts
   └── local encrypted backup directory
@@ -49,18 +49,18 @@ AMP server
 The architecture must support adding a second backup server later:
 
 ```text
-AMP server
+Recallant server
   ├── local encrypted backup directory
   └── replication over SSH/Tailscale
         ↓
      backup server on owner's network
 ```
 
-The second server is not required on day one, but implementation should not hard-code "backup only lives on the AMP server" as the permanent model.
+The second server is not required on day one, but implementation should not hard-code "backup only lives on the Recallant server" as the permanent model.
 
 ## 3. Restore verification
 
-A backup is not considered good just because it was created. AMP must support a restore verification workflow.
+A backup is not considered good just because it was created. Recallant must support a restore verification workflow.
 
 Minimum verification:
 

@@ -6,7 +6,7 @@ Accepted, refined by [ADR-0036-governed-memory-lifecycle-statuses.md](ADR-0036-g
 
 ## Context
 
-AMP creates ordinary governed memories automatically. If every memory required manual review, the Review UI would become unusable. If nothing required review, inferred long-term rules, conflicts, duplicates, and risky guidance could quietly degrade agent behavior.
+Recallant creates ordinary governed memories automatically. If every memory required manual review, the Review UI would become unusable. If nothing required review, inferred long-term rules, conflicts, duplicates, and risky guidance could quietly degrade agent behavior.
 
 The owner selected the policy: review **important, conflicting, and long-term** records.
 

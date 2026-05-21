@@ -1,4 +1,4 @@
-# ADR-0018: OB1/MF0 synthesis for AMP architecture
+# ADR-0018: OB1/MF0 synthesis for Recallant architecture
 
 ## Status
 
@@ -6,18 +6,18 @@ Accepted
 
 ## Context
 
-The owner confirmed the desired direction: AMP should use the strongest parts of both Open Brain / OB1 and MF0-1984 rather than choosing one project narrowly.
+The owner confirmed the desired direction: Recallant should use the strongest parts of both Open Brain / OB1 and MF0-1984 rather than choosing one project narrowly.
 
 Current upstream research shows a useful split:
 
 - **OB1** is strongest as the governance backbone: Postgres/pgvector, MCP-first architecture, governed agent-memory sidecars, provenance, review state, source refs, recall traces, audit trails, compact write-back, and conservative policy around instruction-grade memory.
 - **MF0-1984** is strongest as a local workbench and capture/UI reference: conversation turns, per-thread message mirror, rolling summaries, extracted memory items, Memory Tree, Keeper pipelines, project profile export/import, and server-side provider proxy patterns.
 
-Neither upstream project implements the exact AMP decision by itself. OB1 is more selective and governed; it intentionally avoids raw transcript capture as normal memory. MF0 preserves more of the chat/workbench flow and derives summaries/memories from it, but does not provide AMP's explicit per-project capture profile semantics.
+Neither upstream project implements the exact Recallant decision by itself. OB1 is more selective and governed; it intentionally avoids raw transcript capture as normal memory. MF0 preserves more of the chat/workbench flow and derives summaries/memories from it, but does not provide Recallant's explicit per-project capture profile semantics.
 
 ## Decision
 
-AMP will use an **optimal controlled synthesis**:
+Recallant will use an **optimal controlled synthesis**:
 
 ### From OB1
 
@@ -47,9 +47,9 @@ Use MF0-1984 as a major subsystem donor for:
 - project profile export/import,
 - server-side LLM/provider proxy pattern so browser/UI clients do not directly hold provider secrets.
 
-### Owned by AMP
+### Owned by Recallant
 
-AMP must own the bridge that neither upstream provides exactly:
+Recallant must own the bridge that neither upstream provides exactly:
 
 - managed hybrid capture with raw evidence, derived memory, and agent-context layers,
 - raw workflow evidence as the lower factual foundation, with governed memory as the upper behavior layer,
@@ -63,7 +63,7 @@ AMP must own the bridge that neither upstream provides exactly:
 ## Consequences
 
 - OB1 remains the preferred architecture foundation, but MF0 is not a minor reference. It is the primary donor for workbench, raw capture, Memory Tree, and Keeper-style UX ideas.
-- AMP must not copy either upstream schema directly. All borrowed ideas are mapped into AMP-owned contracts: `DATA_MODEL.md`, `MCP_SPEC.md`, `INGESTION.md`, `MEMORY_MANAGEMENT.md`, and `RETRIEVAL.md`.
+- Recallant must not copy either upstream schema directly. All borrowed ideas are mapped into Recallant-owned contracts: `DATA_MODEL.md`, `MCP_SPEC.md`, `INGESTION.md`, `MEMORY_MANAGEMENT.md`, and `RETRIEVAL.md`.
 - Raw evidence preservation does not weaken governance. Future agent behavior comes from governed memories, checkpoint, scoring, review, and scoped retrieval.
 - The v1 design should intentionally combine OB1-style safe memory with MF0-style usable memory management, instead of treating these as competing choices.
 - See [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md) for the accepted lower-layer raw evidence policy.
@@ -77,4 +77,4 @@ AMP must own the bridge that neither upstream provides exactly:
 
 - How much MF0-style Memory Tree functionality belongs in v1 Review UI versus later workbench expansion?
 - Which Keeper-style specialized extraction pipelines should be implemented first after core capture/governance works?
-- How should MF0-style project profile export/import relate to AMP `amp init`, Journey-style kits, and backup/restore?
+- How should MF0-style project profile export/import relate to Recallant `recallant init`, Journey-style kits, and backup/restore?

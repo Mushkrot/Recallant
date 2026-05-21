@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Question 9 covered how existing project/server/history material should enter AMP without turning old files into accidental active instructions.
+Question 9 covered how existing project/server/history material should enter Recallant without turning old files into accidental active instructions.
 
 The owner confirmed several real examples from the first deployment environment:
 
@@ -20,25 +20,25 @@ ADR-0038 accepted environment discovery and portability. This ADR accepts the v1
 
 ## Decision
 
-AMP v1 will use a **discovery-first, import-by-confirmation** workflow.
+Recallant v1 will use a **discovery-first, import-by-confirmation** workflow.
 
 ### Commands and responsibilities
 
-`amp discover`
+`recallant discover`
 
 - Scans the environment for import/setup candidates.
 - May record scan metadata and discovered candidates.
 - Must not import historical material as active memory.
 - Must not silently promote discovered facts into binding rules.
 
-`amp init`
+`recallant init`
 
-- Registers/configures a project with AMP.
-- Creates or updates repo-native adapter surfaces such as `.amp/config` and thin agent instructions.
+- Registers/configures a project with Recallant.
+- Creates or updates repo-native adapter surfaces such as `.recallant/config` and thin agent instructions.
 - May suggest import candidates.
 - Must not perform broad historical import automatically.
 
-`amp import`
+`recallant import`
 
 - Is the explicit path for historical/external/project material.
 - Must support preview/dry-run before writing durable import results.
@@ -58,7 +58,7 @@ Accepted v1 sources:
 - `.env.example` as variable names and meanings only,
 - secret-store inventory as names/status/references only, never values,
 - server inventory such as `/ai/PORTS.yaml` or equivalent when confirmed as server/environment scope,
-- existing AMP/session JSONL exports when available.
+- existing Recallant/session JSONL exports when available.
 
 Not automatic in v1:
 
@@ -100,7 +100,7 @@ An import result is not just "a memory." Import should classify findings into st
 
 - Import is powerful enough to onboard existing projects but controlled enough to avoid stale-doc rule pollution.
 - Discovery and import are separate operations.
-- `amp init` remains safe for new and existing projects.
+- `recallant init` remains safe for new and existing projects.
 - The Review UI must understand import candidates and source refs.
 - Scope/audience assignment follows ADR-0040.
 - Conflict handling during import preview follows ADR-0041.

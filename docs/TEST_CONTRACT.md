@@ -92,7 +92,7 @@
 
 ## Phase 6.5 — Review UI
 
-- [ ] Review UI is served from the AMP server deployment or a sibling `amp-review-ui` process behind the same AMP private boundary.
+- [ ] Review UI is served from the Recallant server deployment or a sibling `recallant-review-ui` process behind the same Recallant private boundary.
 - [ ] First screen is Review Inbox / Command Center, not a raw memory list or metrics dashboard.
 - [ ] v1 UI is a compact workbench, not an approval-only table: it includes project navigation, Review Inbox, Rules, detail panel, action controls, Cost / Paid API, and Settings entrypoint.
 - [ ] First screen shows current project/scope/domain/capture profile.
@@ -118,41 +118,41 @@
 - [ ] Conflict view shows old/new records and can apply a supersede/demote/archive resolution.
 - [ ] Ordinary auto-created recallable memories do not appear as mandatory approval work unless policy marks them important/risky/conflicting.
 - [ ] Review UI/admin API is not publicly exposed by default in the local/server test profile.
-- [ ] Review UI/admin API requires AMP auth/session/token even when bound to localhost/Tailnet.
+- [ ] Review UI/admin API requires Recallant auth/session/token even when bound to localhost/Tailnet.
 - [ ] Browser/UI clients cannot read provider API keys or secret env values.
 
 ## Phase 7
 
-- [ ] `amp init --target codex --dry-run` в папке без `.amp/config`: печатает план, не изменяет файлы.
-- [ ] `amp init --target codex` создаёт `.amp/config` с валидным UUID `project_id`, запись в таблице `projects`.
-- [ ] `amp init --target codex` assigns `capture_profile=standard` by default and prints it in the plan/output.
-- [ ] `amp init --target codex --capture-profile detailed` stores the override and prints it in the plan/output.
-- [ ] `amp init` stores authoritative project settings on the AMP server; `.amp/config` contains only pointer data such as `project_id` and `amp_server_url`.
-- [ ] `amp init --target codex` создаёт или дополняет thin `AGENTS.md` секцией «Memory (AMP)».
-- [ ] `amp init --target codex` создаёт `PROJECT_LOG.md` если его нет.
-- [ ] `amp init --target codex` печатает готовый MCP-конфиг блок для Codex.
-- [ ] `amp init --target codex` может напечатать import candidates, но не создаёт `events.kind=import_batch` и не запускает import без explicit `amp import ...`.
-- [ ] `amp discover --dry-run` shows project/server/secret-reference/import candidates without creating active memories or instruction-grade records.
-- [ ] `amp import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.
-- [ ] `amp import` of `.env.example` stores variable names/meanings only and never raw secret values.
-- [ ] `amp import` of client-specific docs such as `CLAUDE.md` defaults to client-adapter/specific-client audience rather than universal all-agent instruction.
+- [ ] `recallant init --target codex --dry-run` в папке без `.recallant/config`: печатает план, не изменяет файлы.
+- [ ] `recallant init --target codex` создаёт `.recallant/config` с валидным UUID `project_id`, запись в таблице `projects`.
+- [ ] `recallant init --target codex` assigns `capture_profile=standard` by default and prints it in the plan/output.
+- [ ] `recallant init --target codex --capture-profile detailed` stores the override and prints it in the plan/output.
+- [ ] `recallant init` stores authoritative project settings on the Recallant server; `.recallant/config` contains only pointer data such as `project_id` and `recallant_server_url`.
+- [ ] `recallant init --target codex` создаёт или дополняет thin `AGENTS.md` секцией «Memory (Recallant)».
+- [ ] `recallant init --target codex` создаёт `PROJECT_LOG.md` если его нет.
+- [ ] `recallant init --target codex` печатает готовый MCP-конфиг блок для Codex.
+- [ ] `recallant init --target codex` может напечатать import candidates, но не создаёт `events.kind=import_batch` и не запускает import без explicit `recallant import ...`.
+- [ ] `recallant discover --dry-run` shows project/server/secret-reference/import candidates without creating active memories or instruction-grade records.
+- [ ] `recallant import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.
+- [ ] `recallant import` of `.env.example` stores variable names/meanings only and never raw secret values.
+- [ ] `recallant import` of client-specific docs such as `CLAUDE.md` defaults to client-adapter/specific-client audience rather than universal all-agent instruction.
 - [ ] Closeout intent recognizer treats "Закрываем сессию", "Exit", and "Сохрани все и выходим" as closeout triggers when context supports it.
 - [ ] `memory_closeout` marks the session closed, updates checkpoint, creates/updates governed-memory candidates, and returns a `PROJECT_LOG.md` update payload.
 - [ ] Successful warning-free `memory_closeout` returns `report_required=false`.
 - [ ] `memory_closeout` returns `report_required=true` and warnings when spool is unsynced, conflicts exist, `candidate`/`needs_review` records are created, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
 - [ ] Ambiguous closeout wording uses model routing or asks for confirmation; risky/non-routine actions require confirmation.
-- [ ] `amp lint-context` проходит на свежем bootstrap и падает на fixture с большим duplicated historical log in `AGENTS.md`.
-- [ ] `amp lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
-- [ ] `amp lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
+- [ ] `recallant lint-context` проходит на свежем bootstrap и падает на fixture с большим duplicated historical log in `AGENTS.md`.
+- [ ] `recallant lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
+- [ ] `recallant lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
 - [ ] Startup fixture restores context through checkpoint + governed memories without reading long docs or archive logs.
 - [ ] Startup fixture uses `memory_start_session` followed by `memory_get_context_pack` as the normal automatic path.
-- [ ] `amp context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.
+- [ ] `recallant context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.
 - [ ] Startup broad query fixture such as `memory_search(query="проект")` is warned/rejected by context-budget lint or policy tests.
-- [ ] `amp doctor` возвращает OK при доступных Postgres и Ollama; возвращает конкретную ошибку при недоступности каждого.
-- [ ] `amp doctor` or equivalent diagnostics shows effective model routes for `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`, and marks disabled routes clearly.
+- [ ] `recallant doctor` возвращает OK при доступных Postgres и Ollama; возвращает конкретную ошибку при недоступности каждого.
+- [ ] `recallant doctor` or equivalent diagnostics shows effective model routes for `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`, and marks disabled routes clearly.
 - [ ] Default powerful-model escalation is subscription-first/API-last: active agent or supported subscription worker before paid API where available.
 - [ ] Default paid API profile routes through OpenAI unless project/session settings explicitly select Gemini or Claude.
-- [ ] If subscription route reports `rate_limited` or `exhausted`, AMP defers/downgrades/asks according to policy and does not silently fall through to paid API.
+- [ ] If subscription route reports `rate_limited` or `exhausted`, Recallant defers/downgrades/asks according to policy and does not silently fall through to paid API.
 - [ ] Default `paid_api_mode=confirm_each`; every direct paid API request requires explicit approval before provider call.
 - [ ] Denied/expired paid API approval defers or downgrades the task according to policy without creating a paid provider call.
 - [ ] `auto_with_caps` is rejected unless explicitly enabled for the project/task/profile and visible in settings/cost dashboard.
@@ -166,26 +166,26 @@
 
 - [ ] При недоступном сервере local spool append создаёт JSONL/NDJSON record with stable dedup key.
 - [ ] Local spool can include raw artifact pointer/hash/metadata records for large evidence and sync them to server `raw_artifacts`.
-- [ ] `amp sync-spool --dry-run` показывает unsynced records без записи на сервер.
-- [ ] `amp sync-spool` загружает records, создаёт server `event_id`, и сохраняет local→server mapping.
-- [ ] Повторный `amp sync-spool` не создаёт duplicates.
-- [ ] `amp prune-spool --synced` удаляет/архивирует только confirmed synced records.
+- [ ] `recallant sync-spool --dry-run` показывает unsynced records без записи на сервер.
+- [ ] `recallant sync-spool` загружает records, создаёт server `event_id`, и сохраняет local→server mapping.
+- [ ] Повторный `recallant sync-spool` не создаёт duplicates.
+- [ ] `recallant prune-spool --synced` удаляет/архивирует только confirmed synced records.
 
 ## Phase 8
 
 - [ ] Append текста размером **> лимита** возвращает `VALIDATION_ERROR` без записи в БД.
 - [ ] `memory_search` на БД с representative fixture size завершается < **configured p95 budget** (например 10k chunks / 1500ms на dev hardware может быть локальным CI-профилем; не как жёсткий prod SLO).
-- [ ] Backup command/job creates a backup manifest with backup id, timestamp, AMP/schema version, included DBs, artifact roots, hash manifest, target, encryption status, and job status.
-- [ ] Backup includes `amp_agent_work` Postgres data and raw artifact storage metadata/files required by `raw_artifacts`.
+- [ ] Backup command/job creates a backup manifest with backup id, timestamp, Recallant version, schema version, included DBs, artifact roots, hash manifest, target, encryption status, and job status.
+- [ ] Backup includes `recallant_agent_work` Postgres data and raw artifact storage metadata/files required by `raw_artifacts`.
 - [ ] Restore verification restores backup into temporary database/location without overwriting production.
 - [ ] Restore verification checks schema/migration version, raw artifact pointers, artifact hashes according to policy, project list, latest checkpoint, governed memory recall, and bounded search.
-- [ ] Backup target config can represent current local AMP-server storage and a future second server over SSH/Tailscale.
+- [ ] Backup target config can represent current local Recallant-server storage and a future second server over SSH/Tailscale.
 - [ ] Portable restore/remap fixture can map old project roots, secret references, connector/account bindings, and environment facts to new values without editing raw memories by hand.
 - [ ] Backup manifests/logs do not include provider API keys or raw secrets.
 - [ ] Default HTTP bind config is localhost/Tailnet/private interface, not public `0.0.0.0`, unless explicit owner config enables another mode.
 - [ ] Remote MCP/admin API rejects unauthenticated requests.
 - [ ] Future Cloudflare mode exists as explicit config but is disabled by default.
-- [ ] Cloudflare mode requires both edge-auth metadata/config and AMP auth/session; tests must reject unauthenticated public access.
+- [ ] Cloudflare mode requires both edge-auth metadata/config and Recallant auth/session; tests must reject unauthenticated public access.
 - [ ] No unauthenticated public route exposes Review UI, admin API, MCP tools, backups, or raw artifacts.
 
 ## Phase 9
@@ -197,12 +197,12 @@
 - [ ] Governed-memory cleanup changes lifecycle status (`archived`, `superseded`, `rejected`, or `stale`) rather than hard-deleting by default.
 - [ ] После `memory_link(relation_type="supersedes", src=new, dst=old)` — старый chunk получает score penalty: его `S_final` < его `S_base * decay`.
 - [ ] `access_count` chunk увеличивается после `memory_search` который его вернул.
-- [ ] `amp analyze --dry-run` не изменяет данные, печатает отчёт.
-- [ ] `amp cleanup --archive --not-accessed <configured-threshold> --dry-run` не изменяет данные, печатает список кандидатов.
+- [ ] `recallant analyze --dry-run` не изменяет данные, печатает отчёт.
+- [ ] `recallant cleanup --archive --not-accessed <configured-threshold> --dry-run` не изменяет данные, печатает список кандидатов.
 
 ## Cross-client smoke (manual until automated harness exists)
 
-- [ ] Два MCP клиента (например Cursor + другой) с одинаковым `AMP_PROJECT_ID`: append в A, search в B находит тот же факт по запросу.
+- [ ] Два MCP клиента (например Cursor + другой) с одинаковым `RECALLANT_PROJECT_ID`: append в A, search в B находит тот же факт по запросу.
 
 ## Repo contract sync
 

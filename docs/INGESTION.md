@@ -26,7 +26,7 @@ Ordinary captured user/assistant turns can store their full text in `payload.tex
 - **Idempotency:** клиент может передать `dedup_key` (string); сервер записывает в `ingest_dedup_keys` и отвечает тем же `event_id` при повторе.
 - For Codex-first v1, this is the preferred live path when the MCP server is reachable.
 
-Important: AMP must not rely only on end-of-session capture. `memory_append_turn`, checkpoint updates, governed-memory writes, and local spool provide incremental safety during work. Full closeout is an additional durable consolidation step, not the only write path.
+Important: Recallant must not rely only on end-of-session capture. `memory_append_turn`, checkpoint updates, governed-memory writes, and local spool provide incremental safety during work. Full closeout is an additional durable consolidation step, not the only write path.
 
 ### 2.1.1 MCP `memory_append_event` (workflow evidence)
 
@@ -38,7 +38,7 @@ Important: AMP must not rely only on end-of-session capture. `memory_append_turn
 - system warnings,
 - large output excerpts with raw artifact refs.
 
-This keeps AMP universal across clients. Codex is the first adapter, but other clients can report the same event kinds through the same contract.
+This keeps Recallant universal across clients. Codex is the first adapter, but other clients can report the same event kinds through the same contract.
 
 ### 2.2 File import (secondary)
 
@@ -54,7 +54,7 @@ This keeps AMP universal across clients. Codex is the first adapter, but other c
 |-----|-------------|-------|
 | Cursor | Adapter research pending | Stable export path is not part of the v1 core contract; until then use MCP append plus explicit JSONL import when available. |
 | Windsurf | Adapter research pending | Same boundary as Cursor: adapter-specific export mapping is future work, not a v1 blocker. |
-| Claude Code | Adapter research pending | Account for compaction by preferring AMP-side append during the session; CLI export mapping is future adapter work. |
+| Claude Code | Adapter research pending | Account for compaction by preferring Recallant-side append during the session; CLI export mapping is future adapter work. |
 
 **Правило:** отсутствие авто-export **не блокирует** v1 если выполнен канал MCP append.
 
@@ -64,12 +64,12 @@ This keeps AMP universal across clients. Codex is the first adapter, but other c
 
 ### 2.5 Local capture spool + server offload
 
-When the working machine cannot reach the AMP server, or when direct live capture is not available, the agent/CLI writes append-only local JSONL spool files and later syncs them to the server. This is a required resilience path for the product, even if implementation is staged after the primary MCP write path.
+When the working machine cannot reach the Recallant server, or when direct live capture is not available, the agent/CLI writes append-only local JSONL spool files and later syncs them to the server. This is a required resilience path for the product, even if implementation is staged after the primary MCP write path.
 
 Target behavior:
 
 - Local spool is append-only and idempotent through `dedup_key` / payload hash.
-- `amp sync-spool` uploads unsynced records to the server and records server `event_id` mappings.
+- `recallant sync-spool` uploads unsynced records to the server and records server `event_id` mappings.
 - Server remains the canonical SoT after sync.
 - Spool files are not a replacement for Postgres; they are a resilience/offline/offload buffer.
 - After confirmed sync, local spool records can be compacted/pruned while retaining a sync manifest.
@@ -118,7 +118,7 @@ Heartbeat is not an ingest channel. It is liveness metadata, not memory content.
 
 ## 2.6 Capture policy and profiles
 
-AMP must not use one fixed capture depth for every project.
+Recallant must not use one fixed capture depth for every project.
 
 Plain-language rule:
 
@@ -147,9 +147,9 @@ Initial profile examples:
 
 Default selection:
 
-- `amp init` assigns `standard` automatically for normal coding projects.
+- `recallant init` assigns `standard` automatically for normal coding projects.
 - The owner can override immediately with a command option or later through UI/CLI settings.
-- The selected effective profile should be visible in `amp init --dry-run`, project settings, and Review UI.
+- The selected effective profile should be visible in `recallant init --dry-run`, project settings, and Review UI.
 - Later profile changes apply only to the current project and only to future capture. Existing records are not reprocessed unless the owner runs an explicit reprocess/import/extraction workflow.
 
 Policy resolution order:
@@ -162,7 +162,7 @@ Policy resolution order:
 
 The effective policy must be inspectable in CLI/UI.
 
-Settings source of truth is AMP server/Postgres. Local `.amp/config` only points to `project_id` and `amp_server_url`; it does not store authoritative capture policy. See [SETTINGS.md](SETTINGS.md).
+Settings source of truth is Recallant server/Postgres. Local `.recallant/config` only points to `project_id` and `recallant_server_url`; it does not store authoritative capture policy. See [SETTINGS.md](SETTINGS.md).
 
 ## 2.7 Explicit imports
 
@@ -176,7 +176,7 @@ v1 supports explicit imports for important project context that is not captured 
 
 Explicit import is different from automatic full-repo ingestion. It should preserve provenance, source path/URL, import timestamp, and project/developer scope.
 
-`amp init` must not create `import_batch` events by itself. It may only detect candidates and suggest explicit `amp import ...` commands. Natural-language closeout also must not import historical material automatically; it preserves current session state.
+`recallant init` must not create `import_batch` events by itself. It may only detect candidates and suggest explicit `recallant import ...` commands. Natural-language closeout also must not import historical material automatically; it preserves current session state.
 
 ## 3. Chunking policy (L1)
 
@@ -189,16 +189,16 @@ Chunking numbers are operational heuristics. They must be deterministic for a co
 
 ## 4. Embedding policy
 
-- Модель embedding задаётся конфигом окружения `AMP_EMBEDDING_MODEL`, `AMP_EMBEDDING_DIMS`.
+- Модель embedding задаётся конфигом окружения `RECALLANT_EMBEDDING_MODEL`, `RECALLANT_EMBEDDING_DIMS`.
 - Любой chunk без embedding имеет статус **явно** хранимый в `embeddings` presence или в `chunks` flag (если добавлено миграцией); минимум v1: отсутствие row в `embeddings` == pending.
 
 ### Batching
 
 Embedding-вызовы **обязаны** быть батчевыми — не по одному chunk за вызов:
 
-- Переменная окружения `AMP_EMBED_BATCH_SIZE` (profile default).
+- Переменная окружения `RECALLANT_EMBED_BATCH_SIZE` (profile default).
 - При `memory_append_turn` (1-3 chunks): батч из всех chunks одного turn — один HTTP-вызов к Ollama.
-- При `file_import` (сотни turns): chunks накапливаются в буфер по `AMP_EMBED_BATCH_SIZE` и отправляются пачками.
+- При `file_import` (сотни turns): chunks накапливаются в буфер по `RECALLANT_EMBED_BATCH_SIZE` и отправляются пачками.
 - Ollama `/api/embed` принимает массив строк — использовать именно этот endpoint, не `/api/embeddings` (single string).
 
 Concrete batch examples are illustrative. The hard rule is batched embedding calls where provider supports batching; exact batch size is configurable.
@@ -214,14 +214,14 @@ Concrete batch examples are illustrative. The hard rule is batched embedding cal
 
 ### Смена embedding модели (re-embed)
 
-**Важно:** векторы от разных моделей несовместимы. При смене `AMP_EMBEDDING_MODEL`:
+**Важно:** векторы от разных моделей несовместимы. При смене `RECALLANT_EMBEDDING_MODEL`:
 
 1. Изменить конфиг — новые chunks начнут писаться с новой моделью.
-2. Запустить `amp reindex --model <new_model>` — перезапишет все `embeddings` rows.
+2. Запустить `recallant reindex --model <new_model>` — перезапишет все `embeddings` rows.
 3. До завершения reindex — search деградирует в `lexical_only` для старых chunks.
 4. Смена dims требует пересоздания pgvector индекса (миграция).
 
-Процедура блокирует smena модели без явного `amp reindex` — реализация должна это проверять.
+Процедура блокирует smena модели без явного `recallant reindex` — реализация должна это проверять.
 
 ### Рекомендуемые провайдеры
 
@@ -233,7 +233,7 @@ Concrete batch examples are illustrative. The hard rule is batched embedding cal
 
 Целевой deployment — один Linux сервер; предпочтителен self-hosted вариант. `nomic-embed-text` / 768 dims is an initial default. The selected model/dims are configuration and require explicit reindex/migration when changed.
 
-The active embedding provider must match the indexed vectors. If a project switches from local embeddings to OpenAI/Gemini or changes dimensions, AMP must require explicit reindex/migration and must not silently mix incompatible vectors.
+The active embedding provider must match the indexed vectors. If a project switches from local embeddings to OpenAI/Gemini or changes dimensions, Recallant must require explicit reindex/migration and must not silently mix incompatible vectors.
 
 ## 5. Ordering and clocks
 

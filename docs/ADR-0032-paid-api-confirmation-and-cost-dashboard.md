@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-AMP is designed to reduce repeated context loss without creating a new uncontrolled cost center.
+Recallant is designed to reduce repeated context loss without creating a new uncontrolled cost center.
 
 The owner expects most work to be handled by:
 
@@ -25,14 +25,14 @@ Use **Option C** as the v1 default for direct paid API:
 Every paid API request requires explicit confirmation by default.
 ```
 
-AMP should first try:
+Recallant should first try:
 
 1. local route,
 2. active-agent route,
 3. subscription-worker route,
 4. downgrade/defer/pending queue.
 
-Only if direct paid API is still needed, AMP creates an approval request instead of calling the API silently.
+Only if direct paid API is still needed, Recallant creates an approval request instead of calling the API silently.
 
 The owner can later enable automatic paid API for selected projects/tasks only after the cost dashboard shows that actual usage is zero or acceptably small. That future relaxation must be explicit, scoped, and budgeted.
 
@@ -42,14 +42,14 @@ The owner can later enable automatic paid API for selected projects/tasks only a
 - Background/night jobs must not call paid API automatically by default.
 - Paid API fallback after subscription limit exhaustion is never silent.
 - Paid API approval must show purpose, project, provider/model, estimated tokens/cost, routing reason, and fallback alternatives already attempted.
-- If the owner denies or ignores approval, AMP defers the task or downgrades to local/subscription routes according to policy.
+- If the owner denies or ignores approval, Recallant defers the task or downgrades to local/subscription routes according to policy.
 - Paid API keys remain server-side and are never exposed to browser clients.
 
 ## Cost dashboard
 
-AMP v1 must include a cost dashboard in the AMP management UI.
+Recallant v1 must include a cost dashboard in the Recallant management UI.
 
-The dashboard should show near-real-time operational cost visibility from AMP audit data:
+The dashboard should show near-real-time operational cost visibility from Recallant audit data:
 
 - current day paid API estimate,
 - current month paid API estimate,
@@ -61,7 +61,7 @@ The dashboard should show near-real-time operational cost visibility from AMP au
 - subscription-worker limit status when available,
 - recent model calls and route class breakdown.
 
-Provider billing portals remain the billing source of truth. AMP's dashboard is an operational safety view based on `model_calls`, approval records, and provider cost metadata when available.
+Provider billing portals remain the billing source of truth. Recallant's dashboard is an operational safety view based on `model_calls`, approval records, and provider cost metadata when available.
 
 ## Future relaxation
 
@@ -79,7 +79,7 @@ This is not the v1 default. It is an explicit owner-controlled mode.
 
 ## Consequences
 
-- AMP is financially conservative by default.
+- Recallant is financially conservative by default.
 - The platform may pause or defer some background tasks instead of spending money.
 - The management UI must include cost visibility early, not as a later analytics add-on.
 - Tests must prove that paid API is not invoked without approval in the default profile.

@@ -6,9 +6,9 @@ Accepted, refined by [ADR-0016-review-ui-in-v1.md](ADR-0016-review-ui-in-v1.md),
 
 ## Context
 
-The earlier architecture discussion left one central question open: should AMP v1 stop at raw capture, chunks, retrieval, and checkpoints, or should OB1-style governed agent memories be included from the start?
+The earlier architecture discussion left one central question open: should Recallant v1 stop at raw capture, chunks, retrieval, and checkpoints, or should OB1-style governed agent memories be included from the start?
 
-The project owner explicitly prefers the second path. AMP is intended to become a full product for real daily work, not the fastest minimal prototype. We should not save implementation effort by postponing the memory layer that makes prior decisions, rules, constraints, lessons, failures, and work logs safe to reuse.
+The project owner explicitly prefers the second path. Recallant is intended to become a full product for real daily work, not the fastest minimal prototype. We should not save implementation effort by postponing the memory layer that makes prior decisions, rules, constraints, lessons, failures, and work logs safe to reuse.
 
 ## Decision
 

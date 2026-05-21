@@ -1,16 +1,16 @@
 # Settings architecture
 
-This document defines where AMP settings live and how effective settings are resolved.
+This document defines where Recallant settings live and how effective settings are resolved.
 
 ## 1. Principle
 
-AMP server is the source of truth for settings.
+Recallant server is the source of truth for settings.
 
-Local project files only identify the project and route the agent to AMP:
+Local project files only identify the project and route the agent to Recallant:
 
 ```yaml
 project_id: "..."
-amp_server_url: "..."
+recallant_server_url: "..."
 ```
 
 Do not store full capture policy, model routing, context budget, or review behavior in each project repository as the authoritative copy. Otherwise projects drift and agents read stale policy.
@@ -32,7 +32,7 @@ Secrets and bootstrap credentials are not ordinary settings. They should live in
 Security/access settings should include safe metadata only:
 
 - bind mode: `localhost`, `tailnet`, or explicit configured interface,
-- AMP auth mode and non-secret policy metadata,
+- Recallant auth mode and non-secret policy metadata,
 - token/session lifetime policy,
 - allowed origins for future Cloudflare/subdomain mode,
 - Cloudflare mode flag and safe route labels,
@@ -72,7 +72,7 @@ applies_to = future capture only
 
 ## 4. Management UI behavior
 
-When the owner opens the management UI through Tailscale/SSH tunnel or a future Cloudflare subdomain, the top-level view should support multiple projects. Future Cloudflare access should be treated as a near-future deployment mode, but the default v1 setting remains private-by-default and AMP-authenticated.
+When the owner opens the management UI through Tailscale/SSH tunnel or a future Cloudflare subdomain, the top-level view should support multiple projects. Future Cloudflare access should be treated as a near-future deployment mode, but the default v1 setting remains private-by-default and Recallant-authenticated.
 
 Default path:
 
@@ -85,7 +85,7 @@ Default path:
 /projects/:project_id/capture
 ```
 
-The Review Inbox may open inside the last/current project, but there must be a clear project selector because the same AMP server manages multiple projects.
+The Review Inbox may open inside the last/current project, but there must be a clear project selector because the same Recallant server manages multiple projects.
 
 ## 4.1 Controlled Settings UI
 
@@ -135,7 +135,7 @@ Project settings should include at least:
 - context budget profile,
 - enabled/known clients,
 - project paths and aliases,
-- repo contract status: `.amp/config`, `AGENTS.md`, `PROJECT_LOG.md`,
+- repo contract status: `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`,
 - local spool/sync status,
 - import candidates,
 - model routing overrides,
@@ -173,7 +173,7 @@ Cost dashboard settings should include at least:
 - cost display currency,
 - default dashboard time ranges: day/month/project,
 - alert thresholds for unusual paid API activity,
-- whether `auto_with_caps` is allowed at all on this AMP instance.
+- whether `auto_with_caps` is allowed at all on this Recallant instance.
 
 The baseline model portfolio is defined in [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md). Exact provider/model choices are settings, not hard-coded business logic.
 
@@ -183,13 +183,13 @@ Most settings affect future behavior only. Existing captured records are not rep
 
 ## 6. Local project files
 
-`.amp/config` is a local pointer and should not be committed by default.
+`.recallant/config` is a local pointer and should not be committed by default.
 
-`AGENTS.md` stays thin and tells agents how to use AMP tools.
+`AGENTS.md` stays thin and tells agents how to use Recallant tools.
 
 `PROJECT_LOG.md` stays a human-readable checkpoint.
 
-Full settings live in AMP server/Postgres and are managed through UI/CLI/API.
+Full settings live in Recallant server/Postgres and are managed through UI/CLI/API.
 
 ## 7. Audit
 

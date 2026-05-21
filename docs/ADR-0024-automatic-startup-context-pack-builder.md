@@ -12,7 +12,7 @@ Previous discussion used the phrase "smart button", but that is misleading. The 
 
 ## Decision
 
-AMP will include a server-side **Context Pack Builder**.
+Recallant will include a server-side **Context Pack Builder**.
 
 Normal agent startup flow:
 
@@ -20,7 +20,7 @@ Normal agent startup flow:
 2. Agent calls `memory_start_session`.
 3. `memory_start_session` returns `session_id`, checkpoint/recovery metadata, and recommends `memory_get_context_pack`.
 4. Agent calls `memory_get_context_pack` before non-trivial work.
-5. AMP server returns a bounded startup pack with only the context needed for this project/session/task.
+5. Recallant server returns a bounded startup pack with only the context needed for this project/session/task.
 
 The Context Pack Builder composes:
 
@@ -35,7 +35,7 @@ The Context Pack Builder composes:
 
 Manual CLI/UI access is only a preview/debug surface over the same server logic:
 
-- CLI example: `amp context --project <id>` or equivalent,
+- CLI example: `recallant context --project <id>` or equivalent,
 - UI example: "Preview agent context" in the future management interface.
 
 These preview surfaces must not create a separate context-building algorithm.
@@ -43,7 +43,7 @@ These preview surfaces must not create a separate context-building algorithm.
 ## Consequences
 
 - Agent startup becomes automatic and consistent across Codex, Cursor, Claude Code, Windsurf, and future clients.
-- Context budgeting is enforced on the AMP server before the agent sees text.
+- Context budgeting is enforced on the Recallant server before the agent sees text.
 - Agents no longer need to manually decide whether to call checkpoint, governed memory recall, or raw search at startup.
 - The owner can inspect what an agent would receive without changing the normal automatic workflow.
 - Implementation needs a canonical MCP tool: `memory_get_context_pack`.

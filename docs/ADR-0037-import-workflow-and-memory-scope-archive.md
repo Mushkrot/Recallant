@@ -8,7 +8,7 @@ Superseded by ADR-0039 and ADR-0040
 
 Two questions were originally coupled:
 
-1. Import workflow: how old project data enters AMP.
+1. Import workflow: how old project data enters Recallant.
 2. Memory scope/audience: where imported and governed memories are allowed to apply.
 
 Question 9 import workflow is now accepted in [ADR-0039](ADR-0039-v1-import-workflow.md). Question 12 memory scope/audience is now accepted in [ADR-0040](ADR-0040-memory-scope-and-audience-model.md).
@@ -17,8 +17,8 @@ Examples include `PROJECT_LOG.md`, selected docs, architecture notes, git histor
 
 Additional owner clarification after inspecting the live server environment:
 
-- The current `/ai/*` project layout, `/ai/SECURITY` control-plane repo, and `/opt/secure-configs/.env` shared secret file are real first-deployment facts, not universal AMP architecture constants.
-- AMP should support this environment through configurable server/project facts, secret references, and capability/account bindings.
+- The current `/ai/*` project layout, `/ai/SECURITY` control-plane repo, and `/opt/secure-configs/.env` shared secret file are real first-deployment facts, not universal Recallant architecture constants.
+- Recallant should support this environment through configurable server/project facts, secret references, and capability/account bindings.
 - The same mechanism must support other future layouts, secret stores, and connector/account bindings rather than hard-coding the current server shape.
 - `agent-bootstrap` is the owner's earlier personal sketch for the same problem, not a mature external upstream. It may inform repo-native fallback/import ideas, but should not be treated as a finished implementation source.
 - Server environment discovery and portable instance migration are accepted in ADR-0038.

@@ -10,8 +10,8 @@ Question 12 covered where imported, discovered, captured, and governed memories 
 
 The initial data model used a simple `scope=project|developer` distinction. That is useful but too narrow for the owner's real operating model:
 
-- one AMP instance may run on a particular server with local environment facts,
-- the current `/ai` layout and `/opt/secure-configs/.env` are deployment-profile facts, not global AMP truth,
+- one Recallant instance may run on a particular server with local environment facts,
+- the current `/ai` layout and `/opt/secure-configs/.env` are deployment-profile facts, not global Recallant truth,
 - `/ai/SECURITY` owns server exposure while app repos own app behavior,
 - connector/account bindings such as personal vs corporate Google Drive must be remembered,
 - capability bindings such as Cloudflare DNS vs Zero Trust tokens must be distinct,
@@ -19,7 +19,7 @@ The initial data model used a simple `scope=project|developer` distinction. That
 
 ## Decision
 
-AMP will use a **multi-axis scope and audience model**.
+Recallant will use a **multi-axis scope and audience model**.
 
 ### Scope / applicability
 
@@ -29,7 +29,7 @@ Accepted scope kinds:
 
 - `domain`: a broad memory domain such as `agent_work` or future `personal_life`.
 - `developer`: durable owner-level preferences, lessons, and rules across projects.
-- `environment`: facts about a specific AMP installation/server/runtime.
+- `environment`: facts about a specific Recallant installation/server/runtime.
 - `project`: a logical project/workspace.
 - `repo`: a concrete repository or checkout under a project.
 - `subproject`: a bounded package/app/module inside a repo/workspace.
@@ -89,7 +89,7 @@ When a session starts, the Context Pack Builder should compose:
 It must not include:
 
 - project memories from unrelated projects by default,
-- environment facts from a different AMP instance unless restoring/remapping,
+- environment facts from a different Recallant instance unless restoring/remapping,
 - client-specific rules for the wrong client,
 - connector/account bindings unrelated to the project/task,
 - candidate or needs-review records as binding rules.

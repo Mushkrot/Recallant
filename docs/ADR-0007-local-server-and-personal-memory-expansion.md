@@ -6,11 +6,11 @@ Working direction
 
 ## Context
 
-The owner expects to run AMP on a personal Linux server with a capable GPU. The same system may later expand beyond AI coding-agent memory into broader human external memory, closer to the original OB1 vision.
+The owner expects to run Recallant on a personal Linux server with a capable GPU. The same system may later expand beyond AI coding-agent memory into broader human external memory, closer to the original OB1 vision.
 
 ## Decision
 
-AMP should be **local/server-first** and **personal-memory extensible**.
+Recallant should be **local/server-first** and **personal-memory extensible**.
 
 For v1:
 
@@ -35,6 +35,6 @@ For future expansion:
 
 ## Open questions
 
-- Should personal-life memory share the same Postgres instance with separate `memory_domain`, or live in a separate AMP deployment?
+- Should personal-life memory share the same Postgres instance with separate `memory_domain`, or live in a separate Recallant deployment?
 - What connectors are first for personal memory: browser history, notes, email, calendar, files, chat transcripts, or manual capture?
 - How much automatic observation is acceptable before explicit review/consent is required?

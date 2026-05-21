@@ -4,7 +4,7 @@
 
 ## Продукт и аудитория
 
-- Не делаем широкий **primary UI для всего AMP** как обязательную часть v1. Исключение: owner-facing Review UI для governed memory входит в v1; см. `ADR-0016-review-ui-in-v1.md`. Не делаем marketing/SaaS dashboard, полный observability suite или визуальный редактор всех raw events/chunks.
+- Не делаем широкий **primary UI для всего Recallant** как обязательную часть v1. Исключение: owner-facing Review UI для governed memory входит в v1; см. `ADR-0016-review-ui-in-v1.md`. Не делаем marketing/SaaS dashboard, полный observability suite или визуальный редактор всех raw events/chunks.
 - Не оптимизируем под **маркетинговый SaaS** (billing, multi-tenant product, self-serve signup).
 - Не делаем **скоростной throwaway MVP**, в котором ради быстроты выброшены provenance, review/use policy или governed agent memory. Скорость реализации ниже качества core.
 - Не делаем в v1 полноценную систему захвата всей повседневной жизни человека. Но архитектура должна оставить путь к этому OB1-style расширению через domains/scopes/connectors.
@@ -21,7 +21,7 @@
 
 - Не делаем **«универсальную БД для чего угодно»** (CRM, биллинг, inventory). Только артефакты памяти агентов и связанный граф.
 - Не гарантируем **семантическую корректность** summary без human review: summaries — derived layer с provenance, могут ошибаться; SoT — raw append layer.
-- Не делаем **универсальный LLM gateway** для любых внешних приложений. Но AMP включает local-first model router для собственных memory tasks; см. `MODEL_ROUTING.md` и `ADR-0012`.
+- Не делаем **универсальный LLM gateway** для любых внешних приложений. Но Recallant включает local-first model router для собственных memory tasks; см. `MODEL_ROUTING.md` и `ADR-0012`.
 
 ## Безопасность (границы)
 

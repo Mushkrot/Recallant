@@ -1,6 +1,6 @@
 # Storage strategy
 
-The owner is concerned that "one database for everything" may become fragile or hard to evolve. AMP should distinguish logical architecture from physical storage.
+The owner is concerned that "one database for everything" may become fragile or hard to evolve. Recallant should distinguish logical architecture from physical storage.
 
 ## 1. Accepted direction
 
@@ -48,8 +48,8 @@ Decision status: **accepted target architecture**.
 Meaning:
 
 ```text
-Postgres instance on AMP server
-  ├── amp_agent_work database
+Postgres instance on Recallant server
+  ├── recallant_agent_work database
   │   ├── projects
   │   ├── sessions
   │   ├── raw_events
@@ -57,7 +57,7 @@ Postgres instance on AMP server
   │   ├── embeddings
   │   └── agent_memories
   │
-  └── amp_personal_life database
+  └── recallant_personal_life database
       ├── sources
       ├── events
       ├── chunks
@@ -69,8 +69,8 @@ Simple analogy: one building, different locked rooms. Same Postgres service, sam
 
 Example:
 
-- coding session transcript goes to `amp_agent_work`,
-- future screenshot/calendar/email import goes to `amp_personal_life`,
+- coding session transcript goes to `recallant_agent_work`,
+- future screenshot/calendar/email import goes to `recallant_personal_life`,
 - developer-level memory like "Vadim prefers documentation-first architecture" may eventually be promoted into a shared/global domain or copied with provenance rather than silently mixed.
 
 Pros:
@@ -109,7 +109,7 @@ Example: Postgres for metadata, object storage for raw blobs, vector DB for embe
 Meaning:
 
 ```text
-AMP server
+Recallant server
   ├── Postgres
   │   ├── projects, sessions, metadata, policies, provenance
   │   └── pointers to raw/vector/graph records
@@ -128,7 +128,7 @@ Simple analogy: not one building with rooms, but a small campus. Each building i
 
 Example:
 
-- Postgres row says: "session `s123`, project `ZenDesk-AI-Assistance`, raw transcript stored at `s3://amp-raw/s123.jsonl`, vector ids `v900..v950`, graph node `n123`",
+- Postgres row says: "session `s123`, project `ZenDesk-AI-Assistance`, raw transcript stored at `s3://recallant-raw/s123.jsonl`, vector ids `v900..v950`, graph node `n123`",
 - object storage keeps the full raw transcript cheaply,
 - vector DB answers "what memories are semantically close to this question?",
 - graph DB answers "show all decisions related to this project, their causes, superseded versions, and affected files".
@@ -172,16 +172,16 @@ v1 physical minimum:
 
 ```text
 Postgres instance
-  └── amp_agent_work
+  └── recallant_agent_work
 ```
 
 Future physical expansion:
 
 ```text
 Postgres instance
-  ├── amp_agent_work
-  ├── amp_personal_life
-  └── amp_research
+  ├── recallant_agent_work
+  ├── recallant_personal_life
+  └── recallant_research
 ```
 
 Inside each domain database, keep strong logical boundaries:
@@ -208,10 +208,10 @@ Current architecture should remain compatible with future specialized storage on
 - graph relations are explicit enough to move from Postgres tables to a graph DB later,
 - retrieval should depend on an internal storage interface, not directly on "one giant table".
 
-Backup/restore policy is separate from storage-engine selection. v1 uses the practical backup policy from [BACKUP_RESTORE.md](BACKUP_RESTORE.md): Postgres backup plus raw artifact backup, backup manifest, encrypted target, and restore verification. Initial backups may live on the AMP server; the architecture must allow later replication to a second backup server over SSH/Tailscale.
+Backup/restore policy is separate from storage-engine selection. v1 uses the practical backup policy from [BACKUP_RESTORE.md](BACKUP_RESTORE.md): Postgres backup plus raw artifact backup, backup manifest, encrypted target, and restore verification. Initial backups may live on the Recallant server; the architecture must allow later replication to a second backup server over SSH/Tailscale.
 
 ## 5. Open decisions
 
-- Should AMP ever add a tiny `amp_control` database for domain registry/server metadata, or keep domain routing in config/env?
+- Should Recallant ever add a tiny `recallant_control` database for domain registry/server metadata, or keep domain routing in config/env?
 - Should raw full transcript blobs live in Postgres JSONB/text or object storage once large?
 - Exact retention windows for backups and raw evidence.

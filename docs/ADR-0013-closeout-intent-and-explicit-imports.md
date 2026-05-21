@@ -11,11 +11,11 @@ The owner wants agents to understand closeout intent from natural language, not 
 Closeout and import are related but separate actions:
 
 - closeout preserves the current session state,
-- import brings historical/external material into AMP.
+- import brings historical/external material into Recallant.
 
 ## Decision
 
-AMP recognizes closeout intent through:
+Recallant recognizes closeout intent through:
 
 - simple trigger phrases for common cases,
 - context-aware interpretation,
@@ -35,19 +35,19 @@ Closeout must not automatically perform broad historical imports.
 Imports are explicit. Accepted v1 import behavior is discovery-first, import-by-confirmation:
 
 ```bash
-amp discover
-amp init
-amp import project-log PROJECT_LOG.md
-amp import docs docs/architecture/*.md
-amp import git --since 2026-01-01 --paths backend/
-amp import jsonl export.jsonl
+recallant discover
+recallant init
+recallant import project-log PROJECT_LOG.md
+recallant import docs docs/architecture/*.md
+recallant import git --since 2026-01-01 --paths backend/
+recallant import jsonl export.jsonl
 ```
 
 Future connector imports may include GitHub, Drive, Gmail, Calendar, browser history, and notes apps, but they require connector-specific design and explicit owner action.
 
-`amp init` must not import all detected history automatically. It may detect import candidates and print suggested commands.
+`recallant init` must not import all detected history automatically. It may detect import candidates and print suggested commands.
 
-`amp import` must support preview/dry-run before durable writes. Imported material is classified as raw evidence, chunks, candidate memories, environment facts, secret references, capability/account bindings, checkpoint seeds, or repo contracts. It must not silently become `instruction_grade`.
+`recallant import` must support preview/dry-run before durable writes. Imported material is classified as raw evidence, chunks, candidate memories, environment facts, secret references, capability/account bindings, checkpoint seeds, or repo contracts. It must not silently become `instruction_grade`.
 
 ## Consequences
 
@@ -55,14 +55,14 @@ Future connector imports may include GitHub, Drive, Gmail, Calendar, browser his
 - Ambiguous phrases can be classified with local/cloud model routing, but basic known triggers should not require cloud.
 - Risky or broad actions still require confirmation.
 - Project bootstrap stays light and safe.
-- Historical context enters AMP through provenance-preserving explicit imports.
+- Historical context enters Recallant through provenance-preserving explicit imports.
 - Scope/audience assignment follows ADR-0040.
 - Conflict priority follows ADR-0041.
 
 ## Open questions
 
-- Should v1 expose a dedicated `amp closeout` CLI command in addition to natural-language closeout?
+- Should v1 expose a dedicated `recallant closeout` CLI command in addition to natural-language closeout?
 - Should closeout always produce a human-readable report, or only when there are proposals/conflicts/unsynced data?
 - Which future connector, if any, should be promoted into v1 after core architecture is complete?
-- Exact CLI flags and preview output format for `amp import --dry-run`.
+- Exact CLI flags and preview output format for `recallant import --dry-run`.
 - Exact dedup strategy for repeated imports.

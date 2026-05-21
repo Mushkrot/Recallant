@@ -1,17 +1,17 @@
 # Import policy
 
-Explicit imports extend v1 memory beyond live agent sessions without turning AMP into "ingest everything automatically."
+Explicit imports extend v1 memory beyond live agent sessions without turning Recallant into "ingest everything automatically."
 
 Decision status: v1 import workflow accepted. See [ADR-0013-closeout-intent-and-explicit-imports.md](ADR-0013-closeout-intent-and-explicit-imports.md), [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md), and historical context in [ADR-0037-import-workflow-and-memory-scope-archive.md](ADR-0037-import-workflow-and-memory-scope-archive.md).
 
 Core rule:
 
-- `amp discover` scans the environment for setup/import candidates, but does not import historical material as active memory.
-- `amp init` registers/configures a project and may suggest imports.
-- `amp init` does not import historical material automatically.
-- `amp closeout` / natural-language closeout preserves current session state.
-- `amp import ...` is the explicit path for historical/external material.
-- `amp import ...` must support preview/dry-run before writing durable import results.
+- `recallant discover` scans the environment for setup/import candidates, but does not import historical material as active memory.
+- `recallant init` registers/configures a project and may suggest imports.
+- `recallant init` does not import historical material automatically.
+- `recallant closeout` / natural-language closeout preserves current session state.
+- `recallant import ...` is the explicit path for historical/external material.
+- `recallant import ...` must support preview/dry-run before writing durable import results.
 - Scope/audience assignment follows [ADR-0040](ADR-0040-memory-scope-and-audience-model.md).
 
 ## 1. v1 import categories
@@ -39,7 +39,7 @@ Examples:
 - local model/runtime availability,
 - service/process/port candidates.
 
-The current `/ai` server layout and `/opt/secure-configs/.env` are first-deployment facts, not hard-coded AMP assumptions.
+The current `/ai` server layout and `/opt/secure-configs/.env` are first-deployment facts, not hard-coded Recallant assumptions.
 
 ### Secret and capability metadata
 
@@ -56,7 +56,7 @@ Never import raw secret values into ordinary memory.
 
 Examples:
 
-- existing AMP/session JSONL exports,
+- existing Recallant/session JSONL exports,
 - selected Markdown/JSON exports,
 - source-linked external notes.
 
@@ -81,16 +81,16 @@ These may become future targeted imports or connector features after separate co
 Candidate commands:
 
 ```bash
-amp discover
-amp import project-log PROJECT_LOG.md
-amp import docs docs/architecture/*.md
-amp import git --since 2026-01-01 --paths backend/
-amp import jsonl export.jsonl
+recallant discover
+recallant import project-log PROJECT_LOG.md
+recallant import docs docs/architecture/*.md
+recallant import git --since 2026-01-01 --paths backend/
+recallant import jsonl export.jsonl
 ```
 
-`amp init` should not automatically import large historical material unless the user asks. It may detect candidates and suggest commands.
+`recallant init` should not automatically import large historical material unless the user asks. It may detect candidates and suggest commands.
 
-Example `amp init` output:
+Example `recallant init` output:
 
 ```text
 Detected import candidates:
@@ -100,9 +100,9 @@ Detected import candidates:
 
 No imports were run.
 Suggested commands:
-  amp import project-log PROJECT_LOG.md
-  amp import docs docs/architecture/*.md
-  amp import git --since 2026-01-01
+  recallant import project-log PROJECT_LOG.md
+  recallant import docs docs/architecture/*.md
+  recallant import git --since 2026-01-01
 ```
 
 ## 4. Import result classes

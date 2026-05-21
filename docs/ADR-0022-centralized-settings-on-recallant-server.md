@@ -1,4 +1,4 @@
-# ADR-0022: Centralized settings on AMP server
+# ADR-0022: Centralized settings on Recallant server
 
 ## Status
 
@@ -6,19 +6,19 @@ Accepted, refined by [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-control
 
 ## Context
 
-AMP will have a management UI on the AMP server and may later be accessed through a Cloudflare-managed subdomain. The owner needs to manage multiple projects from one place and then open a specific project to inspect or change its settings.
+Recallant will have a management UI on the Recallant server and may later be accessed through a Cloudflare-managed subdomain. The owner needs to manage multiple projects from one place and then open a specific project to inspect or change its settings.
 
-This creates an important boundary: settings must not be scattered across project folders as the source of truth. Local project files should help agents find the right AMP project, but they should not become the authoritative policy store.
+This creates an important boundary: settings must not be scattered across project folders as the source of truth. Local project files should help agents find the right Recallant project, but they should not become the authoritative policy store.
 
 ## Decision
 
-System settings live centrally on the AMP server.
+System settings live centrally on the Recallant server.
 
-AMP settings are stored and managed primarily in the AMP server database, with secrets and infrastructure bootstrapping kept in environment variables or a secret store.
+Recallant settings are stored and managed primarily in the Recallant server database, with secrets and infrastructure bootstrapping kept in environment variables or a secret store.
 
 The settings hierarchy is:
 
-1. **Server settings**: AMP server/runtime defaults and deployment mode.
+1. **Server settings**: Recallant server/runtime defaults and deployment mode.
 2. **Developer/global settings**: owner-wide defaults across projects.
 3. **Project settings**: settings for one managed project.
 4. **Session/task overrides**: temporary settings for one session or task.
@@ -28,18 +28,18 @@ The management UI must start from a project list when the owner is not already i
 
 The v1 Settings UI is controlled rather than fully administrative. It can edit practical project settings, while sensitive/server/global settings are read-only or confirmation-gated; see [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md).
 
-Local `.amp/config` remains a pointer only:
+Local `.recallant/config` remains a pointer only:
 
 ```yaml
 project_id: "..."
-amp_server_url: "..."
+recallant_server_url: "..."
 ```
 
 It is not the source of truth for capture policy, context budget, model routing, or review behavior.
 
 ## Resolution Order
 
-When AMP needs an effective setting, it resolves in this order:
+When Recallant needs an effective setting, it resolves in this order:
 
 1. explicit session/task override,
 2. project setting,
@@ -55,7 +55,7 @@ The effective source should be inspectable in UI/CLI, so the owner can see why a
 - A project folder does not need to store full policy state.
 - Changing a project setting in the UI affects future behavior for that project according to each setting's semantics.
 - Settings changes should be auditable enough to understand who/what changed a project policy and when.
-- `amp init` creates project records and pointer files, but settings remain centralized.
+- `recallant init` creates project records and pointer files, but settings remain centralized.
 
 ## Open questions
 

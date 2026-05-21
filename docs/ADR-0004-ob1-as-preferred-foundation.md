@@ -6,15 +6,15 @@ Working direction
 
 ## Context
 
-AMP is still in architecture discovery. We have compared Open Brain / OB1, MemPalace, MF0-1984, OpenMemory variants, Journey, and the owner's earlier local `agent-bootstrap` sketch.
+Recallant is still in architecture discovery. We have compared Open Brain / OB1, MemPalace, MF0-1984, OpenMemory variants, Journey, and the owner's earlier local `agent-bootstrap` sketch.
 
 The project owner currently prefers **Open Brain / OB1** as the main architectural foundation because its author and current design direction are considered the strongest architectural baseline among the reviewed projects.
 
-This does not mean AMP should become a direct clone of OB1. It means OB1 is the default reference point when decisions conflict, while other projects remain active sources of proven mechanisms and implementation ideas.
+This does not mean Recallant should become a direct clone of OB1. It means OB1 is the default reference point when decisions conflict, while other projects remain active sources of proven mechanisms and implementation ideas.
 
 ## Decision
 
-Use **OB1 as the preferred foundation** for AMP architecture:
+Use **OB1 as the preferred foundation** for Recallant architecture:
 
 - Postgres / pgvector as the central durable store.
 - Remote MCP as the primary agent-facing interface.
@@ -37,15 +37,15 @@ The owner has also accepted a more precise OB1/MF0 synthesis: OB1 remains the go
 
 ## Consequences
 
-- When specs conflict, start from OB1's architectural posture and adapt it to AMP requirements before adopting competing patterns.
+- When specs conflict, start from OB1's architectural posture and adapt it to Recallant requirements before adopting competing patterns.
 - Do not flatten the comparison into "all projects are equal." OB1 is the backbone; the others are targeted sources of specific capabilities.
 - Do not discard a better mechanism just because it is outside OB1. If MemPalace, MF0, or OpenMemory has a stronger answer for a specific subsystem, document the subsystem-level adoption.
-- Keep AMP's own contracts authoritative: `DATA_MODEL.md`, `MCP_SPEC.md`, `RETRIEVAL.md`, and `INGESTION.md` define the final implementation surface.
+- Keep Recallant's own contracts authoritative: `DATA_MODEL.md`, `MCP_SPEC.md`, `RETRIEVAL.md`, and `INGESTION.md` define the final implementation surface.
 - Treat MF0 as a first-class subsystem reference for workbench/capture/UI ideas, not as a replacement foundation and not as a schema to copy directly.
 
 ## Implementation mapping notes
 
-- AMP contracts stay authoritative: `DATA_MODEL.md`, `MCP_SPEC.md`, `RETRIEVAL.md`, and `INGESTION.md` define the implementation surface.
+- Recallant contracts stay authoritative: `DATA_MODEL.md`, `MCP_SPEC.md`, `RETRIEVAL.md`, and `INGESTION.md` define the implementation surface.
 - OB1-style governed agent memories are v1 core; see [ADR-0005-governed-agent-memory-in-v1.md](ADR-0005-governed-agent-memory-in-v1.md).
 - MemPalace hook/sweep mechanics are prior art for capture policy, but MCP append and local spool are the v1 contract.
 - OpenMemory-style salience/decay ideas are represented as configurable scoring/governance metadata, not a required imported taxonomy.

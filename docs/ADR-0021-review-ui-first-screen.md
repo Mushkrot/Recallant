@@ -6,7 +6,7 @@ Accepted, refined by [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-co
 
 ## Context
 
-The Review UI runs on the AMP server and should be useful from day one. The owner asked what should be on the first screen and delegated the decision. Later refinement accepted a compact workbench for v1, not a minimal approval table.
+The Review UI runs on the Recallant server and should be useful from day one. The owner asked what should be on the first screen and delegated the decision. Later refinement accepted a compact workbench for v1, not a minimal approval table.
 
 The first screen should support the main purpose of Review UI: keeping long-term governed memory healthy without asking the owner to approve every ordinary memory write.
 

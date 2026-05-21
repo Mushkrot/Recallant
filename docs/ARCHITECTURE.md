@@ -2,9 +2,9 @@
 
 ## 0. Current architecture bias
 
-AMP uses **Open Brain / OB1 as the preferred architectural foundation**: Postgres/pgvector, remote MCP, multi-client memory, and governed agent-memory sidecars are the default starting point. This is a working direction, not a claim that every OB1 detail should be copied unchanged.
+Recallant uses **Open Brain / OB1 as the preferred architectural foundation**: Postgres/pgvector, remote MCP, multi-client memory, and governed agent-memory sidecars are the default starting point. This is a working direction, not a claim that every OB1 detail should be copied unchanged.
 
-The accepted direction is now an **OB1/MF0 synthesis**: OB1 supplies the governance backbone, while MF0 supplies important workbench/raw-capture/Memory Tree/Keeper ideas. AMP owns the integration layer: managed hybrid capture, raw workflow evidence, project capture profiles, Review UI, context budget, and local-server-first deployment. See [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md).
+The accepted direction is now an **OB1/MF0 synthesis**: OB1 supplies the governance backbone, while MF0 supplies important workbench/raw-capture/Memory Tree/Keeper ideas. Recallant owns the integration layer: managed hybrid capture, raw workflow evidence, project capture profiles, Review UI, context budget, and local-server-first deployment. See [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md).
 
 Other reviewed systems remain active inputs:
 
@@ -15,19 +15,19 @@ Other reviewed systems remain active inputs:
 
 See [ADR-0004-ob1-as-preferred-foundation.md](ADR-0004-ob1-as-preferred-foundation.md), [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md), and [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md).
 
-Codex is the first adapter and tested workflow, but AMP is not Codex-specific. The core MCP tools, session lifecycle, closeout, recovery, storage, and Review UI are universal. See [ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md](ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md).
+Codex is the first adapter and tested workflow, but Recallant is not Codex-specific. The core MCP tools, session lifecycle, closeout, recovery, storage, and Review UI are universal. See [ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md](ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md).
 
-Review UI runs on the AMP server. v1 uses a compact private workbench, not a minimal approval table, and the architecture should let it grow into a fuller management platform and later be exposed through a dedicated Cloudflare-managed subdomain if the owner chooses. See [ADR-0020-review-ui-on-amp-server-management-platform-path.md](ADR-0020-review-ui-on-amp-server-management-platform-path.md) and [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md).
+Review UI runs on the Recallant server. v1 uses a compact private workbench, not a minimal approval table, and the architecture should let it grow into a fuller management platform and later be exposed through a dedicated Cloudflare-managed subdomain if the owner chooses. See [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md) and [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md).
 
-Settings live centrally on the AMP server. Project repositories keep only pointer/config files; effective policy is resolved from session/project/developer/server settings. v1 exposes a controlled Settings UI for project workflow settings while keeping sensitive/server settings read-only or confirmation-gated. See [ADR-0022-centralized-settings-on-amp-server.md](ADR-0022-centralized-settings-on-amp-server.md), [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md), and [SETTINGS.md](SETTINGS.md).
+Settings live centrally on the Recallant server. Project repositories keep only pointer/config files; effective policy is resolved from session/project/developer/server settings. v1 exposes a controlled Settings UI for project workflow settings while keeping sensitive/server settings read-only or confirmation-gated. See [ADR-0022-centralized-settings-on-recallant-server.md](ADR-0022-centralized-settings-on-recallant-server.md), [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md), and [SETTINGS.md](SETTINGS.md).
 
 Model routing is local-first, subscription-first, and API-last with a configurable provider portfolio. The baseline profile uses local Ollama models for routine work, active-agent/subscription-backed routes for stronger reasoning where available, and OpenAI/Gemini/Claude paid API routes only after explicit approval by default. See [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md), [ADR-0031-subscription-first-api-last-model-escalation.md](ADR-0031-subscription-first-api-last-model-escalation.md), [ADR-0032-paid-api-confirmation-and-cost-dashboard.md](ADR-0032-paid-api-confirmation-and-cost-dashboard.md), and [MODEL_ROUTING.md](MODEL_ROUTING.md).
 
 Startup context is built automatically by the server-side Context Pack Builder through `memory_get_context_pack`, not by a manual UI button. See [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md) and [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md).
 
-Environment discovery and portability are first-class architecture requirements. AMP must model server/project/secret/connector reality as configurable facts, not hard-coded paths, and must support export/restore/remapping when moving to another server. See [ADR-0038-environment-discovery-and-portable-instance.md](ADR-0038-environment-discovery-and-portable-instance.md).
+Environment discovery and portability are first-class architecture requirements. Recallant must model server/project/secret/connector reality as configurable facts, not hard-coded paths, and must support export/restore/remapping when moving to another server. See [ADR-0038-environment-discovery-and-portable-instance.md](ADR-0038-environment-discovery-and-portable-instance.md).
 
-Import workflow is discovery-first and import-by-confirmation. `amp discover` finds candidates, `amp init` registers/configures projects and suggests imports, and `amp import` performs explicit preview/dry-run/write flows. See [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md) and [IMPORT_POLICY.md](IMPORT_POLICY.md).
+Import workflow is discovery-first and import-by-confirmation. `recallant discover` finds candidates, `recallant init` registers/configures projects and suggests imports, and `recallant import` performs explicit preview/dry-run/write flows. See [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md) and [IMPORT_POLICY.md](IMPORT_POLICY.md).
 
 Memory applicability uses a multi-axis scope/audience model: `scope_kind`/`scope_id` define where a memory applies, `audience` defines who may consume it, and `use_policy` defines authority. Conflict resolution applies applicability, authority, scope specificity, and recency in that order. See [ADR-0040-memory-scope-and-audience-model.md](ADR-0040-memory-scope-and-audience-model.md) and [ADR-0041-conflict-resolution-priority.md](ADR-0041-conflict-resolution-priority.md).
 
@@ -45,7 +45,7 @@ flowchart TB
     Windsurf
     ClaudeCode[Claude_Code]
   end
-  subgraph amp [Agent_Memory_Platform]
+  subgraph recallant [Agent_Memory_Platform]
     MCP[MCP_server]
     Spool[Local_capture_spool_sync]
     UI[Review_UI_and_admin_API]
@@ -74,8 +74,8 @@ flowchart TB
 | **Postgres** | SoT: L0 events/turns/workflow evidence metadata, raw artifact pointers, L1 chunks/embeddings, L2 edges, L3 governed agent memories, checkpoints, recall traces. Миграции версионируются. |
 | **Index/embed worker** | Асинхронная обработка: chunking, embedding, rerank (если не inline), переиндексация. Может быть в процессе MCP (v1 simplest) или отдельном процессе (preferred при нагрузке). |
 | **Review UI + admin API** | Required owner-facing v1 surface for governed-memory review: inbox, rules, detail/source refs, duplicates, conflicts, and review actions. It must use the same policy path as MCP/CLI actions. It also hosts the required Cost / Paid API dashboard. Broader observability/admin dashboards remain optional. |
-| **Management UI path** | Starts as Review UI + Cost / Paid API dashboard on AMP server; can later expand into private management surfaces for projects, capture profiles, sessions/recovery, sync/spool state, model routing, and other admin functions. |
-| **Auth/access layer** | Private-by-default access control for Review UI/admin API/remote MCP: localhost/Tailnet bind by default, AMP auth/session/token, secret isolation, and Cloudflare-ready routing without public exposure by default. |
+| **Management UI path** | Starts as Review UI + Cost / Paid API dashboard on Recallant server; can later expand into private management surfaces for projects, capture profiles, sessions/recovery, sync/spool state, model routing, and other admin functions. |
+| **Auth/access layer** | Private-by-default access control for Review UI/admin API/remote MCP: localhost/Tailnet bind by default, Recallant auth/session/token, secret isolation, and Cloudflare-ready routing without public exposure by default. |
 | **Settings service** | Resolves effective settings from session overrides, project settings, developer/global defaults, server settings, and built-in defaults; exposes inspected effective settings to UI/CLI/MCP policy paths. |
 | **Context Pack Builder** | Server-side startup context builder used by agents automatically after `memory_start_session`; composes checkpoint, rules, governed memories, recovery state, optional evidence, and next-fetch hints under context policy. |
 | **Backup/restore jobs** | Create Postgres/raw-artifact backups, write manifests, support encrypted local target first, allow future second-server replication, and verify restore into temporary DB/location. |
@@ -148,7 +148,7 @@ sequenceDiagram
   MCP->>DB: mark session closed + checkpoint + governed memories
 ```
 
-If the agent stops before `memory_closeout`, the next `memory_start_session` surfaces the unclosed session and last durable state. Hybrid heartbeat improves long-task status but is not required for basic clients. This is core AMP behavior, not a Codex-only feature.
+If the agent stops before `memory_closeout`, the next `memory_start_session` surfaces the unclosed session and last durable state. Hybrid heartbeat improves long-task status but is not required for basic clients. This is core Recallant behavior, not a Codex-only feature.
 
 ## 4.3 Startup context pack
 
@@ -168,7 +168,7 @@ This is the normal startup path. CLI/UI may preview the same pack, but they must
 
 ## 5. Multi-project routing
 
-- Каждый MCP session должен знать `project_id` (через env `AMP_PROJECT_ID` или параметр конфигурации клиента).
+- Каждый MCP session должен знать `project_id` (через env `RECALLANT_PROJECT_ID` или параметр конфигурации клиента).
 - Запрещено смешивать `project_id` в одном query без явного параметра (defense in depth).
 - `projects.parent_project_id` поддерживает nested projects/workspaces, но default search остаётся scoped to current project unless explicitly widened.
 - `memory_domain` позволяет будущую personal-memory expansion не смешивать с coding-agent memory by accident.
@@ -178,20 +178,20 @@ This is the normal startup path. CLI/UI may preview the same pack, but they must
 
 Default target is the owner's Linux server:
 
-- AMP server and one Postgres/pgvector instance run on the server.
-- Storage follows [ADR-0011-postgres-instance-domain-databases.md](ADR-0011-postgres-instance-domain-databases.md): v1 uses `amp_agent_work`; future major domains get separate databases in the same Postgres instance.
+- Recallant server and one Postgres/pgvector instance run on the server.
+- Storage follows [ADR-0011-postgres-instance-domain-databases.md](ADR-0011-postgres-instance-domain-databases.md): v1 uses `recallant_agent_work`; future major domains get separate databases in the same Postgres instance.
 - Local/self-hosted embeddings are the default path.
 - GPU can be used for background embedding, consolidation, review assistance, or local rerank.
 - External LLM providers are optional enrichment paths, not required for core append/search.
 - Local spool/offload is part of the target deployment posture so work can continue during server/network outages and sync later.
 - Large workflow evidence can be offloaded through raw artifact pointers; v1 may use local/server filesystem storage, while object storage remains a later evolution path.
-- Review UI is hosted on the AMP server as a private management surface. Future Cloudflare/subdomain access is allowed by architecture but requires explicit deployment/security configuration.
+- Review UI is hosted on the Recallant server as a private management surface. Future Cloudflare/subdomain access is allowed by architecture but requires explicit deployment/security configuration.
 
 See [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md), [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md), and [MODEL_ROUTING.md](MODEL_ROUTING.md).
 
 ## 5.2 Context budget
 
-AMP must not solve memory loss by stuffing more files into the prompt. Startup context comes from thin repo files plus the server-built context pack, which may include checkpoint, governed memory recall, recovery warnings, and narrow evidence. See [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md).
+Recallant must not solve memory loss by stuffing more files into the prompt. Startup context comes from thin repo files plus the server-built context pack, which may include checkpoint, governed memory recall, recovery warnings, and narrow evidence. See [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md).
 
 ## 6. Threat boundaries
 

@@ -6,13 +6,13 @@ Accepted
 
 ## Context
 
-Question 13 covered how AMP should resolve conflicts between memories, imports, user instructions, environment facts, connector/account bindings, client-adapter guidance, and raw evidence.
+Question 13 covered how Recallant should resolve conflicts between memories, imports, user instructions, environment facts, connector/account bindings, client-adapter guidance, and raw evidence.
 
 ADR-0040 introduced a multi-axis scope/audience model, so conflict resolution cannot be a simple "newer wins" rule. A conflict is only meaningful when records overlap in domain, scope, audience, authority, and task relevance.
 
 ## Decision
 
-AMP resolves conflicts by:
+Recallant resolves conflicts by:
 
 1. applicability,
 2. authority,
@@ -22,12 +22,12 @@ AMP resolves conflicts by:
 
 ### 1. Applicability first
 
-Before comparing priority, AMP must decide whether two records apply to the same situation.
+Before comparing priority, Recallant must decide whether two records apply to the same situation.
 
 Records do not conflict when:
 
 - their audiences do not overlap, such as Claude-only guidance vs Codex-only guidance,
-- one is an environment fact for a different AMP instance,
+- one is an environment fact for a different Recallant instance,
 - one is a broader rule and the other is a compatible narrower elaboration,
 - they relate to different connector accounts, capabilities, repos, or projects.
 
@@ -68,7 +68,7 @@ Within the same authority and scope:
 
 ### 5. Review instead of silent choice
 
-AMP must surface the conflict for Review UI / owner confirmation when:
+Recallant must surface the conflict for Review UI / owner confirmation when:
 
 - both sides are active accepted `instruction_grade`,
 - the conflict affects secrets, deployment, public exposure, destructive commands, paid API, server access, account bindings, or connector/capability use,

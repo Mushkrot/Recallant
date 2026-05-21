@@ -11,9 +11,9 @@ The owner confirmed the proposed synthesis:
 - OB1 remains the preferred upper architecture for governed memory, provenance, review, recall, and policy.
 - MF0/Journey-like workbench ideas are needed for preserving the real agent workflow: conversation history, command/tool traces, large outputs, session recovery, and later reprocessing.
 
-The important distinction is that AMP is not only a "memory of conclusions." It must also preserve enough evidence to reconstruct what happened during agent work when a session is interrupted, compacted, or later reviewed.
+The important distinction is that Recallant is not only a "memory of conclusions." It must also preserve enough evidence to reconstruct what happened during agent work when a session is interrupted, compacted, or later reviewed.
 
-OB1-style governed memory is strong for safe future behavior, but by itself it is not enough for AMP because AMP must support:
+OB1-style governed memory is strong for safe future behavior, but by itself it is not enough for Recallant because Recallant must support:
 
 - recovery after abnormal session interruption,
 - audit and correction of extracted memories,
@@ -23,7 +23,7 @@ OB1-style governed memory is strong for safe future behavior, but by itself it i
 
 ## Decision
 
-AMP will use a two-level synthesis:
+Recallant will use a two-level synthesis:
 
 1. **Lower layer: raw workflow evidence**
    - append-only L0 events for ordinary conversation turns and workflow events,
@@ -71,7 +71,7 @@ Full raw artifacts are available for recovery, Review UI, debugging, explicit in
 
 ## Consequences
 
-- AMP borrows OB1's governance discipline and MF0's stronger workflow-capture posture without copying either project directly.
+- Recallant borrows OB1's governance discipline and MF0's stronger workflow-capture posture without copying either project directly.
 - Raw capture does not weaken safety because future behavior is controlled by governed memory, use policy, review, scoring, scope, and context budget.
 - Capture profiles become important product settings because different projects need different evidence depth.
 - The schema needs an explicit raw artifact abstraction now, even if v1 physically stores artifacts on the filesystem/spool rather than in object storage.

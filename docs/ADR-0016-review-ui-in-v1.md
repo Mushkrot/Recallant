@@ -10,7 +10,7 @@ Governed memory only stays healthy if the owner can inspect and curate important
 
 The owner confirmed that review is required in v1 with a full UI, focused on important, conflicting, and long-term memories.
 
-Placement refinement: the Review UI runs on the AMP server. v1 should be a compact private workbench rather than a minimal approval table, and it should evolve into a fuller AMP management platform. See [ADR-0020-review-ui-on-amp-server-management-platform-path.md](ADR-0020-review-ui-on-amp-server-management-platform-path.md) and [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md).
+Placement refinement: the Review UI runs on the Recallant server. v1 should be a compact private workbench rather than a minimal approval table, and it should evolve into a fuller Recallant management platform. See [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md) and [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md).
 
 First screen refinement: the Review UI starts on an action-focused Review Inbox / Command Center, not a generic metrics dashboard. See [ADR-0021-review-ui-first-screen.md](ADR-0021-review-ui-first-screen.md).
 
@@ -18,9 +18,9 @@ Inbox policy refinement: default review covers important, conflicting, and long-
 
 ## Decision
 
-AMP v1 must include an owner-facing Review UI.
+Recallant v1 must include an owner-facing Review UI.
 
-The Review UI is served from the AMP server deployment, not from Codex and not from each target project repository.
+The Review UI is served from the Recallant server deployment, not from Codex and not from each target project repository.
 
 The Review UI is not for confirming every memory. Ordinary memories can still be created automatically and become recallable through deterministic policy. The UI exists to manage:
 
@@ -60,11 +60,11 @@ The UI should prioritize review hygiene, rules, and paid API cost safety over br
 - The UI must not silently promote agent-inferred memories to binding rules.
 - The UI should be usable locally over Tailscale/private server access; no public SaaS assumption.
 - v1 should be a compact working UI with project navigation, inbox, rules, details, actions, Cost / Paid API, and settings shortcuts. A minimal approval-only table is not sufficient.
-- The UI should be structured so it can grow into an AMP management platform.
+- The UI should be structured so it can grow into a Recallant management platform.
 
 ## Non-goal Boundary
 
-This ADR changes the earlier "no required UI in v1" position only for governed-memory review. AMP v1 still does not need:
+This ADR changes the earlier "no required UI in v1" position only for governed-memory review. Recallant v1 still does not need:
 
 - marketing website,
 - public SaaS dashboard,
@@ -79,10 +79,10 @@ This does not prohibit a future private management platform. It only prevents v1
 - v1 implementation scope increases, but the product becomes much more realistic for long-term rule hygiene.
 - TypeScript-first core becomes even more appropriate because types can be shared between MCP, CLI, API, and UI.
 - The implementation guide and test contract must include review UI requirements.
-- MF0/OpenMemory dashboard/workbench ideas become relevant UI references, while AMP keeps its own governed-memory model.
+- MF0/OpenMemory dashboard/workbench ideas become relevant UI references, while Recallant keeps its own governed-memory model.
 
 ## Open questions
 
 - Which UI stack should be used in implementation: Next.js, Vite/React, or another TypeScript-first option?
 - Should the UI support keyboard-first review flows in v1?
-- Should the first implementation serve the UI from the main AMP HTTP service or a separate `amp-review-ui` process?
+- Should the first implementation serve the UI from the main Recallant HTTP service or a separate `recallant-review-ui` process?

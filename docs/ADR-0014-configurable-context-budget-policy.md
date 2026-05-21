@@ -12,7 +12,7 @@ The real architectural requirement is not a specific KB number. The requirement 
 
 ## Decision
 
-AMP must use a **configurable context policy** instead of hard-coded universal file-size limits.
+Recallant must use a **configurable context policy** instead of hard-coded universal file-size limits.
 
 Policy inputs:
 
@@ -72,17 +72,17 @@ context_policy:
     severity_for_history_dump: error
 ```
 
-Policy may live in AMP project settings first. A small committed policy file can be added later if portability requires it, but it must stay declarative and must not become another long instruction dump.
+Policy may live in Recallant project settings first. A small committed policy file can be added later if portability requires it, but it must stay declarative and must not become another long instruction dump.
 
 ## Consequences
 
 - Large projects can intentionally increase budgets without fighting the tool.
-- `amp lint-context` becomes policy-aware instead of enforcing one fixed size.
+- `recallant lint-context` becomes policy-aware instead of enforcing one fixed size.
 - The core discipline remains: repo files route to memory; they do not become the memory store.
 - Server-side context pack remains the preferred long-term mechanism for central budget enforcement.
 
 ## Open questions
 
-- Should project-level context policy live only in AMP DB, or also support a committed `amp.context.yml`?
+- Should project-level context policy live only in Recallant DB, or also support a committed `recallant.context.yml`?
 - What default profiles should ship in v1?
 - Should the context pack budget be derived automatically from detected model context window, or set explicitly per project/client?

@@ -2,7 +2,7 @@
 
 Этот каталог — **единственный источник спецификации** для реализации Recallant: платформы долговременной governed memory для агентов (Codex, Cursor, Windsurf, Claude Code и совместимые MCP-клиенты). Предполагается, что код пишут **AI-агенты** по этим документам.
 
-Historical/internal architecture docs may still use **AMP** as shorthand for the Agent Memory Platform architecture.
+Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 
 ## Быстрый старт для пользователя
 
@@ -16,7 +16,7 @@ Historical/internal architecture docs may still use **AMP** as shorthand for the
 4. [NON_GOALS.md](NON_GOALS.md) — что не делаем.
 5. [GLOSSARY.md](GLOSSARY.md) — термины и идентификаторы.
 6. [ARCHITECTURE.md](ARCHITECTURE.md) — компоненты и потоки данных.
-7. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — что такое AMP server и как он живёт на Linux/Tailscale.
+7. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — что такое Recallant server и как он живёт на Linux/Tailscale.
 8. [SETTINGS.md](SETTINGS.md) — где живут настройки server/developer/project/session/client.
 9. [RUNTIME_STACK.md](RUNTIME_STACK.md) — TypeScript/Python tradeoffs and controlled hybrid runtime.
 10. [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md) — границы Postgres/domains/schemas/future splits.
@@ -35,8 +35,8 @@ Historical/internal architecture docs may still use **AMP** as shorthand for the
 23. [OBSERVABILITY.md](OBSERVABILITY.md) — логи и метрики.
 24. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 как preferred foundation и заимствования из upstream-проектов.
 25. [REPO_CONTRACT.md](REPO_CONTRACT.md) — связь с `AGENTS.md` / `PROJECT_LOG.md`, MCP-конфиг клиентов, session flow.
-26. [QUICKSTART.md](QUICKSTART.md) — пользовательский journey: `amp init`, подключение клиента, cross-project поиск.
-27. [CLEANUP.md](CLEANUP.md) — score decay, архивирование, `amp analyze`, `amp cleanup`.
+26. [QUICKSTART.md](QUICKSTART.md) — пользовательский journey: `recallant init`, подключение клиента, cross-project поиск.
+27. [CLEANUP.md](CLEANUP.md) — score decay, архивирование, `recallant analyze`, `recallant cleanup`.
 28. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — фазы реализации.
 29. [TASK_GRAPH.md](TASK_GRAPH.md) — зависимости задач.
 30. [TEST_CONTRACT.md](TEST_CONTRACT.md) — обязательные тесты.
@@ -62,9 +62,9 @@ Historical/internal architecture docs may still use **AMP** as shorthand for the
 - [ADR-0017-managed-hybrid-capture.md](ADR-0017-managed-hybrid-capture.md)
 - [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md)
 - [ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md](ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md)
-- [ADR-0020-review-ui-on-amp-server-management-platform-path.md](ADR-0020-review-ui-on-amp-server-management-platform-path.md)
+- [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md)
 - [ADR-0021-review-ui-first-screen.md](ADR-0021-review-ui-first-screen.md)
-- [ADR-0022-centralized-settings-on-amp-server.md](ADR-0022-centralized-settings-on-amp-server.md)
+- [ADR-0022-centralized-settings-on-recallant-server.md](ADR-0022-centralized-settings-on-recallant-server.md)
 - [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md)
 - [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md)
 - [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md)

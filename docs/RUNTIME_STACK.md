@@ -1,6 +1,6 @@
 # Runtime stack
 
-AMP can use more than one language, but it should not become an uncontrolled polyglot system.
+Recallant can use more than one language, but it should not become an uncontrolled polyglot system.
 
 ## 1. Principle
 
@@ -111,7 +111,7 @@ Reference evidence:
 
 Use **controlled hybrid**:
 
-- TypeScript-first for AMP core.
+- TypeScript-first for Recallant core.
 - Python allowed for workers only when a concrete task clearly benefits from Python.
 - No duplicated business logic across TypeScript and Python.
 - Postgres schema, MCP tool contracts, and governance policy remain authoritative and language-neutral.

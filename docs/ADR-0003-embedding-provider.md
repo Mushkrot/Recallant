@@ -6,7 +6,7 @@ Accepted, refined by [MODEL_ROUTING.md](MODEL_ROUTING.md), [ADR-0012-local-first
 
 ## Context
 
-AMP требует преобразования текстовых chunks в векторы для semantic search (pgvector). Нужен выбор между облачным API и локальной моделью.
+Recallant требует преобразования текстовых chunks в векторы для semantic search (pgvector). Нужен выбор между облачным API и локальной моделью.
 
 Целевой deployment: один личный Linux сервер, potentially with 24GB GPU. Требования: локальность по умолчанию, данные не покидают сервер для базового recall, приемлемое качество для coding context, возможность использовать внешний LLM только как optional enrichment path.
 
@@ -41,23 +41,23 @@ The local-first requirement is architectural. The exact embedding model, dimensi
 
 При первом запуске или после рестарта Ollama-контейнера модель загружается в память (~2–5 секунд). Последующие вызовы — без задержки (модель остаётся в памяти пока контейнер запущен).
 
-AMP server при старте должен поддерживать policy-controlled warmup/probe of the local embedding provider so the first real call does not fail mysteriously. If the local provider is unavailable, server may route to configured cloud fallback or return `UNAVAILABLE` depending on policy.
+Recallant server при старте должен поддерживать policy-controlled warmup/probe of the local embedding provider so the first real call does not fail mysteriously. If the local provider is unavailable, server may route to configured cloud fallback or return `UNAVAILABLE` depending on policy.
 
 ## Model switching
 
-Смена `AMP_EMBEDDING_MODEL` требует полного reindex всех chunks (см. `INGESTION.md`). Dims при смене модели требуют миграции pgvector-индекса. Не делать без явного `amp reindex`.
+Смена `RECALLANT_EMBEDDING_MODEL` требует полного reindex всех chunks (см. `INGESTION.md`). Dims при смене модели требуют миграции pgvector-индекса. Не делать без явного `recallant reindex`.
 
 ## Alternatives considered
 
-- **OpenAI text-embedding-3-small**: выше качество на общих задачах, 1536 dims, но платно и данные уходят во внешний сервис. Допустим как fallback через `AMP_EMBEDDING_MODEL=openai/text-embedding-3-small`.
+- **OpenAI text-embedding-3-small**: выше качество на общих задачах, 1536 dims, но платно и данные уходят во внешний сервис. Допустим как fallback через `RECALLANT_EMBEDDING_MODEL=openai/text-embedding-3-small`.
 - **Gemini embeddings**: useful as an alternate cloud profile, especially if Gemini is already enabled for other routes or multimodal retrieval becomes important. Must still follow the same explicit reindex rule when model/dims change.
 - **ChromaDB со встроенными embeddings**: скрывает детали, но добавляет второй сервис рядом с Postgres — отклонено в ADR-0001.
 
 ## Configuration
 
 ```env
-AMP_EMBEDDING_MODEL=nomic-embed-text
-AMP_EMBEDDING_DIMS=768
-AMP_OLLAMA_URL=http://localhost:11434
-AMP_CLOUD_EMBEDDING_FALLBACK=disabled|enabled
+RECALLANT_EMBEDDING_MODEL=nomic-embed-text
+RECALLANT_EMBEDDING_DIMS=768
+RECALLANT_OLLAMA_URL=http://localhost:11434
+RECALLANT_CLOUD_EMBEDDING_FALLBACK=disabled|enabled
 ```

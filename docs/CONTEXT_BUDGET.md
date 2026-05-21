@@ -1,14 +1,14 @@
 # Context budget and lazy loading
 
-AMP must improve agent behavior without filling the model context window with duplicated instructions and historical logs.
+Recallant must improve agent behavior without filling the model context window with duplicated instructions and historical logs.
 
 ## 1. Principle
 
 Project files are **routing and bootstrap surfaces**, not the long-term knowledge base.
 
-- `AGENTS.md` tells the agent how to use AMP and what local conventions must always be obeyed.
+- `AGENTS.md` tells the agent how to use Recallant and what local conventions must always be obeyed.
 - `PROJECT_LOG.md` gives the human-readable current resume point.
-- AMP stores raw history, raw workflow evidence/artifact refs, derived memories, decisions, failures, lessons, artifacts, and searchable context.
+- Recallant stores raw history, raw workflow evidence/artifact refs, derived memories, decisions, failures, lessons, artifacts, and searchable context.
 
 Plain-language model:
 
@@ -49,9 +49,9 @@ If the task is trivial, the context pack may contain only checkpoint and active 
 
 Repo-native agent files are controlled by a **configurable context policy**, not fixed universal KB limits. See [ADR-0014-configurable-context-budget-policy.md](ADR-0014-configurable-context-budget-policy.md).
 
-- Root `AGENTS.md`: compact stable rules and AMP usage only.
+- Root `AGENTS.md`: compact stable rules and Recallant usage only.
 - Adapter files such as `CLAUDE.md`, `.windsurfrules`, `.cursor/rules/*.md`: thin pointers to the canonical contract.
-- `PROJECT_LOG.md`: current state only; archive or move detailed history into AMP when it grows.
+- `PROJECT_LOG.md`: current state only; archive or move detailed history into Recallant when it grows.
 - Long design docs may stay in the repo if they are true project artifacts, but agents should retrieve them by need, not at every session start.
 
 The policy may define different profiles such as:
@@ -78,9 +78,9 @@ Large files are warnings unless they violate one of those hard rules or exceed p
 Context policy should be resolved in this order:
 
 1. explicit task/client override,
-2. project-level AMP setting,
+2. project-level Recallant setting,
 3. optional small committed policy file if added later,
-4. AMP default profile.
+4. Recallant default profile.
 
 The policy should consider:
 
@@ -110,7 +110,7 @@ The exact field names can change during implementation. The required property is
 
 ## 4. Lazy loading
 
-AMP should support context routing through:
+Recallant should support context routing through:
 
 - task-specific governed memories,
 - retrieval filters by `memory_type`, `scope`, `project_id`, and optional subproject,
@@ -130,13 +130,13 @@ Agents should climb this ladder only as needed:
 4. **Operational bindings:** relevant environment facts, secret references, capability bindings, connector/account bindings, and client-adapter rules.
 5. **Evidence excerpts:** bounded `memory_search` hits with source refs.
 6. **Full evidence:** `memory_fetch_chunk`, specific docs, commits, logs, imported source material, or explicit raw artifact inspection.
-7. **Explicit import:** only when needed material is outside AMP.
+7. **Explicit import:** only when needed material is outside Recallant.
 
 Do not jump from step 1 to "read every doc in the repo".
 
 ## 4.2 Context Pack Builder
 
-AMP exposes a server-side **Context Pack Builder**. This is the canonical startup context mechanism, not a manual UI button. See [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md).
+Recallant exposes a server-side **Context Pack Builder**. This is the canonical startup context mechanism, not a manual UI button. See [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md).
 
 Illustrative logical input:
 
@@ -168,7 +168,7 @@ Accepted interface: implement this as MCP tool `memory_get_context_pack`. The to
 
 Manual surfaces:
 
-- `amp context` / `amp context --project ...` can preview what an agent would receive.
+- `recallant context` / `recallant context --project ...` can preview what an agent would receive.
 - Future Review/Management UI can expose "Preview agent context".
 
 These are diagnostics, not the normal workflow. In normal work the agent calls `memory_get_context_pack` automatically after `memory_start_session`.
@@ -203,12 +203,12 @@ Good context budget:
 
 Implementation should include a context-lint command or test that checks:
 
-- generated `AGENTS.md` contains the AMP section,
+- generated `AGENTS.md` contains the Recallant section,
 - generated adapters are thin,
 - no bootstrap file embeds large historical logs,
 - startup flow can restore a project from checkpoint + governed memories without reading all docs.
 - broad startup queries are rejected or warned about by lint/tests,
 - MCP recall/search responses respect `max_chars_total`,
-- `amp lint-context` applies the configured context policy,
+- `recallant lint-context` applies the configured context policy,
 - size excess without an override is a warning or error depending on policy,
 - duplicated history, secrets, and adapter rule duplication are hard errors regardless of size.

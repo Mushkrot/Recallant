@@ -21,7 +21,7 @@ These values are useful defaults for v1 implementation and tests, but they shoul
 
 ## Decision
 
-AMP must distinguish:
+Recallant must distinguish:
 
 1. **Hard invariants**  
    Safety, provenance, and contract requirements that should not be configurable away casually.
@@ -44,7 +44,7 @@ These remain intentionally strict:
 - Every returned memory/evidence item must preserve provenance/source refs.
 - Agent-created memories must not silently become `instruction_grade`.
 - No plaintext secrets in memory/bootstrap.
-- `amp init` must not silently import historical material.
+- `recallant init` must not silently import historical material.
 - Basic recall must work without cloud providers.
 - Cloud/model calls must be auditable.
 - Startup must not read all docs/logs/archive files by default.
@@ -104,6 +104,6 @@ Bad:
 
 ## Open questions
 
-- Should these operational policies live in one `amp policy` config object or separate retrieval/context/cleanup/model configs?
+- Should these operational policies live in one `recallant policy` config object or separate retrieval/context/cleanup/model configs?
 - Which profiles should ship in v1?
 - Which settings require owner confirmation because changing them affects cost, privacy, or quality?

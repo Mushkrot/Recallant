@@ -6,15 +6,15 @@ Accepted
 
 ## Context
 
-AMP must detect unclosed or interrupted agent sessions without relying only on manual closeout. The schema already has `sessions.last_seen_at`, updated by session-scoped tool calls.
+Recallant must detect unclosed or interrupted agent sessions without relying only on manual closeout. The schema already has `sessions.last_seen_at`, updated by session-scoped tool calls.
 
-The decision question was whether AMP needs a separate heartbeat tool or whether ordinary memory tool calls are enough.
+The decision question was whether Recallant needs a separate heartbeat tool or whether ordinary memory tool calls are enough.
 
 The owner selected the hybrid option.
 
 ## Decision
 
-AMP v1 uses **hybrid heartbeat**:
+Recallant v1 uses **hybrid heartbeat**:
 
 - all session-scoped tools update `sessions.last_seen_at`,
 - an optional lightweight `memory_heartbeat` tool exists for long-running or idle work,
@@ -55,11 +55,11 @@ may call:
 
 ## Consequences
 
-- AMP avoids noisy heartbeat events in the raw memory archive.
+- Recallant avoids noisy heartbeat events in the raw memory archive.
 - Review/Management UI can show that a session is active or stale.
 - Recovery is more accurate for long-running tasks.
 - Clients that do not support heartbeat still work because ordinary tools update `last_seen_at`.
-- Agents should use heartbeat only when a long task would otherwise leave AMP with stale session state.
+- Agents should use heartbeat only when a long task would otherwise leave Recallant with stale session state.
 
 ## Non-decisions
 

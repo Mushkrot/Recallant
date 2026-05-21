@@ -74,7 +74,7 @@ Required v1 areas:
 
 v1 UI should not include a full raw memory browser, visual graph explorer, personal-life memory UI, full backup console, or broad analytics suite.
 
-It should be implemented with a layout and API shape that can grow into the later AMP management platform without redesign.
+It should be implemented with a layout and API shape that can grow into the later Recallant management platform without redesign.
 
 ## Consequences
 

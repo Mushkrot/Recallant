@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Settings already live centrally on the AMP server. The owner needs to change practical project behavior without editing local files or asking an agent to patch config by hand.
+Settings already live centrally on the Recallant server. The owner needs to change practical project behavior without editing local files or asking an agent to patch config by hand.
 
 At the same time, a full low-level admin settings UI would be risky too early: it could expose secrets, infrastructure toggles, storage internals, and provider controls before the product is hardened.
 
@@ -72,7 +72,7 @@ The UI may show safe status, labels, and secret references such as `configured` 
 
 ## Consequences
 
-- The owner can manage daily AMP behavior without hand-editing files.
+- The owner can manage daily Recallant behavior without hand-editing files.
 - The UI remains safe enough for v1.
 - Dangerous changes are possible only with explicit confirmation and audit.
 - Full server/infrastructure administration remains future work.

@@ -1,10 +1,10 @@
 # Session handoff 2026-05-21
 
-This file started as the final local-session handoff before moving AMP work to the target Linux server. It now also records the follow-up accepted decisions made after the move so future sessions do not reopen Q9/Q12/Q13.
+This file started as the final local-session handoff before moving Recallant work to the target Linux server. It now also records the follow-up accepted decisions made after the move so future sessions do not reopen Q9/Q12/Q13.
 
 ## Transfer boundary
 
-The durable project is `agent-memory-platform/`.
+The durable project is `recallant/`.
 
 The parent `Memories/` folder is not required for continuation if this folder is transferred with its `docs/` contents intact.
 
@@ -24,7 +24,7 @@ External parent-folder notes were consolidated into:
 
 ### Decision 10: Retention / cleanup
 
-AMP v1 uses conservative retention:
+Recallant v1 uses conservative retention:
 
 - L0 raw evidence: no automatic delete.
 - Raw artifacts, transcripts, and log exports: no automatic delete by default.
@@ -79,7 +79,7 @@ Questions 9, 12, and 13 have now been accepted:
 Accepted Q9 summary:
 
 - v1 uses discovery-first, import-by-confirmation.
-- `amp discover` scans candidates, `amp init` registers/configures and may suggest imports, and `amp import` is the explicit preview/dry-run/write path.
+- `recallant discover` scans candidates, `recallant init` registers/configures and may suggest imports, and `recallant import` is the explicit preview/dry-run/write path.
 - Imported material is classified into raw evidence, chunks, candidate memories, environment facts, secret references, capability/account bindings, checkpoint seeds, or repo contracts.
 - Imported material does not silently become `instruction_grade`.
 

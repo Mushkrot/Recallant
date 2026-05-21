@@ -6,7 +6,7 @@
 
 | Term | Definition |
 |------|------------|
-| **Developer** | Владелец одного или нескольких проектов. Верхний уровень иерархии памяти. Идентификатор: `developer_id` (UUID). В v1 один developer per AMP instance. |
+| **Developer** | Владелец одного или нескольких проектов. Верхний уровень иерархии памяти. Идентификатор: `developer_id` (UUID). В v1 один developer per Recallant instance. |
 | **Project** | Логическая единица изоляции памяти, обычно 1:1 с корнем git-репозитория на диске. Может иметь parent project для subproject/workspace hierarchy. Принадлежит `developer_id`. Идентификатор: `project_id` (UUID). |
 | **MemoryDomain** | Высокоуровневая область памяти: `agent_work` для coding-agent workflow сейчас; future domains могут покрывать broader personal memory. |
 | **Workspace** | Физический путь на машине пользователя, связанный с `project_id`. Может меняться; в ingest хранится как метаданные, не как primary key. |
@@ -53,7 +53,7 @@
 
 | Term | Definition |
 |------|------------|
-| **ActiveAgentRoute** | The currently open agent session, such as Codex, performs reasoning and writes the result to AMP through MCP tools. |
+| **ActiveAgentRoute** | The currently open agent session, such as Codex, performs reasoning and writes the result to Recallant through MCP tools. |
 | **SubscriptionWorkerRoute** | A background/local/server worker uses supported OAuth/sign-in subscription mechanisms and existing plan limits. |
 | **PaidApiRoute** | Direct token/credit-billed API call to OpenAI, Gemini, Claude, or a compatible paid provider. |
 | **Subscription-first/API-last** | Routing rule: use local/active-agent/subscription-backed paths before direct paid API, and never silently fall through to paid API after subscription limits are hit. |
@@ -100,7 +100,7 @@
 
 - `domain` — broad memory domain.
 - `developer` — owner-level cross-project scope.
-- `environment` — a specific AMP installation/server/runtime.
+- `environment` — a specific Recallant installation/server/runtime.
 - `project` — logical project/workspace.
 - `repo` — concrete repository/checkout.
 - `subproject` — package/app/module inside a larger project/repo.

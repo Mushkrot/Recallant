@@ -27,7 +27,7 @@ Implementation should combine:
 
 Known trigger phrases should not require paid API. Ambiguous intent may use the local-first, subscription-first model router; paid API LLM use is escalation only for hard/quality-critical cases and only when policy allows it.
 
-Closeout is not a broad import. It preserves the current session state. Historical docs, git history, exports, or external sources enter AMP only through explicit import commands; see [IMPORT_POLICY.md](IMPORT_POLICY.md).
+Closeout is not a broad import. It preserves the current session state. Historical docs, git history, exports, or external sources enter Recallant only through explicit import commands; see [IMPORT_POLICY.md](IMPORT_POLICY.md).
 
 ## 2. Full closeout steps
 
@@ -48,7 +48,7 @@ When closeout is triggered:
 5. Update `PROJECT_LOG.md` with compact current state.
 6. Sync local spool if server is reachable.
 7. Leave clear unsynced state if server is unavailable.
-8. Keep repo files lean; detailed narrative belongs in AMP.
+8. Keep repo files lean; detailed narrative belongs in Recallant.
 
 ## 3. Normal incremental updates
 
@@ -74,7 +74,7 @@ Show a short report only when there is something that needs attention, for examp
 - low-confidence closeout extraction,
 - server/model/provider errors.
 
-If everything succeeds and there are no warnings, the agent may respond with a minimal confirmation such as "Сессия закрыта, состояние сохранено." The detailed closeout data remains in AMP and can be inspected later through Review UI/CLI.
+If everything succeeds and there are no warnings, the agent may respond with a minimal confirmation such as "Сессия закрыта, состояние сохранено." The detailed closeout data remains in Recallant and can be inspected later through Review UI/CLI.
 
 ## 5. Abnormal interruption recovery
 
@@ -95,7 +95,7 @@ If the previous session is unclosed, the agent should not ask the owner to re-ex
 
 ## 6. Heartbeat policy
 
-AMP uses hybrid heartbeat:
+Recallant uses hybrid heartbeat:
 
 - normal memory tools refresh session liveness,
 - `memory_heartbeat` exists for long-running commands, tests, imports, sync jobs, or idle periods,

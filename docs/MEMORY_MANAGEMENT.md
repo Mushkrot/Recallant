@@ -10,7 +10,7 @@ Lifecycle refinement: governed memory statuses are `candidate`, `accepted`, `rej
 
 ## 1. Mental model
 
-AMP has three practical buckets:
+Recallant has three practical buckets:
 
 ```text
 Bucket A: ordinary memory
@@ -55,22 +55,22 @@ The CLI/admin workflow remains required for scripting, automation, tests, and fa
 Required CLI commands:
 
 ```bash
-amp memory inbox
-amp memory rules
-amp memory show <memory_id>
-amp memory accept <memory_id>
-amp memory reject <memory_id>
-amp memory promote <memory_id>
-amp memory demote <memory_id>
-amp memory edit <memory_id>
-amp memory archive <memory_id>
-amp memory supersede <old_memory_id> --by <new_memory_id>
-amp memory merge <memory_id...>
-amp memory conflicts
-amp memory duplicates
+recallant memory inbox
+recallant memory rules
+recallant memory show <memory_id>
+recallant memory accept <memory_id>
+recallant memory reject <memory_id>
+recallant memory promote <memory_id>
+recallant memory demote <memory_id>
+recallant memory edit <memory_id>
+recallant memory archive <memory_id>
+recallant memory supersede <old_memory_id> --by <new_memory_id>
+recallant memory merge <memory_id...>
+recallant memory conflicts
+recallant memory duplicates
 ```
 
-Names may change during implementation, but the workflow must exist. `amp memory approve` may remain as a compatibility alias for `accept`; the stored status is `accepted`.
+Names may change during implementation, but the workflow must exist. `recallant memory approve` may remain as a compatibility alias for `accept`; the stored status is `accepted`.
 
 ## 2.1 First screen: Review Inbox / Command Center
 
@@ -99,7 +99,7 @@ If no item needs attention, show a quiet empty state with current project/profil
 
 ## 3. Inbox
 
-`amp memory inbox` shows records that need attention.
+`recallant memory inbox` shows records that need attention.
 
 Default inbox includes:
 
@@ -125,7 +125,7 @@ Default inbox excludes ordinary low-risk memories:
 Example:
 
 ```text
-AMP Memory Inbox
+Recallant Memory Inbox
 
 [1] candidate_rule / developer scope / high confidence
     "Always document architecture decisions immediately."
@@ -138,7 +138,7 @@ AMP Memory Inbox
     Suggested: merge or archive duplicate
 
 [3] candidate_rule / security sensitive
-    "Never expose AMP outside Tailscale."
+    "Never expose Recallant outside Tailscale."
     Suggested: promote_instruction after owner confirmation
 ```
 
@@ -150,18 +150,18 @@ The inbox should be quiet by default. It should not interrupt normal work unless
 
 ## 4. Rules view
 
-`amp memory rules` shows only active `instruction_grade` records by default.
+`recallant memory rules` shows only active `instruction_grade` records by default.
 
 Useful filters:
 
 ```bash
-amp memory rules --scope developer
-amp memory rules --project <project_id>
-amp memory rules --domain agent_work
-amp memory rules --type preference
-amp memory rules --type procedure
-amp memory rules --include-archived
-amp memory rules --with-sources
+recallant memory rules --scope developer
+recallant memory rules --project <project_id>
+recallant memory rules --domain agent_work
+recallant memory rules --type preference
+recallant memory rules --type procedure
+recallant memory rules --include-archived
+recallant memory rules --with-sources
 ```
 
 Example output:
@@ -224,7 +224,7 @@ Examples:
 - "Important decisions must be fixed in documentation."
 - "Do not leave architecture decisions only in chat."
 
-AMP should detect possible duplicates by:
+Recallant should detect possible duplicates by:
 
 - same `memory_type`,
 - same/similar scope,
@@ -233,7 +233,7 @@ AMP should detect possible duplicates by:
 - overlapping keywords,
 - same target behavior.
 
-Duplicates are not auto-deleted. They are shown in `amp memory duplicates`.
+Duplicates are not auto-deleted. They are shown in `recallant memory duplicates`.
 
 Preferred resolution:
 
@@ -254,7 +254,7 @@ Examples:
 - Old: "Cloud is disabled."
 - New: "Cloud is allowed as escalation."
 
-AMP should flag possible conflicts when:
+Recallant should flag possible conflicts when:
 
 - two active `instruction_grade` records have opposite guidance,
 - a new decision contradicts an older decision in the same scope/domain,
@@ -283,7 +283,7 @@ Authority ladder:
 
 High-risk or equal-authority conflicts must go to Review UI / owner confirmation instead of silent resolution.
 
-`amp memory conflicts` should show:
+`recallant memory conflicts` should show:
 
 ```text
 Conflict 1
@@ -319,10 +319,10 @@ Use two levels:
    - conflicts created in the session.
 
 2. Periodic review:
-   - `amp memory inbox --older-than 7d`,
-   - `amp memory duplicates`,
-   - `amp memory conflicts`,
-   - `amp analyze` for stale raw/chunk material.
+   - `recallant memory inbox --older-than 7d`,
+   - `recallant memory duplicates`,
+   - `recallant memory conflicts`,
+   - `recallant analyze` for stale raw/chunk material.
 
 The system should avoid making the owner review everything every day.
 

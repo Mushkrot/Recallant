@@ -2,7 +2,7 @@
 
 Цель: **высокое качество recall** при **настраиваемых жёстких лимитах** на размер ответа MCP tool.
 
-AMP retrieval must be contextual, not keyword-only. Lexical search is necessary for exact terms, file names, IDs, and rare tokens, but the platform must also find memories by task meaning, prior decisions, and related context through embeddings, governed memory types, graph expansion, scope, decay/salience, and provenance.
+Recallant retrieval must be contextual, not keyword-only. Lexical search is necessary for exact terms, file names, IDs, and rare tokens, but the platform must also find memories by task meaning, prior decisions, and related context through embeddings, governed memory types, graph expansion, scope, decay/salience, and provenance.
 
 ## 1. Public API (logical)
 
@@ -80,7 +80,7 @@ Scope/audience filtering is mandatory before ranking:
 
 - exclude memories outside the current project/repo/subproject unless caller explicitly requests broader scope,
 - include developer-scope rules only when applicable to the current domain/task,
-- include environment facts only for the current AMP instance or explicit restore/remap workflows,
+- include environment facts only for the current Recallant instance or explicit restore/remap workflows,
 - include connector/capability bindings only when relevant to the task/project,
 - include client-adapter guidance only for the active client or explicit review,
 - never treat candidate/needs-review records as binding even if scope matches.

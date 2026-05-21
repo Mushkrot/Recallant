@@ -14,7 +14,7 @@ Recallant is a source-backed memory and context continuity platform for AI codin
 
 На данный момент репозиторий содержит **только документацию** (PRD, архитектура, схема данных, MCP контракт, план реализации для агентов). Код реализации создаётся отдельным шагом по [docs/AGENT_IMPLEMENTATION_GUIDE.md](docs/AGENT_IMPLEMENTATION_GUIDE.md).
 
-Internal architecture docs may still use **AMP** as the historical shorthand for the Agent Memory Platform architecture behind Recallant.
+Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 
 ## Связанные материалы
 

@@ -1,6 +1,6 @@
 # Agent implementation guide
 
-Этот документ задаёт **порядок работ** для AI-агента, который создаёт репозиторий реализации AMP.
+Этот документ задаёт **порядок работ** для AI-агента, который создаёт репозиторий реализации Recallant.
 
 **Current status:** do not execute this guide yet. Implementation is paused until architecture documentation is complete and the owner explicitly authorizes coding. See [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
 
@@ -38,7 +38,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Регистрация server name `agent-memory-platform`.
+- [ ] Регистрация server name `recallant`.
 - [ ] Stub tools с JSON Schema из [MCP_SPEC.md](MCP_SPEC.md) (возвращают фикстуры).
 - [ ] Universal session lifecycle/startup tools included in the stub surface: `memory_start_session`, `memory_get_context_pack`, `memory_closeout`.
 - [ ] Hybrid heartbeat stub included: `memory_heartbeat`.
@@ -104,14 +104,14 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 **Deliverables:**
 
 - [ ] Owner-facing compact Review UI workbench from [ADR-0016-review-ui-in-v1.md](ADR-0016-review-ui-in-v1.md), [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md), and [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md).
-- [ ] UI runs on the AMP server deployment per [ADR-0020-review-ui-on-amp-server-management-platform-path.md](ADR-0020-review-ui-on-amp-server-management-platform-path.md).
+- [ ] UI runs on the Recallant server deployment per [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md).
 - [ ] First screen follows [ADR-0021-review-ui-first-screen.md](ADR-0021-review-ui-first-screen.md): Review Inbox / Command Center, not a metrics dashboard.
 - [ ] Management UI includes project list/selector and project-specific Settings entrypoint per [SETTINGS.md](SETTINGS.md).
 - [ ] Views: project selector/list, inbox, rules, memory detail/source refs/history, duplicates, conflicts, Cost / Paid API, and project settings shortcut.
 - [ ] Controlled Settings UI implements editable project settings, effective source display, confirmation-gated dangerous changes, secret redaction, and settings audit events per [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md).
 - [ ] Actions: accept/approve, reject, promote instruction, demote instruction, archive, unarchive, mark stale, edit, merge, supersede.
 - [ ] UI actions use the same server-side policy path as MCP/CLI review actions and write `agent_memory_review_actions`.
-- [ ] UI is private/local-server oriented and requires AMP-level auth/session/token even on Tailnet/SSH access; no public SaaS assumption.
+- [ ] UI is private/local-server oriented and requires Recallant-level auth/session/token even on Tailnet/SSH access; no public SaaS assumption.
 - [ ] UI/admin API route/session design is Cloudflare-ready without enabling public/subdomain access by default.
 - [ ] Initial implementation must be a compact working UI, not an approval-only table, while API/routing structure must not block management-platform expansion.
 
@@ -121,23 +121,23 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Команда `amp init --target codex` в папке проекта:
+- [ ] Команда `recallant init --target codex` в папке проекта:
   1. Создаёт запись в `projects` (генерирует `project_id`, привязывает к `developer_id`).
   2. Assigns default `capture_profile=standard` unless overridden by `--capture-profile`.
-  3. Записывает `.amp/config` в корень проекта (`project_id` + `amp_server_url`).
-  4. Создаёт или дополняет thin `AGENTS.md` секцией «Memory (AMP)» (см. `REPO_CONTRACT.md`).
+  3. Записывает `.recallant/config` в корень проекта (`project_id` + `recallant_server_url`).
+  4. Создаёт или дополняет thin `AGENTS.md` секцией «Memory (Recallant)» (см. `REPO_CONTRACT.md`).
   5. Создаёт `PROJECT_LOG.md` если его нет.
   6. Печатает готовый блок MCP-конфигурации для вставки в настройки клиента.
-  7. Может показать import candidates, но не создаёт import events и не запускает import без explicit `amp import ...`.
-- [ ] Команда `amp discover` follows [ADR-0038](ADR-0038-environment-discovery-and-portable-instance.md) and [ADR-0039](ADR-0039-v1-import-workflow.md): scans candidates without silently importing or promoting them.
-- [ ] Команда `amp import --dry-run` previews source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts before durable writes.
+  7. Может показать import candidates, но не создаёт import events и не запускает import без explicit `recallant import ...`.
+- [ ] Команда `recallant discover` follows [ADR-0038](ADR-0038-environment-discovery-and-portable-instance.md) and [ADR-0039](ADR-0039-v1-import-workflow.md): scans candidates without silently importing or promoting them.
+- [ ] Команда `recallant import --dry-run` previews source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts before durable writes.
 - [ ] Флаг `--dry-run`: показывает план без изменений.
 - [ ] Флаг `--capture-profile light|standard|detailed|custom`: overrides the automatic default during init.
 - [ ] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
-- [ ] `amp lint-context`: проверяет, что bootstrap files не стали duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
-- [ ] `amp context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
-- [ ] Команда `amp doctor`: проверяет связность (Postgres, Ollama, `.amp/config`).
-- [ ] `amp doctor` or equivalent diagnostics show effective model routes and whether local, active-agent, subscription-worker, and paid API routes are enabled/disabled.
+- [ ] `recallant lint-context`: проверяет, что bootstrap files не стали duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
+- [ ] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
+- [ ] Команда `recallant doctor`: проверяет связность (Postgres, Ollama, `.recallant/config`).
+- [ ] `recallant doctor` or equivalent diagnostics show effective model routes and whether local, active-agent, subscription-worker, and paid API routes are enabled/disabled.
 - [ ] Cost / Paid API management view shows model-call audit, estimated cost, pending approvals, and confirms default `paid_api_mode=confirm_each`.
 - [ ] Closeout intent handling follows [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md): known trigger phrases plus model-routed classification for ambiguous cases.
 - [ ] Normal closeout calls `memory_closeout`; abnormal interruption recovery starts at the next `memory_start_session`.
@@ -149,10 +149,10 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 **Deliverables:**
 
 - [ ] Rate limits, size limits, structured errors.
-- [ ] Security/access hardening from [ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md](ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md): private bind defaults, AMP auth, secret handling, token/session checks, and Cloudflare-ready config.
+- [ ] Security/access hardening from [ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md](ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md): private bind defaults, Recallant auth, secret handling, token/session checks, and Cloudflare-ready config.
 - [ ] Backup commands/jobs from [BACKUP_RESTORE.md](BACKUP_RESTORE.md): Postgres backup, raw artifact backup, manifest creation, and encrypted local target support.
 - [ ] Restore verification command/job: restore into temporary DB/location and run basic read checks without touching production.
-- [ ] Backup target abstraction allows future SSH/Tailscale replication to a second backup server, even if the initial implementation writes only to local AMP-server storage.
+- [ ] Backup target abstraction allows future SSH/Tailscale replication to a second backup server, even if the initial implementation writes only to local Recallant-server storage.
 - [ ] Export/restore design preserves portability metadata and supports remapping/rebinding of project paths, secret references, connector/account bindings, and environment facts per ADR-0038.
 - [ ] Документация запуска для трёх клиентов (ссылки на внешние official docs + наши env).
 
@@ -166,8 +166,8 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [ ] Access tracking: асинхронное обновление `last_accessed_at` / `access_count` после каждого retrieval.
 - [ ] `supersedes` penalty в rerank pipeline.
 - [ ] MCP tool `memory_archive` (archive / unarchive).
-- [ ] Команда `amp analyze` с интерактивным отчётом и LLM summary (Ollama fallback на keyword extraction).
-- [ ] Команда `amp cleanup` с флагами `--archive`, `--delete-archived`, `--dry-run`, `--no-confirm`.
+- [ ] Команда `recallant analyze` с интерактивным отчётом и LLM summary (Ollama fallback на keyword extraction).
+- [ ] Команда `recallant cleanup` с флагами `--archive`, `--delete-archived`, `--dry-run`, `--no-confirm`.
 
 **Gate:** тесты из `TEST_CONTRACT.md` Phase 9.
 

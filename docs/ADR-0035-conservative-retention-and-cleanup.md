@@ -6,13 +6,13 @@ Accepted
 
 ## Context
 
-AMP will accumulate raw conversations, command/tool evidence, imported artifacts, chunks, embeddings, governed memories, queues, and model/cost audit records.
+Recallant will accumulate raw conversations, command/tool evidence, imported artifacts, chunks, embeddings, governed memories, queues, and model/cost audit records.
 
 If the system deletes too aggressively, it can lose the source of truth needed for recovery, audit, reprocessing, or correcting bad memories. If it never cleans anything, retrieval quality and operations will degrade.
 
 ## Decision
 
-AMP v1 uses a conservative retention policy:
+Recallant v1 uses a conservative retention policy:
 
 - L0 raw evidence is not automatically deleted.
 - Raw artifacts, transcripts, and log exports are not automatically deleted by default.

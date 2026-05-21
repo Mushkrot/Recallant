@@ -6,7 +6,7 @@ Decision status: conservative v1 retention accepted. See [ADR-0035-conservative-
 
 ## 0. Retention v1
 
-AMP cleanup must not erase the source of truth by default.
+Recallant cleanup must not erase the source of truth by default.
 
 Policy:
 
@@ -64,11 +64,11 @@ score_final = S * decay(chunk)
 | `project` | profile default | Проектные решения меняются быстрее |
 | `developer` | profile default | Общие паттерны более стабильны |
 
-Оба значения настраиваемы: `AMP_DECAY_HALFLIFE_PROJECT_DAYS`, `AMP_DECAY_HALFLIFE_DEVELOPER_DAYS`. Examples such as 90/365 days are tuning defaults, not architecture invariants.
+Оба значения настраиваемы: `RECALLANT_DECAY_HALFLIFE_PROJECT_DAYS`, `RECALLANT_DECAY_HALFLIFE_DEVELOPER_DAYS`. Examples such as 90/365 days are tuning defaults, not architecture invariants.
 
 ### Отключение decay
 
-`AMP_DECAY_ENABLED=false` — отключает decay полностью (для отладки или специальных случаев).
+`RECALLANT_DECAY_ENABLED=false` — отключает decay полностью (для отладки или специальных случаев).
 
 ## 3. Явное supersede
 
@@ -105,24 +105,24 @@ Chunk можно архивировать — исключить из обычн
 
 Raw artifacts follow the same evidence-first posture as L0 metadata. Ordinary cleanup may archive/delete derived chunks and embeddings, but it must not delete raw artifact records or full artifact content unless an explicit retention/offload policy says so. In v1 the default is to preserve raw evidence and prune only confirmed local spool copies after server sync.
 
-## 6. `amp analyze` — интерактивный анализ
+## 6. `recallant analyze` — интерактивный анализ
 
 Команда для периодической ревизии накопленных данных.
 
 ### Запуск
 
 ```bash
-amp analyze                          # все проекты
-amp analyze --project my-project     # конкретный проект
-amp analyze --older-than 90d         # example threshold; configurable
-amp analyze --not-accessed 90d       # example threshold; configurable
+recallant analyze                          # все проекты
+recallant analyze --project my-project     # конкретный проект
+recallant analyze --older-than 90d         # example threshold; configurable
+recallant analyze --not-accessed 90d       # example threshold; configurable
 ```
 
 ### Что делает
 
 1. Находит кандидатов на удаление по критериям (см. ниже).
 2. Кластеризует их по теме (используя существующие embeddings — k-means или nearest-neighbor группировка).
-3. Для каждого кластера генерирует краткое summary на русском/английском через локальную LLM (Ollama, модель `AMP_ANALYSIS_MODEL`, default: `llama3.2:3b`).
+3. Для каждого кластера генерирует краткое summary на русском/английском через локальную LLM (Ollama, модель `RECALLANT_ANALYSIS_MODEL`, default: `llama3.2:3b`).
 4. Показывает интерактивный отчёт и предлагает действия.
 
 Analysis model names and thresholds are profile/config defaults, not architecture invariants. The hard requirement is that cleanup analysis is auditable, dry-run capable, and can degrade to an offline non-LLM path.
@@ -130,9 +130,9 @@ Analysis model names and thresholds are profile/config defaults, not architectur
 ### Критерии кандидатов (настраиваемые)
 
 ```
-not_accessed_days  >= AMP_STALE_NOT_ACCESSED_DAYS
+not_accessed_days  >= RECALLANT_STALE_NOT_ACCESSED_DAYS
 OR
-age_days           >= AMP_STALE_AGE_DAYS
+age_days           >= RECALLANT_STALE_AGE_DAYS
 ```
 
 При этом исключаются:
@@ -144,7 +144,7 @@ age_days           >= AMP_STALE_AGE_DAYS
 
 ```
 ══════════════════════════════════════════════════════
-AMP Analysis Report — project: my-project
+Recallant Analysis Report — project: my-project
 Stale chunks: 47  |  Clusters: 4
 ══════════════════════════════════════════════════════
 
@@ -171,25 +171,25 @@ Oldest: 2026-02-01  |  Newest: 2026-02-01
 |---------|-----------|
 | `d` (delete) | Физически удаляет chunks и embeddings из L1/L2. L0 events сохраняются. |
 | `a` (archive) | Устанавливает `archived_at`, исключает из поиска. Обратимо. |
-| `k` (keep) | Не трогает. Добавляет `AMP_STALE_NOT_ACCESSED_DAYS` к следующей проверке для этого кластера. |
+| `k` (keep) | Не трогает. Добавляет `RECALLANT_STALE_NOT_ACCESSED_DAYS` к следующей проверке для этого кластера. |
 | `v` (view) | Показывает полные тексты chunks кластера. |
 | `da` (delete all) | Удалить все кластеры в этом отчёте. |
 | `aa` (archive all) | Архивировать все. |
 
 ### LLM для summary — провайдеры
 
-`amp analyze` поддерживает три провайдера для генерации summary. Выбор через `AMP_ANALYSIS_PROVIDER`:
+`recallant analyze` поддерживает три провайдера для генерации summary. Выбор через `RECALLANT_ANALYSIS_PROVIDER`:
 
 | Провайдер | Config | Стоимость | Когда использовать |
 |-----------|--------|-----------|-------------------|
-| `ollama` (default) | `AMP_ANALYSIS_MODEL=llama3.2:3b` | бесплатно | повседневный анализ |
-| `openai` | `AMP_OPENAI_API_KEY=...`, `AMP_ANALYSIS_MODEL=gpt-4o-mini` | платно | когда нужно лучшее качество summary and explicit paid API approval is granted |
+| `ollama` (default) | `RECALLANT_ANALYSIS_MODEL=llama3.2:3b` | бесплатно | повседневный анализ |
+| `openai` | `RECALLANT_OPENAI_API_KEY=...`, `RECALLANT_ANALYSIS_MODEL=gpt-4o-mini` | платно | когда нужно лучшее качество summary and explicit paid API approval is granted |
 | `none` | — | бесплатно | keyword-only fallback без LLM |
 
 #### Ollama (default)
 
 ```bash
-amp analyze  # использует llama3.2:3b через локальный Ollama
+recallant analyze  # использует llama3.2:3b через локальный Ollama
 ```
 
 Если Ollama недоступна или модель не загружена — автоматически деградирует в `none` с предупреждением.
@@ -197,12 +197,12 @@ amp analyze  # использует llama3.2:3b через локальный Ol
 #### Внешний API (OpenAI и совместимые)
 
 ```bash
-amp analyze --provider openai
+recallant analyze --provider openai
 # или через env:
-AMP_ANALYSIS_PROVIDER=openai amp analyze
+RECALLANT_ANALYSIS_PROVIDER=openai recallant analyze
 ```
 
-Перед запуском `amp analyze` с внешним провайдером **создаёт paid API approval request**, показывает оценку стоимости и запрашивает подтверждение:
+Перед запуском `recallant analyze` с внешним провайдером **создаёт paid API approval request**, показывает оценку стоимости и запрашивает подтверждение:
 
 ```
 Analysis provider: OpenAI (gpt-4o-mini)
@@ -241,34 +241,34 @@ what topic/task they relate to. Be specific and concrete.
 Fragments: [chunk texts, truncated to configured analysis prompt cap]
 ```
 
-## 7. `amp cleanup` — пакетная очистка
+## 7. `recallant cleanup` — пакетная очистка
 
 Для автоматизации без интерактивного режима:
 
 ```bash
 # Example: архивировать всё старше 6 месяцев без единого обращения
-amp cleanup --archive --not-accessed 180d --no-confirm
+recallant cleanup --archive --not-accessed 180d --no-confirm
 
 # Example: удалить уже заархивированные chunks старше года
-amp cleanup --delete-archived --older-than 365d
+recallant cleanup --delete-archived --older-than 365d
 
 # Example dry run — показать что будет сделано без действий
-amp cleanup --archive --not-accessed 90d --dry-run
+recallant cleanup --archive --not-accessed 90d --dry-run
 ```
 
 ## 8. Env variables (полный список)
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `AMP_DECAY_ENABLED` | `true` | Включить score decay |
-| `AMP_DECAY_HALFLIFE_PROJECT_DAYS` | `90` | Half-life для project-scope chunks |
-| `AMP_DECAY_HALFLIFE_DEVELOPER_DAYS` | `365` | Half-life для developer-scope chunks |
-| `AMP_DECAY_MIN` | `0.2` | Минимальный decay multiplier |
-| `AMP_STALE_NOT_ACCESSED_DAYS` | profile default | Порог "не запрашивался N дней" для analyze |
-| `AMP_STALE_AGE_DAYS` | profile default | Порог возраста chunk для analyze |
-| `AMP_ANALYSIS_PROVIDER` | `ollama` | Провайдер LLM для summary: `ollama` \| `openai` \| `none` |
-| `AMP_ANALYSIS_MODEL` | `llama3.2:3b` | Модель для summary (Ollama model name или OpenAI model id) |
-| `AMP_OPENAI_API_KEY` | — | API ключ OpenAI; обязателен если `AMP_ANALYSIS_PROVIDER=openai` |
-| `AMP_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL; можно заменить на совместимый API |
+| `RECALLANT_DECAY_ENABLED` | `true` | Включить score decay |
+| `RECALLANT_DECAY_HALFLIFE_PROJECT_DAYS` | `90` | Half-life для project-scope chunks |
+| `RECALLANT_DECAY_HALFLIFE_DEVELOPER_DAYS` | `365` | Half-life для developer-scope chunks |
+| `RECALLANT_DECAY_MIN` | `0.2` | Минимальный decay multiplier |
+| `RECALLANT_STALE_NOT_ACCESSED_DAYS` | profile default | Порог "не запрашивался N дней" для analyze |
+| `RECALLANT_STALE_AGE_DAYS` | profile default | Порог возраста chunk для analyze |
+| `RECALLANT_ANALYSIS_PROVIDER` | `ollama` | Провайдер LLM для summary: `ollama` \| `openai` \| `none` |
+| `RECALLANT_ANALYSIS_MODEL` | `llama3.2:3b` | Модель для summary (Ollama model name или OpenAI model id) |
+| `RECALLANT_OPENAI_API_KEY` | — | API ключ OpenAI; обязателен если `RECALLANT_ANALYSIS_PROVIDER=openai` |
+| `RECALLANT_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL; можно заменить на совместимый API |
 
 Defaults in this table are implementation/profile defaults. They can change without architecture revision if routing, cost, or quality evidence justifies it and the change is explicit in config.

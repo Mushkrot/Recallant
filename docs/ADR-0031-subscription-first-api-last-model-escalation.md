@@ -6,20 +6,20 @@ Accepted, refined by [ADR-0032-paid-api-confirmation-and-cost-dashboard.md](ADR-
 
 ## Context
 
-The owner already pays for intensive vibe-coding subscriptions such as Codex and may also use other agent subscriptions. AMP must not become a hidden second source of high token/API spend.
+The owner already pays for intensive vibe-coding subscriptions such as Codex and may also use other agent subscriptions. Recallant must not become a hidden second source of high token/API spend.
 
 OpenAI API usage is a separate paid token-based route and is billed separately from ChatGPT/Codex subscriptions. A ChatGPT subscription must not be treated as a generic API replacement.
 
-However, subscription-backed agent usage is different from generic API usage. Codex can be used through supported clients and OAuth/sign-in flows tied to an existing ChatGPT/Codex plan. Other agent tools may expose similar provider-supported subscription routes. If such a route works within subscription limits and provider rules, AMP may treat it as a distinct model route.
+However, subscription-backed agent usage is different from generic API usage. Codex can be used through supported clients and OAuth/sign-in flows tied to an existing ChatGPT/Codex plan. Other agent tools may expose similar provider-supported subscription routes. If such a route works within subscription limits and provider rules, Recallant may treat it as a distinct model route.
 
 ## Decision
 
 Refine the model-router decision from "cloud escalation" to **subscription-first, API-last escalation**.
 
-AMP model routing has four route classes:
+Recallant model routing has four route classes:
 
 1. `local_model`: self-hosted/local models for embeddings, search, extraction, cleanup, and simple consolidation.
-2. `active_agent`: the currently open agent session, such as Codex, performs reasoning using its already active subscription/session and writes results to AMP through MCP tools.
+2. `active_agent`: the currently open agent session, such as Codex, performs reasoning using its already active subscription/session and writes results to Recallant through MCP tools.
 3. `subscription_worker`: a background/local/server worker using supported OAuth/sign-in subscription mechanisms and existing plan limits, when available and compliant with current provider rules.
 4. `paid_api_provider`: direct token-billed API usage such as OpenAI API, Gemini API, Claude API, or compatible paid gateways.
 
@@ -36,9 +36,9 @@ Automatic use of stronger models should prefer this order:
 3. local downgrade or defer/pending queue if the subscription route is unavailable or rate-limited;
 4. paid API only after explicit confirmation by default, unless a future scoped `auto_with_caps` policy is explicitly enabled.
 
-If subscription limits are exhausted, AMP must not silently fall through to paid API. It should pause, defer, downgrade to local models, or create an explicit paid API approval request according to policy.
+If subscription limits are exhausted, Recallant must not silently fall through to paid API. It should pause, defer, downgrade to local models, or create an explicit paid API approval request according to policy.
 
-AMP must explicitly avoid:
+Recallant must explicitly avoid:
 
 - browser automation against ChatGPT as a hidden API,
 - scraping ChatGPT output,
@@ -92,7 +92,7 @@ Subscription-backed usage may have no direct API dollar cost, but it still consu
 
 ## Consequences
 
-- AMP remains financially aligned with the owner's workflow: already-paid agent subscriptions are used before extra API spend.
+- Recallant remains financially aligned with the owner's workflow: already-paid agent subscriptions are used before extra API spend.
 - "Cloud escalation" no longer means "paid API by default."
 - Paid API remains available for quality-critical cases, but default v1 behavior requires explicit approval. Future unattended paid API requires scoped `auto_with_caps` policy and dashboard-backed monitoring.
 - Implementation needs provider/worker capability detection: not every client can provide an `active_agent` or `subscription_worker` route.

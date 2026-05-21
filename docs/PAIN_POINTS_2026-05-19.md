@@ -28,13 +28,13 @@ The owner already built a file-based configuration structure that helps agents r
 
 Requirement:
 
-- A new project should be connected to AMP in one simple action: CLI command, skill, kit, or repository bootstrap.
+- A new project should be connected to Recallant in one simple action: CLI command, skill, kit, or repository bootstrap.
 - The bootstrap must create the thin project files and MCP config needed for the selected agent harness.
 - The bootstrap must not copy large duplicated documentation into every project.
 
 Current target:
 
-- `amp init` remains the canonical local command.
+- `recallant init` remains the canonical local command.
 - A Journey-style installable kit/skill may become an additional distribution path.
 - A command is acceptable for the owner now; if the project becomes a public repo, a more polished kit/skill/bootstrap experience should be revisited.
 
@@ -46,7 +46,7 @@ Requirement:
 
 - Project files must be thin adapters, not large knowledge dumps.
 - Startup context must be a compact capsule: rules for how to use memory, current checkpoint, and a small number of relevant recalled items.
-- Long-lived knowledge belongs in AMP storage and should be loaded lazily through retrieval, resolver hints, and governed memory recall.
+- Long-lived knowledge belongs in Recallant storage and should be loaded lazily through retrieval, resolver hints, and governed memory recall.
 - The system needs explicit context budget rules and tests.
 
 ## 5. Contextual retrieval, not keyword-only search
@@ -61,7 +61,7 @@ Requirement:
 
 ## 6. Local server first, external LLMs when useful
 
-The owner expects to run AMP on a personal Linux server with a capable GPU (24GB VRAM). Local compute should handle the default memory workload. External LLMs such as OpenAI, Claude, Gemini, or similar providers should remain available for harder analysis.
+The owner expects to run Recallant on a personal Linux server with a capable GPU (24GB VRAM). Local compute should handle the default memory workload. External LLMs such as OpenAI, Claude, Gemini, or similar providers should remain available for harder analysis.
 
 Requirement:
 
@@ -83,7 +83,7 @@ The owner needs multiple memory layers:
 
 Requirement:
 
-- AMP must preserve strict scoping so one project's private context does not pollute another project.
+- Recallant must preserve strict scoping so one project's private context does not pollute another project.
 - Developer-level knowledge must be intentionally promoted and reusable across projects.
 - The data model should support project hierarchy or parent/child project relationships.
 - Projects are not secret-isolated from each other in the owner's workflow. Agents are often allowed to inspect another project to reuse configuration or implementation patterns. The problem is context contamination, not confidentiality.
@@ -91,17 +91,17 @@ Requirement:
 
 ## 8. Repo files should become thin, memory becomes the main store
 
-Today each project contains project logs and documentation files where agents write everything they do. Some repo-native files should remain, especially agent configuration and human-readable checkpoints. But most long historical narrative should move into AMP.
+Today each project contains project logs and documentation files where agents write everything they do. Some repo-native files should remain, especially agent configuration and human-readable checkpoints. But most long historical narrative should move into Recallant.
 
 Requirement:
 
 - `AGENTS.md` stays as the thin entrypoint for agents.
 - `PROJECT_LOG.md` stays as a human-readable checkpoint/resume file.
-- Long session history, detailed decisions, failures, lessons, and evidence should live in AMP, not be duplicated endlessly in repo files.
+- Long session history, detailed decisions, failures, lessons, and evidence should live in Recallant, not be duplicated endlessly in repo files.
 
 ## 9. Compaction resilience and raw capture
 
-When an LLM context window fills, the provider compacts the chat and older details may disappear. AMP should protect against that loss.
+When an LLM context window fills, the provider compacts the chat and older details may disappear. Recallant should protect against that loss.
 
 Requirement:
 
@@ -131,7 +131,7 @@ OB1 started closer to a human external memory: a system that observes and stores
 
 Requirement:
 
-- AMP v1 stays focused on AI-assisted coding work.
+- Recallant v1 stays focused on AI-assisted coding work.
 - The architecture should leave a clear expansion path toward broader personal memory.
 - The same core ideas should be reusable: owner-controlled store, scopes, provenance, bounded retrieval, review/use policy, and optional connectors.
 

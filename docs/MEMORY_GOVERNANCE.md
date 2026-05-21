@@ -19,7 +19,7 @@ Scope/audience refinement: governed memory authority is multi-axis. A memory mus
 | Level | Meaning | Example |
 |-------|---------|---------|
 | `evidence_only` | Useful evidence, not a rule. | "On May 19 the agent tried X and it failed." |
-| `recall_allowed` | Safe to recall as working memory. | "AMP uses OB1 as foundation and Journey as packaging layer." |
+| `recall_allowed` | Safe to recall as working memory. | "Recallant uses OB1 as foundation and Journey as packaging layer." |
 | `instruction_grade` | Safe to treat as a standing instruction/preference. | "For spreadsheet edits, never overwrite formulas unless explicitly asked." |
 | `do_not_use` | Retained for audit but excluded from normal recall. | Rejected or unsafe memory. |
 
@@ -50,7 +50,7 @@ Default state:
 Examples:
 
 - "The owner seems to prefer documentation-first architecture."
-- "Maybe new projects should always use `amp init --target codex`."
+- "Maybe new projects should always use `recallant init --target codex`."
 - "The agent inferred that paid API LLM should be used for all closeouts."
 
 These can be recalled as context, but the agent must not treat them as a standing rule unless promoted.
@@ -109,8 +109,8 @@ These can be auto-created for recall, but should not become `instruction_grade` 
 
 Examples:
 
-- "Always use `amp init --target codex` for new projects" can be recallable now, but may become instruction-grade after confirmation.
-- "Never expose AMP outside Tailscale" is security-sensitive and should require confirmation before instruction-grade.
+- "Always use `recallant init --target codex` for new projects" can be recallable now, but may become instruction-grade after confirmation.
+- "Never expose Recallant outside Tailscale" is security-sensitive and should require confirmation before instruction-grade.
 
 ## 3.1 Stronger policy triggers
 
@@ -204,4 +204,4 @@ Only `accepted` memories can act as durable behavioral guidance according to the
 
 - Should low-confidence extraction always produce `needs_review` by default, or only for candidate rules?
 - Should cross-project/developer-level promotion require explicit user confirmation unless the source is a direct user instruction?
-- Should there be a daily/weekly `amp review --important` summary rather than interrupting during work?
+- Should there be a daily/weekly `recallant review --important` summary rather than interrupting during work?
