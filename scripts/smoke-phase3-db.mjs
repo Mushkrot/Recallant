@@ -173,6 +173,51 @@ await callTool(8, "memory_closeout", {
   artifact_refs: []
 });
 
+await client.query(
+  `
+    INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+    VALUES ($1, 'stale_session_threshold_minutes', $2, 'phase3 smoke stale recovery', 'smoke')
+    ON CONFLICT (project_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [projectId, JSON.stringify(0)]
+);
+
+const unclosed = await callTool(9, "memory_start_session", {
+  client_kind: "codex",
+  client_version: "smoke",
+  project_path: process.cwd(),
+  session_label: "phase3-unclosed",
+  resume_policy: "normal"
+});
+const recovery = await callTool(10, "memory_start_session", {
+  client_kind: "codex",
+  client_version: "smoke",
+  project_path: process.cwd(),
+  session_label: "phase3-recovery",
+  resume_policy: "normal"
+});
+if (
+  recovery.previous_unclosed_session?.session_id !== unclosed.session_id ||
+  recovery.previous_unclosed_session?.is_stale !== true ||
+  recovery.previous_unclosed_session?.stale_after_minutes !== 0
+) {
+  throw new Error(`Stale-session recovery metadata failed: ${JSON.stringify(recovery)}`);
+}
+
+await callTool(11, "memory_closeout", {
+  session_id: recovery.session_id,
+  closeout_intent: "task_complete",
+  summary: "Phase 3 stale recovery smoke complete.",
+  checkpoint_payload: {
+    current_status: "phase3 recovery smoke complete",
+    current_focus: "session lifecycle",
+    next_step: "continue implementation",
+    open_questions: []
+  },
+  governed_memory_candidates: [],
+  artifact_refs: []
+});
+
 try {
   const checks = await client.query(
     `
@@ -184,10 +229,20 @@ try {
         (SELECT payload->'capture'->>'profile' FROM events WHERE id = $3) AS workflow_profile,
         (SELECT length(payload->>'text') FROM events WHERE id = $4) AS light_text_length,
         (SELECT status FROM sessions WHERE id = $1) AS session_status,
+        (SELECT status FROM sessions WHERE id = $6) AS unclosed_status,
+        (SELECT status FROM sessions WHERE id = $7) AS recovery_status,
         (SELECT last_heartbeat_at IS NOT NULL FROM sessions WHERE id = $1) AS has_heartbeat,
         (SELECT count(*)::int FROM checkpoints WHERE project_id = $5) AS checkpoint_count
     `,
-    [started.session_id, appended.event_id, workflowEvent.event_id, lightEvent.event_id, projectId]
+    [
+      started.session_id,
+      appended.event_id,
+      workflowEvent.event_id,
+      lightEvent.event_id,
+      projectId,
+      unclosed.session_id,
+      recovery.session_id
+    ]
   );
   const row = checks.rows[0];
   if (
@@ -198,6 +253,8 @@ try {
     row.workflow_profile !== "detailed" ||
     row.light_text_length !== 500 ||
     row.session_status !== "closed" ||
+    row.unclosed_status !== "interrupted" ||
+    row.recovery_status !== "closed" ||
     row.has_heartbeat !== true ||
     row.checkpoint_count !== 1
   ) {

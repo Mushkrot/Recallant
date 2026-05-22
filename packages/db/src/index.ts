@@ -101,6 +101,15 @@ function buildCapturePolicy(profile: CaptureProfile, source: string): CapturePol
   return { profile, source, ...capturePolicies[profile] };
 }
 
+function readNumberSetting(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object" && "minutes" in value) {
+    const minutes = (value as { minutes?: unknown }).minutes;
+    if (typeof minutes === "number" && Number.isFinite(minutes)) return minutes;
+  }
+  return null;
+}
+
 function capText(text: string | null | undefined, maxChars: number) {
   if (text === null || text === undefined) return null;
   if (text.length <= maxChars) return text;
@@ -212,7 +221,7 @@ export class RecallantDb {
     return withTransaction(this.pool, async (client) => {
       const previous = await client.query(
         `
-          SELECT id, last_seen_at
+          SELECT id, last_seen_at, extract(epoch from (now() - last_seen_at)) / 60 AS age_minutes
           FROM sessions
           WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL
           ORDER BY last_seen_at DESC
@@ -221,15 +230,24 @@ export class RecallantDb {
         [project.projectId]
       );
       const previousSession = previous.rows[0];
+      const staleThresholdMinutes = await this.resolveStaleSessionThreshold(
+        client,
+        project.projectId,
+        project.developerId
+      );
+      const ageMinutes = Number(previousSession?.age_minutes ?? 0);
+      const previousIsStale = previousSession ? ageMinutes >= staleThresholdMinutes : false;
       if (previousSession) {
-        await client.query(
-          `
-            UPDATE sessions
-            SET status = 'interrupted', ended_reason = 'crash_or_unknown', last_seen_at = now()
-            WHERE id = $1
-          `,
-          [previousSession.id]
-        );
+        if (previousIsStale) {
+          await client.query(
+            `
+              UPDATE sessions
+              SET status = 'interrupted', ended_reason = 'crash_or_unknown', last_seen_at = now()
+              WHERE id = $1
+            `,
+            [previousSession.id]
+          );
+        }
       }
 
       const inserted = await client.query<{ id: string }>(
@@ -260,7 +278,10 @@ export class RecallantDb {
               session_id: previousSession.id,
               last_seen_at: previousSession.last_seen_at,
               last_event_id: await this.findLastEventId(client, previousSession.id),
-              recovery_status: "needs_review"
+              recovery_status: "needs_review",
+              is_stale: previousIsStale,
+              age_minutes: ageMinutes,
+              stale_after_minutes: staleThresholdMinutes
             }
           : null,
         recommended_next_calls: ["memory_get_context_pack"]
@@ -515,6 +536,36 @@ export class RecallantDb {
     if (systemProfile) return buildCapturePolicy(systemProfile, "system_settings");
 
     return buildCapturePolicy("standard", "built_in_default");
+  }
+
+  private async resolveStaleSessionThreshold(
+    client: PoolClient,
+    projectId: string,
+    developerId: string
+  ) {
+    const key = "stale_session_threshold_minutes";
+    const projectSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = $2",
+      [projectId, key]
+    );
+    const projectValue = readNumberSetting(projectSetting.rows[0]?.value);
+    if (projectValue !== null) return projectValue;
+
+    const developerSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM developer_settings WHERE developer_id = $1 AND key = $2",
+      [developerId, key]
+    );
+    const developerValue = readNumberSetting(developerSetting.rows[0]?.value);
+    if (developerValue !== null) return developerValue;
+
+    const systemSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM system_settings WHERE key = $1",
+      [key]
+    );
+    const systemValue = readNumberSetting(systemSetting.rows[0]?.value);
+    if (systemValue !== null) return systemValue;
+
+    return 480;
   }
 
   private async insertEvent(
