@@ -88,7 +88,9 @@ function run(args) {
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
   }
   return JSON.parse(result.stdout);
 }
@@ -123,6 +125,38 @@ if (
   throw new Error(`Cleanup dry-run report failed: ${JSON.stringify(cleanup)}`);
 }
 
+const blockedDelete = spawnSync(
+  process.execPath,
+  ["apps/cli/dist/index.js", "cleanup", "--delete-archived", "--confirm"],
+  {
+    cwd: "/work",
+    env: { ...process.env, RECALLANT_DATABASE_URL: databaseUrl },
+    encoding: "utf8"
+  }
+);
+if (blockedDelete.status === 0 || !blockedDelete.stderr.includes("POLICY_BLOCKED")) {
+  throw new Error(`Cleanup hard-delete was not policy-blocked: ${blockedDelete.stderr}`);
+}
+
+const archived = run([
+  "cleanup",
+  "--archive",
+  "--confirm",
+  "--not-accessed",
+  "90d",
+  "--older-than",
+  "180d"
+]);
+if (
+  archived.ok !== true ||
+  archived.dry_run !== false ||
+  archived.writes_database !== true ||
+  !archived.archived_chunk_ids.includes(oldChunkId) ||
+  !archived.archived_chunk_ids.includes(duplicateChunkId)
+) {
+  throw new Error(`Cleanup archive execution failed: ${JSON.stringify(archived)}`);
+}
+
 const verify = new pg.Client({ connectionString: databaseUrl });
 await verify.connect();
 try {
@@ -130,7 +164,8 @@ try {
     `
       SELECT
         (SELECT count(*)::int FROM events WHERE id = ANY($1::uuid[])) AS event_count,
-        (SELECT count(*)::int FROM chunks WHERE id = ANY($2::uuid[]) AND archived_at IS NULL) AS unarchived_chunk_count
+        (SELECT count(*)::int FROM chunks WHERE id = ANY($2::uuid[]) AND archived_at IS NOT NULL) AS archived_chunk_count,
+        (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = ANY($1::uuid[])) AS raw_artifact_count
     `,
     [
       [oldEventId, duplicateEventId, replacementEventId],
@@ -138,11 +173,11 @@ try {
     ]
   );
   const row = checks.rows[0];
-  if (row.event_count !== 3 || row.unarchived_chunk_count !== 3) {
-    throw new Error(`Cleanup dry-run changed data: ${JSON.stringify(row)}`);
+  if (row.event_count !== 3 || row.archived_chunk_count < 2 || row.raw_artifact_count !== 0) {
+    throw new Error(`Cleanup archive changed wrong data: ${JSON.stringify(row)}`);
   }
 } finally {
   await verify.end();
 }
 
-process.stdout.write("Phase 9 cleanup dry-run smoke passed\n");
+process.stdout.write("Phase 9 cleanup smoke passed\n");

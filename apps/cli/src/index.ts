@@ -618,28 +618,59 @@ async function runAnalyze(argv: readonly string[]) {
 }
 
 async function runCleanup(argv: readonly string[]) {
-  if (!argv.includes("--dry-run")) {
-    throw new Error("POLICY_BLOCKED: cleanup currently requires --dry-run");
+  if (argv.includes("--delete-archived")) {
+    throw new Error(
+      "POLICY_BLOCKED: cleanup hard delete must route through confirmed erasure policy"
+    );
+  }
+  const dryRun = argv.includes("--dry-run");
+  const archiveRequested = argv.includes("--archive");
+  const confirmed = argv.includes("--confirm");
+  if (!dryRun && (!archiveRequested || !confirmed)) {
+    throw new Error("POLICY_BLOCKED: cleanup writes require --archive --confirm");
   }
   const report = await queryCleanupCandidates(argv);
-  const archiveRequested = argv.includes("--archive");
   const candidates = [
     ...report.stale_chunks.map((candidate) => ({ ...candidate, reason: "stale_or_not_accessed" })),
     ...report.duplicate_chunks.map((candidate) => ({ ...candidate, reason: "duplicate_text" })),
     ...report.superseded_chunks.map((candidate) => ({ ...candidate, reason: "superseded" }))
   ];
+  const uniqueChunkIds = Array.from(new Set(candidates.map((candidate) => candidate.chunk_id)));
+  if (!dryRun && uniqueChunkIds.length > 0) {
+    const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+    if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for cleanup");
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      await client.query(
+        `
+          UPDATE chunks
+          SET archived_at = coalesce(archived_at, now())
+          WHERE id = ANY($1::uuid[])
+        `,
+        [uniqueChunkIds]
+      );
+    } finally {
+      await client.end();
+    }
+  }
   process.stdout.write(
     `${JSON.stringify(
       {
         ok: true,
         action: "cleanup",
-        dry_run: true,
-        writes_database: false,
+        dry_run: dryRun,
+        writes_database: !dryRun,
         archive_requested: archiveRequested,
+        archived_chunk_ids: dryRun ? [] : uniqueChunkIds,
         candidates,
-        warnings: [
-          "Dry run only. No chunks, embeddings, L0 events, raw artifacts, or governed memories were changed."
-        ]
+        warnings: dryRun
+          ? [
+              "Dry run only. No chunks, embeddings, L0 events, raw artifacts, or governed memories were changed."
+            ]
+          : [
+              "Only derived chunks were archived. L0 events, raw artifacts, embeddings, and governed memories were not deleted."
+            ]
       },
       null,
       2
