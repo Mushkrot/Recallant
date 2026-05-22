@@ -143,6 +143,7 @@ Latest implementation checkpoints:
 - Phase 6.5 first Review UI slice is implemented as a private server-rendered Review Command Center on the Recallant server package. It requires `RECALLANT_AUTH_TOKEN` for `/review` and `/api/review-dashboard`, binds through the HTTP server default private host path, and shows project list, critical status, Review Inbox, Active Rules, Cost / Paid API, Settings, and a management-chat placeholder with confirmation-gated destructive action wording. It is verified by `scripts/smoke-review-ui.mjs`.
 - Review UI action/settings slice is implemented: `/api/review-action` uses the same DB review policy path as MCP, `/api/project-setting` writes project settings with `settings_audit_events`, and dangerous settings such as paid API mode or major route/profile changes require explicit confirmation. `scripts/smoke-review-ui.mjs` covers auth, HTML/API dashboard, review action, confirmation-gated setting rejection, and confirmed setting update.
 - Phase 7 first CLI onboarding slice is implemented: `recallant init`, `discover`, `import --dry-run`, `lint-context`, `context`, and expanded `doctor`. Init writes pointer-only `.recallant/config`, a thin `AGENTS.md` Memory section, `PROJECT_LOG.md`, central project/settings rows in Postgres, and a Codex MCP config block. Discover/import remain preview-only and do not create import events or instruction-grade memories. It is verified by `scripts/smoke-phase7-cli.mjs`.
+- Phase 8 first backup/restore-verification slice is implemented: `recallant backup` exports all current `0001_initial` Postgres tables into a local backup directory with `tables.json`, `manifest.json`, schema/version metadata, file hash, target metadata, and secret-policy marker; `recallant backup-verify --manifest ...` verifies the hash and performs a non-destructive restore check in a temporary schema, then drops it. It is verified by `scripts/smoke-phase8-backup.mjs`.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
@@ -152,15 +153,9 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. If Phase 0 is committed, begin Phase 1 database/migrations from `DATA_MODEL.md`; otherwise finish and commit the Phase 0 skeleton first.
-4. Build only stubs at first where the current phase calls for stubs:
-   - `recallant doctor`;
-   - `recallant init`;
-   - `recallant discover`;
-   - MCP server name `recallant`;
-   - MCP tool stubs for `memory_start_session`, `memory_get_context_pack`, `memory_closeout`, `memory_append_event`, `memory_heartbeat`, and `memory_forget`.
-5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
-6. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
+3. Continue Phase 8 hardening from the current checkpoint: input-size validation/no-write guarantees, private server defaults audit, and backup/export portability gaps that do not require owner secrets or production service changes.
+4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
+5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 
 Do not reopen the product name, v1 scope, OB1/MF0 synthesis, managed memory decision, natural-language management direction, owner-server security/ports constraints, or Recallant/AMP rename unless the owner explicitly requests it.
 

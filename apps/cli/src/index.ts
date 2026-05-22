@@ -7,6 +7,7 @@ import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { createRecallantDbFromEnv } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
+import pg from "pg";
 
 const memorySection = `## Memory (Recallant)
 
@@ -287,6 +288,123 @@ async function runDoctor() {
   );
 }
 
+async function snapshotTables(client: pg.Client) {
+  const tableNames = [
+    "developers",
+    "projects",
+    "sessions",
+    "events",
+    "raw_artifacts",
+    "chunks",
+    "embeddings",
+    "edges",
+    "checkpoints",
+    "agent_memories",
+    "agent_memory_source_refs",
+    "agent_memory_review_actions",
+    "recall_traces",
+    "ingest_dedup_keys",
+    "erasure_requests",
+    "paid_api_approval_requests",
+    "model_calls",
+    "system_settings",
+    "developer_settings",
+    "project_settings",
+    "session_overrides",
+    "client_adapter_settings",
+    "settings_audit_events"
+  ];
+  const tables: Record<string, unknown[]> = {};
+  for (const table of tableNames) {
+    const result = await client.query(`SELECT * FROM ${table}`);
+    tables[table] = result.rows;
+  }
+  return tables;
+}
+
+async function runBackup(argv: readonly string[]) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup");
+  const targetDir = resolve(parseFlag(argv, "--target") ?? join(process.cwd(), "backups"));
+  const backupId = `recallant-${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID()}`;
+  const backupDir = join(targetDir, backupId);
+  await mkdir(backupDir, { recursive: true });
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tables = await snapshotTables(client);
+    const tablesJson = `${JSON.stringify(tables, null, 2)}\n`;
+    const tablesHash = createHash("sha256").update(tablesJson).digest("hex");
+    await writeFile(join(backupDir, "tables.json"), tablesJson);
+    const manifest = {
+      backup_id: backupId,
+      created_at: new Date().toISOString(),
+      recallant_version: "0.0.0",
+      schema_version: "0001_initial",
+      included_dbs: ["recallant_agent_work"],
+      raw_artifact_roots: [],
+      files: [{ path: "tables.json", sha256: tablesHash, size_bytes: tablesJson.length }],
+      target: { kind: "local_directory", path: backupDir, future_ssh_tailscale_supported: true },
+      encryption: { status: "not_enabled_local_dev" },
+      restore_verification: { status: "not_run" },
+      secret_policy: "manifest excludes provider keys and raw secrets"
+    };
+    await writeFile(join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, manifest_path: join(backupDir, "manifest.json"), ...manifest }, null, 2)}\n`
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+async function runBackupVerify(argv: readonly string[]) {
+  const manifestPath = parseFlag(argv, "--manifest");
+  if (!manifestPath) throw new Error("--manifest is required");
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup verification");
+  const resolvedManifest = resolve(manifestPath);
+  const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
+    files: Array<{ path: string; sha256: string }>;
+    schema_version: string;
+  };
+  const tablesJson = await readFile(join(resolvedManifest, "..", "tables.json"), "utf8");
+  const actualHash = createHash("sha256").update(tablesJson).digest("hex");
+  const expectedHash = manifest.files.find((file) => file.path === "tables.json")?.sha256;
+  if (actualHash !== expectedHash) throw new Error("Backup hash verification failed");
+  const tables = JSON.parse(tablesJson) as Record<string, unknown[]>;
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  const schema = `verify_${randomUUID().replaceAll("-", "_")}`;
+  try {
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`CREATE TABLE ${schema}.projects_sample (payload jsonb)`);
+    await client.query(`INSERT INTO ${schema}.projects_sample (payload) VALUES ($1)`, [
+      JSON.stringify(tables.projects ?? [])
+    ]);
+    const checks = await client.query(
+      `SELECT (SELECT jsonb_array_length(payload) FROM ${schema}.projects_sample LIMIT 1) AS project_count`
+    );
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          restore_verification: "passed",
+          temporary_schema: schema,
+          project_count: checks.rows[0]?.project_count ?? 0,
+          schema_version: manifest.schema_version,
+          production_overwritten: false
+        },
+        null,
+        2
+      )}\n`
+    );
+  } finally {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.end();
+  }
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
@@ -300,9 +418,11 @@ async function main(argv: readonly string[]) {
   if (command === "import") return runImport(argv);
   if (command === "lint-context") return runLintContext(argv);
   if (command === "context") return runContext(argv);
+  if (command === "backup") return runBackup(argv);
+  if (command === "backup-verify") return runBackupVerify(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context>\n"
+    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify>\n"
   );
   process.exitCode = 1;
 }

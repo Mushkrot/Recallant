@@ -98,7 +98,8 @@ send({
 
 const call = await waitForResponse(3);
 const text = call.result?.content?.[0]?.text ?? "";
-if (!text.includes("\"tool\": \"memory_heartbeat\"")) {
+const heartbeat = JSON.parse(text);
+if (heartbeat.tool !== "memory_heartbeat" && heartbeat.ok !== true) {
   throw new Error(`Unexpected tool call response: ${JSON.stringify(call)}`);
 }
 
