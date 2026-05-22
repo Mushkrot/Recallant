@@ -216,7 +216,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Self-cleaning reports can identify duplicate/stale/superseded/low-value/poor-provenance/conflicting-connector candidates without auto-deleting them.
 - [ ] `recallant cleanup` does not execute permanent erasure without routing through `memory_forget` confirmation.
 
-## Cross-client smoke (manual until automated harness exists)
+## Cross-client smoke
 
 - [ ] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.
 
