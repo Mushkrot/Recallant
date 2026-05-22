@@ -16,6 +16,14 @@ Recallant is a source-backed memory and context continuity platform for AI codin
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) and [docs/SECURITY.md](docs/SECURITY.md).
+
 ## Связанные материалы
 
 - `agent-bootstrap` — ранний личный sketch владельца, полезный для идей репозиторного контракта `AGENTS.md` / `PROJECT_LOG.md`, но не внешний mature upstream. Для продолжения работы соседняя папка не требуется: нужные выводы зафиксированы в [docs/REPO_CONTRACT.md](docs/REPO_CONTRACT.md), [docs/UPSTREAM_INTEGRATION.md](docs/UPSTREAM_INTEGRATION.md), and [docs/UPSTREAM_RESEARCH_2026-05-19.md](docs/UPSTREAM_RESEARCH_2026-05-19.md).

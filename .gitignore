@@ -1,0 +1,45 @@
+# Local editor/agent state
+.claude/settings.local.json
+.cursor/
+.vscode/
+
+# Recallant project-local pointers and spools
+.recallant/
+
+# Secrets and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.next/
+.vite/
+
+# Python worker/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Logs and runtime artifacts
+*.log
+logs/
+tmp/
+temp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
