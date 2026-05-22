@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import pg from "pg";
+import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
@@ -12,51 +12,63 @@ const databaseUrl =
 const backupRoot = await mkdtemp(join(tmpdir(), "recallant-phase8-backup-"));
 const projectId = randomUUID();
 const developerId = randomUUID();
+const projectPath = `/tmp/recallant-phase8-${projectId}`;
+const searchNeedle = "portable-quartz-signal";
 
-const client = new pg.Client({ connectionString: databaseUrl });
-await client.connect();
+const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
 try {
-  await client.query(
-    `
-      INSERT INTO developers (id, name)
-      VALUES ($1, 'phase8 backup smoke developer')
-      ON CONFLICT (id) DO NOTHING
-    `,
-    [developerId]
-  );
-  await client.query(
-    `
-      INSERT INTO projects (id, developer_id, primary_path, name)
-      VALUES ($1, $2, $3, 'phase8-backup-smoke')
-      ON CONFLICT (id) DO NOTHING
-    `,
-    [projectId, developerId, `/tmp/recallant-phase8-${projectId}`]
-  );
-  await client.query(
-    `
-      INSERT INTO checkpoints (project_id, payload)
-      VALUES ($1, $2)
-    `,
-    [
-      projectId,
-      JSON.stringify({
-        current_status: "phase8 backup smoke",
-        current_focus: "backup verification",
-        next_step: "continue hardening",
-        open_questions: []
-      })
-    ]
-  );
-  await client.query(
-    `
-      INSERT INTO project_settings (project_id, key, value, reason, updated_by)
-      VALUES ($1, 'capture_profile', $2, 'phase8 backup smoke', 'smoke')
-      ON CONFLICT (project_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-    `,
-    [projectId, JSON.stringify("standard")]
-  );
+  await db.ensureProject(projectPath);
+  const session = await db.startSession({
+    client_kind: "codex",
+    client_version: "smoke",
+    project_path: projectPath,
+    session_label: "phase8-backup-smoke",
+    resume_policy: "normal"
+  });
+  const event = await db.appendTurn({
+    session_id: session.session_id,
+    client_kind: "codex",
+    role: "user",
+    text: `Phase 8 backup smoke creates searchable chunk ${searchNeedle}.`,
+    dedup_key: `phase8-backup-turn-${randomUUID()}`
+  });
+  await db.appendEvent({
+    session_id: session.session_id,
+    client_kind: "codex",
+    event_kind: "terminal_output",
+    text: "Phase 8 backup smoke raw artifact pointer event.",
+    metadata: { smoke: true },
+    raw_artifacts: [
+      {
+        artifact_kind: "terminal_output",
+        storage_backend: "external",
+        uri: "smoke://phase8-backup-artifact",
+        sha256: "2".repeat(64),
+        size_bytes: 2048,
+        content_type: "text/plain",
+        excerpt: "bounded backup artifact excerpt",
+        metadata: { smoke: true }
+      }
+    ],
+    dedup_key: `phase8-backup-artifact-${randomUUID()}`
+  });
+  await db.setCheckpoint(projectId, {
+    current_status: "phase8 backup smoke",
+    current_focus: "backup verification",
+    next_step: "continue hardening",
+    open_questions: []
+  });
+  await db.createAgentMemory({
+    memory_type: "work_log",
+    scope: "project",
+    title: "Phase 8 backup smoke memory",
+    body: `Backup verification should preserve governed memory around ${searchNeedle}.`,
+    confidence: 0.9,
+    created_by: "agent",
+    source_refs: [{ source_kind: "event", source_id: event.event_id, quote: searchNeedle }]
+  });
 } finally {
-  await client.end();
+  await db.close();
 }
 
 function run(args) {
@@ -69,7 +81,9 @@ function run(args) {
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
   }
   return JSON.parse(result.stdout);
 }
@@ -100,7 +114,14 @@ if (
   !Array.isArray(tables.model_calls) ||
   !Array.isArray(tables.settings_audit_events) ||
   !tables.projects.some((project) => project.id === projectId) ||
-  !tables.checkpoints.some((checkpoint) => checkpoint.project_id === projectId)
+  !tables.checkpoints.some((checkpoint) => checkpoint.project_id === projectId) ||
+  !tables.chunks.some(
+    (chunk) => chunk.project_id === projectId && chunk.text.includes(searchNeedle)
+  ) ||
+  !tables.agent_memories.some((memory) => memory.project_id === projectId) ||
+  !tables.raw_artifacts.some(
+    (artifact) => artifact.project_id === projectId && artifact.sha256 === "2".repeat(64)
+  )
 ) {
   throw new Error(`Backup manifest/tables failed: ${JSON.stringify({ manifest, tablesHash })}`);
 }
@@ -113,12 +134,18 @@ for (const fragment of forbiddenFragments) {
   }
 }
 
-const verify = run(["backup-verify", "--manifest", backup.manifest_path]);
+const verify = run(["backup-verify", "--manifest", backup.manifest_path, "--query", searchNeedle]);
 if (
   verify.ok !== true ||
   verify.restore_verification !== "passed" ||
   verify.production_overwritten !== false ||
-  Number(verify.project_count) < 1
+  Number(verify.project_count) < 1 ||
+  verify.latest_checkpoint_present !== true ||
+  Number(verify.governed_memory_count) < 1 ||
+  Number(verify.chunk_count) < 1 ||
+  Number(verify.raw_artifact_count) < 1 ||
+  verify.raw_artifact_pointer_issues !== 0 ||
+  Number(verify.bounded_search_matches) < 1
 ) {
   throw new Error(`Backup verification failed: ${JSON.stringify(verify)}`);
 }

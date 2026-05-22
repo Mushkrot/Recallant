@@ -322,6 +322,12 @@ async function snapshotTables(client: pg.Client) {
   return tables;
 }
 
+function rowsOf(tables: Record<string, unknown[]>, table: string) {
+  return (tables[table] ?? []).filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+  );
+}
+
 async function runBackup(argv: readonly string[]) {
   const databaseUrl = process.env.RECALLANT_DATABASE_URL;
   if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup");
@@ -373,17 +379,48 @@ async function runBackupVerify(argv: readonly string[]) {
   const expectedHash = manifest.files.find((file) => file.path === "tables.json")?.sha256;
   if (actualHash !== expectedHash) throw new Error("Backup hash verification failed");
   const tables = JSON.parse(tablesJson) as Record<string, unknown[]>;
+  const checkpoints = rowsOf(tables, "checkpoints");
+  const chunks = rowsOf(tables, "chunks");
+  const agentMemories = rowsOf(tables, "agent_memories");
+  const rawArtifacts = rowsOf(tables, "raw_artifacts");
+  const searchQuery = parseFlag(argv, "--query")?.toLowerCase();
+  const boundedSearchMatches = searchQuery
+    ? chunks.filter((chunk) =>
+        String(chunk.text ?? "")
+          .toLowerCase()
+          .includes(searchQuery)
+      ).length
+    : chunks.length;
+  const rawArtifactPointerIssues = rawArtifacts.filter(
+    (artifact) =>
+      artifact.storage_backend !== "postgres_inline" && !artifact.uri && !artifact.sha256
+  ).length;
+  if (rawArtifactPointerIssues > 0) {
+    throw new Error("Backup raw artifact pointer verification failed");
+  }
+  if (searchQuery && boundedSearchMatches === 0) {
+    throw new Error("Backup bounded search verification failed");
+  }
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();
   const schema = `verify_${randomUUID().replaceAll("-", "_")}`;
   try {
     await client.query(`CREATE SCHEMA ${schema}`);
-    await client.query(`CREATE TABLE ${schema}.projects_sample (payload jsonb)`);
-    await client.query(`INSERT INTO ${schema}.projects_sample (payload) VALUES ($1)`, [
-      JSON.stringify(tables.projects ?? [])
+    await client.query(`CREATE TABLE ${schema}.backup_snapshot (payload jsonb)`);
+    await client.query(`INSERT INTO ${schema}.backup_snapshot (payload) VALUES ($1)`, [
+      JSON.stringify(tables)
     ]);
     const checks = await client.query(
-      `SELECT (SELECT jsonb_array_length(payload) FROM ${schema}.projects_sample LIMIT 1) AS project_count`
+      `
+        SELECT
+          jsonb_array_length(payload->'projects') AS project_count,
+          jsonb_array_length(payload->'checkpoints') AS checkpoint_count,
+          jsonb_array_length(payload->'chunks') AS chunk_count,
+          jsonb_array_length(payload->'agent_memories') AS governed_memory_count,
+          jsonb_array_length(payload->'raw_artifacts') AS raw_artifact_count
+        FROM ${schema}.backup_snapshot
+        LIMIT 1
+      `
     );
     process.stdout.write(
       `${JSON.stringify(
@@ -392,6 +429,14 @@ async function runBackupVerify(argv: readonly string[]) {
           restore_verification: "passed",
           temporary_schema: schema,
           project_count: checks.rows[0]?.project_count ?? 0,
+          latest_checkpoint_present: checkpoints.length > 0,
+          governed_memory_count: checks.rows[0]?.governed_memory_count ?? agentMemories.length,
+          chunk_count: checks.rows[0]?.chunk_count ?? chunks.length,
+          raw_artifact_count: checks.rows[0]?.raw_artifact_count ?? rawArtifacts.length,
+          raw_artifact_pointer_issues: rawArtifactPointerIssues,
+          bounded_search_checked: true,
+          bounded_search_query: searchQuery ?? null,
+          bounded_search_matches: boundedSearchMatches,
           schema_version: manifest.schema_version,
           production_overwritten: false
         },
