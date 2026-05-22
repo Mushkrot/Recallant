@@ -311,12 +311,64 @@ async function runContext(argv: readonly string[]) {
   }
 }
 
-async function runDoctor() {
+async function checkOllama() {
+  const url = process.env.RECALLANT_OLLAMA_URL ?? "http://localhost:11434";
+  const expectedModels = (
+    process.env.RECALLANT_EXPECTED_OLLAMA_MODELS ?? "nomic-embed-text,gpt-oss:20b"
+  )
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 500);
+  try {
+    const response = await fetch(new URL("/api/tags", url), { signal: controller.signal });
+    if (!response.ok) {
+      return {
+        provider: "ollama",
+        url,
+        reachable: false,
+        starts_service: false,
+        expected_models: expectedModels,
+        missing_models: expectedModels,
+        fallback_route: "active_agent_or_defer",
+        error: `HTTP ${response.status}`
+      };
+    }
+    const payload = (await response.json()) as { models?: Array<{ name?: string }> };
+    const available = new Set((payload.models ?? []).map((model) => model.name).filter(Boolean));
+    return {
+      provider: "ollama",
+      url,
+      reachable: true,
+      starts_service: false,
+      expected_models: expectedModels,
+      missing_models: expectedModels.filter((model) => !available.has(model)),
+      fallback_route: "active_agent_or_defer"
+    };
+  } catch (error) {
+    return {
+      provider: "ollama",
+      url,
+      reachable: false,
+      starts_service: false,
+      expected_models: expectedModels,
+      missing_models: expectedModels,
+      fallback_route: "active_agent_or_defer",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
   if (database) {
     try {
-      await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? process.cwd());
+      await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
       postgres = { configured: true, reachable: true };
     } catch {
       postgres = { configured: true, reachable: false };
@@ -329,12 +381,35 @@ async function runDoctor() {
       {
         ...describeCliBoundary(),
         postgres,
-        local_model: {
-          provider: "ollama",
-          url: process.env.RECALLANT_OLLAMA_URL ?? "http://localhost:11434",
-          starts_service: false
+        project_config: {
+          path: join(projectDir, ".recallant", "config"),
+          present: (await readOptional(join(projectDir, ".recallant", "config"))) !== null
+        },
+        local_model: await checkOllama(),
+        model_routes: {
+          local_model: { enabled: true, provider: "ollama", route_class: "local" },
+          active_agent: { enabled: true, route_class: "active_agent" },
+          subscription_worker: { enabled: false, route_class: "subscription_worker" },
+          paid_api_provider: {
+            enabled: false,
+            route_class: "paid_api_provider",
+            default_provider: "openai",
+            requires_approval: true
+          },
+          escalation_order: [
+            "local_model",
+            "active_agent",
+            "subscription_worker",
+            "paid_api_provider"
+          ]
         },
         paid_api_mode: "confirm_each",
+        policy: {
+          paid_api_requires_approval: true,
+          browser_automation_allowed: false,
+          hidden_api_routes_allowed: false,
+          starts_local_services: false
+        },
         owner_server_notes: [
           "/ai/PORTS.yaml must be checked before service start",
           "/ai/SECURITY must be consulted before public exposure"
@@ -982,7 +1057,7 @@ async function main(argv: readonly string[]) {
     await runRecallantStdioServer();
     return;
   }
-  if (command === "doctor") return runDoctor();
+  if (command === "doctor") return runDoctor(argv);
   if (command === "init") return runInit(argv);
   if (command === "discover") return runDiscover(argv);
   if (command === "import") return runImport(argv);

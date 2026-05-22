@@ -93,7 +93,16 @@ if (context.sections?.checkpoint === undefined || context.sections?.binding_rule
 }
 
 const doctor = run(["doctor", "--project-dir", projectDir]);
-if (doctor.postgres?.reachable !== true || doctor.local_model?.starts_service !== false) {
+if (
+  doctor.postgres?.reachable !== true ||
+  doctor.project_config?.present !== true ||
+  doctor.local_model?.starts_service !== false ||
+  doctor.local_model?.provider !== "ollama" ||
+  doctor.model_routes?.paid_api_provider?.requires_approval !== true ||
+  doctor.model_routes?.subscription_worker?.enabled !== false ||
+  doctor.paid_api_mode !== "confirm_each" ||
+  doctor.policy?.hidden_api_routes_allowed !== false
+) {
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
 }
 
