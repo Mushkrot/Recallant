@@ -35,6 +35,7 @@
     "phase9:smoke:archive": "node scripts/smoke-phase9-archive.mjs",
     "phase9:smoke:cleanup": "node scripts/smoke-phase9-cleanup.mjs",
     "phase9:smoke:decay": "node scripts/smoke-phase9-decay-supersedes.mjs",
+    "repo-contract:smoke": "node scripts/smoke-repo-contract.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"

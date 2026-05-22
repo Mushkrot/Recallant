@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createRecallantDbFromEnv,
   type ArchiveInput,
@@ -83,6 +85,52 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
 
 function db() {
   return createRecallantDbFromEnv();
+}
+
+async function syncProjectLog(payload: JsonObject) {
+  const projectPath = process.env.RECALLANT_PROJECT_PATH;
+  if (!projectPath) {
+    return { status: "skipped", reason: "RECALLANT_PROJECT_PATH is not configured" };
+  }
+  const projectLogPath = join(projectPath, "PROJECT_LOG.md");
+  const openQuestions = Array.isArray(payload.open_questions)
+    ? (payload.open_questions as unknown[]).map(String)
+    : [];
+  const currentSession = `## Current Session
+
+Status: ${String(payload.current_status ?? "checkpoint updated")}
+Current focus: ${String(payload.current_focus ?? "")}
+Next step: ${String(payload.next_step ?? "")}`;
+  const questions = `## Open Questions
+
+${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).join("\n") : "- None recorded."}`;
+  const fallback = `# Project Log
+
+${currentSession}
+
+${questions}
+
+## Notes
+
+- Long history belongs in Recallant memory, not this file.
+`;
+  let rendered = fallback;
+  try {
+    const existing = await readFile(projectLogPath, "utf8");
+    rendered = existing;
+    const currentPattern = /## Current Session[\s\S]*?(?=\n## |$)/;
+    rendered = currentPattern.test(rendered)
+      ? rendered.replace(currentPattern, currentSession)
+      : `${rendered.trimEnd()}\n\n${currentSession}`;
+    const questionsPattern = /## Open Questions[\s\S]*?(?=\n## |$)/;
+    rendered = questionsPattern.test(rendered)
+      ? rendered.replace(questionsPattern, questions)
+      : `${rendered.trimEnd()}\n\n${questions}`;
+  } catch {
+    return { status: "skipped", reason: "PROJECT_LOG.md is not present", path: projectLogPath };
+  }
+  await writeFile(projectLogPath, rendered);
+  return { status: "updated", path: projectLogPath };
 }
 
 export const recallantTools: readonly RecallantToolDefinition[] = [
@@ -453,7 +501,22 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           process.env.RECALLANT_PROJECT_ID,
           args.payload as JsonObject
         );
-        return { ok: true, updated_at: checkpoint?.updated_at ?? nowIso() };
+        try {
+          return {
+            ok: true,
+            updated_at: checkpoint?.updated_at ?? nowIso(),
+            repo_sync: await syncProjectLog(args.payload as JsonObject)
+          };
+        } catch (error) {
+          return {
+            ok: true,
+            updated_at: checkpoint?.updated_at ?? nowIso(),
+            repo_sync: {
+              status: "failed",
+              reason: error instanceof Error ? error.message : String(error)
+            }
+          };
+        }
       }
       return stubResponse("memory_set_checkpoint", { ok: true, updated_at: nowIso() });
     }
