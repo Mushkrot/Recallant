@@ -15,11 +15,17 @@ const replacementEventId = randomUUID();
 const oldChunkId = randomUUID();
 const duplicateChunkId = randomUUID();
 const replacementChunkId = randomUUID();
+const lowValueChunkId = randomUUID();
+const lowValueEventId = randomUUID();
 const staleMemoryId = randomUUID();
 const duplicateMemoryA = randomUUID();
 const duplicateMemoryB = randomUUID();
+const poorProvenanceMemoryId = randomUUID();
+const connectorConflictA = randomUUID();
+const connectorConflictB = randomUUID();
 const duplicateText = `Phase 9 cleanup duplicate fixture ${randomUUID()}.`;
 const duplicateMemoryTitle = `Phase 9 duplicate governed memory ${randomUUID()}`;
+const connectorTitle = `Phase 9 connector binding ${randomUUID()}`;
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
@@ -41,7 +47,8 @@ try {
       VALUES
         ($1, $4, $5, 'fixture', 'turn_user', now() - interval '400 days', $6),
         ($2, $4, $5, 'fixture', 'turn_user', now() - interval '10 days', $7),
-        ($3, $4, $5, 'fixture', 'turn_user', now(), $8)
+        ($3, $4, $5, 'fixture', 'turn_user', now(), $8),
+        ($9, $4, $5, 'fixture', 'turn_user', now() - interval '5 days', $10)
     `,
     [
       oldEventId,
@@ -51,7 +58,9 @@ try {
       sessionId,
       JSON.stringify({ text: "old stale cleanup fixture" }),
       JSON.stringify({ text: duplicateText }),
-      JSON.stringify({ text: duplicateText })
+      JSON.stringify({ text: duplicateText }),
+      lowValueEventId,
+      JSON.stringify({ text: "ok" })
     ]
   );
   await client.query(
@@ -60,7 +69,8 @@ try {
       VALUES
         ($1, $4, $5, $6, 'Phase 9 stale cleanup fixture', 0, 20, 'project', now() - interval '400 days', NULL),
         ($2, $4, $5, $7, $9, 0, 20, 'project', now() - interval '10 days', NULL),
-        ($3, $4, $5, $8, $9, 0, 20, 'project', now(), now())
+        ($3, $4, $5, $8, $9, 0, 20, 'project', now(), now()),
+        ($10, $4, $5, $11, 'ok', 0, 1, 'project', now() - interval '5 days', NULL)
     `,
     [
       oldChunkId,
@@ -71,7 +81,9 @@ try {
       oldEventId,
       duplicateEventId,
       replacementEventId,
-      duplicateText
+      duplicateText,
+      lowValueChunkId,
+      lowValueEventId
     ]
   );
   await client.query(
@@ -84,21 +96,28 @@ try {
   await client.query(
     `
       INSERT INTO agent_memories (
-        id, developer_id, project_id, scope, memory_type, title, body,
+        id, developer_id, project_id, scope, scope_kind, scope_id, memory_type, title, body,
         status, use_policy, confidence, created_by
       )
       VALUES
-        ($1, $5, $6, 'project', 'decision', 'Phase 9 stale governed memory', 'Stale governed memory fixture.', 'stale', 'evidence_only', 0.8, 'agent'),
-        ($2, $5, $6, 'project', 'decision', $4, 'Duplicate governed memory A.', 'accepted', 'recall_allowed', 0.9, 'agent'),
-        ($3, $5, $6, 'project', 'decision', $4, 'Duplicate governed memory B.', 'accepted', 'recall_allowed', 0.9, 'agent')
+        ($1, $8, $9, 'project', NULL, NULL, 'decision', 'Phase 9 stale governed memory', 'Stale governed memory fixture.', 'stale', 'evidence_only', 0.8, 'agent'),
+        ($2, $8, $9, 'project', NULL, NULL, 'decision', $4, 'Duplicate governed memory A.', 'accepted', 'recall_allowed', 0.9, 'agent'),
+        ($3, $8, $9, 'project', NULL, NULL, 'decision', $4, 'Duplicate governed memory B.', 'accepted', 'recall_allowed', 0.9, 'agent'),
+        ($5, $8, $9, 'project', NULL, NULL, 'decision', 'Phase 9 poor provenance memory', 'No source refs by fixture design.', 'accepted', 'recall_allowed', 0.9, 'user'),
+        ($6, $8, $9, 'project', 'connector_account', 'github:owner/repo', 'constraint', $10, 'Use GitHub account alpha.', 'accepted', 'recall_allowed', 0.9, 'user'),
+        ($7, $8, $9, 'project', 'connector_account', 'github:owner/repo', 'constraint', $10, 'Use GitHub account beta.', 'accepted', 'recall_allowed', 0.9, 'user')
     `,
     [
       staleMemoryId,
       duplicateMemoryA,
       duplicateMemoryB,
       duplicateMemoryTitle,
+      poorProvenanceMemoryId,
+      connectorConflictA,
+      connectorConflictB,
       developerId,
-      projectId
+      projectId,
+      connectorTitle
     ]
   );
 } finally {
@@ -126,8 +145,11 @@ if (
   analyze.summary.stale_chunks < 1 ||
   analyze.summary.duplicate_chunks < 2 ||
   analyze.summary.superseded_chunks < 1 ||
+  analyze.summary.low_value_chunks < 1 ||
   analyze.summary.stale_or_superseded_memories < 1 ||
-  analyze.summary.duplicate_memories < 2
+  analyze.summary.duplicate_memories < 2 ||
+  analyze.summary.poor_provenance_memories < 1 ||
+  analyze.summary.conflicting_connector_memories < 2
 ) {
   throw new Error(`Analyze dry-run report failed: ${JSON.stringify(analyze)}`);
 }

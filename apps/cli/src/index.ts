@@ -580,6 +580,19 @@ async function queryCleanupCandidates(argv: readonly string[]) {
       `,
       [Number.isFinite(limit) ? limit : 50]
     );
+    const lowValue = await client.query(
+      `
+        SELECT id AS chunk_id, project_id, source_event_id, left(text, 180) AS excerpt,
+               created_at, last_accessed_at, access_count, token_count_est
+        FROM chunks
+        WHERE archived_at IS NULL
+          AND access_count = 0
+          AND token_count_est <= 4
+        ORDER BY created_at ASC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
     const staleMemories = await client.query(
       `
         SELECT id AS memory_id, project_id, scope, memory_type, title, status, use_policy,
@@ -611,6 +624,45 @@ async function queryCleanupCandidates(argv: readonly string[]) {
       `,
       [Number.isFinite(limit) ? limit : 50]
     );
+    const poorProvenanceMemories = await client.query(
+      `
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.scope_kind, m.scope_id,
+               m.memory_type, m.title, m.status, m.use_policy, m.created_by, m.updated_at
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE m.status NOT IN ('rejected', 'archived', 'superseded')
+        GROUP BY m.id
+        HAVING count(r.memory_id) = 0
+        ORDER BY m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const conflictingConnectorMemories = await client.query(
+      `
+        WITH connector_groups AS (
+          SELECT scope_kind, scope_id, lower(title) AS normalized_title
+          FROM agent_memories
+          WHERE status IN ('accepted', 'needs_review', 'candidate')
+            AND scope_kind = 'connector_account'
+            AND scope_id IS NOT NULL
+          GROUP BY scope_kind, scope_id, lower(title)
+          HAVING count(DISTINCT body) > 1
+          LIMIT $1::int
+        )
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.scope_kind, m.scope_id,
+               m.memory_type, m.title, m.status, m.use_policy, m.updated_at
+        FROM agent_memories m
+        JOIN connector_groups g
+          ON g.scope_kind = m.scope_kind
+         AND g.scope_id = m.scope_id
+         AND g.normalized_title = lower(m.title)
+        WHERE m.status IN ('accepted', 'needs_review', 'candidate')
+        ORDER BY m.scope_id, lower(m.title), m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
     return {
       policy: {
         not_accessed_days: notAccessedDays,
@@ -620,8 +672,11 @@ async function queryCleanupCandidates(argv: readonly string[]) {
       stale_chunks: stale.rows,
       duplicate_chunks: duplicates.rows,
       superseded_chunks: superseded.rows,
+      low_value_chunks: lowValue.rows,
       stale_or_superseded_memories: staleMemories.rows,
-      duplicate_memories: duplicateMemories.rows
+      duplicate_memories: duplicateMemories.rows,
+      poor_provenance_memories: poorProvenanceMemories.rows,
+      conflicting_connector_memories: conflictingConnectorMemories.rows
     };
   } finally {
     await client.end();
@@ -642,8 +697,11 @@ async function runAnalyze(argv: readonly string[]) {
           stale_chunks: report.stale_chunks.length,
           duplicate_chunks: report.duplicate_chunks.length,
           superseded_chunks: report.superseded_chunks.length,
+          low_value_chunks: report.low_value_chunks.length,
           stale_or_superseded_memories: report.stale_or_superseded_memories.length,
-          duplicate_memories: report.duplicate_memories.length
+          duplicate_memories: report.duplicate_memories.length,
+          poor_provenance_memories: report.poor_provenance_memories.length,
+          conflicting_connector_memories: report.conflicting_connector_memories.length
         }
       },
       null,
