@@ -129,8 +129,27 @@ Do not treat future expansion as permission to implement everything at once. The
 
 The project is now on the target Linux server. A new session should resume from this documentation, not from chat history.
 
-Current next step: continue architecture cleanup and close the remaining implementation-shaping decisions, then move to implementation planning only after the owner explicitly says to begin implementation.
+Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
+
+Next session should start here:
+
+1. Confirm whether the owner is ready to begin implementation.
+2. Resolve the only small pre-Phase-0 question if still open: license choice. Current recommendation is `Apache-2.0` for a public platform because it is permissive and includes an explicit patent grant. `MIT` remains the simpler permissive alternative.
+3. Begin Phase 0 from `AGENT_IMPLEMENTATION_GUIDE.md`:
+   - create the repository skeleton;
+   - set up a TypeScript-first workspace/toolchain;
+   - add formatter/linter/test scaffolding and a minimal CI placeholder;
+   - create package boundaries for CLI, server, Review UI, core, DB, MCP, contracts, and adapters.
+4. Build only stubs at first:
+   - `recallant doctor`;
+   - `recallant init`;
+   - `recallant discover`;
+   - MCP server name `recallant`;
+   - MCP tool stubs for `memory_start_session`, `memory_get_context_pack`, `memory_closeout`, `memory_append_event`, `memory_heartbeat`, and `memory_forget`.
+5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
+
+Do not reopen the product name, v1 scope, OB1/MF0 synthesis, managed memory decision, natural-language management direction, owner-server security/ports constraints, or Recallant/AMP rename unless the owner explicitly requests it.
 
 After each material decision, update the relevant spec/ADR immediately so context loss does not erase the reasoning.
