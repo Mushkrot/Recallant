@@ -235,6 +235,22 @@ function readNumberSetting(value: unknown) {
   return null;
 }
 
+function readPositiveIntEnv(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function assertMaxChars(kind: string, text: string | null | undefined, maxChars: number) {
+  const length = text?.length ?? 0;
+  if (length > maxChars) {
+    throw new Error(
+      `VALIDATION_ERROR: ${kind} exceeds configured limit (${length} > ${maxChars} chars)`
+    );
+  }
+}
+
 function readObjectSetting(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -546,6 +562,11 @@ export class RecallantDb {
   }
 
   async appendTurn(input: AppendTurnInput) {
+    assertMaxChars(
+      "memory_append_turn.text",
+      input.text,
+      readPositiveIntEnv("RECALLANT_APPEND_TURN_MAX_CHARS", 200_000)
+    );
     const context = await this.contextForSession(input.session_id);
     return withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
@@ -965,6 +986,22 @@ export class RecallantDb {
   }
 
   async appendEvent(input: AppendEventInput) {
+    assertMaxChars(
+      "memory_append_event.text",
+      input.text,
+      readPositiveIntEnv("RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS", 100_000)
+    );
+    const artifactExcerptMaxChars = readPositiveIntEnv(
+      "RECALLANT_RAW_ARTIFACT_EXCERPT_MAX_CHARS",
+      16_000
+    );
+    for (const [index, artifact] of (input.raw_artifacts ?? []).entries()) {
+      assertMaxChars(
+        `memory_append_event.raw_artifacts[${index}].excerpt`,
+        artifact.excerpt,
+        artifactExcerptMaxChars
+      );
+    }
     const context = await this.contextForSession(input.session_id);
     return withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);

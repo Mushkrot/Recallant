@@ -29,6 +29,7 @@
     "phase6:smoke:graph": "node scripts/smoke-phase6-graph-context-forget.mjs",
     "review-ui:smoke": "node scripts/smoke-review-ui.mjs",
     "phase8:smoke:backup": "node scripts/smoke-phase8-backup.mjs",
+    "phase8:smoke:limits": "node scripts/smoke-phase8-size-limits.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"

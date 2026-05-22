@@ -144,6 +144,7 @@ Latest implementation checkpoints:
 - Review UI action/settings slice is implemented: `/api/review-action` uses the same DB review policy path as MCP, `/api/project-setting` writes project settings with `settings_audit_events`, and dangerous settings such as paid API mode or major route/profile changes require explicit confirmation. `scripts/smoke-review-ui.mjs` covers auth, HTML/API dashboard, review action, confirmation-gated setting rejection, and confirmed setting update.
 - Phase 7 first CLI onboarding slice is implemented: `recallant init`, `discover`, `import --dry-run`, `lint-context`, `context`, and expanded `doctor`. Init writes pointer-only `.recallant/config`, a thin `AGENTS.md` Memory section, `PROJECT_LOG.md`, central project/settings rows in Postgres, and a Codex MCP config block. Discover/import remain preview-only and do not create import events or instruction-grade memories. It is verified by `scripts/smoke-phase7-cli.mjs`.
 - Phase 8 first backup/restore-verification slice is implemented: `recallant backup` exports all current `0001_initial` Postgres tables into a local backup directory with `tables.json`, `manifest.json`, schema/version metadata, file hash, target metadata, and secret-policy marker; `recallant backup-verify --manifest ...` verifies the hash and performs a non-destructive restore check in a temporary schema, then drops it. It is verified by `scripts/smoke-phase8-backup.mjs`.
+- Phase 8 size-limit slice is implemented: `memory_append_turn` rejects text above `RECALLANT_APPEND_TURN_MAX_CHARS`, `memory_append_event` rejects text above `RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS`, and raw artifact excerpts above `RECALLANT_RAW_ARTIFACT_EXCERPT_MAX_CHARS` are rejected before session touch, event insert, raw-artifact insert, or dedup insert. It is verified by `scripts/smoke-phase8-size-limits.mjs`; `scripts/smoke-phase3-db.mjs` covers the normal append regression path.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
@@ -153,7 +154,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Continue Phase 8 hardening from the current checkpoint: input-size validation/no-write guarantees, private server defaults audit, and backup/export portability gaps that do not require owner secrets or production service changes.
+3. Continue Phase 8 hardening from the current checkpoint: private server defaults audit, Cloudflare-ready disabled-by-default config checks, and backup/export portability gaps that do not require owner secrets or production service changes.
 4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 
