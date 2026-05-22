@@ -27,6 +27,7 @@
     "phase5:smoke": "node scripts/smoke-phase5-retrieval.mjs",
     "phase6:smoke:governed": "node scripts/smoke-phase6-governed-memory.mjs",
     "phase6:smoke:graph": "node scripts/smoke-phase6-graph-context-forget.mjs",
+    "review-ui:smoke": "node scripts/smoke-review-ui.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"
   },

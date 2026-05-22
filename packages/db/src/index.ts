@@ -1262,6 +1262,72 @@ export class RecallantDb {
     return { ok: true, trace_id: input.trace_id };
   }
 
+  async getReviewDashboard() {
+    const context = await this.ensureProject();
+    const projects = await this.pool.query(
+      `
+        SELECT id AS project_id, name, primary_path, project_kind, memory_domain, updated_at
+        FROM projects
+        WHERE developer_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 50
+      `,
+      [context.developerId]
+    );
+    const inbox = await this.listAgentMemories({ view: "inbox", limit: 25 });
+    const rules = await this.listAgentMemories({ view: "rules", limit: 25 });
+    const critical = await this.pool.query(
+      `
+        SELECT
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
+          (SELECT count(*)::int FROM agent_memories WHERE (project_id = $1 OR scope = 'developer') AND status IN ('candidate', 'needs_review')) AS pending_review,
+          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals
+      `,
+      [context.projectId]
+    );
+    const costs = await this.pool.query(
+      `
+        SELECT provider, model, purpose,
+               coalesce(sum(cost_actual_usd), 0)::float AS actual_usd,
+               coalesce(sum(cost_estimate_usd), 0)::float AS estimated_usd,
+               count(*)::int AS call_count
+        FROM model_calls
+        WHERE project_id = $1
+          AND created_at >= now() - interval '30 days'
+        GROUP BY provider, model, purpose
+        ORDER BY estimated_usd DESC, call_count DESC
+        LIMIT 20
+      `,
+      [context.projectId]
+    );
+    const settings = await this.pool.query(
+      `
+        SELECT key, value, 'project_settings' AS source
+        FROM project_settings
+        WHERE project_id = $1
+        UNION ALL
+        SELECT key, value, 'system_settings' AS source
+        FROM system_settings
+        WHERE key IN ('capture_profile', 'embedding_route', 'paid_api_mode')
+        ORDER BY key, source
+      `,
+      [context.projectId]
+    );
+    return {
+      current_project_id: context.projectId,
+      projects: projects.rows,
+      critical: critical.rows[0],
+      inbox: inbox.memories,
+      rules: rules.memories,
+      costs: costs.rows,
+      settings: settings.rows,
+      chat: {
+        placeholder: "Ask Recallant about memory, context packs, cleanup, or settings.",
+        destructive_actions_require_confirmation: true
+      }
+    };
+  }
+
   private classifyAgentMemory(input: CreateAgentMemoryInput) {
     const combined = `${input.title}\n${input.body}`;
     if (

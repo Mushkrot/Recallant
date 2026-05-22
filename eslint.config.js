@@ -11,6 +11,7 @@ export default tseslint.config(
     files: ["**/*.{js,mjs}"],
     languageOptions: {
       globals: {
+        fetch: "readonly",
         process: "readonly",
         setTimeout: "readonly"
       }
