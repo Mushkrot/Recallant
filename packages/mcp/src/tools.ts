@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import {
+  createRecallantDbFromEnv,
+  type AppendEventInput,
+  type AppendTurnInput,
+  type JsonObject,
+  type StartSessionInput
+} from "@recallant/db";
 import { z } from "zod";
 
 const nullableString = z.string().nullable().optional();
@@ -48,7 +55,9 @@ export type RecallantToolDefinition = {
   title: string;
   description: string;
   inputSchema: z.ZodObject<z.ZodRawShape>;
-  handler: (args: Record<string, unknown>) => Record<string, unknown>;
+  handler: (
+    args: Record<string, unknown>
+  ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 };
 
 function nowIso() {
@@ -63,6 +72,10 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
   };
 }
 
+function db() {
+  return createRecallantDbFromEnv();
+}
+
 export const recallantTools: readonly RecallantToolDefinition[] = [
   {
     name: "memory_start_session",
@@ -75,14 +88,17 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       session_label: nullableString,
       resume_policy: z.enum(["normal", "force_new", "recover_previous"]).default("normal")
     }),
-    handler: () =>
-      stubResponse("memory_start_session", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.startSession(args as StartSessionInput);
+      return stubResponse("memory_start_session", {
         session_id: randomUUID(),
         project_id: process.env.RECALLANT_PROJECT_ID ?? randomUUID(),
         checkpoint: { payload: null, updated_at: null },
         previous_unclosed_session: null,
         recommended_next_calls: ["memory_get_context_pack"]
-      })
+      });
+    }
   },
   {
     name: "memory_heartbeat",
@@ -101,13 +117,29 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       note: nullableString,
       metadata
     }),
-    handler: (args) =>
-      stubResponse("memory_heartbeat", {
+    handler: async (args) => {
+      const database = db();
+      if (database) {
+        const heartbeat = await database.heartbeat(
+          args.session_id as string,
+          args.status as string,
+          args.note as string | null | undefined,
+          args.metadata as JsonObject | undefined
+        );
+        return {
+          ok: true,
+          session_id: heartbeat?.id ?? args.session_id,
+          last_seen_at: heartbeat?.last_seen_at ?? nowIso(),
+          last_heartbeat_at: heartbeat?.last_heartbeat_at ?? nowIso()
+        };
+      }
+      return stubResponse("memory_heartbeat", {
         ok: true,
         session_id: args.session_id,
         last_seen_at: nowIso(),
         last_heartbeat_at: nowIso()
-      })
+      });
+    }
   },
   {
     name: "memory_get_context_pack",
@@ -156,7 +188,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       occurred_at: nullableString,
       dedup_key: nullableString
     }),
-    handler: () => stubResponse("memory_append_turn", { event_id: randomUUID(), status: "created" })
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.appendTurn(args as AppendTurnInput);
+      return stubResponse("memory_append_turn", { event_id: randomUUID(), status: "created" });
+    }
   },
   {
     name: "memory_append_event",
@@ -205,14 +241,17 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       occurred_at: nullableString,
       dedup_key: nullableString
     }),
-    handler: (args) =>
-      stubResponse("memory_append_event", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.appendEvent(args as AppendEventInput);
+      return stubResponse("memory_append_event", {
         event_id: randomUUID(),
         raw_artifact_ids: Array.from({ length: (args.raw_artifacts as unknown[]).length }, () =>
           randomUUID()
         ),
         status: "created"
-      })
+      });
+    }
   },
   {
     name: "memory_search",
@@ -341,7 +380,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     title: "Get Checkpoint",
     description: "Fetch the current project checkpoint.",
     inputSchema: z.object({}),
-    handler: () => stubResponse("memory_get_checkpoint", { payload: null, updated_at: null })
+    handler: async () => {
+      const database = db();
+      if (database) return database.getCheckpoint(process.env.RECALLANT_PROJECT_ID);
+      return stubResponse("memory_get_checkpoint", { payload: null, updated_at: null });
+    }
   },
   {
     name: "memory_set_checkpoint",
@@ -356,7 +399,17 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         open_questions: z.array(z.string()).default([])
       })
     }),
-    handler: () => stubResponse("memory_set_checkpoint", { ok: true, updated_at: nowIso() })
+    handler: async (args) => {
+      const database = db();
+      if (database) {
+        const checkpoint = await database.setCheckpoint(
+          process.env.RECALLANT_PROJECT_ID,
+          args.payload as JsonObject
+        );
+        return { ok: true, updated_at: checkpoint?.updated_at ?? nowIso() };
+      }
+      return stubResponse("memory_set_checkpoint", { ok: true, updated_at: nowIso() });
+    }
   },
   {
     name: "memory_create_agent_memory",
@@ -559,8 +612,29 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         )
         .default([])
     }),
-    handler: (args) =>
-      stubResponse("memory_closeout", {
+    handler: async (args) => {
+      const database = db();
+      if (database) {
+        const checkpoint = await database.closeout(
+          args.session_id as string,
+          args.checkpoint_payload as JsonObject
+        );
+        return {
+          ok: true,
+          session_id: args.session_id,
+          checkpoint_updated_at: checkpoint?.updated_at ?? nowIso(),
+          created_memory_ids: [],
+          needs_review_ids: [],
+          spool_sync_status: "not_applicable",
+          report_required: false,
+          warnings: [],
+          project_log_update: {
+            required: true,
+            suggested_payload: args.checkpoint_payload
+          }
+        };
+      }
+      return stubResponse("memory_closeout", {
         ok: true,
         session_id: args.session_id,
         checkpoint_updated_at: nowIso(),
@@ -573,7 +647,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           required: true,
           suggested_payload: args.checkpoint_payload
         }
-      })
+      });
+    }
   }
 ];
 

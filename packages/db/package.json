@@ -9,6 +9,10 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@recallant/contracts": "file:../contracts"
+    "@recallant/contracts": "file:../contracts",
+    "pg": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }

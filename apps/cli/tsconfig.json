@@ -5,6 +5,10 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "references": [{ "path": "../../packages/adapters" }, { "path": "../../packages/core" }],
+  "references": [
+    { "path": "../../packages/adapters" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/mcp" }
+  ],
   "include": ["src/**/*.ts"]
 }

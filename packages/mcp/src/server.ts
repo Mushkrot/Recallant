@@ -21,7 +21,7 @@ export function createRecallantMcpServer() {
         content: [
           {
             type: "text",
-            text: JSON.stringify(tool.handler(args as Record<string, unknown>), null, 2)
+            text: JSON.stringify(await tool.handler(args as Record<string, unknown>), null, 2)
           }
         ]
       })

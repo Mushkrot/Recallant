@@ -12,6 +12,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@recallant/contracts": "file:../contracts",
     "@recallant/core": "file:../core",
+    "@recallant/db": "file:../db",
     "zod": "^4.4.3"
   }
 }

@@ -130,6 +130,13 @@ Do not treat future expansion as permission to implement everything at once. The
 
 The project is now on the target Linux server. A new session should resume from this documentation, not from chat history.
 
+Latest implementation checkpoints:
+
+- Phase 0 repo skeleton committed as `5fc7892`.
+- Phase 1 initial Postgres/pgvector schema migration committed as `6945c46`.
+- Phase 2 MCP skeleton stubs committed as `25a1a26`; verified by `npm run mcp:smoke`.
+- Phase 3 is in progress. The first vertical slice now routes MCP lifecycle/write tools to Postgres when `RECALLANT_DATABASE_URL` is set: `memory_start_session`, `memory_append_turn`, `memory_append_event`, `memory_heartbeat`, checkpoint set/get, and `memory_closeout`. It is verified by `scripts/smoke-phase3-db.mjs` against Docker Postgres inside the private compose network. Remaining Phase 3 work includes effective capture policy resolution, light/standard/detailed fixture behavior, configurable stale thresholds, and broader negative/error tests.
+
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
