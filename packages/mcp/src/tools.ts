@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   createRecallantDbFromEnv,
+  type CreateAgentMemoryInput,
   type AppendEventInput,
   type AppendTurnInput,
   type JsonObject,
+  type ListAgentMemoriesInput,
+  type RecallAgentMemoriesInput,
+  type ReportRecallUsageInput,
+  type ReviewAgentMemoryInput,
   type StartSessionInput
 } from "@recallant/db";
 import { z } from "zod";
@@ -468,12 +473,15 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       created_by: z.enum(["agent", "user", "system", "import"]),
       metadata
     }),
-    handler: (args) =>
-      stubResponse("memory_create_agent_memory", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.createAgentMemory(args as CreateAgentMemoryInput);
+      return stubResponse("memory_create_agent_memory", {
         memory_id: randomUUID(),
         status: args.created_by === "agent" ? "accepted" : "candidate",
         use_policy: "recall_allowed"
-      })
+      });
+    }
   },
   {
     name: "memory_review_agent_memory",
@@ -510,13 +518,16 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       note: nullableString,
       actor_kind: z.enum(["user", "agent", "system"])
     }),
-    handler: (args) =>
-      stubResponse("memory_review_agent_memory", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.reviewAgentMemory(args as ReviewAgentMemoryInput);
+      return stubResponse("memory_review_agent_memory", {
         ok: true,
         memory_id: args.memory_id,
         status: args.action === "reject" ? "rejected" : "accepted",
         use_policy: args.action === "promote_instruction" ? "instruction_grade" : "recall_allowed"
-      })
+      });
+    }
   },
   {
     name: "memory_list_agent_memories",
@@ -533,7 +544,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       use_policy: nullableString,
       limit: z.number().int().positive().max(200).default(50)
     }),
-    handler: () => stubResponse("memory_list_agent_memories", { memories: [] })
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.listAgentMemories(args as ListAgentMemoriesInput);
+      return stubResponse("memory_list_agent_memories", { memories: [] });
+    }
   },
   {
     name: "memory_get_agent_memory",
@@ -542,13 +557,16 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     inputSchema: z.object({
       memory_id: uuidString
     }),
-    handler: (args) =>
-      stubResponse("memory_get_agent_memory", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.getAgentMemory(args.memory_id as string);
+      return stubResponse("memory_get_agent_memory", {
         memory: { memory_id: args.memory_id },
         source_refs: [],
         review_actions: [],
         related_memories: []
-      })
+      });
+    }
   },
   {
     name: "memory_recall_agent_memories",
@@ -566,12 +584,15 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       top_k: z.number().int().positive().default(8),
       max_chars_total: z.number().int().positive().default(12_000)
     }),
-    handler: () =>
-      stubResponse("memory_recall_agent_memories", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.recallAgentMemories(args as RecallAgentMemoriesInput);
+      return stubResponse("memory_recall_agent_memories", {
         trace_id: randomUUID(),
         memories: [],
         truncated: false
-      })
+      });
+    }
   },
   {
     name: "memory_report_recall_usage",
@@ -584,7 +605,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       used_chunk_ids: z.array(uuidString).default([]),
       note: nullableString
     }),
-    handler: () => stubResponse("memory_report_recall_usage", { ok: true })
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.reportRecallUsage(args as ReportRecallUsageInput);
+      return stubResponse("memory_report_recall_usage", { ok: true });
+    }
   },
   {
     name: "memory_closeout",

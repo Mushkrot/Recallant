@@ -25,6 +25,7 @@
     "mcp:smoke": "node scripts/smoke-mcp.mjs",
     "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",
     "phase5:smoke": "node scripts/smoke-phase5-retrieval.mjs",
+    "phase6:smoke:governed": "node scripts/smoke-phase6-governed-memory.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"
   },

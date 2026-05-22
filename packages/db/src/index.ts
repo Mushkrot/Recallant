@@ -51,6 +51,78 @@ export type AppendEventInput = {
   dedup_key?: string | null;
 };
 
+export type AgentMemorySourceRefInput = {
+  source_kind: string;
+  source_id: string;
+  quote?: string | null;
+  metadata?: JsonObject;
+};
+
+export type CreateAgentMemoryInput = {
+  memory_type: string;
+  scope: "project" | "developer";
+  scope_kind?: string | null;
+  scope_id?: string | null;
+  audience?: unknown[];
+  title: string;
+  body: string;
+  confidence?: number | null;
+  source_refs?: AgentMemorySourceRefInput[];
+  created_by: "agent" | "user" | "system" | "import";
+  metadata?: JsonObject;
+};
+
+export type ReviewAgentMemoryInput = {
+  memory_id: string;
+  action: string;
+  superseded_by?: string | null;
+  merge_memory_ids?: string[];
+  patch?: {
+    title?: string | null;
+    body?: string | null;
+    scope?: "project" | "developer" | null;
+    scope_kind?: string | null;
+    scope_id?: string | null;
+    audience?: unknown[];
+    memory_type?: string | null;
+  };
+  note?: string | null;
+  actor_kind: "user" | "agent" | "system";
+};
+
+export type ListAgentMemoriesInput = {
+  view: string;
+  project_id?: string | null;
+  scope?: string | null;
+  scope_kind?: string | null;
+  audience_kind?: string | null;
+  memory_domain?: string | null;
+  status?: string | null;
+  use_policy?: string | null;
+  limit?: number;
+};
+
+export type RecallAgentMemoriesInput = {
+  query: string;
+  scope?: string;
+  scope_kind?: string | null;
+  audience_kind?: string | null;
+  memory_types?: string[];
+  include_candidates?: boolean;
+  include_stale?: boolean;
+  include_needs_review?: boolean;
+  top_k?: number;
+  max_chars_total?: number;
+};
+
+export type ReportRecallUsageInput = {
+  trace_id: string;
+  used_memory_ids?: string[];
+  ignored_memory_ids?: string[];
+  used_chunk_ids?: string[];
+  note?: string | null;
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -166,6 +238,18 @@ function truncationMetadata(text: string | null | undefined, captured: string | 
     captured_chars: captured.length,
     truncated: captured.length < text.length
   };
+}
+
+function hasInstructionSignal(value: string) {
+  return /\b(always|never|default|from now on|every project|all projects|instruction|rule)\b/i.test(
+    value
+  );
+}
+
+function hasHighRiskSignal(value: string) {
+  return /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
+    value
+  );
 }
 
 function canonicalJson(value: unknown): string {
@@ -654,6 +738,333 @@ export class RecallantDb {
         captured_text_chars: capturedText?.length ?? 0
       };
     });
+  }
+
+  async createAgentMemory(input: CreateAgentMemoryInput) {
+    if (input.created_by === "agent" && (input.source_refs?.length ?? 0) === 0) {
+      throw new Error("VALIDATION_ERROR: agent-created memories require source_refs");
+    }
+    const context = await this.ensureProject();
+    return withTransaction(this.pool, async (client) => {
+      const policy = this.classifyAgentMemory(input);
+      const result = await client.query<{ id: string; status: string; use_policy: string }>(
+        `
+          INSERT INTO agent_memories (
+            developer_id, project_id, scope, scope_kind, scope_id, audience,
+            memory_type, title, body, status, use_policy, confidence, created_by, metadata
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          RETURNING id, status, use_policy
+        `,
+        [
+          context.developerId,
+          input.scope === "project" ? context.projectId : null,
+          input.scope,
+          input.scope_kind ?? input.scope,
+          input.scope_id ?? (input.scope === "project" ? context.projectId : context.developerId),
+          JSON.stringify(input.audience ?? [{ kind: "all_agents", id: null }]),
+          input.memory_type,
+          input.title,
+          input.body,
+          policy.status,
+          policy.usePolicy,
+          input.confidence ?? null,
+          input.created_by,
+          JSON.stringify({ ...(input.metadata ?? {}), policy_reason: policy.reason })
+        ]
+      );
+      const memoryId = result.rows[0]?.id;
+      if (!memoryId) throw new Error("Failed to create agent memory");
+      for (const ref of input.source_refs ?? []) {
+        await client.query(
+          `
+            INSERT INTO agent_memory_source_refs (memory_id, source_kind, source_id, quote, metadata)
+            VALUES ($1, $2, $3, $4, $5)
+          `,
+          [
+            memoryId,
+            ref.source_kind,
+            ref.source_id,
+            ref.quote ?? null,
+            JSON.stringify(ref.metadata ?? {})
+          ]
+        );
+      }
+      return {
+        memory_id: memoryId,
+        status: result.rows[0]?.status,
+        use_policy: result.rows[0]?.use_policy,
+        review_reason: policy.reason
+      };
+    });
+  }
+
+  async reviewAgentMemory(input: ReviewAgentMemoryInput) {
+    return withTransaction(this.pool, async (client) => {
+      const before = await client.query("SELECT * FROM agent_memories WHERE id = $1", [
+        input.memory_id
+      ]);
+      const previous = before.rows[0];
+      if (!previous) throw new Error(`Unknown memory_id: ${input.memory_id}`);
+
+      const action = input.action === "approve" ? "accept" : input.action;
+      const updates: string[] = ["updated_at = now()"];
+      const values: unknown[] = [input.memory_id];
+      const set = (sql: string, value: unknown) => {
+        values.push(value);
+        updates.push(`${sql} = $${values.length}`);
+      };
+
+      if (action === "accept") {
+        set("status", "accepted");
+        set("use_policy", "recall_allowed");
+        set("accepted_by", input.actor_kind);
+      } else if (action === "reject") {
+        set("status", "rejected");
+        set("use_policy", "do_not_use");
+        set("rejected_by", input.actor_kind);
+      } else if (action === "archive") {
+        set("status", "archived");
+      } else if (action === "unarchive") {
+        set("status", "accepted");
+      } else if (action === "mark_stale") {
+        set("status", "stale");
+        set("use_policy", "evidence_only");
+      } else if (action === "promote_instruction") {
+        set("status", "accepted");
+        set("use_policy", "instruction_grade");
+        set("accepted_by", input.actor_kind);
+      } else if (action === "demote_instruction") {
+        set("use_policy", "recall_allowed");
+      } else if (action === "supersede") {
+        set("status", "superseded");
+        set("superseded_by", input.superseded_by ?? null);
+      } else if (action === "edit") {
+        if (input.patch?.title !== undefined) set("title", input.patch.title);
+        if (input.patch?.body !== undefined) set("body", input.patch.body);
+        if (input.patch?.scope !== undefined) set("scope", input.patch.scope);
+        if (input.patch?.scope_kind !== undefined) set("scope_kind", input.patch.scope_kind);
+        if (input.patch?.scope_id !== undefined) set("scope_id", input.patch.scope_id);
+        if (input.patch?.audience !== undefined)
+          set("audience", JSON.stringify(input.patch.audience));
+        if (input.patch?.memory_type !== undefined) set("memory_type", input.patch.memory_type);
+      } else if (action === "merge") {
+        for (const mergeId of input.merge_memory_ids ?? []) {
+          await client.query(
+            `
+              UPDATE agent_memories
+              SET status = 'superseded', superseded_by = $1, updated_at = now()
+              WHERE id = $2
+            `,
+            [input.memory_id, mergeId]
+          );
+        }
+      }
+
+      set("review_reason", input.note ?? action);
+      await client.query(`UPDATE agent_memories SET ${updates.join(", ")} WHERE id = $1`, values);
+      await client.query(
+        `
+          INSERT INTO agent_memory_review_actions (memory_id, action, actor_kind, note, metadata)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          input.memory_id,
+          action,
+          input.actor_kind,
+          input.note ?? null,
+          JSON.stringify({
+            previous,
+            patch: input.patch ?? {},
+            merge_memory_ids: input.merge_memory_ids ?? []
+          })
+        ]
+      );
+      const after = await client.query<{ status: string; use_policy: string }>(
+        "SELECT status, use_policy FROM agent_memories WHERE id = $1",
+        [input.memory_id]
+      );
+      return { ok: true, memory_id: input.memory_id, ...after.rows[0] };
+    });
+  }
+
+  async listAgentMemories(input: ListAgentMemoriesInput) {
+    const context = await this.ensureProject();
+    const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
+    const clauses = ["developer_id = $2::uuid"];
+    if (input.view !== "all") clauses.push("(project_id = $1::uuid OR scope = 'developer')");
+    if (input.view === "inbox") {
+      clauses.push(
+        "(status IN ('candidate', 'needs_review') OR metadata->>'policy_reason' LIKE '%high_risk%')"
+      );
+    } else if (input.view === "rules") {
+      clauses.push("status = 'accepted' AND use_policy = 'instruction_grade'");
+    } else if (input.view === "candidates") {
+      clauses.push("status IN ('candidate', 'needs_review')");
+    } else if (input.status) {
+      values.push(input.status);
+      clauses.push(`status = $${values.length}`);
+    }
+    if (input.use_policy) {
+      values.push(input.use_policy);
+      clauses.push(`use_policy = $${values.length}`);
+    }
+    if (input.scope) {
+      values.push(input.scope);
+      clauses.push(`scope = $${values.length}`);
+    }
+    if (input.scope_kind) {
+      values.push(input.scope_kind);
+      clauses.push(`scope_kind = $${values.length}`);
+    }
+    values.push(input.limit ?? 50);
+    const result = await this.pool.query(
+      `
+        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
+               scope_id, audience, confidence, created_by, updated_at
+        FROM agent_memories
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY updated_at DESC
+        LIMIT $${values.length}::int
+      `,
+      values
+    );
+    return { memories: result.rows };
+  }
+
+  async getAgentMemory(memoryId: string) {
+    const memory = await this.pool.query("SELECT * FROM agent_memories WHERE id = $1", [memoryId]);
+    const sourceRefs = await this.pool.query(
+      "SELECT * FROM agent_memory_source_refs WHERE memory_id = $1 ORDER BY created_at ASC",
+      [memoryId]
+    );
+    const reviewActions = await this.pool.query(
+      "SELECT * FROM agent_memory_review_actions WHERE memory_id = $1 ORDER BY created_at DESC",
+      [memoryId]
+    );
+    return {
+      memory: memory.rows[0] ?? null,
+      source_refs: sourceRefs.rows,
+      review_actions: reviewActions.rows,
+      related_memories: []
+    };
+  }
+
+  async recallAgentMemories(input: RecallAgentMemoriesInput) {
+    const context = await this.ensureProject();
+    const statuses = ["accepted"];
+    if (input.include_candidates) statuses.push("candidate");
+    if (input.include_needs_review) statuses.push("needs_review");
+    if (input.include_stale) statuses.push("stale");
+    const values: unknown[] = [context.developerId, context.projectId, input.query, statuses];
+    const clauses = [
+      "developer_id = $1::uuid",
+      "(project_id = $2::uuid OR scope = 'developer')",
+      "status = ANY($4::text[])",
+      "use_policy <> 'do_not_use'",
+      "(title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%' OR memory_type ILIKE '%' || $3 || '%')"
+    ];
+    if (!input.include_candidates) clauses.push("status <> 'candidate'");
+    if (!input.include_needs_review) clauses.push("status <> 'needs_review'");
+    if (!input.include_stale) clauses.push("status <> 'stale'");
+    if (input.memory_types && input.memory_types.length > 0) {
+      values.push(input.memory_types);
+      clauses.push(`memory_type = ANY($${values.length}::text[])`);
+    }
+    if (input.scope_kind) {
+      values.push(input.scope_kind);
+      clauses.push(`scope_kind = $${values.length}`);
+    }
+    const result = await this.pool.query(
+      `
+        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
+               scope_id, audience, confidence, updated_at
+        FROM agent_memories
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY
+          CASE use_policy WHEN 'instruction_grade' THEN 0 WHEN 'recall_allowed' THEN 1 ELSE 2 END,
+          updated_at DESC
+        LIMIT $${values.length + 1}::int
+      `,
+      [...values, input.top_k ?? 8]
+    );
+    let usedChars = 0;
+    const maxChars = input.max_chars_total ?? 12_000;
+    const memories = [];
+    for (const row of result.rows) {
+      if (usedChars >= maxChars) break;
+      const body = String(row.body ?? "");
+      const remaining = maxChars - usedChars;
+      memories.push({ ...row, body: body.slice(0, remaining) });
+      usedChars += Math.min(body.length, remaining);
+    }
+    const trace = await this.pool.query<{ id: string }>(
+      `
+        INSERT INTO recall_traces (
+          developer_id, project_id, tool_name, query, returned_memory_ids, metadata
+        )
+        VALUES ($1, $2, 'memory_recall_agent_memories', $3, $4, $5)
+        RETURNING id
+      `,
+      [
+        context.developerId,
+        context.projectId,
+        input.query,
+        JSON.stringify(memories.map((memory) => memory.memory_id)),
+        JSON.stringify({ truncated: result.rows.length > memories.length })
+      ]
+    );
+    return {
+      trace_id: trace.rows[0]?.id,
+      memories,
+      truncated: result.rows.length > memories.length
+    };
+  }
+
+  async reportRecallUsage(input: ReportRecallUsageInput) {
+    await this.pool.query(
+      `
+        UPDATE recall_traces
+        SET used_memory_ids = $2, ignored_memory_ids = $3, used_chunk_ids = $4,
+            metadata = coalesce(metadata, '{}'::jsonb) || $5::jsonb
+        WHERE id = $1
+      `,
+      [
+        input.trace_id,
+        JSON.stringify(input.used_memory_ids ?? []),
+        JSON.stringify(input.ignored_memory_ids ?? []),
+        JSON.stringify(input.used_chunk_ids ?? []),
+        JSON.stringify({ usage_note: input.note ?? null })
+      ]
+    );
+    return { ok: true, trace_id: input.trace_id };
+  }
+
+  private classifyAgentMemory(input: CreateAgentMemoryInput) {
+    const combined = `${input.title}\n${input.body}`;
+    if (
+      input.created_by === "agent" &&
+      (hasHighRiskSignal(combined) || (input.confidence ?? 1) < 0.5)
+    ) {
+      return {
+        status: "needs_review",
+        usePolicy: "evidence_only",
+        reason: "high_risk_or_low_confidence"
+      };
+    }
+    if (
+      input.created_by === "agent" &&
+      (hasInstructionSignal(combined) ||
+        input.scope === "developer" ||
+        input.memory_type === "procedure")
+    ) {
+      return {
+        status: "candidate",
+        usePolicy: "recall_allowed",
+        reason: "candidate_rule_not_binding"
+      };
+    }
+    return { status: "accepted", usePolicy: "recall_allowed", reason: "ordinary_memory" };
   }
 
   private buildSearchFilter(input: {

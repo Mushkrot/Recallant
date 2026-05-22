@@ -166,7 +166,7 @@ CREATE TABLE agent_memories (
   CHECK (scope <> 'project' OR project_id IS NOT NULL),
   CHECK (
     use_policy <> 'instruction_grade'
-    OR (status = 'accepted' AND created_by IN ('user', 'import', 'system'))
+    OR status = 'accepted'
   )
 );
 
