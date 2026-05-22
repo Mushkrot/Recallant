@@ -1,0 +1,148 @@
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
+
+const databaseUrl =
+  process.env.RECALLANT_DATABASE_URL ??
+  "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+
+const developerId = randomUUID();
+const projectId = randomUUID();
+const sessionId = randomUUID();
+const oldEventId = randomUUID();
+const duplicateEventId = randomUUID();
+const replacementEventId = randomUUID();
+const oldChunkId = randomUUID();
+const duplicateChunkId = randomUUID();
+const replacementChunkId = randomUUID();
+const duplicateText = `Phase 9 cleanup duplicate fixture ${randomUUID()}.`;
+
+const client = new pg.Client({ connectionString: databaseUrl });
+await client.connect();
+try {
+  await client.query("INSERT INTO developers (id, name) VALUES ($1, 'phase9 cleanup developer')", [
+    developerId
+  ]);
+  await client.query(
+    "INSERT INTO projects (id, developer_id, primary_path, name) VALUES ($1, $2, $3, 'phase9-cleanup')",
+    [projectId, developerId, `/tmp/recallant-phase9-cleanup-${projectId}`]
+  );
+  await client.query(
+    "INSERT INTO sessions (id, project_id, client_kind, client_version, status) VALUES ($1, $2, 'codex', 'smoke', 'active')",
+    [sessionId, projectId]
+  );
+  await client.query(
+    `
+      INSERT INTO events (id, project_id, session_id, ingest_source, kind, occurred_at, payload)
+      VALUES
+        ($1, $4, $5, 'fixture', 'turn_user', now() - interval '400 days', $6),
+        ($2, $4, $5, 'fixture', 'turn_user', now() - interval '10 days', $7),
+        ($3, $4, $5, 'fixture', 'turn_user', now(), $8)
+    `,
+    [
+      oldEventId,
+      duplicateEventId,
+      replacementEventId,
+      projectId,
+      sessionId,
+      JSON.stringify({ text: "old stale cleanup fixture" }),
+      JSON.stringify({ text: duplicateText }),
+      JSON.stringify({ text: duplicateText })
+    ]
+  );
+  await client.query(
+    `
+      INSERT INTO chunks (id, project_id, developer_id, source_event_id, text, chunk_index, token_count_est, scope, created_at, last_accessed_at)
+      VALUES
+        ($1, $4, $5, $6, 'Phase 9 stale cleanup fixture', 0, 20, 'project', now() - interval '400 days', NULL),
+        ($2, $4, $5, $7, $9, 0, 20, 'project', now() - interval '10 days', NULL),
+        ($3, $4, $5, $8, $9, 0, 20, 'project', now(), now())
+    `,
+    [
+      oldChunkId,
+      duplicateChunkId,
+      replacementChunkId,
+      projectId,
+      developerId,
+      oldEventId,
+      duplicateEventId,
+      replacementEventId,
+      duplicateText
+    ]
+  );
+  await client.query(
+    `
+      INSERT INTO edges (project_id, src_kind, src_id, dst_kind, dst_id, relation_type, weight, metadata)
+      VALUES ($1, 'chunk', $2, 'chunk', $3, 'supersedes', 1, $4)
+    `,
+    [projectId, replacementChunkId, duplicateChunkId, JSON.stringify({ smoke: true })]
+  );
+} finally {
+  await client.end();
+}
+
+function run(args) {
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: "/work",
+    env: { ...process.env, RECALLANT_DATABASE_URL: databaseUrl },
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+const analyze = run(["analyze", "--dry-run", "--older-than", "180d", "--not-accessed", "90d"]);
+if (
+  analyze.ok !== true ||
+  analyze.writes_database !== false ||
+  analyze.summary.stale_chunks < 1 ||
+  analyze.summary.duplicate_chunks < 2 ||
+  analyze.summary.superseded_chunks < 1
+) {
+  throw new Error(`Analyze dry-run report failed: ${JSON.stringify(analyze)}`);
+}
+
+const cleanup = run([
+  "cleanup",
+  "--archive",
+  "--not-accessed",
+  "90d",
+  "--older-than",
+  "180d",
+  "--dry-run"
+]);
+if (
+  cleanup.ok !== true ||
+  cleanup.dry_run !== true ||
+  cleanup.writes_database !== false ||
+  cleanup.candidates.length < 3 ||
+  !cleanup.warnings.some((warning) => warning.includes("Dry run only"))
+) {
+  throw new Error(`Cleanup dry-run report failed: ${JSON.stringify(cleanup)}`);
+}
+
+const verify = new pg.Client({ connectionString: databaseUrl });
+await verify.connect();
+try {
+  const checks = await verify.query(
+    `
+      SELECT
+        (SELECT count(*)::int FROM events WHERE id = ANY($1::uuid[])) AS event_count,
+        (SELECT count(*)::int FROM chunks WHERE id = ANY($2::uuid[]) AND archived_at IS NULL) AS unarchived_chunk_count
+    `,
+    [
+      [oldEventId, duplicateEventId, replacementEventId],
+      [oldChunkId, duplicateChunkId, replacementChunkId]
+    ]
+  );
+  const row = checks.rows[0];
+  if (row.event_count !== 3 || row.unarchived_chunk_count !== 3) {
+    throw new Error(`Cleanup dry-run changed data: ${JSON.stringify(row)}`);
+  }
+} finally {
+  await verify.end();
+}
+
+process.stdout.write("Phase 9 cleanup dry-run smoke passed\n");

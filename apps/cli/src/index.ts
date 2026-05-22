@@ -513,6 +513,140 @@ async function runRestorePlan(argv: readonly string[]) {
   );
 }
 
+function parseDaysFlag(argv: readonly string[], name: string, fallback: number) {
+  const raw = parseFlag(argv, name);
+  if (!raw) return fallback;
+  const normalized = raw.endsWith("d") ? raw.slice(0, -1) : raw;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function queryCleanupCandidates(argv: readonly string[]) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for cleanup analysis");
+  const notAccessedDays = parseDaysFlag(argv, "--not-accessed", 90);
+  const olderThanDays = parseDaysFlag(argv, "--older-than", 180);
+  const limit = Number.parseInt(parseFlag(argv, "--limit") ?? "50", 10);
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const stale = await client.query(
+      `
+        SELECT id AS chunk_id, project_id, source_event_id, left(text, 180) AS excerpt,
+               created_at, last_accessed_at, access_count
+        FROM chunks
+        WHERE archived_at IS NULL
+          AND (
+            created_at < now() - ($1::int * interval '1 day')
+            OR (last_accessed_at IS NULL AND created_at < now() - ($2::int * interval '1 day'))
+            OR last_accessed_at < now() - ($2::int * interval '1 day')
+          )
+        ORDER BY created_at ASC
+        LIMIT $3::int
+      `,
+      [olderThanDays, notAccessedDays, Number.isFinite(limit) ? limit : 50]
+    );
+    const duplicates = await client.query(
+      `
+        WITH duplicate_text AS (
+          SELECT text
+          FROM chunks
+          WHERE archived_at IS NULL
+          GROUP BY text
+          HAVING count(*) > 1
+          LIMIT $1::int
+        )
+        SELECT c.id AS chunk_id, c.project_id, c.source_event_id, left(c.text, 180) AS excerpt,
+               c.created_at, c.last_accessed_at, c.access_count
+        FROM chunks c
+        JOIN duplicate_text d ON d.text = c.text
+        WHERE c.archived_at IS NULL
+        ORDER BY c.text, c.created_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const superseded = await client.query(
+      `
+        SELECT c.id AS chunk_id, c.project_id, c.source_event_id, left(c.text, 180) AS excerpt,
+               e.src_id AS superseded_by, c.created_at, c.last_accessed_at, c.access_count
+        FROM edges e
+        JOIN chunks c ON c.id::text = e.dst_id
+        WHERE e.relation_type = 'supersedes'
+          AND e.dst_kind = 'chunk'
+          AND c.archived_at IS NULL
+        ORDER BY e.created_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    return {
+      policy: {
+        not_accessed_days: notAccessedDays,
+        older_than_days: olderThanDays,
+        limit: Number.isFinite(limit) ? limit : 50
+      },
+      stale_chunks: stale.rows,
+      duplicate_chunks: duplicates.rows,
+      superseded_chunks: superseded.rows
+    };
+  } finally {
+    await client.end();
+  }
+}
+
+async function runAnalyze(argv: readonly string[]) {
+  const report = await queryCleanupCandidates(argv);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "analyze",
+        dry_run: argv.includes("--dry-run"),
+        writes_database: false,
+        report,
+        summary: {
+          stale_chunks: report.stale_chunks.length,
+          duplicate_chunks: report.duplicate_chunks.length,
+          superseded_chunks: report.superseded_chunks.length
+        }
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runCleanup(argv: readonly string[]) {
+  if (!argv.includes("--dry-run")) {
+    throw new Error("POLICY_BLOCKED: cleanup currently requires --dry-run");
+  }
+  const report = await queryCleanupCandidates(argv);
+  const archiveRequested = argv.includes("--archive");
+  const candidates = [
+    ...report.stale_chunks.map((candidate) => ({ ...candidate, reason: "stale_or_not_accessed" })),
+    ...report.duplicate_chunks.map((candidate) => ({ ...candidate, reason: "duplicate_text" })),
+    ...report.superseded_chunks.map((candidate) => ({ ...candidate, reason: "superseded" }))
+  ];
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "cleanup",
+        dry_run: true,
+        writes_database: false,
+        archive_requested: archiveRequested,
+        candidates,
+        warnings: [
+          "Dry run only. No chunks, embeddings, L0 events, raw artifacts, or governed memories were changed."
+        ]
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
@@ -529,9 +663,11 @@ async function main(argv: readonly string[]) {
   if (command === "backup") return runBackup(argv);
   if (command === "backup-verify") return runBackupVerify(argv);
   if (command === "restore-plan") return runRestorePlan(argv);
+  if (command === "analyze") return runAnalyze(argv);
+  if (command === "cleanup") return runCleanup(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan>\n"
+    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup>\n"
   );
   process.exitCode = 1;
 }
