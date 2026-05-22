@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: recallant_agent_work
+      POSTGRES_USER: recallant
+      POSTGRES_PASSWORD: recallant_dev_password
+    volumes:
+      - recallant-postgres-data:/var/lib/postgresql/data
+      - ./packages/db/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recallant -d recallant_agent_work"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  recallant-postgres-data:

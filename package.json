@@ -15,6 +15,10 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "db:down": "make db-down",
+    "db:migrate": "make db-migrate",
+    "db:reset": "make db-reset",
+    "db:up": "make db-up",
     "format": "prettier --write \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "lint": "eslint .",
