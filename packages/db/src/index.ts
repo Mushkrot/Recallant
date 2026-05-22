@@ -156,6 +156,17 @@ export type ForgetInput = {
   };
 };
 
+export type ProjectSettingInput = {
+  key: string;
+  value: unknown;
+  reason?: string | null;
+  actor_kind?: "user" | "agent" | "system";
+  actor_id?: string | null;
+  confirmation?: {
+    confirmed?: boolean;
+  };
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -283,6 +294,22 @@ function hasHighRiskSignal(value: string) {
   return /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
     value
   );
+}
+
+function isDangerousSetting(key: string, value: unknown) {
+  if (
+    [
+      "paid_api_mode",
+      "subscription_worker",
+      "model_router_profile",
+      "embedding_route",
+      "capture_profile",
+      "context_budget_profile"
+    ].includes(key)
+  ) {
+    return true;
+  }
+  return JSON.stringify(value).includes("auto_with_caps");
 }
 
 function canonicalJson(value: unknown): string {
@@ -1326,6 +1353,66 @@ export class RecallantDb {
         destructive_actions_require_confirmation: true
       }
     };
+  }
+
+  async setProjectSetting(input: ProjectSettingInput) {
+    const context = await this.ensureProject();
+    if (isDangerousSetting(input.key, input.value) && input.confirmation?.confirmed !== true) {
+      return {
+        ok: false,
+        status: "confirmation_required",
+        key: input.key,
+        dangerous: true
+      };
+    }
+    return withTransaction(this.pool, async (client) => {
+      const previous = await client.query<{ value: unknown }>(
+        "SELECT value FROM project_settings WHERE project_id = $1 AND key = $2",
+        [context.projectId, input.key]
+      );
+      await client.query(
+        `
+          INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (project_id, key) DO UPDATE
+          SET value = EXCLUDED.value,
+              reason = EXCLUDED.reason,
+              updated_by = EXCLUDED.updated_by,
+              updated_at = now()
+        `,
+        [
+          context.projectId,
+          input.key,
+          JSON.stringify(input.value),
+          input.reason ?? null,
+          input.actor_id ?? input.actor_kind ?? "user"
+        ]
+      );
+      await client.query(
+        `
+          INSERT INTO settings_audit_events (
+            scope_kind, scope_id, key, old_value, new_value, actor_kind, actor_id, reason
+          )
+          VALUES ('project', $1, $2, $3, $4, $5, $6, $7)
+        `,
+        [
+          context.projectId,
+          input.key,
+          previous.rows[0]?.value === undefined ? null : JSON.stringify(previous.rows[0]?.value),
+          JSON.stringify(input.value),
+          input.actor_kind ?? "user",
+          input.actor_id ?? null,
+          input.reason ?? null
+        ]
+      );
+      return {
+        ok: true,
+        status: "updated",
+        project_id: context.projectId,
+        key: input.key,
+        source: "project_settings"
+      };
+    });
   }
 
   private classifyAgentMemory(input: CreateAgentMemoryInput) {

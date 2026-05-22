@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { getRecallantCoreInfo } from "@recallant/core";
-import { createRecallantDbFromEnv, recallantDatabasePackage } from "@recallant/db";
+import {
+  createRecallantDbFromEnv,
+  recallantDatabasePackage,
+  type ProjectSettingInput,
+  type ReviewAgentMemoryInput
+} from "@recallant/db";
 import { recallantMcpServerName } from "@recallant/mcp";
 
 export function describeServerBoundary() {
@@ -38,6 +43,13 @@ function write(
     "cache-control": "no-store"
   });
   response.end(body);
+}
+
+async function readJson(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string) {
@@ -174,6 +186,27 @@ export function createRecallantHttpServer() {
     }
     if (request.url === "/api/review-dashboard") {
       write(response, 200, JSON.stringify(await database.getReviewDashboard()), "application/json");
+      return;
+    }
+    if (request.method === "POST" && request.url === "/api/review-action") {
+      const body = (await readJson(request)) as ReviewAgentMemoryInput;
+      write(
+        response,
+        200,
+        JSON.stringify(
+          await database.reviewAgentMemory({ ...body, actor_kind: body.actor_kind ?? "user" })
+        ),
+        "application/json"
+      );
+      return;
+    }
+    if (request.method === "POST" && request.url === "/api/project-setting") {
+      const body = (await readJson(request)) as ProjectSettingInput;
+      const result = await database.setProjectSetting({
+        ...body,
+        actor_kind: body.actor_kind ?? "user"
+      });
+      write(response, result.ok ? 200 : 409, JSON.stringify(result), "application/json");
       return;
     }
     write(response, 404, "Not found", "text/plain");

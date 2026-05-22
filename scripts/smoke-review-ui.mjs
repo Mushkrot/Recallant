@@ -97,6 +97,64 @@ try {
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
   }
+
+  const accepted = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      memory_id: candidate.memory_id,
+      action: "accept",
+      actor_kind: "user",
+      note: "review ui action smoke"
+    })
+  });
+  const acceptedJson = await accepted.json();
+  if (accepted.status !== 200 || acceptedJson.status !== "accepted") {
+    throw new Error(`Review action API smoke failed: ${JSON.stringify(acceptedJson)}`);
+  }
+
+  const blockedSetting = await fetch(`${baseUrl}/api/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      key: "paid_api_mode",
+      value: "auto_with_caps",
+      reason: "review ui smoke"
+    })
+  });
+  const blockedSettingJson = await blockedSetting.json();
+  if (blockedSetting.status !== 409 || blockedSettingJson.status !== "confirmation_required") {
+    throw new Error(`Dangerous setting was not confirmation-gated: ${JSON.stringify(blockedSettingJson)}`);
+  }
+
+  const updatedSetting = await fetch(`${baseUrl}/api/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      key: "capture_profile",
+      value: "detailed",
+      reason: "review ui smoke confirmed",
+      confirmation: { confirmed: true }
+    })
+  });
+  const updatedSettingJson = await updatedSetting.json();
+  if (updatedSetting.status !== 200 || updatedSettingJson.status !== "updated") {
+    throw new Error(`Confirmed setting update failed: ${JSON.stringify(updatedSettingJson)}`);
+  }
+
+  const audit = await db.getReviewDashboard();
+  if (!audit.settings.some((setting) => setting.key === "capture_profile" && setting.source === "project_settings")) {
+    throw new Error(`Updated setting is missing from dashboard: ${JSON.stringify(audit.settings)}`);
+  }
 } finally {
   server.close();
   await db.close();
