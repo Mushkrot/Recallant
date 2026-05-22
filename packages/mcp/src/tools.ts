@@ -260,6 +260,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     inputSchema: z.object({
       query: z.string().min(1),
       mode: z.enum(["hybrid", "vector_only", "lexical_only"]).default("hybrid"),
+      session_id: uuidString.nullable().optional(),
       scope: scope.default("project"),
       scope_kind: nullableString,
       audience: nullableString,
@@ -268,7 +269,19 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       graph_expand: z.boolean().default(false),
       graph_budget_nodes: z.number().int().nonnegative().default(8)
     }),
-    handler: () => stubResponse("memory_search", { hits: [], truncated: false })
+    handler: async (args) => {
+      const database = db();
+      if (database) {
+        return database.search({
+          query: args.query as string,
+          mode: args.mode as string | undefined,
+          top_k: args.top_k as number | undefined,
+          max_chars_total: args.max_chars_total as number | undefined,
+          session_id: args.session_id as string | null | undefined
+        });
+      }
+      return stubResponse("memory_search", { hits: [], truncated: false });
+    }
   },
   {
     name: "memory_fetch_chunk",

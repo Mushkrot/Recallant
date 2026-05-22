@@ -23,6 +23,7 @@
     "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "lint": "eslint .",
     "mcp:smoke": "node scripts/smoke-mcp.mjs",
+    "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"
   },

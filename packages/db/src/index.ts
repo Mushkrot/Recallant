@@ -65,6 +65,15 @@ type CapturePolicy = {
   workflowTextMaxChars: number;
 };
 
+type EmbeddingRoute = {
+  routeClass: "local_model" | "paid_api_provider";
+  provider: string;
+  model: string;
+  dims: number;
+  source: string;
+  routingReason: string;
+};
+
 const capturePolicies: Record<CaptureProfile, Omit<CapturePolicy, "profile" | "source">> = {
   light: {
     turnTextMaxChars: 1_000,
@@ -108,6 +117,29 @@ function readNumberSetting(value: unknown) {
     if (typeof minutes === "number" && Number.isFinite(minutes)) return minutes;
   }
   return null;
+}
+
+function readObjectSetting(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function vectorLiteral(values: readonly number[]) {
+  return `[${values.map((value) => value.toFixed(6)).join(",")}]`;
+}
+
+function deterministicEmbedding(text: string, dims: number) {
+  const values = Array.from({ length: dims }, () => 0);
+  const tokens = text.toLowerCase().match(/[a-z0-9_]+/g) ?? [text.toLowerCase()];
+  for (const token of tokens) {
+    const hash = createHash("sha256").update(token).digest();
+    const index = hash.readUInt32BE(0) % dims;
+    const sign = hash.readUInt32BE(4) % 2 === 0 ? 1 : -1;
+    values[index] = (values[index] ?? 0) + sign;
+  }
+  const norm = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0)) || 1;
+  return values.map((value) => value / norm);
 }
 
 function capText(text: string | null | undefined, maxChars: number) {
@@ -211,6 +243,7 @@ export class RecallantDb {
         `,
         [projectId, developerId, projectName, primaryPath]
       );
+      await this.ensureDefaultModelSettings(client);
 
       return { developerId, projectId };
     });
@@ -347,14 +380,128 @@ export class RecallantDb {
         eventId: event.id,
         text: capturedText
       });
+      const embeddingResult = await this.embedChunks(client, {
+        developerId: context.developerId,
+        projectId: context.projectId,
+        sessionId: input.session_id ?? null,
+        chunkIds,
+        texts: chunkText(capturedText)
+      });
       return {
         event_id: event.id,
         chunk_ids: chunkIds,
         status: "created",
         capture_profile: policy.profile,
-        captured_text_chars: capturedText.length
+        captured_text_chars: capturedText.length,
+        embedding: embeddingResult
       };
     });
+  }
+
+  async search(input: {
+    query: string;
+    mode?: string;
+    top_k?: number;
+    max_chars_total?: number;
+    session_id?: string | null;
+  }) {
+    const context = await this.ensureProject();
+    const route = await this.resolveEmbeddingRoute(
+      this.pool,
+      context.projectId,
+      context.developerId
+    );
+    const mode = input.mode ?? "hybrid";
+    let rows: Array<{
+      id: string;
+      text: string;
+      source_event_id: string;
+      score: number;
+      path: string;
+    }> = [];
+
+    if (mode !== "lexical_only" && route.provider === "deterministic") {
+      const queryVector = deterministicEmbedding(input.query, route.dims);
+      await this.recordModelCall(this.pool, {
+        developerId: context.developerId,
+        projectId: context.projectId,
+        sessionId: input.session_id ?? null,
+        route,
+        purpose: "query_embedding",
+        status: "success",
+        metadata: { text_count: 1 }
+      });
+      const vectorRows = await this.pool.query<{
+        id: string;
+        text: string;
+        source_event_id: string;
+        distance: number;
+      }>(
+        `
+          SELECT c.id, c.text, c.source_event_id, e.vector <=> $1::vector AS distance
+          FROM chunks c
+          JOIN embeddings e ON e.chunk_id = c.id
+          WHERE c.project_id = $2 AND c.archived_at IS NULL
+          ORDER BY e.vector <=> $1::vector
+          LIMIT $3
+        `,
+        [vectorLiteral(queryVector), context.projectId, input.top_k ?? 8]
+      );
+      rows = vectorRows.rows.map((row) => ({
+        id: row.id,
+        text: row.text,
+        source_event_id: row.source_event_id,
+        score: 1 - Number(row.distance),
+        path: "vector"
+      }));
+    } else {
+      const lexicalRows = await this.pool.query<{
+        id: string;
+        text: string;
+        source_event_id: string;
+        rank: number;
+      }>(
+        `
+          SELECT id, text, source_event_id, ts_rank(tsv, plainto_tsquery('simple', $1)) AS rank
+          FROM chunks
+          WHERE project_id = $2
+            AND archived_at IS NULL
+            AND tsv @@ plainto_tsquery('simple', $1)
+          ORDER BY rank DESC, created_at DESC
+          LIMIT $3
+        `,
+        [input.query, context.projectId, input.top_k ?? 8]
+      );
+      rows = lexicalRows.rows.map((row) => ({
+        id: row.id,
+        text: row.text,
+        source_event_id: row.source_event_id,
+        score: Number(row.rank),
+        path: "lexical"
+      }));
+    }
+
+    let usedChars = 0;
+    const maxChars = input.max_chars_total ?? 12_000;
+    const hits = [];
+    for (const row of rows) {
+      if (usedChars >= maxChars) break;
+      const remaining = maxChars - usedChars;
+      const excerpt = row.text.slice(0, remaining);
+      usedChars += excerpt.length;
+      hits.push({
+        chunk_id: row.id,
+        source_event_id: row.source_event_id,
+        score: row.score,
+        path: row.path,
+        excerpt
+      });
+    }
+    return {
+      hits,
+      truncated: rows.length > hits.length,
+      route: { provider: route.provider, model: route.model, dims: route.dims }
+    };
   }
 
   async appendEvent(input: AppendEventInput) {
@@ -630,6 +777,292 @@ export class RecallantDb {
       if (id) ids.push(id);
     }
     return ids;
+  }
+
+  private async ensureDefaultModelSettings(client: PoolClient) {
+    await client.query(
+      `
+        INSERT INTO system_settings (key, value, updated_by)
+        VALUES
+          ('embedding_route', $1, 'system'),
+          ('embedding_fallback_candidates', $2, 'system'),
+          ('paid_api_mode', $3, 'system')
+        ON CONFLICT (key) DO NOTHING
+      `,
+      [
+        JSON.stringify({
+          route_class: "local_model",
+          provider: "ollama",
+          model: "nomic-embed-text",
+          dims: 768
+        }),
+        JSON.stringify([
+          {
+            route_class: "paid_api_provider",
+            provider: "openai",
+            model: "text-embedding-3-small",
+            dims: 1536
+          },
+          {
+            route_class: "paid_api_provider",
+            provider: "gemini",
+            model: "gemini-embedding-001"
+          },
+          {
+            route_class: "paid_api_provider",
+            provider: "gemini",
+            model: "gemini-embedding-2"
+          }
+        ]),
+        JSON.stringify("confirm_each")
+      ]
+    );
+  }
+
+  private async resolveEmbeddingRoute(
+    client: Pick<Pool | PoolClient, "query">,
+    projectId: string,
+    developerId: string
+  ): Promise<EmbeddingRoute> {
+    const key = "embedding_route";
+    const projectSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = $2",
+      [projectId, key]
+    );
+    const projectRoute = this.readEmbeddingRoute(projectSetting.rows[0]?.value, "project_settings");
+    if (projectRoute) return projectRoute;
+
+    const developerSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM developer_settings WHERE developer_id = $1 AND key = $2",
+      [developerId, key]
+    );
+    const developerRoute = this.readEmbeddingRoute(
+      developerSetting.rows[0]?.value,
+      "developer_settings"
+    );
+    if (developerRoute) return developerRoute;
+
+    const systemSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM system_settings WHERE key = $1",
+      [key]
+    );
+    const systemRoute = this.readEmbeddingRoute(systemSetting.rows[0]?.value, "system_settings");
+    if (systemRoute) return systemRoute;
+
+    return {
+      routeClass: "local_model",
+      provider: "ollama",
+      model: "nomic-embed-text",
+      dims: 768,
+      source: "built_in_default",
+      routingReason: "default_local_embedding"
+    };
+  }
+
+  private readEmbeddingRoute(value: unknown, source: string): EmbeddingRoute | null {
+    const object = readObjectSetting(value);
+    if (!object) return null;
+    const provider = typeof object.provider === "string" ? object.provider : null;
+    const model = typeof object.model === "string" ? object.model : null;
+    const dims =
+      typeof object.dims === "number" && Number.isInteger(object.dims) ? object.dims : 768;
+    const routeClass =
+      object.route_class === "paid_api_provider" ? "paid_api_provider" : "local_model";
+    if (!provider || !model) return null;
+    return {
+      routeClass,
+      provider,
+      model,
+      dims,
+      source,
+      routingReason: source === "built_in_default" ? "default_local_embedding" : "settings_override"
+    };
+  }
+
+  private async embedChunks(
+    client: PoolClient,
+    input: {
+      developerId: string;
+      projectId: string;
+      sessionId: string | null;
+      chunkIds: string[];
+      texts: string[];
+    }
+  ) {
+    if (input.chunkIds.length === 0) return { status: "skipped", reason: "no_chunks" };
+    const route = await this.resolveEmbeddingRoute(client, input.projectId, input.developerId);
+    const existingModels = await client.query<{ embed_model: string; embed_status: string }>(
+      `
+        SELECT DISTINCT embed_model, embed_status
+        FROM chunks
+        WHERE project_id = $1 AND embed_model IS NOT NULL
+      `,
+      [input.projectId]
+    );
+    const incompatibleModel = existingModels.rows.find(
+      (row) => row.embed_model && row.embed_model !== route.model
+    );
+    if (incompatibleModel) {
+      throw new Error(
+        `Embedding model switch from ${incompatibleModel.embed_model} to ${route.model} requires explicit reindex`
+      );
+    }
+
+    if (route.routeClass === "paid_api_provider") {
+      const approval = await this.createPaidApiApproval(client, {
+        developerId: input.developerId,
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        route,
+        purpose: "chunk_embedding"
+      });
+      await this.recordModelCall(client, {
+        developerId: input.developerId,
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        route,
+        purpose: "chunk_embedding",
+        status: "cancelled",
+        confirmationStatus: "required_pending",
+        approvalRequestId: approval.id,
+        metadata: { text_count: input.texts.length, blocked_before_provider_call: true }
+      });
+      await client.query("UPDATE chunks SET embed_status = 'pending' WHERE id = ANY($1::uuid[])", [
+        input.chunkIds
+      ]);
+      return {
+        status: "pending_approval",
+        provider: route.provider,
+        model: route.model,
+        approval_request_id: approval.id
+      };
+    }
+
+    if (route.provider !== "deterministic") {
+      await this.recordModelCall(client, {
+        developerId: input.developerId,
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        route,
+        purpose: "chunk_embedding",
+        status: "failed",
+        errorCode: "UNAVAILABLE",
+        metadata: { text_count: input.texts.length, message: "Embedding provider is not connected" }
+      });
+      await client.query("UPDATE chunks SET embed_status = 'pending' WHERE id = ANY($1::uuid[])", [
+        input.chunkIds
+      ]);
+      return {
+        status: "pending",
+        provider: route.provider,
+        model: route.model,
+        error: "UNAVAILABLE"
+      };
+    }
+
+    for (const [index, chunkId] of input.chunkIds.entries()) {
+      const embedding = deterministicEmbedding(input.texts[index] ?? "", route.dims);
+      await client.query(
+        `
+          INSERT INTO embeddings (chunk_id, model, dims, vector)
+          VALUES ($1, $2, $3, $4::vector)
+          ON CONFLICT (chunk_id) DO UPDATE
+          SET model = EXCLUDED.model, dims = EXCLUDED.dims, vector = EXCLUDED.vector, created_at = now()
+        `,
+        [chunkId, route.model, route.dims, vectorLiteral(embedding)]
+      );
+    }
+    await client.query(
+      "UPDATE chunks SET embed_status = 'embedded', embed_model = $2 WHERE id = ANY($1::uuid[])",
+      [input.chunkIds, route.model]
+    );
+    await this.recordModelCall(client, {
+      developerId: input.developerId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      route,
+      purpose: "chunk_embedding",
+      status: "success",
+      metadata: { text_count: input.texts.length }
+    });
+    return { status: "embedded", provider: route.provider, model: route.model, dims: route.dims };
+  }
+
+  private async createPaidApiApproval(
+    client: PoolClient,
+    input: {
+      developerId: string;
+      projectId: string;
+      sessionId: string | null;
+      route: EmbeddingRoute;
+      purpose: string;
+    }
+  ) {
+    const result = await client.query<{ id: string }>(
+      `
+        INSERT INTO paid_api_approval_requests (
+          developer_id, project_id, session_id, purpose, provider, model,
+          routing_reason, attempted_routes, requested_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'system')
+        RETURNING id
+      `,
+      [
+        input.developerId,
+        input.projectId,
+        input.sessionId,
+        input.purpose,
+        input.route.provider,
+        input.route.model,
+        input.route.routingReason,
+        JSON.stringify([{ provider: input.route.provider, model: input.route.model }])
+      ]
+    );
+    const id = result.rows[0]?.id;
+    if (!id) throw new Error("Failed to create paid API approval request");
+    return { id };
+  }
+
+  private async recordModelCall(
+    client: Pick<Pool | PoolClient, "query">,
+    input: {
+      developerId: string;
+      projectId: string;
+      sessionId: string | null;
+      route: EmbeddingRoute;
+      purpose: string;
+      status: "success" | "failed" | "cancelled";
+      confirmationStatus?: string;
+      approvalRequestId?: string;
+      errorCode?: string;
+      metadata?: JsonObject;
+    }
+  ) {
+    await client.query(
+      `
+        INSERT INTO model_calls (
+          developer_id, project_id, session_id, memory_domain, route_class,
+          provider, model, purpose, routing_reason, confirmation_status,
+          approval_request_id, status, error_code, metadata
+        )
+        VALUES ($1, $2, $3, 'agent_work', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `,
+      [
+        input.developerId,
+        input.projectId,
+        input.sessionId,
+        input.route.routeClass,
+        input.route.provider,
+        input.route.model,
+        input.purpose,
+        input.route.routingReason,
+        input.confirmationStatus ?? "not_required",
+        input.approvalRequestId ?? null,
+        input.status,
+        input.errorCode ?? null,
+        JSON.stringify(input.metadata ?? {})
+      ]
+    );
   }
 
   private async findLastEventId(client: PoolClient, sessionId: string) {
