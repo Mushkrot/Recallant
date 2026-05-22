@@ -147,6 +147,7 @@ Latest implementation checkpoints:
 - Phase 8 portable restore planning slice is implemented: `recallant restore-plan --manifest ... --remap ...` verifies the backup hash and emits a non-writing restore/remap plan for project roots, raw artifact roots, secret references, connector accounts, environment facts, and ports. It does not edit raw memories by hand or write to production. It is covered by `scripts/smoke-phase8-backup.mjs`.
 - Phase 8 size-limit slice is implemented: `memory_append_turn` rejects text above `RECALLANT_APPEND_TURN_MAX_CHARS`, `memory_append_event` rejects text above `RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS`, and raw artifact excerpts above `RECALLANT_RAW_ARTIFACT_EXCERPT_MAX_CHARS` are rejected before session touch, event insert, raw-artifact insert, or dedup insert. It is verified by `scripts/smoke-phase8-size-limits.mjs`; `scripts/smoke-phase3-db.mjs` covers the normal append regression path.
 - Phase 8 private HTTP/Cloudflare-ready slice is implemented: server config defaults to `127.0.0.1`, rejects public `0.0.0.0`/`::` bind unless `RECALLANT_ALLOW_PUBLIC_BIND=true`, exposes safe HTTP security metadata, keeps Cloudflare mode disabled by default, and when `RECALLANT_CLOUDFLARE_MODE=enabled` requires configured edge auth plus Recallant bearer auth. It is verified by `scripts/smoke-review-ui.mjs`.
+- Phase 8 search p95 fixture is implemented: `scripts/smoke-phase8-search-p95.mjs` loads a 10k-chunk lexical fixture and verifies `memory_search` p95 stays below `RECALLANT_SEARCH_P95_BUDGET_MS` (default 1500ms). The current Docker smoke passed at about 11ms p95.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
@@ -156,7 +157,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Continue Phase 8 hardening from the current checkpoint: search p95 fixture, remaining structured-error/rate-limit work, and any safe hardening that does not require owner secrets or production service changes.
+3. Continue Phase 8 hardening from the current checkpoint: remaining structured-error/rate-limit work and any safe hardening that does not require owner secrets or production service changes.
 4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 
