@@ -9,6 +9,8 @@ Model routing is a product feature, not an afterthought.
 - Basic append/search must work without cloud APIs.
 - Basic lexical search must work even if embeddings are temporarily unavailable.
 - Local server/GPU should handle routine embeddings, indexing, cleanup, and background consolidation when practical.
+- Existing configured local model services should be reused. On the owner's server, if Ollama is already installed/configured, Recallant should use that endpoint instead of starting another Ollama stack.
+- Local model availability is a capability binding, not a hard dependency. If Ollama is missing, disabled, remote, or configured differently on another server, Recallant should surface the state through `recallant doctor` and fall back according to settings.
 - A ChatGPT/Codex subscription is not a generic API replacement.
 - Supported OAuth/sign-in subscription routes may be used as a separate route when available, within limits, and compliant with provider rules.
 - Paid API providers are allowed for fallback/escalation where they materially improve quality or keep the pipeline available, but they are API-last and confirmation-first by default.
@@ -62,7 +64,7 @@ The router should consider:
 
 Local:
 
-- Ollama embeddings,
+- existing configured Ollama embeddings,
 - local reranker/classifier,
 - local LLM on the server GPU for nightly consolidation.
 
@@ -110,6 +112,8 @@ Claude-specific routing note: use `anthropic/claude-haiku-4-5` as the cheap/fast
 - Stronger-model escalation should record a routing reason such as `fallback_unavailable`, `low_confidence`, `quality_critical`, `complex_closeout`, or `user_requested`.
 - Provider/model defaults must be settings, not hard-coded business logic.
 - The router must expose the effective route and source setting in UI/CLI diagnostics.
+- `recallant doctor` must show local model provider reachability, endpoint label/URL, expected models, missing models, and configured fallback behavior.
+- The implementation must not start duplicate Ollama/local-model service stacks by default when an existing configured service is available.
 - `latest` aliases must not be used as durable production defaults unless the owner explicitly enables them for an experiment.
 - The default paid API provider is OpenAI unless project/session settings override it.
 - Gemini/Claude cheap routes must be opt-in profiles or fallback entries, not silent replacements for the OpenAI paid API baseline.

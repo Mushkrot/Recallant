@@ -1,33 +1,32 @@
-# Task graph (dependencies)
+# Task graph
+
+This file defines implementation dependencies between phases from [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md).
 
 ```mermaid
-graph TD
-  p0[Phase0_skeleton]
-  p1[Phase1_DB_migrations]
-  p2[Phase2_MCP_stub]
-  p3[Phase3_session_lifecycle_L0_append]
-  p4[Phase4_embeddings]
-  p5[Phase5_hybrid_retrieval]
-  p6[Phase6_governed_memory_graph_checkpoint]
-  p65[Phase6_5_review_ui]
-  p7[Phase7_codex_first_project_onboarding_context_lint]
-  p8[Phase8_hardening]
-  p9[Phase9_cleanup_analysis]
-  p0 --> p1
-  p1 --> p2
-  p2 --> p3
-  p3 --> p4
-  p4 --> p5
-  p5 --> p6
-  p6 --> p65
-  p65 --> p7
-  p7 --> p8
-  p5 --> p9
-  p8 --> p9
+flowchart TD
+  P0[Phase 0 repo skeleton]
+  P1[Phase 1 database and migrations]
+  P2[Phase 2 MCP skeleton]
+  P3[Phase 3 session lifecycle and L0 write path]
+  P4[Phase 4 embeddings and L1]
+  P5[Phase 5 hybrid retrieval]
+  P6[Phase 6 governed memory, graph, checkpoint, context pack]
+  P65[Phase 6.5 Review/Management UI]
+  P7[Phase 7 onboarding CLI]
+  P8[Phase 8 hardening and backup/restore]
+  P9[Phase 9 cleanup, analysis, erasure]
+
+  P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P65 --> P7 --> P8 --> P9
 ```
 
-Критический путь: `0 → 1 → 2 → 3 → 4 → 5 → 6 → 6.5 → 7 → 8 → 9`. Все фазы обязательны для v1 core. Phase 3 включает universal session lifecycle, hybrid heartbeat, interruption recovery metadata, L0 append, and raw workflow evidence/artifact pointers. Phase 6 включает governed agent memory, graph и checkpoint; Phase 6.5 включает required Review UI; neither is an optional layer.
+Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 6.5 -> 7 -> 8 -> 9`. All phases are required for the v1 core.
 
-Phase 6 also includes the Context Pack Builder because it depends on checkpoint, governed memories, and retrieval budgets. Phase 8 includes hardening plus practical backup/restore verification. Phase 9 зависит от Phase 5 (retrieval pipeline для decay) и Phase 8 (hardening завершён).
+Phase 3 includes universal session lifecycle, hybrid heartbeat, interruption recovery metadata, L0 append, and raw workflow evidence/artifact pointers.
 
-Future expansion work from [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md) is intentionally outside this critical path.
+Phase 6 includes governed agent memory, graph, checkpoint, Context Pack Builder, conflict handling, and erasure policy path because these depend on checkpoint, governed memories, retrieval budgets, and data model support.
+
+Phase 6.5 includes the required Review/Management UI: inbox, rules, detail, duplicates, conflicts, Cost / Paid API, Settings, cleanup/forget, and natural-language management chat.
+
+Phase 8 includes security hardening plus practical backup/restore verification.
+
+Phase 9 depends on Phase 5 for retrieval decay/scoring and Phase 8 for hardened destructive/erasure paths.

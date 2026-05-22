@@ -68,7 +68,7 @@ Allowed promotion paths:
 
 Examples:
 
-- User says: "Всегда фиксируй важные решения в документации." This may become `instruction_grade` with source ref to the user turn.
+- User says: "Always record important decisions in documentation." This may become `instruction_grade` with source ref to the user turn.
 - `AGENTS.md` says: "Never deploy without explicit owner approval." This may be imported as `instruction_grade`.
 - Owner reviews a candidate and promotes it.
 
@@ -142,6 +142,28 @@ The system should not ask the owner to approve every memory write.
 Management of inboxes, active rules, duplicates, conflicts, editing, and periodic hygiene is defined in [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md).
 
 Conflict priority is defined in [ADR-0041](ADR-0041-conflict-resolution-priority.md). In short: applicability first, then authority, then scope specificity, then recency; high-risk or equal-authority conflicts require review/owner confirmation.
+
+## 4.1 Permanent erasure
+
+Permanent erasure is different from governance.
+
+Archive, reject, stale, supersede, demote, edit, and merge keep provenance and remain the normal way to manage memory quality. "Forget forever" is an explicit owner-confirmed erasure workflow for information that should not remain in Recallant at all.
+
+When the owner requests erasure, Recallant must remove or redact the target content and derived material from:
+
+- raw event payloads when controlled by Recallant,
+- raw artifact excerpts and managed artifact content,
+- chunks,
+- embeddings,
+- governed memory titles/bodies/source quotes,
+- derived summaries,
+- search indexes,
+- context-pack caches,
+- UI and chat recall surfaces.
+
+If an audit receipt is kept, it must be redacted and must not contain the erased content. The receipt exists only to prove the operation happened, report safe counts/status, and suppress accidental re-import/re-extraction where safe identifiers are available.
+
+Agents must not use ordinary archive/reject as a substitute for erasure when the owner explicitly asks to delete or forget something permanently.
 
 ## 5. Review Inbox default policy
 

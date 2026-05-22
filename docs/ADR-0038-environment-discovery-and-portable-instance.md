@@ -26,6 +26,9 @@ On first server setup, and later on explicit rescan, Recallant should run a boun
 - existing agent config/handoff files,
 - service/process/port inventory where allowed,
 - available local tools and model runtimes,
+- existing configured local model services such as Ollama, including endpoint/status/model availability, without starting duplicate stacks by default,
+- server port inventories or equivalent deployment registries where available,
+- server security baselines such as `/ai/SECURITY` in the owner's first deployment profile,
 - known secret stores by path/label/status, without reading or storing raw secret values,
 - existing connector/account capabilities when configured,
 - backup targets and local spool locations.
@@ -42,7 +45,7 @@ Accepted discovery results become structured environment facts, project registry
 
 ### Portability
 
-An Recallant instance must be movable between servers through an explicit export/backup/restore path that covers:
+A Recallant instance must be movable between servers through an explicit export/backup/restore path that covers:
 
 - Postgres domain database(s),
 - raw artifact storage and manifests,
@@ -62,10 +65,14 @@ The restore flow must support environment remapping:
 - old secret store references to new secret store references,
 - old connector/account bindings to newly authorized accounts,
 - old local model/runtime availability to the new server's capabilities.
+- old port assignments to new available ports.
+- old security baseline references to the new server's operational documentation.
 
 ## Consequences
 
 - `/ai` and `/opt/secure-configs/.env` must be modeled as environment facts for the owner's first deployment, not as hard-coded defaults in Recallant core.
+- `/ai/SECURITY` and `/ai/PORTS.yaml` must be modeled as owner-server operational facts. They guide the first deployment but are not universal product constants.
+- Existing Ollama is a capability binding. Recallant should reuse it when available and degrade/reconfigure when unavailable.
 - `recallant init` and server setup need a discovery/onboarding layer, not only a repo file generator.
 - Backup/restore from ADR-0028 remains required, but portability adds remapping, rebinding, and instance migration semantics.
 - Context Pack Builder must use accepted environment facts and capability bindings, not filesystem assumptions.

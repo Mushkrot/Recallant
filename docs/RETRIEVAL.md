@@ -1,71 +1,73 @@
 # Retrieval
 
-Цель: **высокое качество recall** при **настраиваемых жёстких лимитах** на размер ответа MCP tool.
+Goal: high-quality recall with configurable hard limits on MCP tool response size.
 
 Recallant retrieval must be contextual, not keyword-only. Lexical search is necessary for exact terms, file names, IDs, and rare tokens, but the platform must also find memories by task meaning, prior decisions, and related context through embeddings, governed memory types, graph expansion, scope, decay/salience, and provenance.
 
 ## 1. Public API (logical)
 
-Raw evidence retrieval реализуется внутри MCP tool `memory_search` (и опционально `memory_fetch_chunk`).
+Raw evidence retrieval is implemented through the MCP tool `memory_search` and optionally `memory_fetch_chunk`.
 
-Governed memory recall реализуется отдельным MCP tool `memory_recall_agent_memories`. Агент должен понимать различие:
+Governed memory recall is implemented through the separate MCP tool `memory_recall_agent_memories`. Agents must understand the difference:
 
-- `memory_search` возвращает evidence chunks из L1.
-- `memory_recall_agent_memories` возвращает structured AgentMemory records из L3 с review/use metadata.
-- Для сложной задачи агент обычно вызывает оба: сначала governed memories для устойчивых решений/правил, затем raw chunks для evidence.
+- `memory_search` returns L1 evidence chunks.
+- `memory_recall_agent_memories` returns structured L3 AgentMemory records with review/use metadata.
+- For complex tasks, agents normally call both: governed memories first for durable decisions/rules, then raw chunks for evidence.
 
 Raw workflow artifacts are not normal recall payloads. Search may return bounded excerpts and source refs derived from raw artifacts, but full raw artifacts are for explicit inspection, Review UI, recovery, debugging, or reprocess jobs. Startup context must never become a raw archive dump.
 
 ### Inputs
 
-- `project_id` (implicit из session config)
-- `developer_id` (implicit из session config)
-- `query` (string)
-- `mode` (enum): `hybrid` (default) | `vector_only` | `lexical_only`
-- `scope` (enum): `project` (default) | `developer` | `all`
-  - `project`: chunks текущего проекта + chunks с `scope=developer` данного developer
-  - `developer`: только chunks с `scope=developer` данного developer (все проекты)
-  - `all`: все chunks всех проектов данного developer
-- `scope_kind` / `audience` filters may further narrow results according to ADR-0040. The simple `scope=project|developer|all` API is the convenience layer; server-side policy must still respect environment, connector_account, capability, client_adapter, and audience constraints.
-- `top_k` (int, policy default; bounded by configured server cap)
-- `max_chars_total` (int, policy default; bounded by configured server cap)
-- `graph_expand` (bool, default **false**)
-- `graph_budget_nodes` (int, policy default; bounded by configured server cap)
+- `project_id`: implicit from session config.
+- `developer_id`: implicit from session config.
+- `query`: string.
+- `mode`: `hybrid` (default), `vector_only`, or `lexical_only`.
+- `scope`: `project` (default), `developer`, or `all`.
+  - `project`: chunks from the current project plus applicable developer-scope chunks.
+  - `developer`: only developer-scope chunks across projects.
+  - `all`: all chunks for the current developer.
+- `scope_kind` / `audience` filters may further narrow results according to ADR-0040. The simple `scope=project|developer|all` API is a convenience layer; server-side policy must still respect environment, connector_account, capability, client_adapter, and audience constraints.
+- `top_k`: policy default, bounded by configured server cap.
+- `max_chars_total`: policy default, bounded by configured server cap.
+- `graph_expand`: boolean, default false.
+- `graph_budget_nodes`: policy default, bounded by configured server cap.
 
 Concrete defaults such as `top_k=8`, `max_chars_total=12000`, and `graph_budget_nodes=8` may ship in the standard profile, but they are tuning defaults, not architecture invariants. See [ADR-0015-configurable-operational-heuristics.md](ADR-0015-configurable-operational-heuristics.md).
 
 ### Output shape
 
-Список hits, каждый hit:
+List of hits. Each hit includes:
 
 - `chunk_id`
-- `score` (float)
-- `text_excerpt` (bounded substring of chunk)
+- `score`
+- `text_excerpt`
 - `source_event_id`
 - `occurred_at`
-- `why` (string) — кратко: `vector` | `lexical` | `graph` | `rerank`
+- `why`: `vector`, `lexical`, `graph`, or `rerank`
 
 ## 2. Hybrid algorithm (v1 baseline)
 
-1. **Lexical:** `ts_rank_cd` или эквивалент по `chunks.tsv` → candidate set `C_lex` (limit `N_lex`, policy default).
-2. **Vector:** top `N_vec` по cosine distance из `embeddings` (policy default).
-3. **Fusion:** union `C_lex ∪ C_vec`, dedupe by `chunk_id`. Исключить chunks где `archived_at IS NOT NULL`.
-4. **Rerank:** combined score с decay и supersede penalty:
-   ```
-   S_base  = a * norm_vector + b * norm_lexical          (a/b are policy defaults)
-   decay   = max(MIN_DECAY, 0.5 ^ (age_days / halflife)) (см. CLEANUP.md)
-   penalty = 0.1 если chunk имеет входящее ребро supersedes, иначе 1.0
+1. **Lexical:** use `ts_rank_cd` or an equivalent query over `chunks.tsv` to build candidate set `C_lex`, limited by policy.
+2. **Vector:** take top `N_vec` by cosine distance from `embeddings`, limited by policy.
+3. **Fusion:** union `C_lex` and `C_vec`, deduplicate by `chunk_id`, and exclude chunks where `archived_at IS NOT NULL`.
+4. **Rerank:** compute combined score with decay and supersede penalty:
+
+   ```text
+   S_base  = a * norm_vector + b * norm_lexical
+   decay   = max(MIN_DECAY, 0.5 ^ (age_days / halflife))
+   penalty = 0.1 when chunk has an incoming supersedes edge, otherwise 1.0
    S_final = S_base * decay * penalty
    ```
-5. **Truncate:** top `top_k` по `S_final`, затем усечь суммарный текст до `max_chars_total` по порядку score (не разрывая mid-word — допускается mid-sentence cut с суффиксом `…`).
 
-Константы `a`, `b`, `N_lex`, `N_vec`, caps и decay параметры — настраиваемые policy/profile values. Tests should verify bounded behavior and relative ranking, not arbitrary exact defaults.
+5. **Truncate:** take top `top_k` by `S_final`, then cap total returned text to `max_chars_total` in score order. Avoid cutting mid-word; mid-sentence truncation with a suffix is acceptable.
 
-Embeddings are a retrieval index, not the memory itself. The durable content remains raw L0 plus materialized chunks and governed memories. If embeddings are rebuilt or replaced, provenance and text remain intact.
+Constants such as `a`, `b`, `N_lex`, `N_vec`, caps, and decay parameters are configurable policy/profile values. Tests should verify bounded behavior and relative ranking, not arbitrary exact defaults.
+
+Embeddings are a retrieval index, not the memory itself. Durable content remains raw L0 plus materialized chunks and governed memories. If embeddings are rebuilt or replaced, provenance and text remain intact unless explicit erasure applies.
 
 For large raw artifacts, chunks may be generated from bounded excerpts, extracted text, or policy-approved slices. The artifact pointer/hash remains the durable provenance, while retrieval returns only bounded text.
 
-## 2.2 Governed memory recall
+## 2.1 Governed memory recall
 
 `memory_recall_agent_memories` uses the same bounded-response discipline as `memory_search`, but filters by governance first:
 
@@ -78,26 +80,27 @@ For large raw artifacts, chunks may be generated from bounded excerpts, extracte
 
 Scope/audience filtering is mandatory before ranking:
 
-- exclude memories outside the current project/repo/subproject unless caller explicitly requests broader scope,
-- include developer-scope rules only when applicable to the current domain/task,
-- include environment facts only for the current Recallant instance or explicit restore/remap workflows,
-- include connector/capability bindings only when relevant to the task/project,
-- include client-adapter guidance only for the active client or explicit review,
+- exclude memories outside the current project/repo/subproject unless the caller explicitly requests broader scope;
+- include developer-scope rules only when applicable to the current domain/task;
+- include environment facts only for the current Recallant instance or explicit restore/remap workflows;
+- include connector/capability bindings only when relevant to the task/project;
+- include client-adapter guidance only for the active client or explicit review;
 - never treat candidate/needs-review records as binding even if scope matches.
 
 Instruction-grade memories are not automatically true forever. They can be superseded, demoted, archived, or contradicted by later evidence.
 
 When retrieved memories conflict, the caller and Context Pack Builder must apply ADR-0041:
 
-- filter by applicability first,
-- prefer higher authority,
-- prefer narrower scope,
-- prefer later accepted decisions when authority/scope match,
+- filter by applicability first;
+- prefer higher authority;
+- prefer narrower scope;
+- prefer later accepted decisions when authority/scope match;
 - surface high-risk or equal-authority conflicts instead of silently choosing.
 
-## 2.1 Access tracking
+## 2.2 Access tracking
 
-После формирования финального списка hits, **асинхронно** (не блокируя ответ):
+After the final hit list is formed, update access metadata asynchronously so the response is not blocked:
+
 ```sql
 UPDATE chunks
 SET last_accessed_at = now(),
@@ -105,29 +108,28 @@ SET last_accessed_at = now(),
 WHERE id = ANY(<returned_chunk_ids>)
 ```
 
-Константы `N_lex`, `N_vec` — policy/profile values.
+## 3. Graph expansion (optional)
 
-## 3. Graph expansion (optional step)
+If `graph_expand=true`:
 
-Если `graph_expand=true`:
-
-- Взять top `m` chunks после шага 5 (`m` policy default, bounded by `top_k`).
-- Для каждого chunk, выбрать инцидентные рёбра из `edges` до `graph_budget_nodes` суммарно по всем стартам BFS с дедупом.
-- Добавить соседние chunks в pool с пометкой `why=graph` и policy-defined понижающим весом к rerank.
-- Повторить fusion+truncate с учётом общего `max_chars_total`.
+- take top `m` chunks after the baseline retrieval step, where `m` is a policy default bounded by `top_k`;
+- for each chunk, select incident edges from `edges` up to `graph_budget_nodes` total across all BFS starts with deduplication;
+- add neighboring chunks to the pool with `why=graph` and a policy-defined lower weight;
+- repeat fusion/truncate while respecting `max_chars_total`.
 
 ## 4. `memory_fetch_chunk`
 
-- Input: `chunk_id`
-- Output: полный `text` chunk + metadata, но **не более** `max_chars` (default same as single chunk max in tests) — для больших chunk допускается pagination в v2 (ADR).
+- Input: `chunk_id`.
+- Output: full chunk `text` plus metadata, capped by `max_chars`. Large chunks may use pagination in v2 through a future ADR.
 
 ## 5. Quality guardrails
 
-- Запрет возвращать hit без `source_event_id`.
-- Если нет embeddings (cold start), автоматически деградировать в `lexical_only` с пометкой в логе.
-- Archived chunks (`archived_at IS NOT NULL`) не возвращаются если не передан `include_archived=true`.
-- Если chunk имеет `superseded_by` — добавить это поле в hit для прозрачности.
+- Do not return a hit without `source_event_id`.
+- If embeddings are unavailable, automatically degrade to `lexical_only` and mark this in logs/metadata.
+- Archived chunks are excluded unless `include_archived=true`.
+- If a chunk has `superseded_by`, add it to the hit for transparency.
+- Erased chunks/content must never be returned in ordinary search, context packs, or fetch APIs.
 
 ## 6. Observability
 
-См. `OBSERVABILITY.md`: latency, counts candidates, truncation stats.
+See `OBSERVABILITY.md` for latency, candidate counts, truncation stats, and recall tracing.

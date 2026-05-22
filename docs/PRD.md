@@ -25,44 +25,51 @@ Current architectural bias:
 - Current daily usage is Codex-first, while the architecture remains a universal MCP memory platform for any supported agent. Codex is the first adapter, not the product boundary.
 - Settings are centralized on the Recallant server; project repositories store only pointer config.
 - Settings UI is controlled in v1: project workflow settings are editable; sensitive/global/server settings are read-only or confirmation-gated.
+- Memory must be managed, correctable, self-cleaning, and erasable through explicit owner workflows. Archive/reject/supersede are normal governance actions; "forget forever" is a separate owner-confirmed erasure workflow that removes content and derived material from active memory.
+- The management experience should be natural-language first. The Review UI remains important for inspection and control, but the owner should be able to query and direct the system in plain language and have Recallant respond in the user's language.
+- Recallant should use AI/LLM capabilities heavily for extraction, cleanup suggestions, conflict explanation, context-pack planning, and intent detection, while deterministic server policy remains authoritative for safety, storage, auth, audit, cost, and destructive operations.
 - Model routing is configurable and provider-switchable. Local models are the default for core recall; stronger reasoning is subscription-first/API-last; paid API requires explicit confirmation by default; OpenAI is the baseline paid API profile only when paid API is approved; Gemini and Claude cheap models are optional paid API routes by task, project, and budget.
 - v1 is a full working core for coding-agent memory, not a throwaway MVP. Broader personal-life memory, passive capture, large blob/object storage, specialized vector/graph databases, and public product packaging are designed for as future expansion, not first implementation scope. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 - Practical backup/restore is part of v1: Postgres + raw artifacts + manifest + restore verification, with a future path to a second backup server.
 - Security/access posture is private-by-default plus Recallant auth: localhost/Tailnet/SSH by default, Review UI/admin API require Recallant auth even inside private network, and Cloudflare-managed access is a near-future opt-in mode requiring edge auth plus Recallant auth.
 - Session liveness uses hybrid heartbeat: ordinary session tools update `last_seen_at`, and optional `memory_heartbeat` exists for long-running/idle tasks without writing raw memory events.
+- On the owner's current server, Recallant must respect shared infrastructure: use existing configured Ollama when available, consult `/ai/SECURITY` for server security changes, register service ports in `/ai/PORTS.yaml`, and model `/opt/secure-configs/.env` only as a secret reference/capability binding.
+- Repository artifacts are public-quality English artifacts: code, identifiers, comments, documentation, commit messages, API text, and public materials. The owner conversation may remain Russian when the owner writes in Russian.
 
 ## 1. Problem statement
 
-При Vibe Coding один и тот же каталог проекта открывается в разных CLI-агентах (Cursor, Windsurf, Claude Code). У каждого клиента свои правила, своя «память» внутри сессии и **compaction** окна контекста. В результате:
+During AI-assisted coding, the same project directory may be opened in different CLI agents such as Codex, Cursor, Windsurf, and Claude Code. Each client has its own rules, session memory, and context-window compaction behavior. As a result:
 
-- при смене клиента **теряется рабочий контекст** (решения, договорённости, история рассуждений);
-- внутри одного клиента **теряется длинный контекст** после compaction и из-за лимитов;
-- между сессиями теряются **правила работы**, предпочтения пользователя и уже объяснённые договорённости;
-- при подключении нового проекта требуется заново переносить структуру конфигурации и handoff-файлы;
-- длинные repo-native инструкции и логи могут забивать окно контекста ещё до начала полезной работы;
-- попытка «скормить всё» в промпт **невозможна** по стоимости и размеру окна.
+- switching clients loses working context: decisions, agreements, reasoning history;
+- a single client loses long context after compaction or window limits;
+- rules, preferences, account bindings, and repeated explanations disappear between sessions;
+- every new project requires manually rebuilding config/handoff structure;
+- long repo-native instructions and logs can flood the context window before useful work begins;
+- trying to put everything in the prompt is impossible because of cost and context limits;
+- if wrong or sensitive information enters memory, the owner needs a clear way to correct or remove it;
+- as memory grows, stale/duplicate/conflicting records can degrade agent behavior.
 
-Нужна **внешняя долговременная память** с **selective retrieval** и **единым хранилищем** для всех клиентов, плюс явный **checkpoint** «с чего продолжить».
+Recallant needs to provide external long-term memory with selective retrieval, one shared store for supported clients, explicit checkpoints, governed memory hygiene, and safe management workflows.
 
 ## 2. Goals
 
 ### G1 — Cross-client continuity
 
-Для фиксированного `project_id` любой поддерживаемый MCP-клиент может в новой сессии **восстановить практический контекст работы** через retrieval + checkpoint, без необходимости заново «переобъяснять весь проект» с нуля.
+For a fixed `project_id`, any supported MCP client can restore practical working context in a new session through retrieval and checkpoint state without forcing the owner to re-explain the project from scratch.
 
-**Измеримость (acceptance):**
+**Acceptance:**
 
-- [ ] Два разных клиента (например Codex и Cursor/Claude Code) подключены к **одному** store для одного `project_id`.
-- [ ] После записи N turns в сессии A, сессия B находит top релевантные chunks по запросу, совпадающему с последней задачей из checkpoint.
+- [ ] Two different clients, for example Codex and Cursor/Claude Code, connect to the same store for one `project_id`.
+- [ ] After session A writes N turns, session B finds the top relevant chunks for a query matching the latest checkpoint task.
 
 ### G2 — Intra-session resilience
 
-Система сохраняет raw evidence according to configured capture policy and builds derived layers (L1/L2/L3) так, чтобы при пересборке индексов **не терялась** возможность вернуться к источникам через provenance. Resilience must not depend only on a perfect end-of-session closeout.
+The system preserves raw evidence according to configured capture policy and builds derived layers (L1/L2/L3) so indexes can be rebuilt without losing source provenance. Resilience must not depend only on a perfect end-of-session closeout.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Любой `chunk_id` однозначно указывает на источник в L0.
-- [ ] Re-embed job не уничтожает L0; максимум помечает старые embedding rows superseded.
+- [ ] Every `chunk_id` points unambiguously to its L0 source.
+- [ ] A re-embed job does not destroy L0; at most it marks old embedding rows superseded.
 - [ ] Project capture profile controls how much raw detail is recorded without changing the governed-memory model.
 - [ ] Large workflow evidence can be preserved through raw artifact pointer/hash/excerpt records without forcing unbounded event JSONB or context output.
 - [ ] `memory_start_session` detects an unclosed previous session and returns recovery metadata.
@@ -71,56 +78,56 @@ Current architectural bias:
 
 ### G3 — Token-safe agent interface
 
-Агент **никогда** не получает «всю базу» одним вызовом. MCP tools возвращают **bounded** payload according to configured retrieval/context policy (см. `RETRIEVAL.md`, `MCP_SPEC.md`, and ADR-0015).
+The agent never receives the entire database in one call. MCP tools return bounded payloads according to configured retrieval/context policy; see `RETRIEVAL.md`, `MCP_SPEC.md`, and ADR-0015.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Стресс-тест: 1M символов в L0/raw artifacts → tools return ≤ configured max chars и ≤ max items.
+- [ ] Stress test: 1M characters in L0/raw artifacts still yields tool responses within configured max chars and max items.
 
 ### G4 — Hybrid recall
 
-Поддержка **vector + lexical** поиска и опционального **graph expansion** с бюджетом.
+Support vector + lexical search and optional graph expansion with explicit budgets.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Задокументированный golden set из запросов в `TEST_CONTRACT.md` проходит пороги precision@k (минимальные пороги задаются там же).
+- [ ] The documented golden query set in `TEST_CONTRACT.md` passes precision@k thresholds defined there.
 
 ### G5 — Where we stopped
 
-Checkpoint хранится в БД и **дублируется по смыслу** в репозитории через контракт `REPO_CONTRACT.md` (`PROJECT_LOG.md`).
+Checkpoint state lives in the database and is mirrored semantically into the repository through the `REPO_CONTRACT.md` / `PROJECT_LOG.md` contract.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] `memory_get_checkpoint` и файл `PROJECT_LOG.md` после `memory_set_checkpoint` согласованы по полю `current_focus` (или эквиваленту) within a configured freshness budget. A 5-second budget may be used as a default test profile, but it is not a product-wide invariant.
+- [ ] `memory_get_checkpoint` and `PROJECT_LOG.md` agree on `current_focus` or equivalent after `memory_set_checkpoint` within a configured freshness budget. A 5-second budget may be used as a default test profile, but it is not a product-wide invariant.
 
 ### G6 — Governed agent memory
 
-Система хранит не только raw events/chunks, но и структурированные **agent memories**: решения, ограничения, правила, уроки, ошибки, work logs, references to artifacts. Эти записи имеют provenance, review status и use policy.
+The system stores not only raw events/chunks, but also structured agent memories: decisions, constraints, rules, lessons, failures, work logs, and artifact references. These records have provenance, review status, and use policy.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Agent-generated memories создаются автоматически без ручного подтверждения каждой записи, если проходят validation/provenance policy.
-- [ ] Agent-generated memory не может стать `instruction_grade` без explicit user confirmation/import/strong policy.
-- [ ] Любой `agent_memory` имеет минимум один source ref на L0/L1 или external ref, если он не создан напрямую пользователем как imported/confirmed.
-- [ ] Recall возвращает bounded set governed memories с review/use metadata.
-- [ ] Recall trace или usage report показывает, какие governed memories были возвращены и какие агент отметил как использованные.
+- [ ] Agent-generated memories are created automatically without manual confirmation for every record when they pass validation/provenance policy.
+- [ ] Agent-generated memory cannot become `instruction_grade` without explicit user confirmation, trusted import, or another strong policy path.
+- [ ] Every `agent_memory` has at least one source ref to L0/L1 or an external ref unless created directly by the user as imported/confirmed.
+- [ ] Recall returns a bounded set of governed memories with review/use metadata.
+- [ ] Recall trace or usage report shows which governed memories were returned and which the agent marked as used.
 
 ### G7 — One-action project onboarding
 
-Новый проект должен подключаться к Recallant без ручного копирования всей структуры правил и логов.
+A new project must connect to Recallant without manually copying rule/log/handoff structure.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] `recallant init --target codex` создаёт `.recallant/config`, тонкий `AGENTS.md`, `PROJECT_LOG.md`, и нужный MCP/config output для Codex.
-- [ ] `recallant init --dry-run` показывает план без изменений.
-- [ ] Project bootstrap не копирует большие исторические документы в новый проект.
-- [ ] Архитектура допускает Journey-style kit/skill distribution как альтернативный путь установки.
+- [ ] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, and the required MCP/config output for Codex.
+- [ ] `recallant init --dry-run` shows a plan without making changes.
+- [ ] Project bootstrap does not copy large historical documents into the new project.
+- [ ] The architecture allows Journey-style kit/skill distribution as an alternate installation path.
 
 ### G7.1 — Universal client adapters
 
 Codex must work first, but Recallant must not become Codex-specific.
 
-**Измеримость:**
+**Acceptance:**
 
 - [ ] The same MCP tool contracts support `client_kind=codex`, `cursor`, `claude_code`, `windsurf`, and `other`.
 - [ ] Client-specific code is limited to bootstrap/config/adapter generation and smoke tests.
@@ -128,24 +135,26 @@ Codex must work first, but Recallant must not become Codex-specific.
 
 ### G8 — Context-budget discipline
 
-Recallant должен улучшать качество работы агента без загрузки огромных файлов при старте сессии.
+Recallant must improve agent quality without loading huge files at session startup.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Сгенерированные `AGENTS.md`/adapter files остаются тонкими и содержат routing rules вместо long-form history.
-- [ ] Startup flow восстанавливает контекст через automatic server-built context pack (`memory_start_session` → `memory_get_context_pack`), not manual user explanation.
+- [ ] Generated `AGENTS.md`/adapter files stay thin and contain routing rules instead of long-form history.
+- [ ] Startup flow restores context through the automatic server-built context pack (`memory_start_session` -> `memory_get_context_pack`), not manual user explanation.
 - [ ] CLI/UI can preview the same context pack for debugging without creating a separate context-building algorithm.
-- [ ] Есть тест или lint, который ловит bootstrap files с большим дублированным историческим контентом.
+- [ ] A test or lint check detects bootstrap files that contain large duplicated historical content.
 
 ### G9 — Local-server-first memory runtime
 
-Core Recallant работает на личном Linux-сервере владельца, с локальными embedding/consolidation задачами и optional внешними LLM для сложного анализа.
+Core Recallant runs on the owner's Linux server, with local embedding/consolidation tasks and optional external LLMs for complex analysis.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Базовый append/search работает без внешнего LLM API.
-- [ ] Embedding provider по умолчанию self-hosted.
-- [ ] External LLM providers включаются через config только для optional enrichment/consolidation/rerank/review assistance.
+- [ ] Basic append/search works without an external LLM API.
+- [ ] Embedding provider is self-hosted by default when local capability is available.
+- [ ] Existing configured Ollama/local-model service is reused when available instead of starting a duplicate stack.
+- [ ] If Ollama is missing, disabled, remote, or configured differently, `recallant doctor` reports the state and the router falls back according to settings.
+- [ ] External LLM providers are enabled through config only for optional enrichment, consolidation, rerank, and review assistance.
 - [ ] Router can switch local/OpenAI/Gemini/Claude models by purpose/project/session without changing core memory behavior.
 - [ ] Router distinguishes `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`.
 - [ ] Default escalation uses active agent or supported subscription worker before paid API when available.
@@ -157,21 +166,21 @@ Core Recallant работает на личном Linux-сервере влад�
 
 ### G10 — Offline/local spool resilience
 
-Recallant должен позволять работать локально, когда сервер недоступен, интернет медленный или live MCP write path временно не работает.
+Recallant must allow local work when the server is unavailable, internet is slow, or the live MCP write path temporarily does not work.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] Local spool пишет append-only JSONL/NDJSON records with dedup keys.
-- [ ] `recallant sync-spool` загружает локальные записи на сервер и сохраняет mapping local id → server `event_id`.
-- [ ] После успешного sync локальные spool records могут быть safely pruned/offloaded.
-- [ ] Search/recall явно показывает, если локальные unsynced records ещё не попали в server SoT.
+- [ ] Local spool writes append-only JSONL/NDJSON records with dedup keys.
+- [ ] `recallant sync-spool` uploads local records to the server and stores a local id -> server `event_id` mapping.
+- [ ] After successful sync, local spool records can be safely pruned/offloaded.
+- [ ] Search/recall explicitly shows when local unsynced records have not reached the server SoT yet.
 - [ ] Local spool follows the same project/session capture policy as live server capture.
 
 ### G12 — Practical backup and restore
 
 Recallant must be restorable after server/database/artifact failure.
 
-**Измеримость:**
+**Acceptance:**
 
 - [ ] Automated backup includes `recallant_agent_work` Postgres database.
 - [ ] Backup includes raw artifact storage or enough artifact manifests to verify missing payloads.
@@ -184,7 +193,7 @@ Recallant must be restorable after server/database/artifact failure.
 
 Recallant must protect memory and management surfaces by default while remaining ready for a near-future Cloudflare-managed subdomain.
 
-**Измеримость:**
+**Acceptance:**
 
 - [ ] Default deployment binds Review UI/admin API to localhost or Tailnet/private interface.
 - [ ] Review UI/admin API require Recallant auth/session/token even on private network.
@@ -196,26 +205,61 @@ Recallant must protect memory and management surfaces by default while remaining
 
 ### G11 — Owner review UI for governed memory
 
-Recallant v1 должен дать владельцу полноценный UI для управления важной, конфликтной и долгосрочной памятью.
+Recallant v1 must give the owner a real UI for important, conflicting, and long-term memory management.
 
 Placement: the UI runs on the Recallant server. It starts as a compact working review/cost/settings workbench, not a minimal approval table, while the architecture allows growth into a full private management platform.
 
 First screen: Review Inbox / Command Center. It should prioritize items that need the owner's decision, not raw memory browsing or metrics.
 
-**Измеримость:**
+**Acceptance:**
 
-- [ ] UI показывает inbox важных/`candidate`/`needs_review`/high-risk memories.
+- [ ] UI shows the inbox of important / `candidate` / `needs_review` / high-risk memories.
 - [ ] First screen shows scope/profile, critical review warnings, priority lanes, main review queue, selected item evidence, and review actions.
 - [ ] v1 UI includes project navigation, Inbox, Rules, detail/source panel, Duplicates, Conflicts, Cost / Paid API, and Settings entrypoint.
 - [ ] Management UI can list all managed projects and open project-specific Review/Settings views.
 - [ ] Settings UI can edit project capture profile, context budget profile, review sensitivity, route enablement, paid API mode, client adapters, and project paths/aliases.
 - [ ] Settings UI shows effective value source and writes audit records for changes.
 - [ ] Settings UI confirmation-gates dangerous changes and does not expose raw secrets.
-- [ ] UI показывает active `instruction_grade` rules with scope/type filters.
-- [ ] UI показывает source refs and review history before promotion.
-- [ ] UI позволяет accept/reject/promote/demote/archive/unarchive/mark-stale/edit/merge/supersede; approve may remain as a compatibility label/alias.
-- [ ] UI показывает duplicate/conflict reports and suggested resolutions.
+- [ ] UI shows active `instruction_grade` rules with scope/type filters.
+- [ ] UI shows source refs and review history before promotion.
+- [ ] UI allows accept/reject/promote/demote/archive/unarchive/mark-stale/edit/merge/supersede; approve may remain as a compatibility label/alias.
+- [ ] UI shows duplicate/conflict reports and suggested resolutions.
 - [ ] Ordinary memories do not require manual approval before becoming useful recall records.
+
+### G14 — Managed deletion and self-cleaning
+
+Recallant memory must be correctable, cleanable, and erasable.
+
+**Measurability:**
+
+- [ ] The owner can archive, reject, supersede, stale, edit, merge, and demote/promote governed memories through UI/CLI/API.
+- [ ] The owner can request a "forget forever" workflow that removes target content and derived chunks/embeddings/summaries/index entries from active memory.
+- [ ] Erasure keeps only a redacted receipt when audit is needed; the original content is not retained in active memory, search, context packs, or UI.
+- [ ] Cleanup analysis identifies stale, duplicate, conflicting, low-value, and poorly sourced records.
+- [ ] Risky cleanup or erasure requires confirmation unless a scoped explicit policy allows it.
+
+### G15 — Natural-language management
+
+Recallant management should be conversational.
+
+**Measurability:**
+
+- [ ] Management UI includes a natural-language command/chat surface for memory questions, cleanup requests, review actions, settings inspection, and context-pack explanation.
+- [ ] The chat interface answers in the user's language by default.
+- [ ] Natural-language destructive/cost/security/global-rule requests become explicit action plans requiring confirmation before execution.
+- [ ] Chat-driven actions use the same server-side policy path as UI/CLI/MCP actions.
+
+### G16 — Professional public-quality implementation
+
+Recallant should be suitable for public release and professional review.
+
+**Measurability:**
+
+- [ ] Code, identifiers, comments, documentation, commit messages, API text, and public materials are English.
+- [ ] Implementation follows modular package boundaries and avoids large files with unrelated responsibilities.
+- [ ] Meaningful commits are made at natural checkpoints.
+- [ ] Upstream reuse is preceded by local inspection and documented adaptation decisions.
+- [ ] Owner-server deployment changes consult `/ai/SECURITY` and register ports in `/ai/PORTS.yaml` before services are started.
 
 ## 3. User stories (for coding agents)
 
@@ -235,6 +279,9 @@ First screen: Review Inbox / Command Center. It should prioritize items that nee
 12. **As the owner**, I want capture profiles per project so serious projects can record more detail while simple projects keep only the essentials.
 13. **As the owner**, I want centralized settings so I can open Recallant management UI, choose a project, and inspect or change its project-specific settings without editing local files.
 14. **As the owner**, I want a cost dashboard and explicit paid API approvals so Recallant cannot quietly add token bills on top of my existing agent subscriptions.
+15. **As the owner**, I want to manage Recallant through natural language so I can ask it to find, fix, archive, or forget memory without learning internal commands.
+16. **As the owner**, I want permanent erasure for wrong or sensitive memory so it does not remain in context packs, embeddings, summaries, search, or UI.
+17. **As the owner**, I want Recallant to reuse existing local infrastructure such as Ollama and obey server inventories such as `/ai/SECURITY` and `/ai/PORTS.yaml`.
 
 ## 4. Priorities
 
@@ -244,23 +291,27 @@ First screen: Review Inbox / Command Center. It should prioritize items that nee
 4. **Context-budget discipline** and one-action project bootstrap
 5. **MCP contract** stability
 6. **Retrieval quality** (hybrid + budgets)
-7. Ingest breadth (автоматизация всех CLI — позже, см. `INGESTION.md`)
+7. Managed cleanup/erasure and natural-language management safety
+8. Ingest breadth (full automation for every CLI comes later; see `INGESTION.md`)
 
 ## 5. Success metrics (v1)
 
-- Retrieval latency p95 для `memory_search` на локальном Postgres — целевые значения задаются в `TEST_CONTRACT.md` (не в PRD числами — избегаем рассинхрона).
+- Retrieval latency p95 for `memory_search` on local Postgres is defined in `TEST_CONTRACT.md`, not as hard-coded PRD numbers.
 - Zero data loss for L0 under normal shutdown (ACID commit before ACK to client).
 - A new Codex project can be bootstrapped without manually copying existing project configuration history.
 - Agent startup context remains bounded and task-relevant.
 - A new Codex session in an old project restores the current task without the owner re-explaining context.
 - Local captured work can be synced to the server after an outage.
 - The owner can review and curate important/conflicting/long-term memories through UI without confirming every ordinary memory write.
+- The owner can remove incorrect or sensitive memory through an explicit erasure workflow that removes active and derived material.
+- The owner can ask Recallant natural-language management questions and receive a context-aware answer/action plan in the user's language.
+- Server deployment does not create unregistered port conflicts and does not bypass the existing security baseline.
 
 ## 6. Dependencies
 
-- PostgreSQL с расширением `pgvector`.
-- Реализация MCP server (language выбирается в implementation guide).
-- Repo-native Recallant contract generated by `recallant init` — см. `REPO_CONTRACT.md`. The older personal `agent-bootstrap` sketch is only historical inspiration.
+- PostgreSQL with the `pgvector` extension.
+- MCP server implementation; language/runtime choices are defined in the implementation guide.
+- Repo-native Recallant contract generated by `recallant init`; see `REPO_CONTRACT.md`. The older personal `agent-bootstrap` sketch is only historical inspiration.
 
 ## 7. v1 Scope
 

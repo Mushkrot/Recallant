@@ -1,11 +1,11 @@
 # Data model (Postgres SoT)
 
-Единственный канонический источник схемы. Все миграции в коде должны **соответствовать** этому документу.
+This is the canonical schema source. Implementation migrations must match this document.
 
 ## 1. Extensions
 
 - `CREATE EXTENSION IF NOT EXISTS vector;`
-- Для lexical: `pg_trgm` и/или встроенный `tsvector` — выбор фиксируется в миграции v1 (рекомендация: **tsvector** на `chunks.text` + GIN index).
+- For lexical search: `pg_trgm` and/or built-in `tsvector`. The v1 migration fixes the choice; recommended baseline is `tsvector` on `chunks.text` plus a GIN index.
 
 ## 1.1 Database placement
 
@@ -24,19 +24,19 @@ Future domain databases such as `recallant_personal_life` may reuse this base L0
 | `created_at` | TIMESTAMPTZ | |
 | `updated_at` | TIMESTAMPTZ | |
 
-Один `developer` объединяет несколько `projects`. Позволяет cross-project поиск и хранение общих паттернов с `scope=developer`. В v1 допускается один developer per Recallant instance (single-user); multi-developer — через ADR.
+One `developer` groups multiple `projects`. This enables cross-project search and developer-scoped patterns. v1 may use one developer per Recallant instance; multi-developer support requires a separate ADR.
 
 ### 2.1 `projects`
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | `project_id` |
-| `developer_id` | UUID FK → developers | обязателен |
-| `parent_project_id` | UUID FK → projects | nullable; для nested projects/workspaces |
+| `developer_id` | UUID FK → developers | required |
+| `parent_project_id` | UUID FK → projects | nullable; for nested projects/workspaces |
 | `project_kind` | TEXT | `repo` \| `subproject` \| `workspace` \| `personal_domain` \| `other`; default `repo` |
 | `memory_domain` | TEXT | `agent_work` default; future: `personal_life`, `research`, `other` |
 | `name` | TEXT | Human label |
-| `primary_path` | TEXT | Последний известный workspace path (nullable) |
+| `primary_path` | TEXT | Last known workspace path (nullable) |
 | `created_at` | TIMESTAMPTZ | |
 | `updated_at` | TIMESTAMPTZ | |
 
@@ -67,7 +67,7 @@ In v1, this may be implemented as additive nullable columns and JSONB/array meta
 |--------|------|-------|
 | `id` | UUID PK | |
 | `project_id` | UUID FK → projects | |
-| `client_kind` | TEXT | см. `GLOSSARY.md` |
+| `client_kind` | TEXT | see `GLOSSARY.md` |
 | `client_version` | TEXT | nullable |
 | `started_at` | TIMESTAMPTZ | |
 | `last_seen_at` | TIMESTAMPTZ | updated by session-scoped tool calls; used for interruption detection |
@@ -89,15 +89,17 @@ In v1, this may be implemented as additive nullable columns and JSONB/array meta
 |--------|------|-------|
 | `id` | UUID PK | `event_id` |
 | `project_id` | UUID FK | |
-| `session_id` | UUID FK | nullable для system events |
-| `ingest_source` | TEXT | см. `GLOSSARY.md` |
+| `session_id` | UUID FK | nullable for system events |
+| `ingest_source` | TEXT | see `GLOSSARY.md` |
 | `kind` | TEXT | `turn_user` \| `turn_assistant` \| `tool_call` \| `tool_result` \| `terminal_output` \| `file_change` \| `system` \| `import_batch` \| `checkpoint` \| `other` |
 | `occurred_at` | TIMESTAMPTZ | |
-| `payload` | JSONB | Нормализованное тело: для turn — `{ "text": "...", "attachments": [] }`; для больших workflow events — metadata + bounded excerpt + raw artifact refs |
-| `payload_hash` | TEXT | SHA256 canonical JSON для dedup (nullable для non-deterministic) |
+| `payload` | JSONB | Normalized body: for a turn, `{ "text": "...", "attachments": [] }`; for large workflow events, metadata + bounded excerpt + raw artifact refs |
+| `payload_hash` | TEXT | SHA256 canonical JSON for dedup (nullable for non-deterministic content) |
 | `created_at` | TIMESTAMPTZ | insert time |
 
-**Invariant:** `events` без UPDATE содержимого; исправления только новым событием `kind=system` с ссылкой (если политика допускает).
+**Invariant:** normal correction does not update `events` content; corrections are new `kind=system` events with source references when policy allows.
+
+**Erasure exception:** explicit owner-confirmed erasure may hard-delete or redact event content and all derived material. If a row must remain for integrity/audit, content fields must be replaced with a non-reconstructive redaction marker and linked to an `erasure_requests` receipt. This exception is not ordinary cleanup.
 
 Ordinary captured user/assistant turns may store full text directly in `events.payload`. Large terminal/tool output, media, attachments, and transcript exports should not force unbounded JSONB growth; store a bounded excerpt and link one or more `raw_artifacts` rows.
 
@@ -125,26 +127,28 @@ Raw artifacts preserve large workflow evidence without making every event row a 
 
 **Invariant:** raw artifact metadata is part of L0 provenance. Full artifact content is never returned to startup context by default; agents receive bounded excerpts and source refs unless an explicit inspection/reprocess workflow is used.
 
+**Erasure exception:** explicit owner-confirmed erasure must remove/redact raw artifact excerpt and physical content when the artifact is in Recallant-managed storage. External artifacts are represented as removed bindings plus a redacted receipt; Recallant cannot delete content it does not control.
+
 ### 2.4 `chunks` (L1)
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | |
 | `project_id` | UUID FK | |
-| `developer_id` | UUID FK → developers | денормализовано для эффективного cross-project поиска |
-| `source_event_id` | UUID FK → events | обязателен если chunk из event |
+| `developer_id` | UUID FK → developers | denormalized for efficient cross-project search |
+| `source_event_id` | UUID FK → events | required if chunk came from an event |
 | `text` | TEXT | materialized chunk |
-| `chunk_index` | INT | порядок внутри event |
+| `chunk_index` | INT | order inside event |
 | `token_count_est` | INT | nullable |
 | `scope` | TEXT | compatibility default: `project` \| `developer`; see ADR-0040 for richer `scope_kind`/audience model |
 | `scope_kind` | TEXT | nullable/additive v1 field for ADR-0040 scope kinds |
 | `scope_id` | TEXT | nullable/additive v1 field; UUID or stable external id depending on `scope_kind` |
 | `audience` | JSONB | nullable; consumer/audience hints such as all_agents/specific_client/context_pack |
-| `embed_status` | TEXT | `pending` \| `embedded` \| `failed` — статус embedding pipeline |
-| `embed_model` | TEXT | название модели которой сделан embedding; NULL если `pending` |
-| `last_accessed_at` | TIMESTAMPTZ | время последнего retrieval-обращения; NULL если никогда |
-| `access_count` | INT | счётчик обращений через memory_search / memory_fetch_chunk; default 0 |
-| `archived_at` | TIMESTAMPTZ | NULL = активный; NOT NULL = архивирован, не участвует в поиске |
+| `embed_status` | TEXT | `pending` \| `embedded` \| `failed`; embedding pipeline status |
+| `embed_model` | TEXT | embedding model name; NULL when `pending` |
+| `last_accessed_at` | TIMESTAMPTZ | last retrieval access time; NULL if never accessed |
+| `access_count` | INT | access count through memory_search / memory_fetch_chunk; default 0 |
+| `archived_at` | TIMESTAMPTZ | NULL = active; NOT NULL = archived and excluded from normal search |
 | `tsv` | tsvector | generated or maintained |
 | `created_at` | TIMESTAMPTZ | |
 
@@ -153,12 +157,12 @@ Raw artifacts preserve large workflow evidence without making every event row a 
 | Column | Type | Notes |
 |--------|------|-------|
 | `chunk_id` | UUID PK/FK | |
-| `model` | TEXT | например `text-embedding-3-large` |
+| `model` | TEXT | for example `text-embedding-3-large` |
 | `dims` | INT | |
 | `vector` | vector(dims) | pgvector |
 | `created_at` | TIMESTAMPTZ | |
 
-**Invariant:** при смене модели — новые rows или версия в отдельной таблице `embedding_models` (ADR optional); v1 допускает **replace** по `chunk_id` с логом в `events`.
+**Invariant:** when changing model/dimensions, use new rows or a versioned `embedding_models` table. v1 may replace by `chunk_id` with an audit/event record.
 
 ### 2.6 `edges` (L2)
 
@@ -167,10 +171,10 @@ Raw artifacts preserve large workflow evidence without making every event row a 
 | `id` | UUID PK | |
 | `project_id` | UUID FK | |
 | `src_kind` | TEXT | `chunk` \| `event` \| `external` |
-| `src_id` | UUID or TEXT | UUID для chunk/event; TEXT для external ref |
+| `src_id` | UUID or TEXT | UUID for chunk/event; TEXT for external ref |
 | `dst_kind` | TEXT | |
 | `dst_id` | UUID or TEXT | |
-| `relation_type` | TEXT | см. `GLOSSARY.md` |
+| `relation_type` | TEXT | see `GLOSSARY.md` |
 | `weight` | REAL | default 1.0 |
 | `metadata` | JSONB | nullable |
 | `created_at` | TIMESTAMPTZ | |
@@ -179,8 +183,8 @@ Raw artifacts preserve large workflow evidence without making every event row a 
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `project_id` | UUID PK | один активный на проект в v1 |
-| `payload` | JSONB | см. `MCP_SPEC.md` schema |
+| `project_id` | UUID PK | one active checkpoint per project in v1 |
+| `payload` | JSONB | see `MCP_SPEC.md` schema |
 | `updated_at` | TIMESTAMPTZ | |
 
 ### 2.8 `agent_memories` (L3 governed memory)
@@ -190,19 +194,19 @@ Structured memory records for decisions, constraints, lessons, failures, prefere
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | |
-| `developer_id` | UUID FK → developers | обязателен |
-| `project_id` | UUID FK → projects | nullable только если `scope=developer` |
-| `memory_domain` | TEXT | default `agent_work`; см. `GLOSSARY.md` |
+| `developer_id` | UUID FK → developers | required |
+| `project_id` | UUID FK → projects | nullable only if `scope=developer` |
+| `memory_domain` | TEXT | default `agent_work`; see `GLOSSARY.md` |
 | `scope` | TEXT | compatibility default: `project` \| `developer`; see `scope_kind` |
 | `scope_kind` | TEXT | nullable/additive v1 field for ADR-0040 scope kinds |
 | `scope_id` | TEXT | nullable/additive v1 field; UUID or stable external id depending on `scope_kind` |
 | `audience` | JSONB | nullable; consumer/audience hints |
-| `memory_type` | TEXT | см. `agent_memory_type` в `GLOSSARY.md` |
-| `title` | TEXT | короткое имя для recall |
-| `body` | TEXT | основная запись памяти |
+| `memory_type` | TEXT | see `agent_memory_type` in `GLOSSARY.md` |
+| `title` | TEXT | short recall name |
+| `body` | TEXT | main memory body |
 | `status` | TEXT | `candidate` \| `accepted` \| `rejected` \| `archived` \| `superseded` \| `stale` \| `needs_review` |
 | `use_policy` | TEXT | `evidence_only` \| `recall_allowed` \| `instruction_grade` \| `do_not_use` |
-| `confidence` | REAL | 0.0–1.0, nullable для imported/user confirmed |
+| `confidence` | REAL | 0.0-1.0, nullable for imported/user-confirmed records |
 | `created_by` | TEXT | `agent` \| `user` \| `system` \| `import` |
 | `accepted_by` | TEXT | nullable actor label/id when status becomes `accepted` |
 | `rejected_by` | TEXT | nullable actor label/id when status becomes `rejected` |
@@ -237,7 +241,7 @@ Structured memory records for decisions, constraints, lessons, failures, prefere
 |--------|------|-------|
 | `id` | UUID PK | |
 | `memory_id` | UUID FK → agent_memories | |
-| `action` | TEXT | см. `review_action` в `GLOSSARY.md`; `approve` may be accepted as a compatibility alias for `accept` |
+| `action` | TEXT | see `review_action` in `GLOSSARY.md`; `approve` may be accepted as a compatibility alias for `accept` |
 | `actor_kind` | TEXT | `user` \| `agent` \| `system` |
 | `actor_id` | TEXT | nullable human/client identifier |
 | `note` | TEXT | nullable |
@@ -267,7 +271,7 @@ Structured memory records for decisions, constraints, lessons, failures, prefere
 | Column | Type | Notes |
 |--------|------|-------|
 | `project_id` | UUID | |
-| `dedup_key` | TEXT | уникальный per project |
+| `dedup_key` | TEXT | unique per project |
 | `event_id` | UUID FK | |
 
 Unique index on (`project_id`, `dedup_key`).
@@ -302,6 +306,33 @@ Durable audit log for every embedding/LLM/rerank/classification call made by Rec
 | `created_at` | TIMESTAMPTZ | |
 
 Do not store full prompt/input/output text in `model_calls` by default. Store source ids or redacted references in `metadata` when needed.
+
+### 2.13.0 `erasure_requests`
+
+Explicit owner-confirmed erasure is separate from ordinary archive/reject/supersede cleanup. It removes content from active memory and derived layers while preserving at most a redacted, non-reconstructive receipt.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `erasure_id` |
+| `developer_id` | UUID FK → developers | |
+| `project_id` | UUID FK → projects | nullable for developer/environment/global scope erasure |
+| `requested_by` | TEXT | actor id/label |
+| `request_source` | TEXT | `ui` \| `cli` \| `chat` \| `mcp` \| `system` |
+| `target_selector` | JSONB | ids, scopes, search criteria, or safe references; no raw target content |
+| `reason` | TEXT | nullable owner note; must not include secrets or erased content |
+| `status` | TEXT | `pending_confirmation` \| `confirmed` \| `running` \| `completed` \| `failed` \| `cancelled` |
+| `requires_confirmation` | BOOLEAN | default true |
+| `confirmed_by` | TEXT | nullable actor id/label |
+| `confirmed_at` | TIMESTAMPTZ | nullable |
+| `executed_at` | TIMESTAMPTZ | nullable |
+| `redacted_receipt` | JSONB | counts, target kinds, hashes/ids if safe, warnings; no erased content |
+| `error_code` | TEXT | nullable |
+| `created_at` | TIMESTAMPTZ | |
+| `updated_at` | TIMESTAMPTZ | |
+
+**Invariant:** erasure must cover active and derived surfaces: `events.payload`, `chunks.text`, `embeddings.vector`, `agent_memories.title/body`, source-ref quotes, raw-artifact excerpts/content, search indexes, summaries, and context-pack caches. The exact implementation may hard-delete rows or replace content with a redaction marker when referential integrity requires a tombstone.
+
+**Invariant:** erasure requests and receipts must not preserve the content being forgotten. They exist to prove the operation happened and to suppress re-import/re-extraction of the same material when safe identifiers are available.
 
 ### 2.13.1 `paid_api_approval_requests`
 
@@ -441,10 +472,10 @@ Do not store secrets in settings audit events.
 - `projects (developer_id, parent_project_id)`
 - `projects (developer_id, memory_domain, project_kind)`
 - `chunks (project_id)` + GIN(`tsv`)
-- `chunks (developer_id, scope)` — для cross-project developer-scope запросов
-- `chunks (project_id, last_accessed_at, archived_at)` — для recallant analyze / cleanup queries
-- `embeddings USING ivfflat` или `hnsw` на `vector` (выбор по размеру данных; v1 может начать с sequential scan при малых N — только для dev)
-- `edges (project_id, src_kind, src_id)` и `(project_id, dst_kind, dst_id)`
+- `chunks (developer_id, scope)` for cross-project developer-scope queries
+- `chunks (project_id, last_accessed_at, archived_at)` for `recallant analyze` / cleanup queries
+- `embeddings USING ivfflat` or `hnsw` on `vector`; choose based on data size. v1 may start with sequential scan only for dev/small fixtures.
+- `edges (project_id, src_kind, src_id)` and `(project_id, dst_kind, dst_id)`
 - `agent_memories (project_id, status, use_policy, updated_at DESC)`
 - `agent_memories (developer_id, scope, status, use_policy)`
 - `agent_memory_source_refs (memory_id)` and `(source_kind, source_id)`
@@ -459,5 +490,5 @@ Do not store secrets in settings audit events.
 
 ## 4. Migrations policy
 
-- Все изменения схемы — SQL миграции + обновление этого файла в том же PR/commit от агента.
-- Любое изменение enums — дополнение к `GLOSSARY.md`.
+- Every schema change requires SQL migrations plus an update to this file in the same PR/commit.
+- Every enum change requires an update to `GLOSSARY.md`.

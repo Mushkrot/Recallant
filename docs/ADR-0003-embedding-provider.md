@@ -6,17 +6,17 @@ Accepted, refined by [MODEL_ROUTING.md](MODEL_ROUTING.md), [ADR-0012-local-first
 
 ## Context
 
-Recallant требует преобразования текстовых chunks в векторы для semantic search (pgvector). Нужен выбор между облачным API и локальной моделью.
+Recallant needs to convert text chunks into vectors for semantic search through pgvector. The architecture needs a choice between cloud APIs and local models.
 
-Целевой deployment: один личный Linux сервер, potentially with 24GB GPU. Требования: локальность по умолчанию, данные не покидают сервер для базового recall, приемлемое качество для coding context, возможность использовать внешний LLM только как optional enrichment path.
+Target deployment is one personal Linux server, potentially with a 24GB GPU. Requirements: local by default, data does not leave the server for basic recall, acceptable quality for coding context, and external LLMs only as optional enrichment paths.
 
 ## Decision
 
-Использовать **Ollama + local embeddings** как рекомендуемый default provider, while architecture must support cloud embeddings fallback and model routing.
+Use **Ollama + local embeddings** as the recommended default provider, while the architecture supports cloud embedding fallback and model routing.
 
 - Initial candidate model/profile default: `nomic-embed-text`
 - Initial dims for that model/profile: 768
-- Запуск: Docker контейнер Ollama на том же сервере что и Postgres
+- Runtime: use an existing configured Ollama service when available; do not start a duplicate stack by default.
 - Cloud embeddings fallback must be supported through provider adapters. Initial fallback candidates are `openai/text-embedding-3-small`, `gemini/gemini-embedding-001`, and `gemini/gemini-embedding-2`.
 - External providers remain allowed for optional enrichment/consolidation/rerank/review assistance, but basic append/search must not depend on them.
 
@@ -24,34 +24,34 @@ The local-first requirement is architectural. The exact embedding model, dimensi
 
 ## Consequences
 
-- Положительные: бесплатно, данные локально, нет зависимости от внешних API, работает offline.
-- Отрицательные: требует GPU или достаточного CPU/RAM на сервере; холодный старт при первой загрузке модели.
+- Positive: no external token bill, data stays local, no dependency on external APIs, offline-capable.
+- Negative: requires GPU or enough CPU/RAM; first model load can have cold-start latency.
 
 ## Performance expectations
 
-| Hardware | Latency per configured batch | Примечание |
+| Hardware | Latency per configured batch | Note |
 |----------|-------------------------------|------------|
-| CPU only (4 cores) | ~3–6s | Достаточно для реального времени (1-3 chunks/turn) |
-| GPU (любой, даже старый) | ~0.2–0.5s | Рекомендуется при импорте больших объёмов |
+| CPU only (4 cores) | ~3-6s | Enough for real-time 1-3 chunks/turn work |
+| GPU | ~0.2-0.5s | Recommended for large imports |
 | 24GB VRAM server GPU | workload-dependent | Candidate for nightly re-embed, consolidation, local rerank, and review assistance jobs |
 
 `nomic-embed-text` is the initial profile default because it is compact and CPU-friendly. It is not a permanent architecture invariant; if quality or deployment evidence points elsewhere, the model can change through configuration plus explicit reindex.
 
 ## Cold start
 
-При первом запуске или после рестарта Ollama-контейнера модель загружается в память (~2–5 секунд). Последующие вызовы — без задержки (модель остаётся в памяти пока контейнер запущен).
+On first call or after restarting the local provider, the model may take a few seconds to load into memory. Later calls are faster while the model remains warm.
 
-Recallant server при старте должен поддерживать policy-controlled warmup/probe of the local embedding provider so the first real call does not fail mysteriously. If the local provider is unavailable, server may route to configured cloud fallback or return `UNAVAILABLE` depending on policy.
+On startup, Recallant server should support policy-controlled warmup/probe of the local embedding provider so the first real call does not fail mysteriously. If the local provider is unavailable, server may route to configured cloud fallback or return `UNAVAILABLE` depending on policy.
 
 ## Model switching
 
-Смена `RECALLANT_EMBEDDING_MODEL` требует полного reindex всех chunks (см. `INGESTION.md`). Dims при смене модели требуют миграции pgvector-индекса. Не делать без явного `recallant reindex`.
+Changing `RECALLANT_EMBEDDING_MODEL` requires full reindex of all chunks; see `INGESTION.md`. Dimension changes require a pgvector index migration. Do not do this without explicit `recallant reindex`.
 
 ## Alternatives considered
 
-- **OpenAI text-embedding-3-small**: выше качество на общих задачах, 1536 dims, но платно и данные уходят во внешний сервис. Допустим как fallback через `RECALLANT_EMBEDDING_MODEL=openai/text-embedding-3-small`.
+- **OpenAI text-embedding-3-small**: higher quality for some general tasks and 1536 dimensions, but paid and sends data to an external service. Allowed as fallback through `RECALLANT_EMBEDDING_MODEL=openai/text-embedding-3-small`.
 - **Gemini embeddings**: useful as an alternate cloud profile, especially if Gemini is already enabled for other routes or multimodal retrieval becomes important. Must still follow the same explicit reindex rule when model/dims change.
-- **ChromaDB со встроенными embeddings**: скрывает детали, но добавляет второй сервис рядом с Postgres — отклонено в ADR-0001.
+- **ChromaDB with built-in embeddings**: hides details but adds a second storage service next to Postgres; rejected in ADR-0001.
 
 ## Configuration
 

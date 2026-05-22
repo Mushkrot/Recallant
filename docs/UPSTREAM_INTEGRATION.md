@@ -1,16 +1,18 @@
 # Upstream integration map
 
-Политика: **заимствовать проверенное**, владеть **контрактами и схемой** у себя. На текущем этапе лицензии не являются архитектурным ограничением: владелец проекта подтвердил право использовать перечисленные upstream как нужно. Отбор делаем по технической ценности, переносимости и соответствию нашим контрактам.
+Policy: **borrow proven ideas**, but own Recallant's contracts and schema. At this stage, licenses are not an architecture selection constraint: the owner confirmed that listed upstreams may be used as needed. Selection is based on technical value, portability, and fit with Recallant contracts.
 
-Текущий детальный research snapshot: [UPSTREAM_RESEARCH_2026-05-19.md](UPSTREAM_RESEARCH_2026-05-19.md).
+Current detailed research snapshot: [UPSTREAM_RESEARCH_2026-05-19.md](UPSTREAM_RESEARCH_2026-05-19.md).
 
-Важно: архитектура Recallant пока не зафиксирована окончательно. SHA ниже — research snapshots для воспроизводимого анализа; они не означают, что код нужно переносить без адаптации.
+Important: Recallant architecture is not a license to copy upstream blindly. The SHAs below are research snapshots for reproducible analysis; they do not mean code should be transplanted without adaptation.
 
-Текущая рабочая позиция: **OB1 / Open Brain — preferred architectural foundation**. Остальные проекты не отбрасываются; они остаются источниками лучших отдельных решений. См. [ADR-0004-ob1-as-preferred-foundation.md](ADR-0004-ob1-as-preferred-foundation.md).
+Current working position: **OB1 / Open Brain is the preferred architectural foundation**. Other projects remain sources for strong subsystem ideas. See [ADR-0004-ob1-as-preferred-foundation.md](ADR-0004-ob1-as-preferred-foundation.md).
 
-Journey specifically is **not** replacing OB1 as the memory foundation; it is the packaging/onboarding/workflow layer reference. См. [ADR-0008-journey-as-workflow-packaging-layer.md](ADR-0008-journey-as-workflow-packaging-layer.md).
+Journey specifically is **not** replacing OB1 as the memory foundation; it is the packaging/onboarding/workflow layer reference. See [ADR-0008-journey-as-workflow-packaging-layer.md](ADR-0008-journey-as-workflow-packaging-layer.md).
 
-Accepted synthesis: Recallant combines **OB1 governance** with **MF0 workbench/raw-capture/Memory Tree ideas**. OB1 remains the backbone, MF0 becomes a first-class subsystem donor, and Recallant owns the bridge: managed hybrid capture profiles, raw workflow evidence/artifact pointers, future-only project policy changes, Review UI, and context-budget enforcement. См. [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md).
+Accepted synthesis: Recallant combines **OB1 governance** with **MF0 workbench/raw-capture/Memory Tree ideas**. OB1 remains the backbone, MF0 becomes a first-class subsystem donor, and Recallant owns the bridge: managed hybrid capture profiles, raw workflow evidence/artifact pointers, future-only project policy changes, Review UI, and context-budget enforcement. See [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md).
+
+Before implementation, selected upstream repositories should be cloned or inspected locally when practical. The goal is to understand code, architecture, tradeoffs, mistakes, and mature patterns before writing Recallant code. Reuse must be deliberate: document what is adapted, what is rejected, and which Recallant contract it maps to.
 
 ## 0. Accepted OB1/MF0 synthesis
 
@@ -25,29 +27,29 @@ Accepted synthesis: Recallant combines **OB1 governance** with **MF0 workbench/r
 
 ## 1. NateBJones-Projects / OB1 (Open Brain)
 
-**Роль:** preferred foundation для **Postgres + vectors + remote MCP + multi-client narrative**, плюс основной референс для governed **agent memory sidecars** and trust policy.
+**Role:** preferred foundation for **Postgres + vectors + remote MCP + multi-client narrative**, plus the main reference for governed **agent memory sidecars** and trust policy.
 
 | Take as-is or adapt | Rework / replace |
 |---------------------|------------------|
-| Паттерны подключения MCP в Cursor / Claude Code из документации репозитория | Доменная схема — заменить на модель из [DATA_MODEL.md](DATA_MODEL.md) |
-| Идеи getting started, env layout | Любые обходы без строгого `project_id` |
-| Примеры миграций pgvector | Семантика «один мозг человека» → перефокус на **agent memory** (не меняет Postgres, меняет docs/tools naming) |
-| Agent Memory sidecars: provenance, review, recall traces, source refs, use policy | Прямой перенос кода без адаптации под Recallant scope/contracts |
+| MCP connection patterns for Cursor / Claude Code from repo docs | Domain schema; replace with [DATA_MODEL.md](DATA_MODEL.md) |
+| Getting started and env layout ideas | Any shortcut without strict `project_id` |
+| pgvector migration examples | "One human brain" semantics; refocus as **agent memory** |
+| Agent Memory sidecars: provenance, review, recall traces, source refs, use policy | Direct code transfer without adaptation to Recallant scope/contracts |
 | Compact structured write-back and unsafe raw-dump blocking | Treating OB1's selective capture stance as enough for Recallant raw evidence needs |
 
-**Action for implementers:** клонировать OB1, составить diff-list: какие файлы остаются, какие выбрасываются. Зафиксировать commit SHA в этом разделе после аудита:
+**Action for implementers:** clone or inspect OB1 locally, produce a diff-list of what remains useful and what is discarded, and record the implementation pin here if code is adapted:
 
 - OB1 research snapshot: `151a8d1c922ffadad08399508efe46b207a5894e`
 - OB1 implementation pin: not selected yet; record only if implementation code is adapted.
 
 ## 2. MemPalace (`MemPalace/mempalace`)
 
-**Роль:** prior art для **verbatim-first memory**, MCP memory tools, hooks/pre-compaction capture, temporal KG, local semantic workflow, backend abstraction, and repair/recovery posture.
+**Role:** prior art for **verbatim-first memory**, MCP memory tools, hooks/pre-compaction capture, temporal KG, local semantic workflow, backend abstraction, and repair/recovery posture.
 
 | Take | Skip |
 |------|------|
-| Имена/группировка tools как UX reference | Chroma-centric schema как SoT |
-| Идея hooks до compaction → маппится на **policy** вызывать `memory_append_turn` из агента или внешнего watcher | «Palace» метафоры как обязательная часть |
+| Tool names/grouping as UX reference | Chroma-centric schema as source of truth |
+| Pre-compaction hook idea, mapped to policy that calls `memory_append_turn` from agent or watcher | "Palace" metaphors as required product language |
 | Verbatim raw storage and message-level sweep as capture safety net | AAAK/compression as required Recallant layer |
 | Temporal KG add/query/invalidate/timeline pattern | Benchmark claims without reproducing on Recallant workloads |
 
@@ -57,12 +59,12 @@ Accepted synthesis: Recallant combines **OB1 governance** with **MF0 workbench/r
 
 ## 3. MF0-1984 (`PavelMuntyan/MF0-1984`)
 
-**Роль:** first-class subsystem donor для **raw capture/workbench**, графа/тем/диалогов, Memory Tree UX, keeper pipelines, project profile export/import, and server-side provider proxy patterns; не runtime core and not schema SoT.
+**Role:** first-class subsystem donor for **raw capture/workbench**, graph/topic/dialogue UX, Memory Tree, keeper pipelines, project profile export/import, and server-side provider proxy patterns; not runtime core and not schema source of truth.
 
 | Take | Skip |
 |------|------|
-| Чтение `HANDOFF.md` для идей связности | Прямой перенос SQLite схемы |
-| Визуальная идея memory tree → вдохновение для v1 Review UI and later richer workbench | Product-specific Intro/Rules/Access modes as Recallant core |
+| Read `HANDOFF.md` for continuity ideas | Direct SQLite schema transfer |
+| Memory Tree visual idea as inspiration for v1 Review UI and later richer workbench | Product-specific Intro/Rules/Access modes as Recallant core |
 | Graph hygiene commands: merge/rename/delete/move, protected hubs | Product-specific graph semantics without Recallant normalization |
 | Server-side LLM proxy pattern: browser never gets provider keys | |
 | Conversation turn/thread message mirror, rolling summaries, extracted memory items | MF0's SQLite schema as Recallant SoT |
@@ -74,19 +76,19 @@ Accepted synthesis: Recallant combines **OB1 governance** with **MF0 workbench/r
 
 ## 4. agent-bootstrap (owner prior sketch)
 
-**Роль:** ранний личный набросок владельца для той же проблемы, полезный как источник идей по **репозиторному контракту** для агентов. Это не внешний mature upstream и не реализация, которую нужно копировать.
+**Role:** the owner's earlier personal sketch for the same problem, useful for **repo contract** ideas for agents. It is not an external mature upstream and not an implementation to copy.
 
 | Take | Skip |
 |------|------|
-| Идея тонких `AGENTS.md` / `PROJECT_LOG.md` bootstrap surfaces | Любая логика памяти внутри bootstrap |
+| Thin `AGENTS.md` / `PROJECT_LOG.md` bootstrap surfaces | Any memory logic inside bootstrap |
 
-См. [REPO_CONTRACT.md](REPO_CONTRACT.md).
+See [REPO_CONTRACT.md](REPO_CONTRACT.md).
 
 **Historical sketch snapshot:** `57d9b3f`.
 
 ## 5. Journey / Journey Kits (`journeykits.ai`)
 
-**Роль:** reference для **packaging/distribution layer**: reusable agent workflows, target-aware install, kit manifests, resolver hints, preflight checks, versioning, shared context, and install/outcome/learning feedback.
+**Role:** reference for **packaging/distribution layer**: reusable agent workflows, target-aware install, kit manifests, resolver hints, preflight checks, versioning, shared context, and install/outcome/learning feedback.
 
 Journey is not a memory engine foundation. It is relevant because Recallant needs "new project -> one action -> usable agent configuration" without manually copying project rules and logs.
 
@@ -104,7 +106,7 @@ Journey is not a memory engine foundation. It is relevant because Recallant need
 
 ## 6. OpenMemory by CaviraOSS (`CaviraOSS/OpenMemory`) — optional
 
-Не входил в «три», но полезен идеями cognitive sectors, temporal facts, salience/decay/reinforcement, waypoints, SDK ergonomics, connectors, and explainable traces. README currently says the project is being rewritten; использовать как prior art, не как stable foundation.
+This was not part of the original "three", but it is useful for ideas around cognitive sectors, temporal facts, salience/decay/reinforcement, waypoints, SDK ergonomics, connectors, and explainable traces. Its README currently says the project is being rewritten; use it as prior art, not as a stable foundation.
 
 | Take | Skip |
 |------|------|

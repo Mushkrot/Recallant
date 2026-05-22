@@ -3,41 +3,41 @@
 ## 1. Server identity
 
 - **Name:** `recallant`
-- **Version:** semver в коде; при старте логируется.
+- **Version:** semver in code; logged on startup.
 
 ## 2. Configuration (environment)
 
 | Variable | Required | Meaning |
 |----------|----------|---------|
 | `RECALLANT_DATABASE_URL` | yes | Postgres connection string |
-| `RECALLANT_DEVELOPER_ID` | yes | UUID developer-владельца; задаётся один раз при `recallant init` |
-| `RECALLANT_PROJECT_ID` | yes* | UUID проекта; берётся из `.recallant/config` текущего проекта |
+| `RECALLANT_DEVELOPER_ID` | yes | Owner/developer UUID; created once during setup/init |
+| `RECALLANT_PROJECT_ID` | yes* | Project UUID; loaded from `.recallant/config` for the current project |
 | `RECALLANT_EMBEDDING_MODEL` | yes | Model id for embeddings (default: `nomic-embed-text`) |
-| `RECALLANT_EMBEDDING_DIMS` | yes | int (default: `768` для nomic-embed-text) |
-| `RECALLANT_OLLAMA_URL` | no | URL Ollama instance (default: `http://localhost:11434`) |
-| `RECALLANT_EMBED_BATCH_SIZE` | no | Размер батча для embedding (default: `32`); см. `INGESTION.md` |
-| `RECALLANT_DECAY_ENABLED` | no | Score decay по возрасту (default: `true`); см. `CLEANUP.md` |
-| `RECALLANT_DECAY_HALFLIFE_PROJECT_DAYS` | no | Half-life для project chunks (default: `90`) |
-| `RECALLANT_DECAY_HALFLIFE_DEVELOPER_DAYS` | no | Half-life для developer chunks (default: `365`) |
-| `RECALLANT_ANALYSIS_PROVIDER` | no | Провайдер LLM для recallant analyze: `ollama` (default) \| `openai` \| `none` |
-| `RECALLANT_ANALYSIS_MODEL` | no | Модель для analyze summaries (default: `llama3.2:3b`); для openai — например `gpt-4o-mini` |
+| `RECALLANT_EMBEDDING_DIMS` | yes | int (default: `768` for `nomic-embed-text`) |
+| `RECALLANT_OLLAMA_URL` | no | Existing Ollama/local-model endpoint (default: `http://localhost:11434`; discovered/configured capability, not a hard-coded service requirement) |
+| `RECALLANT_EMBED_BATCH_SIZE` | no | Embedding batch size (default: `32`); see `INGESTION.md` |
+| `RECALLANT_DECAY_ENABLED` | no | Age-based score decay (default: `true`); see `CLEANUP.md` |
+| `RECALLANT_DECAY_HALFLIFE_PROJECT_DAYS` | no | Half-life for project chunks (default: `90`) |
+| `RECALLANT_DECAY_HALFLIFE_DEVELOPER_DAYS` | no | Half-life for developer chunks (default: `365`) |
+| `RECALLANT_ANALYSIS_PROVIDER` | no | LLM provider for `recallant analyze`: `ollama` (default) \| `openai` \| `none` |
+| `RECALLANT_ANALYSIS_MODEL` | no | Model for analyze summaries (default: `llama3.2:3b`; for OpenAI, for example `gpt-4o-mini`) |
 | `RECALLANT_CLOUD_EMBEDDING_FALLBACK` | no | `disabled` \| `enabled`; default `disabled` until explicitly configured |
 | `RECALLANT_MODEL_ROUTER_MODE` | no | `local_only` \| `local_first` \| `subscription_first_api_last` \| `paid_api_allowed`; default `subscription_first_api_last` when subscription routes are configured, otherwise `local_first` |
 | `RECALLANT_SUBSCRIPTION_WORKER` | no | `disabled` \| `enabled`; enables supported OAuth/sign-in subscription worker route when configured |
 | `RECALLANT_PAID_API_DAILY_BUDGET_USD` | no | optional daily paid API budget ceiling |
 | `RECALLANT_PAID_API_MODE` | no | `disabled` \| `confirm_each` \| `auto_with_caps`; default `confirm_each` |
-| `RECALLANT_OPENAI_API_KEY` | no* | API ключ OpenAI; *обязателен если `RECALLANT_ANALYSIS_PROVIDER=openai` |
-| `RECALLANT_OPENAI_BASE_URL` | no | Base URL для OpenAI-совместимых API (default: `https://api.openai.com/v1`) |
+| `RECALLANT_OPENAI_API_KEY` | no* | OpenAI API key; required if `RECALLANT_ANALYSIS_PROVIDER=openai` |
+| `RECALLANT_OPENAI_BASE_URL` | no | Base URL for OpenAI-compatible APIs (default: `https://api.openai.com/v1`) |
 | `RECALLANT_LOG_LEVEL` | no | default `info` |
 | `RECALLANT_RETRIEVAL_PROFILE` | no | retrieval/context tuning profile; default implementation profile |
 
-\*`RECALLANT_PROJECT_ID` автоматически подставляется из `.recallant/config` при использовании `recallant` CLI. При прямом запуске MCP server — передаётся явно.
+\*`RECALLANT_PROJECT_ID` is automatically loaded from `.recallant/config` when using the `recallant` CLI. Direct MCP server startup passes it explicitly.
 
 Default values in this table are implementation/profile defaults, not architecture invariants. Model/dimension changes must follow explicit reindex/migration rules because stored embeddings depend on the chosen dimensionality; see [ADR-0015-configurable-operational-heuristics.md](ADR-0015-configurable-operational-heuristics.md).
 
 ## 3. Tools (canonical names)
 
-Имена tools **фиксированы**; клиенты и тесты завязаны на них.
+Tool names are fixed; clients and tests depend on them.
 
 ### 3.0 `memory_start_session`
 
@@ -256,7 +256,7 @@ Appends non-turn workflow evidence. This is the canonical path for tool/terminal
 
 ### 3.2 `memory_search`
 
-**Input JSON:** см. поля в `RETRIEVAL.md` (включить явно в JSON Schema реализации).
+**Input JSON:** see fields in `RETRIEVAL.md`; implementation must expose them explicitly in JSON Schema.
 
 Example standard-profile input:
 
@@ -336,25 +336,76 @@ Compatibility helper for promoting a chunk/memory into a broader governed scope.
 
 **Errors:** `NOT_FOUND`, `VALIDATION_ERROR`.
 
-Вызывается агентом (по своей инициативе или по явной просьбе пользователя).
+Called by the agent on its own initiative or after an explicit user request.
 
 ### 3.6 `memory_archive`
 
-Архивирует chunk — исключает из обычного поиска. Обратимо через `unarchive`.
+Archives a chunk and excludes it from ordinary search. This is reversible through `unarchive`.
 
 **Input:** `{ "chunk_id": "uuid", "action": "archive|unarchive" }`
 **Output:** `{ "ok": true, "chunk_id": "uuid", "archived_at": "iso8601|null" }`
 **Errors:** `NOT_FOUND`
 
+### 3.6.1 `memory_forget`
+
+Starts or executes an explicit owner-confirmed erasure workflow. This is not ordinary cleanup. It removes target content and derived material from active memory, search, embeddings, summaries, context packs, and UI surfaces.
+
+**Input JSON:**
+
+```json
+{
+  "target": {
+    "kind": "event|chunk|agent_memory|raw_artifact|search_query|scope_selector",
+    "id": "uuid-or-string|null",
+    "selector": {}
+  },
+  "reason": "string|null",
+  "dry_run": true,
+  "confirmation": {
+    "confirmed": false,
+    "confirmation_token": "string|null"
+  }
+}
+```
+
+**Output JSON:**
+
+```json
+{
+  "erasure_id": "uuid",
+  "status": "preview|pending_confirmation|running|completed|failed|cancelled",
+  "requires_confirmation": true,
+  "affected": {
+    "events": 0,
+    "chunks": 0,
+    "embeddings": 0,
+    "agent_memories": 0,
+    "raw_artifacts": 0,
+    "derived_summaries": 0
+  },
+  "warnings": [],
+  "redacted_receipt": {}
+}
+```
+
+**Policy:**
+
+- Default call is preview/dry-run and does not erase content.
+- Erasure requires explicit owner confirmation unless a future dedicated retention policy says otherwise.
+- Erasure records must not preserve the content being erased.
+- Erasure must remove or redact source content and derived material consistently.
+- If the target is broad, ambiguous, security-sensitive, or crosses project/developer scope, confirmation must show the affected scope and counts before execution.
+- Chat/UI/CLI/MCP erasure must all use the same server-side erasure path.
+
 ### 3.7 `memory_get_checkpoint`
 
 **Input:** `{}`  
-**Output:** `{ "payload": { ... }, "updated_at": "iso8601" }` — может быть null payload если не инициализировано.
+**Output:** `{ "payload": { ... }, "updated_at": "iso8601" }`; payload may be null if uninitialized.
 
 ### 3.8 `memory_set_checkpoint`
 
 **Input:** `{ "payload": { ... } }`  
-Payload schema (минимум):
+Minimum payload schema:
 
 ```json
 {
@@ -624,8 +675,8 @@ Runs durable closeout for a clearly ending/pausing session. This is heavier than
 
 ## 4. JSON Schema delivery
 
-Реализация **обязана** экспортировать JSON Schema для каждого tool (через MCP capability) — генерировать из одного источника правды в коде.
+Implementation must export JSON Schema for every tool through MCP capabilities and generate it from one source of truth in code.
 
 ## 5. Backwards compatibility
 
-Любое добавление полей — **дополнение**, не ломать существующие ключи. Удаление — только major version server + ADR.
+Adding fields must be additive and must not break existing keys. Removing fields requires a major server version plus an ADR.

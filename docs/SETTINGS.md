@@ -26,8 +26,11 @@ Settings are layered:
 | Project | One project only | capture profile, context budget, heartbeat/stale policy, model overrides, enabled clients, project paths |
 | Session/task override | Temporary | detailed capture for one session, cloud closeout for one task, long-running heartbeat status |
 | Client adapter | Target-specific wiring | Codex MCP config hints, Cursor config path, Claude Code adapter metadata |
+| Capability binding | Safe references to local/server/external capabilities | existing Ollama endpoint, shared secret file label, corporate Google Drive account binding, GitHub account binding |
 
 Secrets and bootstrap credentials are not ordinary settings. They should live in environment variables or a secret store. The database may store only safe references or non-secret metadata.
+
+Capability bindings are the bridge between environment discovery and agent behavior. They let Recallant remember that a project should use a specific Google account, GitHub account, shared secret label, or existing local service without storing raw credentials.
 
 Security/access settings should include safe metadata only:
 
@@ -37,6 +40,8 @@ Security/access settings should include safe metadata only:
 - allowed origins for future Cloudflare/subdomain mode,
 - Cloudflare mode flag and safe route labels,
 - secret references, not raw secret values.
+- port assignment/bind mode from the deployment profile, with owner-server ports registered in `/ai/PORTS.yaml`.
+- server security baseline references such as `/ai/SECURITY`, not duplicated long-form security history.
 
 Session/heartbeat settings should include configurable policy values:
 
@@ -176,6 +181,23 @@ Cost dashboard settings should include at least:
 - whether `auto_with_caps` is allowed at all on this Recallant instance.
 
 The baseline model portfolio is defined in [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md). Exact provider/model choices are settings, not hard-coded business logic.
+
+Local model settings should include at least:
+
+- configured local provider: `ollama` or `none`,
+- provider endpoint such as `RECALLANT_OLLAMA_URL`,
+- whether the endpoint is discovered, manually configured, reachable, missing, or disabled,
+- expected embedding/extraction models,
+- fallback behavior when the local provider is unavailable,
+- a flag preventing Recallant from starting duplicate local-model services by default when an existing endpoint is configured.
+
+Natural-language management settings should include at least:
+
+- enabled/disabled state for management chat,
+- default response language policy: follow the user's language by default,
+- allowed action classes for chat: read-only, propose, confirmation-gated, disabled,
+- confirmation requirements for erasure, paid API, global settings, connector/account binding, public exposure, and security-sensitive actions,
+- model route profile for intent/classification/explanation tasks.
 
 Changing a project setting affects only that project unless the UI action explicitly edits developer/global settings.
 

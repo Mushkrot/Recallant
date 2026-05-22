@@ -33,6 +33,9 @@ The owner can edit these for the selected project:
 - enabled/known client adapters,
 - project-specific import candidates visibility,
 - Cost / Paid API dashboard preferences that do not weaken approval policy.
+- natural-language management chat enablement and allowed action classes,
+- local model provider endpoint/status labels such as configured Ollama URL,
+- safe capability/secret reference labels, never raw secret values.
 
 ## Confirmation-Gated Settings
 
@@ -47,6 +50,9 @@ These changes require explicit confirmation and clear warning text:
 - enabling preview/experimental models,
 - changing model routes for quality-critical tasks,
 - changing settings that affect cost, privacy, security, or long-term agent behavior.
+- enabling chat execution for anything beyond read-only/propose mode,
+- changing connector/account bindings such as personal versus corporate Google Drive,
+- changing local model provider endpoints when it could affect privacy/cost/quality.
 
 ## Read-Only / Status-Only In V1
 
@@ -59,6 +65,7 @@ These are visible but not directly editable in the normal v1 Settings UI:
 - auth/session secret material,
 - Cloudflare secret values,
 - destructive retention/delete policies unless a future dedicated flow is designed.
+- raw contents of shared secret files such as `/opt/secure-configs/.env`.
 
 The UI may show safe status, labels, and secret references such as `configured` or `missing`, but not raw secret values.
 

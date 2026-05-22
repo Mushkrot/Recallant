@@ -31,6 +31,10 @@ Import workflow is discovery-first and import-by-confirmation. `recallant discov
 
 Memory applicability uses a multi-axis scope/audience model: `scope_kind`/`scope_id` define where a memory applies, `audience` defines who may consume it, and `use_policy` defines authority. Conflict resolution applies applicability, authority, scope specificity, and recency in that order. See [ADR-0040-memory-scope-and-audience-model.md](ADR-0040-memory-scope-and-audience-model.md) and [ADR-0041-conflict-resolution-priority.md](ADR-0041-conflict-resolution-priority.md).
 
+Recallant is a managed AI-native platform. The owner-facing management surface includes Review UI, controlled settings, Cost / Paid API, health/doctor status, cleanup, and natural-language chat. AI can propose extraction, cleanup, conflict explanations, and context plans, but deterministic server policy owns auth, storage, caps, audit, confirmation, and destructive operations. See [ADR-0042-managed-ai-native-platform-and-operations.md](ADR-0042-managed-ai-native-platform-and-operations.md) and [OPERATING_PRINCIPLES.md](OPERATING_PRINCIPLES.md).
+
+Managed memory includes explicit erasure. Archive/reject/supersede are normal governance actions; "forget forever" is a separate owner-confirmed workflow that removes target content and derived material from active recall, embeddings, summaries, context packs, search indexes, and UI surfaces.
+
 Scope boundary is explicit: v1 is the full working coding-agent memory core; broader personal-life capture, external connectors, specialized storage systems, and public packaging are future expansion paths. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 
 Implementation is not authorized yet. Architecture documentation remains the current deliverable; see [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
@@ -45,15 +49,17 @@ flowchart TB
     Windsurf
     ClaudeCode[Claude_Code]
   end
-  subgraph recallant [Agent_Memory_Platform]
+  subgraph recallant [Recallant]
     MCP[MCP_server]
     Spool[Local_capture_spool_sync]
-    UI[Review_UI_and_admin_API]
+    UI[Management_UI_chat_admin_API]
     Worker[Index_embed_worker]
+    Cleanup[Cleanup_erasure_jobs]
     Backup[Backup_restore_jobs]
     MCP --> Store[(Postgres_pgvector)]
     Spool --> MCP
     Worker --> Store
+    Cleanup --> Store
     UI --> Store
     Backup --> Store
   end
@@ -70,14 +76,16 @@ flowchart TB
 
 | Component | Responsibility |
 |-----------|----------------|
-| **MCP server** | Единственный обязательный **agent-facing** интерфейс v1: tools из `MCP_SPEC.md`, authz к `project_id`, validation, bounded responses, governed memory policy enforcement. |
-| **Postgres** | SoT: L0 events/turns/workflow evidence metadata, raw artifact pointers, L1 chunks/embeddings, L2 edges, L3 governed agent memories, checkpoints, recall traces. Миграции версионируются. |
-| **Index/embed worker** | Асинхронная обработка: chunking, embedding, rerank (если не inline), переиндексация. Может быть в процессе MCP (v1 simplest) или отдельном процессе (preferred при нагрузке). |
-| **Review UI + admin API** | Required owner-facing v1 surface for governed-memory review: inbox, rules, detail/source refs, duplicates, conflicts, and review actions. It must use the same policy path as MCP/CLI actions. It also hosts the required Cost / Paid API dashboard. Broader observability/admin dashboards remain optional. |
-| **Management UI path** | Starts as Review UI + Cost / Paid API dashboard on Recallant server; can later expand into private management surfaces for projects, capture profiles, sessions/recovery, sync/spool state, model routing, and other admin functions. |
+| **MCP server** | The required agent-facing v1 interface: tools from `MCP_SPEC.md`, authz by `project_id`, validation, bounded responses, and governed-memory policy enforcement. |
+| **Postgres** | Source of truth: L0 events/turns/workflow evidence metadata, raw artifact pointers, L1 chunks/embeddings, L2 edges, L3 governed agent memories, checkpoints, recall traces, settings, and erasure receipts. Migrations are versioned. |
+| **Index/embed worker** | Async processing: chunking, embedding, rerank when not inline, and reindex. It may run inside MCP for the simplest v1 path or as a separate process when load justifies it. |
+| **Management UI + admin API** | Required owner-facing v1 surface for governed-memory review, inbox, rules, detail/source refs, duplicates, conflicts, Cost / Paid API, settings, health, cleanup, and natural-language management chat. It must use the same policy path as MCP/CLI actions. |
+| **Management UI path** | Starts as a compact Recallant private workbench; can later expand into management surfaces for projects, capture profiles, sessions/recovery, sync/spool state, model routing, cleanup, backup status, and other admin functions. |
 | **Auth/access layer** | Private-by-default access control for Review UI/admin API/remote MCP: localhost/Tailnet bind by default, Recallant auth/session/token, secret isolation, and Cloudflare-ready routing without public exposure by default. |
 | **Settings service** | Resolves effective settings from session overrides, project settings, developer/global defaults, server settings, and built-in defaults; exposes inspected effective settings to UI/CLI/MCP policy paths. |
 | **Context Pack Builder** | Server-side startup context builder used by agents automatically after `memory_start_session`; composes checkpoint, rules, governed memories, recovery state, optional evidence, and next-fetch hints under context policy. |
+| **Cleanup / erasure jobs** | Analyze stale/duplicate/conflicting/low-value memory, propose cleanup clusters, archive/rebuild derived data, prune confirmed synced spool, and execute owner-confirmed permanent erasure with redacted receipts. |
+| **Natural-language management interpreter** | Converts owner chat requests into read-only answers, proposed action plans, or confirmation-gated actions. It may use model routing, but execution happens through normal server-side policy and audit paths. |
 | **Backup/restore jobs** | Create Postgres/raw-artifact backups, write manifests, support encrypted local target first, allow future second-server replication, and verify restore into temporary DB/location. |
 
 ## 3. Data flow (write path)
@@ -94,7 +102,7 @@ sequenceDiagram
   MCP->>DB: INSERT chunks embeddings
 ```
 
-Политика sync/async для embedding фиксируется в `AGENT_IMPLEMENTATION_GUIDE.md` фазой 1; по умолчанию v1: **sync minimal** (возврат `event_id` сразу, chunk pipeline в той же транзакции или следом с явным статусом `pending_embed`).
+Sync/async embedding policy is fixed by implementation profile. The normal v1 direction is a minimal synchronous acknowledgement path that returns `event_id` quickly while chunking/embedding happens in the same transaction or immediately after with explicit `pending_embed` status.
 
 ## 4. Data flow (read path)
 
@@ -168,10 +176,10 @@ This is the normal startup path. CLI/UI may preview the same pack, but they must
 
 ## 5. Multi-project routing
 
-- Каждый MCP session должен знать `project_id` (через env `RECALLANT_PROJECT_ID` или параметр конфигурации клиента).
-- Запрещено смешивать `project_id` в одном query без явного параметра (defense in depth).
-- `projects.parent_project_id` поддерживает nested projects/workspaces, но default search остаётся scoped to current project unless explicitly widened.
-- `memory_domain` позволяет будущую personal-memory expansion не смешивать с coding-agent memory by accident.
+- Every MCP session must know `project_id` through `.recallant/config`, environment, or client configuration.
+- Mixing `project_id` values in one query is disallowed unless an explicit widening parameter is used.
+- `projects.parent_project_id` supports nested projects/workspaces, but default search stays scoped to the current project unless explicitly widened.
+- `memory_domain` keeps future personal-memory expansion from mixing into coding-agent memory by accident.
 - Project boundaries are not secrecy boundaries for the owner's current workflow. They are relevance boundaries: cross-project search is allowed when explicitly requested, but default recall should not pollute the active project context.
 
 ## 5.1 Deployment posture
@@ -183,9 +191,11 @@ Default target is the owner's Linux server:
 - Local/self-hosted embeddings are the default path.
 - GPU can be used for background embedding, consolidation, review assistance, or local rerank.
 - External LLM providers are optional enrichment paths, not required for core append/search.
+- Existing configured local model services, especially Ollama, should be reused when available instead of duplicated. If the service is missing, disabled, remote, or configured differently, it is represented as a capability/settings difference and surfaced through `recallant doctor`.
 - Local spool/offload is part of the target deployment posture so work can continue during server/network outages and sync later.
 - Large workflow evidence can be offloaded through raw artifact pointers; v1 may use local/server filesystem storage, while object storage remains a later evolution path.
 - Review UI is hosted on the Recallant server as a private management surface. Future Cloudflare/subdomain access is allowed by architecture but requires explicit deployment/security configuration.
+- On the owner's server, deployment must consult `/ai/SECURITY` for security posture and `/ai/PORTS.yaml` for port registration before starting a service.
 
 See [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md), [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md), and [MODEL_ROUTING.md](MODEL_ROUTING.md).
 
@@ -193,9 +203,9 @@ See [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md), [STORAGE_STRATEGY.md](STOR
 
 Recallant must not solve memory loss by stuffing more files into the prompt. Startup context comes from thin repo files plus the server-built context pack, which may include checkpoint, governed memory recall, recovery warnings, and narrow evidence. See [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md).
 
-## 6. Threat boundaries
+## 6. Threat Boundaries
 
-Кратко: см. `SECURITY.md`. Архитектурно MCP server — **единая точка** для ACL по `project_id` и rate limits.
+See `SECURITY.md`. Architecturally, the MCP/admin server is the single enforcement point for ACLs by `project_id`, bounded responses, auth, confirmation gates, destructive operations, and rate limits.
 
 ## 7. Evolution paths (non-v1)
 

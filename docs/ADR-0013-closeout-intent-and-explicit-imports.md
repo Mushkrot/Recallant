@@ -22,13 +22,7 @@ Recallant recognizes closeout intent through:
 - LLM intent classification for ambiguous cases,
 - confirmation only when the action is unclear, risky, or would trigger non-routine work.
 
-Examples that should trigger closeout when context supports it:
-
-- "Закрываем сессию"
-- "Exit"
-- "Сохрани все и выходим"
-- "Я делаю паузу"
-- "Обнови документацию и заверши"
+Configured Russian and English closeout/pause phrases should trigger closeout when context supports it. The exact phrase list belongs in tests/configuration; `Exit` is one simple example.
 
 Closeout must not automatically perform broad historical imports.
 

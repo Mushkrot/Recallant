@@ -1,69 +1,73 @@
 # Observability
 
-## 1. Logging
+## 1. Logs
 
-Структурированные JSON-логи (или эквивалент) с полями:
+Use structured JSON logs or equivalent with at least these fields:
 
-- `ts`, `level`, `tool`, `project_id`, `duration_ms`, `status`, `error_code`
+- `timestamp`
+- `level`
+- `component`
+- `request_id`
+- `project_id`
+- `session_id`
+- `tool_name`
+- `duration_ms`
+- `status`
+- `error_code`
 
-**Запрещено** на `info`: полный текст turns.
+Never log full turn text, raw artifact content, provider API keys, secret env values, or erased content at `info` level. Debug logs that include sensitive payloads require an explicit debug flag and should remain disabled by default.
 
-## 2. Metrics (минимум)
+## 2. Metrics
 
-Счётчики / histograms (реализация через OpenTelemetry optional):
+Minimum counters/histograms:
 
-- `recallant_mcp_requests_total{tool,status}`
-- `recallant_mcp_latency_ms{tool}` (histogram)
-- `recallant_search_candidates_lexical`
-- `recallant_search_candidates_vector`
+- `recallant_mcp_requests_total`
+- `recallant_mcp_request_duration_ms`
+- `recallant_db_query_duration_ms`
+- `recallant_embedding_jobs_total`
+- `recallant_embedding_duration_ms`
+- `recallant_search_candidates_total`
 - `recallant_search_truncated_total`
-- `recallant_agent_memory_recall_total{status,use_policy}`
-- `recallant_recall_usage_report_total`
-- `recallant_model_calls_total{route_class,provider,model,purpose,status}`
-- `recallant_model_call_latency_ms{route_class,provider,model,purpose}` (histogram)
-- `recallant_model_call_cost_usd{route_class,provider,model,purpose}` (counter or derived metric)
-- `recallant_model_subscription_limit_total{provider,status}` where subscription-backed routes expose limit state
-- `recallant_paid_api_approval_requests_total{provider,model,purpose,status}`
-- `recallant_session_heartbeat_total{client_kind,status}`
-- `recallant_session_stale_total{client_kind}`
-- `recallant_backup_jobs_total{target,status}`
-- `recallant_restore_verify_jobs_total{target,status}`
+- `recallant_context_pack_truncated_total`
+- `recallant_model_calls_total`
+- `recallant_paid_api_approval_requests_total`
+- `recallant_paid_api_cost_estimate_usd`
+- `recallant_erasure_requests_total`
+- `recallant_erasure_failures_total`
 
-## 3. Recall traces
+Implementation may use OpenTelemetry or another equivalent metrics stack.
 
-Every governed memory recall writes a `recall_traces` row with returned memory/chunk ids and later usage report fields when available. This is product behavior, not only debug logging: it lets us inspect whether agents relied on the right durable memories.
+## 3. Tracing
 
-## 4. Runtime traces
+One trace per MCP/admin request is preferred. Useful spans:
 
-- Один trace на MCP request; spans: `db.query`, `embed`, `model_call`, `graph_expand`.
+- `db.query`
+- `embed`
+- `model_call`
+- `graph_expand`
+- `context_pack`
+- `cleanup_analyze`
+- `erasure_execute`
 
-Heartbeat calls should be visible as lightweight operational events/metrics, not as raw memory content.
+## 4. Recall traces
 
-## 4.1 Model call audit
+Recall traces are product-level observability, not just infrastructure logs. They show which chunks/governed memories were returned, used, ignored, or marked unsafe. See `DATA_MODEL.md` and `MCP_SPEC.md`.
 
-Every Recallant model/agent intelligence call writes a `model_calls` row with route class/provider/model/purpose/routing reason/cost or subscription-limit metadata/latency/status metadata. This includes local Ollama calls, active-agent routes, supported subscription-worker routes, and paid API calls. Full prompt/input/output text must not be written to ordinary logs or `model_calls` by default.
+## 5. Health checks
 
-## 4.1.1 Paid API approvals and cost view
+`recallant doctor` is the canonical diagnostic command. It should check at least:
 
-Every default-profile paid API call must have an approval record before execution. Approval records should include project, purpose, provider/model, estimated tokens/cost, route attempts already made, approval status, actor, and timestamps.
+- Postgres connection and migration version,
+- pgvector extension,
+- Recallant server reachability,
+- configured Ollama/local-model endpoint reachability and expected model availability,
+- paid API route enablement/approval mode,
+- `.recallant/config` validity,
+- local spool status,
+- backup/restore verification status when configured,
+- owner-server `/ai/PORTS.yaml` registration for planned service ports,
+- relevant `/ai/SECURITY` baseline reminder for exposure/security changes.
 
-Recallant v1 must expose a near-real-time cost dashboard in the management UI based on `model_calls`, approval records, and configured/provider cost metadata. Provider billing portals remain the billing source of truth; the Recallant dashboard is the operational guardrail.
+If the Review UI/admin API is served over HTTP, `GET /health` should exist and expose only safe status data.
 
-## 4.2 Backup and restore status
-
-Backup/restore jobs should expose operational status without leaking memory contents:
-
-- last backup timestamp/status,
-- last restore verification timestamp/status,
-- backup target label,
-- included databases/artifact roots,
-- counts/sizes/hashes,
-- errors with raw content redacted.
-
-## 5. Health
-
-- `GET /health` should exist if the Review UI/admin API is served over HTTP; otherwise health через отдельную команду CLI `recallant doctor` (фаза из implementation guide).
-
-## 6. Dashboards
-
-General metrics/observability dashboards не входят в v1 core; допускается экспорт метрик в существующий stack пользователя (ADR). This does not exclude the required v1 Review UI and required v1 paid API cost dashboard inside Recallant management UI.
+General metrics/observability dashboards are not v1 core. Exporting metrics to an existing owner stack is allowed by ADR. This does not exclude the required v1 management UI and paid API cost dashboard.

@@ -70,11 +70,24 @@ Required v1 areas:
    - context budget profile.
    - controlled editing for project-level settings, with dangerous changes confirmation-gated.
 
+8. **Natural-language management chat**
+   - ask questions about memory, projects, context packs, health, and settings,
+   - request cleanup or review actions in plain language,
+   - respond in the user's language by default,
+   - convert risky requests into confirmation-gated action plans.
+
+9. **Cleanup / Forget**
+   - stale/duplicate/conflict cleanup candidates,
+   - archive/rebuild/prune derived data actions,
+   - explicit permanent erasure dry-run, confirmation, and redacted receipt.
+
 ## Boundary
 
 v1 UI should not include a full raw memory browser, visual graph explorer, personal-life memory UI, full backup console, or broad analytics suite.
 
 It should be implemented with a layout and API shape that can grow into the later Recallant management platform without redesign.
+
+Natural-language chat does not bypass the bounded v1 UI scope. It is a safer command surface over the same Review/Settings/Cost/Cleanup APIs, not a separate uncontrolled agent with direct database access.
 
 ## Consequences
 

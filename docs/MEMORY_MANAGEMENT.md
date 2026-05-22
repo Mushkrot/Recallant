@@ -48,6 +48,8 @@ Required UI views:
 - Conflicts: contradictory records with suggested resolution.
 - Cost / Paid API: pending paid API approvals and cost visibility.
 - Project / Settings navigation: project selector/list and project settings entrypoints.
+- Natural-language management chat: ask questions, inspect memories, explain context packs, propose cleanup, and prepare confirmation-gated actions.
+- Cleanup / Forget: cleanup candidates, stale clusters, duplicate/conflict hygiene, archive/rebuild actions, and explicit permanent erasure workflow.
 - Action controls: accept/approve, reject, promote instruction, demote instruction, archive, unarchive, mark stale, edit, merge, supersede.
 
 The CLI/admin workflow remains required for scripting, automation, tests, and fallback operation.
@@ -64,15 +66,40 @@ recallant memory promote <memory_id>
 recallant memory demote <memory_id>
 recallant memory edit <memory_id>
 recallant memory archive <memory_id>
+recallant memory forget <selector-or-id> --dry-run
 recallant memory supersede <old_memory_id> --by <new_memory_id>
 recallant memory merge <memory_id...>
 recallant memory conflicts
 recallant memory duplicates
+recallant chat
 ```
 
 Names may change during implementation, but the workflow must exist. `recallant memory approve` may remain as a compatibility alias for `accept`; the stored status is `accepted`.
 
-## 2.1 First screen: Review Inbox / Command Center
+## 2.1 Natural-language management
+
+The management UI must include a conversational surface. This is the owner's primary ergonomic control layer, while structured UI controls remain available for inspection and precision.
+
+Examples:
+
+```text
+Show what the next agent needs before starting this project.
+Find stale GitHub access memories.
+Delete everything related to the wrong Google account in this project.
+Make this rule developer-wide, but only after showing the source.
+Forget this permanently.
+```
+
+Natural-language management must not bypass policy:
+
+- read-only questions can be answered directly with source links where available;
+- low-risk governance actions may produce an action plan and UI controls;
+- destructive, cost-affecting, global-scope, connector/account, security, public-exposure, or secret-related actions require explicit confirmation;
+- actions execute through the same server-side MCP/API paths used by UI and CLI.
+
+Recallant should answer the owner in the owner's language by default. Repository artifacts and API contracts remain English.
+
+## 2.2 First screen: Review Inbox / Command Center
 
 The first screen should answer one practical question: **what needs the owner's decision now?**
 
@@ -197,8 +224,11 @@ Required actions:
 | `supersede` | Newer memory/rule replaces older memory/rule. |
 | `merge` | Several duplicates become one canonical record; old records point to the canonical one. |
 | `edit` | Owner edits title/body/scope/type; original source refs and review history remain. |
+| `forget` | Explicit owner-confirmed permanent erasure of content and derived material. Not ordinary cleanup. |
 
 Every action writes an `agent_memory_review_actions` row.
+
+`forget` additionally writes an `erasure_requests` record or equivalent redacted receipt and must remove/redact derived material as defined in `DATA_MODEL.md` and `MCP_SPEC.md`.
 
 ## 6. Editing
 
@@ -326,16 +356,38 @@ Use two levels:
 
 The system should avoid making the owner review everything every day.
 
+## 10.1 Self-cleaning and erasure
+
+Recallant should continuously make memory easier to maintain without silently destroying source truth.
+
+Self-cleaning should detect:
+
+- duplicate or near-duplicate memories,
+- stale decisions,
+- superseded guidance,
+- abandoned experiments,
+- old temporary context,
+- low-value derived chunks/summaries,
+- unsynced or already-synced spool material,
+- conflicting connector/account bindings,
+- records without adequate provenance.
+
+Default automated cleanup should prefer archive, supersede, stale, rebuild, or prune derived/index data. Permanent erasure requires explicit owner confirmation unless a future dedicated retention policy is explicitly configured.
+
+When erasure runs, the owner should receive a redacted receipt with safe counts and warnings. The receipt must not contain the erased content.
+
 ## 11. Minimal v1 requirement
 
 v1 must include:
 
 - compact Review UI workbench with project navigation, inbox, rules, detail, duplicates, conflicts, Cost / Paid API, Settings shortcut, and action flows,
+- natural-language management chat for memory questions, review actions, cleanup requests, and confirmation-gated operations,
 - CLI fallback for the same management actions,
 - queryable inbox,
 - list active rules,
 - show one memory with source refs and review history,
 - promote/demote/reject/archive/supersede/edit/merge,
+- explicit permanent erasure workflow with dry-run, confirmation, and redacted receipt,
 - duplicate/conflict detection at least as a report,
 - closeout proposals for new candidate rules.
 

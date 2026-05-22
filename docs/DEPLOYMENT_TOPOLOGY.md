@@ -26,11 +26,14 @@ The owner's target environment is a personal Linux server. Access should normall
 Important assumptions:
 
 - The server already hosts public real-time applications.
+- The server has shared operational documentation and inventory: `/ai/SECURITY` for security posture and `/ai/PORTS.yaml` for port assignments.
+- The server may already provide local-model services such as Ollama; Recallant should reuse configured existing services instead of creating duplicate stacks.
 - Recallant should not increase public attack surface unnecessarily.
 - Even when the client machine is on the local network, the owner prefers connecting through Tailscale for security.
 - Recallant should be private-by-default and reachable over Tailnet/VPN rather than exposed to the public internet.
 - Recallant should still use its own auth/session/token layer inside the private network.
 - Future Cloudflare access is expected soon enough that the routing/auth design must stay Cloudflare-ready.
+- The current server layout and paths are deployment-profile facts, not universal product assumptions.
 
 ## 3. Recommended topology
 
@@ -48,9 +51,9 @@ Recallant server on Linux
   +-- Postgres / pgvector
   +-- raw artifact storage
   +-- model router
-  +-- Ollama/local GPU workers
+  +-- existing Ollama/local GPU workers when configured
   +-- background jobs
-  +-- private Review UI/admin API
+  +-- private Management UI/chat/admin API
   +-- future management platform UI
   +-- local encrypted backup target
         |
@@ -67,6 +70,18 @@ Default recommendation:
 - Keep public apps on separate reverse-proxy routes from Recallant.
 - Use explicit tokens/keys even inside Tailnet for defense in depth.
 - Require Recallant-level auth for Review UI/admin API even when reached over Tailnet or SSH tunnel.
+- Before starting any long-running service that binds a port on the owner's server, check `/ai/PORTS.yaml` and register the selected port/bind mode there.
+- Consult `/ai/SECURITY` before changing firewall, public exposure, Cloudflare, service, or secret-handling behavior.
+
+Current owner-server planning profile:
+
+```text
+Review UI/admin API: 127.0.0.1:3005
+Remote access: SSH/Tailscale only by default
+Cloudflare: disabled until explicitly configured
+```
+
+The port is an owner-server inventory choice, not a universal product invariant. Other servers may use another port through settings.
 
 Cloudflare-ready path:
 
@@ -112,3 +127,4 @@ See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) and [ADR-0028-practical-backup-restor
 - Whether Review UI is served by the same Recallant HTTP service or as a separate `recallant-review-ui` process behind the same private network boundary.
 - Exact future Cloudflare deployment mode, subdomain, Access policy, and Recallant session mechanism.
 - Exact backup tool and future second-server path.
+- Whether the production Review UI/admin API stays on port `3005` for the first owner-server deployment or is remapped before service start.

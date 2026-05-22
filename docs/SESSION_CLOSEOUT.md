@@ -10,13 +10,7 @@ Session lifecycle refinement: accepted. See [ADR-0019-universal-mcp-core-codex-a
 
 Closeout should not depend on one rigid phrase. The agent should recognize closeout intent from context.
 
-Examples:
-
-- "Закрываем сессию"
-- "Я делаю паузу"
-- "Exit"
-- "Сохрани все и выходим"
-- "Обнови документацию и заверши"
+Examples include common Russian and English closeout/pause phrases, plus explicit commands such as `Exit`. The exact phrase list is configuration/test data, not a hard-coded product invariant.
 
 Implementation should combine:
 
@@ -74,7 +68,7 @@ Show a short report only when there is something that needs attention, for examp
 - low-confidence closeout extraction,
 - server/model/provider errors.
 
-If everything succeeds and there are no warnings, the agent may respond with a minimal confirmation such as "Сессия закрыта, состояние сохранено." The detailed closeout data remains in Recallant and can be inspected later through Review UI/CLI.
+If everything succeeds and there are no warnings, the agent may respond with a minimal confirmation in the user's language. The detailed closeout data remains in Recallant and can be inspected later through Review UI/CLI.
 
 ## 5. Abnormal interruption recovery
 
