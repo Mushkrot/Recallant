@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createRecallantHttpServer } from "../apps/server/dist/index.js";
+import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
@@ -9,6 +9,38 @@ const databaseUrl =
 
 const token = `review-smoke-${randomUUID()}`;
 process.env.RECALLANT_AUTH_TOKEN = token;
+
+const defaultHttpConfig = getRecallantHttpConfig();
+if (
+  defaultHttpConfig.host !== "127.0.0.1" ||
+  defaultHttpConfig.cloudflare.mode !== "disabled" ||
+  defaultHttpConfig.recallant_auth_required !== true
+) {
+  throw new Error(`Unexpected default HTTP security config: ${JSON.stringify(defaultHttpConfig)}`);
+}
+
+const originalHost = process.env.RECALLANT_HOST;
+const originalAllowPublicBind = process.env.RECALLANT_ALLOW_PUBLIC_BIND;
+try {
+  process.env.RECALLANT_HOST = "0.0.0.0";
+  delete process.env.RECALLANT_ALLOW_PUBLIC_BIND;
+  try {
+    getRecallantHttpConfig();
+    throw new Error("Public bind was allowed without explicit opt-in");
+  } catch (error) {
+    if (!String(error).includes("VALIDATION_ERROR")) throw error;
+  }
+  process.env.RECALLANT_ALLOW_PUBLIC_BIND = "true";
+  const publicOptInConfig = getRecallantHttpConfig();
+  if (publicOptInConfig.public_bind_allowed !== true) {
+    throw new Error(`Public bind opt-in config failed: ${JSON.stringify(publicOptInConfig)}`);
+  }
+} finally {
+  if (originalHost === undefined) delete process.env.RECALLANT_HOST;
+  else process.env.RECALLANT_HOST = originalHost;
+  if (originalAllowPublicBind === undefined) delete process.env.RECALLANT_ALLOW_PUBLIC_BIND;
+  else process.env.RECALLANT_ALLOW_PUBLIC_BIND = originalAllowPublicBind;
+}
 
 const developerId = randomUUID();
 const projectId = randomUUID();
@@ -130,7 +162,9 @@ try {
   });
   const blockedSettingJson = await blockedSetting.json();
   if (blockedSetting.status !== 409 || blockedSettingJson.status !== "confirmation_required") {
-    throw new Error(`Dangerous setting was not confirmation-gated: ${JSON.stringify(blockedSettingJson)}`);
+    throw new Error(
+      `Dangerous setting was not confirmation-gated: ${JSON.stringify(blockedSettingJson)}`
+    );
   }
 
   const updatedSetting = await fetch(`${baseUrl}/api/project-setting`, {
@@ -152,10 +186,38 @@ try {
   }
 
   const audit = await db.getReviewDashboard();
-  if (!audit.settings.some((setting) => setting.key === "capture_profile" && setting.source === "project_settings")) {
+  if (
+    !audit.settings.some(
+      (setting) => setting.key === "capture_profile" && setting.source === "project_settings"
+    )
+  ) {
     throw new Error(`Updated setting is missing from dashboard: ${JSON.stringify(audit.settings)}`);
   }
+
+  process.env.RECALLANT_CLOUDFLARE_MODE = "enabled";
+  process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH = "required";
+  const cloudflareConfig = getRecallantHttpConfig();
+  if (cloudflareConfig.cloudflare.edge_auth_required !== true) {
+    throw new Error(`Cloudflare config failed: ${JSON.stringify(cloudflareConfig)}`);
+  }
+  const missingEdgeAuth = await fetch(`${baseUrl}/review`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  if (missingEdgeAuth.status !== 401) {
+    throw new Error(`Cloudflare mode allowed missing edge auth: ${missingEdgeAuth.status}`);
+  }
+  const edgeAuthorized = await fetch(`${baseUrl}/review`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "cf-access-authenticated-user-email": "owner@example.invalid"
+    }
+  });
+  if (edgeAuthorized.status !== 200) {
+    throw new Error(`Cloudflare edge-auth + Recallant token failed: ${edgeAuthorized.status}`);
+  }
 } finally {
+  delete process.env.RECALLANT_CLOUDFLARE_MODE;
+  delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
   server.close();
   await db.close();
 }

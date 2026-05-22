@@ -13,7 +13,39 @@ export function describeServerBoundary() {
     core: getRecallantCoreInfo(),
     database: recallantDatabasePackage,
     mcpServerName: recallantMcpServerName,
-    reviewUi: "private-command-center"
+    reviewUi: "private-command-center",
+    http: getRecallantHttpConfig()
+  };
+}
+
+export function getRecallantHttpConfig() {
+  const host = process.env.RECALLANT_HOST ?? "127.0.0.1";
+  const port = Number(process.env.RECALLANT_PORT ?? 3005);
+  const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
+  const publicBindRequested = host === "0.0.0.0" || host === "::";
+  if (publicBindRequested && process.env.RECALLANT_ALLOW_PUBLIC_BIND !== "true") {
+    throw new Error(
+      "VALIDATION_ERROR: public HTTP bind requires explicit RECALLANT_ALLOW_PUBLIC_BIND=true"
+    );
+  }
+  if (cloudflareMode !== "disabled" && cloudflareMode !== "enabled") {
+    throw new Error("VALIDATION_ERROR: RECALLANT_CLOUDFLARE_MODE must be disabled or enabled");
+  }
+  if (cloudflareMode === "enabled" && process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH !== "required") {
+    throw new Error(
+      "VALIDATION_ERROR: Cloudflare mode requires RECALLANT_CLOUDFLARE_EDGE_AUTH=required"
+    );
+  }
+  return {
+    host,
+    port,
+    private_by_default: !publicBindRequested,
+    public_bind_allowed: process.env.RECALLANT_ALLOW_PUBLIC_BIND === "true",
+    recallant_auth_required: true,
+    cloudflare: {
+      mode: cloudflareMode,
+      edge_auth_required: cloudflareMode === "enabled"
+    }
   };
 }
 
@@ -29,7 +61,14 @@ function authorized(request: IncomingMessage) {
   const token = process.env.RECALLANT_AUTH_TOKEN;
   if (!token) return false;
   const header = request.headers.authorization;
-  return header === `Bearer ${token}`;
+  const recallantAuth = header === `Bearer ${token}`;
+  if (!recallantAuth) return false;
+  if (process.env.RECALLANT_CLOUDFLARE_MODE !== "enabled") return true;
+  if (process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH !== "required") return false;
+  return Boolean(
+    request.headers["cf-access-authenticated-user-email"] ||
+    request.headers["cf-access-jwt-assertion"]
+  );
 }
 
 function write(
@@ -214,8 +253,7 @@ export function createRecallantHttpServer() {
 }
 
 export async function startRecallantHttpServer() {
-  const host = process.env.RECALLANT_HOST ?? "127.0.0.1";
-  const port = Number(process.env.RECALLANT_PORT ?? 3005);
+  const { host, port } = getRecallantHttpConfig();
   const server = createRecallantHttpServer();
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return server;
