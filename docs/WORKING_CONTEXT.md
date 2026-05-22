@@ -155,6 +155,7 @@ Latest implementation checkpoints:
 - Repo-contract sync slice is implemented: after `memory_set_checkpoint`, MCP attempts to update an existing `PROJECT_LOG.md` under `RECALLANT_PROJECT_PATH` with `current_status`, `current_focus`, `next_step`, and open questions while preserving other sections. Missing project logs are skipped instead of creating files in arbitrary working directories. It is verified by `scripts/smoke-repo-contract.mjs`.
 - Local spool/sync slice is implemented: `recallant spool-append` writes append-only local JSONL records for offline turns/events with stable dedup keys and raw-artifact pointers; `recallant sync-spool` supports dry-run and idempotent Postgres sync through a local sync manifest; `recallant prune-spool --synced` removes only confirmed synced local records, while unsafe pruning remains policy-blocked. It is verified by `scripts/smoke-spool.mjs`.
 - Cross-client smoke automation is implemented: `scripts/smoke-cross-client.mjs` starts two independent MCP processes with the same project/developer context, writes a fact through one client kind, and verifies another client kind can retrieve it through `memory_search`.
+- Core smoke suite aggregation is available through `npm run smoke:core`; run it after `npm run build` and a clean `make db-reset` when validating the full local DB-backed implementation surface.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 

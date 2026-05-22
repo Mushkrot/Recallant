@@ -22,6 +22,7 @@
     "format": "prettier --write \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "lint": "eslint .",
+    "smoke:core": "npm run mcp:smoke && npm run phase3:smoke && npm run phase4:smoke && npm run phase5:smoke && npm run phase6:smoke:governed && npm run phase6:smoke:graph && npm run review-ui:smoke && npm run phase7:smoke && npm run phase8:smoke:backup && npm run phase8:smoke:limits && npm run phase8:smoke:errors && npm run phase8:smoke:search-p95 && npm run phase9:smoke:archive && npm run phase9:smoke:decay && npm run phase9:smoke:cleanup && npm run repo-contract:smoke && npm run spool:smoke && npm run cross-client:smoke",
     "mcp:smoke": "node scripts/smoke-mcp.mjs",
     "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",
     "phase5:smoke": "node scripts/smoke-phase5-retrieval.mjs",

@@ -214,12 +214,16 @@ async function runInit(argv: readonly string[]) {
 
   const database = createRecallantDbFromEnv();
   if (database) {
-    await database.registerProject({
-      projectId,
-      developerId,
-      projectPath: options.projectDir,
-      captureProfile: options.captureProfile
-    });
+    try {
+      await database.registerProject({
+        projectId,
+        developerId,
+        projectPath: options.projectDir,
+        captureProfile: options.captureProfile
+      });
+    } finally {
+      await database.close();
+    }
   }
 
   process.stdout.write(
@@ -286,21 +290,25 @@ async function runLintContext(argv: readonly string[]) {
 async function runContext(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for context preview");
-  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
-  const started = await database.startSession({
-    client_kind: "codex",
-    project_path: projectDir,
-    session_label: "context-preview",
-    resume_policy: "normal"
-  });
-  const pack = await database.getContextPack({
-    session_id: String(started.session_id),
-    task_hint: parseFlag(argv, "--task-hint") ?? "context preview",
-    include_raw_evidence: "auto",
-    include_recovery: true,
-    local_spool_status: await getLocalSpoolStatus(argv)
-  });
-  process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
+  try {
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const started = await database.startSession({
+      client_kind: "codex",
+      project_path: projectDir,
+      session_label: "context-preview",
+      resume_policy: "normal"
+    });
+    const pack = await database.getContextPack({
+      session_id: String(started.session_id),
+      task_hint: parseFlag(argv, "--task-hint") ?? "context preview",
+      include_raw_evidence: "auto",
+      include_recovery: true,
+      local_spool_status: await getLocalSpoolStatus(argv)
+    });
+    process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
+  } finally {
+    await database.close();
+  }
 }
 
 async function runDoctor() {
@@ -312,6 +320,8 @@ async function runDoctor() {
       postgres = { configured: true, reachable: true };
     } catch {
       postgres = { configured: true, reachable: false };
+    } finally {
+      await database.close();
     }
   }
   process.stdout.write(
