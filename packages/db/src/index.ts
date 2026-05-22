@@ -56,6 +56,68 @@ type ProjectContext = {
   projectId: string;
 };
 
+type CaptureProfile = "light" | "standard" | "detailed" | "custom";
+
+type CapturePolicy = {
+  profile: CaptureProfile;
+  source: string;
+  turnTextMaxChars: number;
+  workflowTextMaxChars: number;
+};
+
+const capturePolicies: Record<CaptureProfile, Omit<CapturePolicy, "profile" | "source">> = {
+  light: {
+    turnTextMaxChars: 1_000,
+    workflowTextMaxChars: 500
+  },
+  standard: {
+    turnTextMaxChars: 12_000,
+    workflowTextMaxChars: 2_000
+  },
+  detailed: {
+    turnTextMaxChars: 50_000,
+    workflowTextMaxChars: 8_000
+  },
+  custom: {
+    turnTextMaxChars: 12_000,
+    workflowTextMaxChars: 2_000
+  }
+};
+
+function isCaptureProfile(value: unknown): value is CaptureProfile {
+  return value === "light" || value === "standard" || value === "detailed" || value === "custom";
+}
+
+function readCaptureProfile(value: unknown) {
+  if (isCaptureProfile(value)) return value;
+  if (value && typeof value === "object" && "profile" in value) {
+    const profile = (value as { profile?: unknown }).profile;
+    if (isCaptureProfile(profile)) return profile;
+  }
+  return null;
+}
+
+function buildCapturePolicy(profile: CaptureProfile, source: string): CapturePolicy {
+  return { profile, source, ...capturePolicies[profile] };
+}
+
+function capText(text: string | null | undefined, maxChars: number) {
+  if (text === null || text === undefined) return null;
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars);
+}
+
+function truncationMetadata(text: string | null | undefined, captured: string | null) {
+  if (text === null || text === undefined || captured === null) {
+    return { original_chars: text?.length ?? 0, captured_chars: 0, truncated: false };
+  }
+  return {
+    original_chars: text.length,
+    captured_chars: captured.length,
+    truncated: captured.length < text.length
+  };
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
   if (value && typeof value === "object") {
@@ -230,7 +292,24 @@ export class RecallantDb {
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
       if (existing) return { event_id: existing, status: "duplicate" };
 
-      const payload = { schema_version: 1, text: input.text, attachments: [], raw_artifacts: [] };
+      const policy = await this.resolveCapturePolicy(
+        client,
+        context.projectId,
+        context.developerId,
+        input.session_id
+      );
+      const capturedText = capText(input.text, policy.turnTextMaxChars) ?? "";
+      const payload = {
+        schema_version: 1,
+        text: capturedText,
+        attachments: [],
+        raw_artifacts: [],
+        capture: {
+          profile: policy.profile,
+          source: policy.source,
+          ...truncationMetadata(input.text, capturedText)
+        }
+      };
       const event = await this.insertEvent(client, {
         projectId: context.projectId,
         sessionId: input.session_id ?? null,
@@ -245,9 +324,15 @@ export class RecallantDb {
         projectId: context.projectId,
         developerId: context.developerId,
         eventId: event.id,
-        text: input.text
+        text: capturedText
       });
-      return { event_id: event.id, chunk_ids: chunkIds, status: "created" };
+      return {
+        event_id: event.id,
+        chunk_ids: chunkIds,
+        status: "created",
+        capture_profile: policy.profile,
+        captured_text_chars: capturedText.length
+      };
     });
   }
 
@@ -258,11 +343,23 @@ export class RecallantDb {
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
       if (existing) return { event_id: existing, raw_artifact_ids: [], status: "duplicate" };
 
+      const policy = await this.resolveCapturePolicy(
+        client,
+        context.projectId,
+        context.developerId,
+        input.session_id
+      );
+      const capturedText = capText(input.text, policy.workflowTextMaxChars);
       const payload = {
         schema_version: 1,
-        text: input.text ?? null,
+        text: capturedText,
         metadata: input.metadata ?? {},
-        raw_artifacts: []
+        raw_artifacts: [],
+        capture: {
+          profile: policy.profile,
+          source: policy.source,
+          ...truncationMetadata(input.text, capturedText)
+        }
       };
       const event = await this.insertEvent(client, {
         projectId: context.projectId,
@@ -307,7 +404,13 @@ export class RecallantDb {
       ]);
       await this.insertDedup(client, context.projectId, input.dedup_key, event.id);
 
-      return { event_id: event.id, raw_artifact_ids: rawArtifactIds, status: "created" };
+      return {
+        event_id: event.id,
+        raw_artifact_ids: rawArtifactIds,
+        status: "created",
+        capture_profile: policy.profile,
+        captured_text_chars: capturedText?.length ?? 0
+      };
     });
   }
 
@@ -365,6 +468,53 @@ export class RecallantDb {
     const row = result.rows[0];
     if (!row) throw new Error(`Unknown session_id: ${sessionId}`);
     return { projectId: row.project_id, developerId: row.developer_id };
+  }
+
+  private async resolveCapturePolicy(
+    client: PoolClient,
+    projectId: string,
+    developerId: string,
+    sessionId?: string | null
+  ): Promise<CapturePolicy> {
+    if (sessionId) {
+      const sessionOverride = await client.query<{ value: unknown }>(
+        `
+          SELECT value
+          FROM session_overrides
+          WHERE session_id = $1
+            AND key = 'capture_profile'
+            AND cleared_at IS NULL
+            AND (expires_at IS NULL OR expires_at > now())
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [sessionId]
+      );
+      const profile = readCaptureProfile(sessionOverride.rows[0]?.value);
+      if (profile) return buildCapturePolicy(profile, "session_overrides");
+    }
+
+    const projectSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'capture_profile'",
+      [projectId]
+    );
+    const projectProfile = readCaptureProfile(projectSetting.rows[0]?.value);
+    if (projectProfile) return buildCapturePolicy(projectProfile, "project_settings");
+
+    const developerSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM developer_settings WHERE developer_id = $1 AND key = 'capture_profile'",
+      [developerId]
+    );
+    const developerProfile = readCaptureProfile(developerSetting.rows[0]?.value);
+    if (developerProfile) return buildCapturePolicy(developerProfile, "developer_settings");
+
+    const systemSetting = await client.query<{ value: unknown }>(
+      "SELECT value FROM system_settings WHERE key = 'capture_profile'"
+    );
+    const systemProfile = readCaptureProfile(systemSetting.rows[0]?.value);
+    if (systemProfile) return buildCapturePolicy(systemProfile, "system_settings");
+
+    return buildCapturePolicy("standard", "built_in_default");
   }
 
   private async insertEvent(

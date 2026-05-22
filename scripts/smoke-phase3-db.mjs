@@ -98,6 +98,17 @@ if (duplicate.event_id !== appended.event_id || duplicate.status !== "duplicate"
   throw new Error(`Dedup failed: ${JSON.stringify({ appended, duplicate })}`);
 }
 
+const client = new pg.Client({ connectionString: databaseUrl });
+await client.connect();
+await client.query(
+  `
+    INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+    VALUES ($1, 'capture_profile', $2, 'phase3 smoke profile switch', 'smoke')
+    ON CONFLICT (project_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [projectId, JSON.stringify("detailed")]
+);
+
 await callTool(5, "memory_heartbeat", {
   session_id: started.session_id,
   status: "running_tests",
@@ -109,7 +120,7 @@ const workflowEvent = await callTool(6, "memory_append_event", {
   session_id: started.session_id,
   client_kind: "codex",
   event_kind: "terminal_output",
-  text: "bounded excerpt",
+  text: "D".repeat(9000),
   metadata: { command: "echo smoke" },
   raw_artifacts: [
     {
@@ -124,8 +135,31 @@ const workflowEvent = await callTool(6, "memory_append_event", {
     }
   ]
 });
+if (workflowEvent.capture_profile !== "detailed" || workflowEvent.captured_text_chars !== 8000) {
+  throw new Error(`Project capture profile was not applied: ${JSON.stringify(workflowEvent)}`);
+}
 
-await callTool(7, "memory_closeout", {
+await client.query(
+  `
+    INSERT INTO session_overrides (session_id, key, value, reason, created_by)
+    VALUES ($1, 'capture_profile', $2, 'phase3 smoke session override', 'smoke')
+  `,
+  [started.session_id, JSON.stringify("light")]
+);
+
+const lightEvent = await callTool(7, "memory_append_event", {
+  session_id: started.session_id,
+  client_kind: "codex",
+  event_kind: "terminal_output",
+  text: "L".repeat(9000),
+  metadata: { command: "echo light" },
+  raw_artifacts: []
+});
+if (lightEvent.capture_profile !== "light" || lightEvent.captured_text_chars !== 500) {
+  throw new Error(`Session capture override was not applied: ${JSON.stringify(lightEvent)}`);
+}
+
+await callTool(8, "memory_closeout", {
   session_id: started.session_id,
   closeout_intent: "task_complete",
   summary: "Phase 3 smoke complete.",
@@ -139,8 +173,6 @@ await callTool(7, "memory_closeout", {
   artifact_refs: []
 });
 
-const client = new pg.Client({ connectionString: databaseUrl });
-await client.connect();
 try {
   const checks = await client.query(
     `
@@ -148,17 +180,23 @@ try {
         (SELECT count(*)::int FROM events WHERE session_id = $1) AS event_count,
         (SELECT count(*)::int FROM chunks WHERE source_event_id = $2) AS chunk_count,
         (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = $3) AS raw_artifact_count,
+        (SELECT payload->'capture'->>'profile' FROM events WHERE id = $2) AS turn_profile,
+        (SELECT payload->'capture'->>'profile' FROM events WHERE id = $3) AS workflow_profile,
+        (SELECT length(payload->>'text') FROM events WHERE id = $4) AS light_text_length,
         (SELECT status FROM sessions WHERE id = $1) AS session_status,
         (SELECT last_heartbeat_at IS NOT NULL FROM sessions WHERE id = $1) AS has_heartbeat,
-        (SELECT count(*)::int FROM checkpoints WHERE project_id = $4) AS checkpoint_count
+        (SELECT count(*)::int FROM checkpoints WHERE project_id = $5) AS checkpoint_count
     `,
-    [started.session_id, appended.event_id, workflowEvent.event_id, projectId]
+    [started.session_id, appended.event_id, workflowEvent.event_id, lightEvent.event_id, projectId]
   );
   const row = checks.rows[0];
   if (
-    row.event_count !== 2 ||
+    row.event_count !== 3 ||
     row.chunk_count < 1 ||
     row.raw_artifact_count !== 1 ||
+    row.turn_profile !== "standard" ||
+    row.workflow_profile !== "detailed" ||
+    row.light_text_length !== 500 ||
     row.session_status !== "closed" ||
     row.has_heartbeat !== true ||
     row.checkpoint_count !== 1
