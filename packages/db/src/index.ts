@@ -123,6 +123,39 @@ export type ReportRecallUsageInput = {
   note?: string | null;
 };
 
+export type LinkMemoryInput = {
+  src_kind: string;
+  src_id: string;
+  dst_kind: string;
+  dst_id: string;
+  relation_type: string;
+  weight?: number;
+  metadata?: JsonObject;
+};
+
+export type ContextPackInput = {
+  session_id: string;
+  task_hint?: string | null;
+  project_id?: string | null;
+  max_chars_total?: number;
+  include_raw_evidence?: "auto" | "never" | "always";
+  include_recovery?: boolean;
+};
+
+export type ForgetInput = {
+  target: {
+    kind: string;
+    id?: string | null;
+    selector?: JsonObject;
+  };
+  reason?: string | null;
+  dry_run?: boolean;
+  confirmation?: {
+    confirmed?: boolean;
+    confirmation_token?: string | null;
+  };
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -500,6 +533,8 @@ export class RecallantDb {
     scope?: string;
     scope_kind?: string | null;
     audience?: string | null;
+    graph_expand?: boolean;
+    graph_budget_nodes?: number;
   }) {
     const context = input.session_id
       ? await this.contextForSession(input.session_id)
@@ -626,6 +661,17 @@ export class RecallantDb {
       .sort((left, right) => right.score - left.score)
       .slice(0, topK);
 
+    if (input.graph_expand && rows.length > 0) {
+      const graphRows = await this.expandGraphRows({
+        projectId: context.projectId,
+        seedChunkIds: rows.map((row) => row.id),
+        budget: input.graph_budget_nodes ?? 8,
+        existingChunkIds: new Set(rows.map((row) => row.id))
+      });
+      rows.push(...graphRows);
+      rows.sort((left, right) => right.score - left.score);
+    }
+
     let usedChars = 0;
     const maxChars = input.max_chars_total ?? 12_000;
     const hits = [];
@@ -659,6 +705,182 @@ export class RecallantDb {
       hits,
       truncated: rows.length > hits.length,
       route: { provider: route.provider, model: route.model, dims: route.dims }
+    };
+  }
+
+  async fetchChunk(chunkId: string, maxChars = 16_000) {
+    const result = await this.pool.query(
+      `
+        UPDATE chunks
+        SET last_accessed_at = now(), access_count = access_count + 1
+        WHERE id = $1
+        RETURNING id AS chunk_id, text, source_event_id, scope, scope_kind, scope_id, audience,
+                  embed_status, embed_model, archived_at, created_at
+      `,
+      [chunkId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error(`Unknown chunk_id: ${chunkId}`);
+    return {
+      ...row,
+      text: String(row.text ?? "").slice(0, maxChars),
+      truncated: String(row.text ?? "").length > maxChars
+    };
+  }
+
+  async linkMemory(input: LinkMemoryInput) {
+    const context = await this.ensureProject();
+    const result = await this.pool.query<{ id: string }>(
+      `
+        INSERT INTO edges (project_id, src_kind, src_id, dst_kind, dst_id, relation_type, weight, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+      `,
+      [
+        context.projectId,
+        input.src_kind,
+        input.src_id,
+        input.dst_kind,
+        input.dst_id,
+        input.relation_type,
+        input.weight ?? 1,
+        JSON.stringify(input.metadata ?? {})
+      ]
+    );
+    return { edge_id: result.rows[0]?.id };
+  }
+
+  async getContextPack(input: ContextPackInput) {
+    const context = await this.contextForSession(input.session_id);
+    const checkpoint = await this.getCheckpoint(context.projectId);
+    const recovery = await this.pool.query(
+      `
+        SELECT id AS session_id, last_seen_at, status
+        FROM sessions
+        WHERE project_id = $1 AND status = 'interrupted'
+        ORDER BY last_seen_at DESC
+        LIMIT 3
+      `,
+      [context.projectId]
+    );
+    const rules = await this.pool.query(
+      `
+        SELECT id AS memory_id, title, body, scope, scope_kind, scope_id, use_policy
+        FROM agent_memories
+        WHERE developer_id = $1 AND (project_id = $2 OR scope = 'developer')
+          AND status = 'accepted' AND use_policy = 'instruction_grade'
+        ORDER BY updated_at DESC
+        LIMIT 8
+      `,
+      [context.developerId, context.projectId]
+    );
+    const working =
+      input.task_hint && input.task_hint.trim()
+        ? await this.recallAgentMemories({
+            query: input.task_hint,
+            top_k: 8,
+            max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 2)
+          })
+        : { memories: [], trace_id: null };
+    const evidence =
+      input.include_raw_evidence === "always" && input.task_hint
+        ? await this.search({
+            session_id: input.session_id,
+            query: input.task_hint,
+            mode: "hybrid",
+            top_k: 4,
+            max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 3)
+          })
+        : { hits: [] };
+    return {
+      context_pack_id: randomUUID(),
+      project_id: context.projectId,
+      session_id: input.session_id,
+      profile: "compact",
+      sections: {
+        checkpoint,
+        recovery: input.include_recovery === false ? [] : recovery.rows,
+        binding_rules: rules.rows,
+        working_memories: working.memories,
+        operational_bindings: [],
+        evidence_excerpts: evidence.hits,
+        suggested_next_fetches: []
+      },
+      trace_id: "trace_id" in working ? working.trace_id : null,
+      truncated: false,
+      budget: { max_chars_total: input.max_chars_total ?? 12_000 }
+    };
+  }
+
+  async forget(input: ForgetInput) {
+    const targetId = input.target.id;
+    if (!targetId) throw new Error("VALIDATION_ERROR: forget target id is required");
+    const affected = await this.countForgetTarget(input.target.kind, targetId);
+    if (input.dry_run !== false || input.confirmation?.confirmed !== true) {
+      return {
+        erasure_id: randomUUID(),
+        status: "pending_confirmation",
+        requires_confirmation: true,
+        affected,
+        warnings: ["Dry run only. No Recallant-controlled content was erased."],
+        redacted_receipt: {}
+      };
+    }
+    const erasureId = randomUUID();
+    await withTransaction(this.pool, async (client) => {
+      if (input.target.kind === "chunk") {
+        await client.query("DELETE FROM embeddings WHERE chunk_id = $1", [targetId]);
+        await client.query(
+          "UPDATE chunks SET text = '[REDACTED]', archived_at = now() WHERE id = $1",
+          [targetId]
+        );
+      } else if (input.target.kind === "event") {
+        await client.query(
+          "DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE source_event_id = $1)",
+          [targetId]
+        );
+        await client.query(
+          "UPDATE chunks SET text = '[REDACTED]', archived_at = now() WHERE source_event_id = $1",
+          [targetId]
+        );
+        await client.query("UPDATE events SET payload = $2 WHERE id = $1", [
+          targetId,
+          JSON.stringify({ redacted: true, erasure_id: erasureId })
+        ]);
+      } else if (input.target.kind === "agent_memory") {
+        await client.query(
+          "UPDATE agent_memories SET title = '[REDACTED]', body = '[REDACTED]', status = 'archived', use_policy = 'do_not_use' WHERE id = $1",
+          [targetId]
+        );
+        await client.query(
+          "UPDATE agent_memory_source_refs SET quote = NULL WHERE memory_id = $1",
+          [targetId]
+        );
+      }
+      await client.query(
+        `
+          INSERT INTO erasure_requests (
+            id, developer_id, project_id, requested_by, request_source, target_selector,
+            reason, status, requires_confirmation, confirmed_by, confirmed_at, executed_at, redacted_receipt
+          )
+          VALUES ($1, coalesce((SELECT developer_id FROM projects LIMIT 1), gen_random_uuid()), NULL,
+                  'owner', 'mcp', $2, $3, 'completed', true, 'owner', now(), now(), $4)
+        `,
+        [
+          erasureId,
+          JSON.stringify({ kind: input.target.kind, id: targetId }),
+          input.reason ?? null,
+          JSON.stringify({ affected, content_redacted: true })
+        ]
+      );
+    });
+    return {
+      erasure_id: erasureId,
+      status: "completed",
+      requires_confirmation: false,
+      affected,
+      warnings: [],
+      redacted_receipt: { affected, content_redacted: true }
     };
   }
 
@@ -1100,6 +1322,113 @@ export class RecallantDb {
       );
     }
     return { whereSql: clauses.join(" AND "), params };
+  }
+
+  private async expandGraphRows(input: {
+    projectId: string;
+    seedChunkIds: string[];
+    budget: number;
+    existingChunkIds: Set<string>;
+  }) {
+    if (input.budget <= 0) return [];
+    const result = await this.pool.query<{
+      id: string;
+      text: string;
+      source_event_id: string;
+      occurred_at: string;
+      weight: number;
+    }>(
+      `
+        WITH neighbors AS (
+          SELECT
+            CASE
+              WHEN e.src_kind = 'chunk' AND e.src_id = ANY($2::text[]) THEN e.dst_id
+              WHEN e.dst_kind = 'chunk' AND e.dst_id = ANY($2::text[]) THEN e.src_id
+            END AS chunk_id,
+            max(e.weight) AS weight
+          FROM edges e
+          WHERE e.project_id = $1
+            AND (
+              (e.src_kind = 'chunk' AND e.src_id = ANY($2::text[]))
+              OR (e.dst_kind = 'chunk' AND e.dst_id = ANY($2::text[]))
+            )
+          GROUP BY chunk_id
+        )
+        SELECT c.id, c.text, c.source_event_id, ev.occurred_at, n.weight
+        FROM neighbors n
+        JOIN chunks c ON c.id::text = n.chunk_id
+        JOIN events ev ON ev.id = c.source_event_id
+        WHERE c.archived_at IS NULL
+        LIMIT $3
+      `,
+      [input.projectId, input.seedChunkIds, input.budget]
+    );
+    return result.rows
+      .filter((row) => !input.existingChunkIds.has(row.id))
+      .map((row) => ({
+        id: row.id,
+        text: row.text,
+        source_event_id: row.source_event_id,
+        occurred_at: row.occurred_at,
+        score: Number(row.weight) * 0.2,
+        path: "graph"
+      }));
+  }
+
+  private async countForgetTarget(kind: string, targetId: string) {
+    if (kind === "event") {
+      const result = await this.pool.query(
+        `
+          SELECT
+            1 AS events,
+            (SELECT count(*)::int FROM chunks WHERE source_event_id = $1) AS chunks,
+            (SELECT count(*)::int FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE source_event_id = $1)) AS embeddings,
+            0 AS agent_memories,
+            (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = $1) AS raw_artifacts,
+            0 AS derived_summaries
+        `,
+        [targetId]
+      );
+      return result.rows[0];
+    }
+    if (kind === "chunk") {
+      const result = await this.pool.query(
+        `
+          SELECT
+            0 AS events,
+            (SELECT count(*)::int FROM chunks WHERE id = $1) AS chunks,
+            (SELECT count(*)::int FROM embeddings WHERE chunk_id = $1) AS embeddings,
+            0 AS agent_memories,
+            0 AS raw_artifacts,
+            0 AS derived_summaries
+        `,
+        [targetId]
+      );
+      return result.rows[0];
+    }
+    if (kind === "agent_memory") {
+      const result = await this.pool.query(
+        `
+          SELECT
+            0 AS events,
+            0 AS chunks,
+            0 AS embeddings,
+            (SELECT count(*)::int FROM agent_memories WHERE id = $1) AS agent_memories,
+            0 AS raw_artifacts,
+            0 AS derived_summaries
+        `,
+        [targetId]
+      );
+      return result.rows[0];
+    }
+    return {
+      events: 0,
+      chunks: 0,
+      embeddings: 0,
+      agent_memories: 0,
+      raw_artifacts: 0,
+      derived_summaries: 0
+    };
   }
 
   async setCheckpoint(projectId: string | null | undefined, payload: JsonObject) {

@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   createRecallantDbFromEnv,
+  type ContextPackInput,
   type CreateAgentMemoryInput,
+  type ForgetInput,
   type AppendEventInput,
   type AppendTurnInput,
   type JsonObject,
+  type LinkMemoryInput,
   type ListAgentMemoriesInput,
   type RecallAgentMemoriesInput,
   type ReportRecallUsageInput,
@@ -158,8 +161,10 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       include_raw_evidence: z.enum(["auto", "never", "always"]).default("auto"),
       include_recovery: z.boolean().default(true)
     }),
-    handler: (args) =>
-      stubResponse("memory_get_context_pack", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.getContextPack(args as ContextPackInput);
+      return stubResponse("memory_get_context_pack", {
         context_pack_id: randomUUID(),
         project_id: args.project_id ?? process.env.RECALLANT_PROJECT_ID ?? randomUUID(),
         session_id: args.session_id,
@@ -179,7 +184,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           max_chars_total: args.max_chars_total,
           used_chars_estimate: 0
         }
-      })
+      });
+    }
   },
   {
     name: "memory_append_turn",
@@ -285,7 +291,9 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           session_id: args.session_id as string | null | undefined,
           scope: args.scope as string | undefined,
           scope_kind: args.scope_kind as string | null | undefined,
-          audience: args.audience as string | null | undefined
+          audience: args.audience as string | null | undefined,
+          graph_expand: args.graph_expand as boolean | undefined,
+          graph_budget_nodes: args.graph_budget_nodes as number | undefined
         });
       }
       return stubResponse("memory_search", { hits: [], truncated: false });
@@ -299,13 +307,18 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       chunk_id: uuidString,
       max_chars: z.number().int().positive().default(16_000)
     }),
-    handler: (args) =>
-      stubResponse("memory_fetch_chunk", {
+    handler: async (args) => {
+      const database = db();
+      if (database) {
+        return database.fetchChunk(args.chunk_id as string, args.max_chars as number | undefined);
+      }
+      return stubResponse("memory_fetch_chunk", {
         chunk_id: args.chunk_id,
         text: "",
         source_event_id: null,
         metadata: {}
-      })
+      });
+    }
   },
   {
     name: "memory_link",
@@ -320,7 +333,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       weight: z.number().default(1.0),
       metadata
     }),
-    handler: () => stubResponse("memory_link", { edge_id: randomUUID() })
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.linkMemory(args as LinkMemoryInput);
+      return stubResponse("memory_link", { edge_id: randomUUID() });
+    }
   },
   {
     name: "memory_promote",
@@ -379,8 +396,10 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         })
         .default({ confirmed: false })
     }),
-    handler: () =>
-      stubResponse("memory_forget", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.forget(args as ForgetInput);
+      return stubResponse("memory_forget", {
         erasure_id: randomUUID(),
         status: "preview",
         requires_confirmation: true,
@@ -394,7 +413,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         },
         warnings: ["MCP skeleton stub: erasure preview is not database-backed yet."],
         redacted_receipt: {}
-      })
+      });
+    }
   },
   {
     name: "memory_get_checkpoint",
