@@ -277,7 +277,10 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           mode: args.mode as string | undefined,
           top_k: args.top_k as number | undefined,
           max_chars_total: args.max_chars_total as number | undefined,
-          session_id: args.session_id as string | null | undefined
+          session_id: args.session_id as string | null | undefined,
+          scope: args.scope as string | undefined,
+          scope_kind: args.scope_kind as string | null | undefined,
+          audience: args.audience as string | null | undefined
         });
       }
       return stubResponse("memory_search", { hits: [], truncated: false });

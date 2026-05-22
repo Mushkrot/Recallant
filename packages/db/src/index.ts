@@ -133,7 +133,16 @@ function deterministicEmbedding(text: string, dims: number) {
   const values = Array.from({ length: dims }, () => 0);
   const tokens = text.toLowerCase().match(/[a-z0-9_]+/g) ?? [text.toLowerCase()];
   for (const token of tokens) {
-    const hash = createHash("sha256").update(token).digest();
+    const normalizedToken =
+      {
+        connectivity: "network",
+        delay: "latency",
+        fruit: "banana",
+        outage: "network",
+        slow: "latency",
+        slowness: "latency"
+      }[token] ?? token;
+    const hash = createHash("sha256").update(normalizedToken).digest();
     const index = hash.readUInt32BE(0) % dims;
     const sign = hash.readUInt32BE(4) % 2 === 0 ? 1 : -1;
     values[index] = (values[index] ?? 0) + sign;
@@ -404,23 +413,43 @@ export class RecallantDb {
     top_k?: number;
     max_chars_total?: number;
     session_id?: string | null;
+    scope?: string;
+    scope_kind?: string | null;
+    audience?: string | null;
   }) {
-    const context = await this.ensureProject();
+    const context = input.session_id
+      ? await this.contextForSession(input.session_id)
+      : await this.ensureProject();
     const route = await this.resolveEmbeddingRoute(
       this.pool,
       context.projectId,
       context.developerId
     );
     const mode = input.mode ?? "hybrid";
-    let rows: Array<{
-      id: string;
-      text: string;
-      source_event_id: string;
-      score: number;
-      path: string;
-    }> = [];
+    const topK = input.top_k ?? 8;
+    const candidateLimit = Math.max(topK * 2, 8);
+    const filter = this.buildSearchFilter({
+      projectId: context.projectId,
+      developerId: context.developerId,
+      scope: input.scope ?? "project",
+      scopeKind: input.scope_kind ?? null,
+      audience: input.audience ?? null,
+      startIndex: 2
+    });
+    const candidates = new Map<
+      string,
+      {
+        id: string;
+        text: string;
+        source_event_id: string;
+        occurred_at: string;
+        vectorScore: number;
+        lexicalScore: number;
+        paths: Set<string>;
+      }
+    >();
 
-    if (mode !== "lexical_only" && route.provider === "deterministic") {
+    if ((mode === "hybrid" || mode === "vector_only") && route.provider === "deterministic") {
       const queryVector = deterministicEmbedding(input.query, route.dims);
       await this.recordModelCall(this.pool, {
         developerId: context.developerId,
@@ -435,51 +464,83 @@ export class RecallantDb {
         id: string;
         text: string;
         source_event_id: string;
+        occurred_at: string;
         distance: number;
       }>(
         `
-          SELECT c.id, c.text, c.source_event_id, e.vector <=> $1::vector AS distance
+          SELECT c.id, c.text, c.source_event_id, ev.occurred_at, e.vector <=> $1::vector AS distance
           FROM chunks c
+          JOIN events ev ON ev.id = c.source_event_id
           JOIN embeddings e ON e.chunk_id = c.id
-          WHERE c.project_id = $2 AND c.archived_at IS NULL
+          WHERE ${filter.whereSql}
           ORDER BY e.vector <=> $1::vector
-          LIMIT $3
+          LIMIT $${filter.params.length + 2}::int
         `,
-        [vectorLiteral(queryVector), context.projectId, input.top_k ?? 8]
+        [vectorLiteral(queryVector), ...filter.params, candidateLimit]
       );
-      rows = vectorRows.rows.map((row) => ({
-        id: row.id,
-        text: row.text,
-        source_event_id: row.source_event_id,
-        score: 1 - Number(row.distance),
-        path: "vector"
-      }));
-    } else {
+      for (const row of vectorRows.rows) {
+        candidates.set(row.id, {
+          id: row.id,
+          text: row.text,
+          source_event_id: row.source_event_id,
+          occurred_at: row.occurred_at,
+          vectorScore: Math.max(0, 1 - Number(row.distance)),
+          lexicalScore: 0,
+          paths: new Set(["vector"])
+        });
+      }
+    }
+
+    if (mode === "hybrid" || mode === "lexical_only" || candidates.size === 0) {
       const lexicalRows = await this.pool.query<{
         id: string;
         text: string;
         source_event_id: string;
+        occurred_at: string;
         rank: number;
       }>(
         `
-          SELECT id, text, source_event_id, ts_rank(tsv, plainto_tsquery('simple', $1)) AS rank
-          FROM chunks
-          WHERE project_id = $2
-            AND archived_at IS NULL
-            AND tsv @@ plainto_tsquery('simple', $1)
-          ORDER BY rank DESC, created_at DESC
-          LIMIT $3
+          SELECT c.id, c.text, c.source_event_id, ev.occurred_at,
+                 ts_rank_cd(c.tsv, plainto_tsquery('simple', $1)) AS rank
+          FROM chunks c
+          JOIN events ev ON ev.id = c.source_event_id
+          WHERE ${filter.whereSql}
+            AND c.tsv @@ plainto_tsquery('simple', $1)
+          ORDER BY rank DESC, c.created_at DESC
+          LIMIT $${filter.params.length + 2}::int
         `,
-        [input.query, context.projectId, input.top_k ?? 8]
+        [input.query, ...filter.params, candidateLimit]
       );
-      rows = lexicalRows.rows.map((row) => ({
-        id: row.id,
-        text: row.text,
-        source_event_id: row.source_event_id,
-        score: Number(row.rank),
-        path: "lexical"
-      }));
+      for (const row of lexicalRows.rows) {
+        const existing = candidates.get(row.id);
+        if (existing) {
+          existing.lexicalScore = Number(row.rank);
+          existing.paths.add("lexical");
+        } else {
+          candidates.set(row.id, {
+            id: row.id,
+            text: row.text,
+            source_event_id: row.source_event_id,
+            occurred_at: row.occurred_at,
+            vectorScore: 0,
+            lexicalScore: Number(row.rank),
+            paths: new Set(["lexical"])
+          });
+        }
+      }
     }
+
+    const rows = Array.from(candidates.values())
+      .map((candidate) => ({
+        id: candidate.id,
+        text: candidate.text,
+        source_event_id: candidate.source_event_id,
+        occurred_at: candidate.occurred_at,
+        score: candidate.vectorScore * 0.65 + candidate.lexicalScore * 0.35,
+        path: Array.from(candidate.paths).join("+")
+      }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, topK);
 
     let usedChars = 0;
     const maxChars = input.max_chars_total ?? 12_000;
@@ -494,8 +555,21 @@ export class RecallantDb {
         source_event_id: row.source_event_id,
         score: row.score,
         path: row.path,
+        why: row.path,
+        occurred_at: row.occurred_at,
+        text_excerpt: excerpt,
         excerpt
       });
+    }
+    if (hits.length > 0) {
+      await this.pool.query(
+        `
+          UPDATE chunks
+          SET last_accessed_at = now(), access_count = access_count + 1
+          WHERE id = ANY($1::uuid[])
+        `,
+        [hits.map((hit) => hit.chunk_id)]
+      );
     }
     return {
       hits,
@@ -580,6 +654,41 @@ export class RecallantDb {
         captured_text_chars: capturedText?.length ?? 0
       };
     });
+  }
+
+  private buildSearchFilter(input: {
+    projectId: string;
+    developerId: string;
+    scope: string;
+    scopeKind: string | null;
+    audience: string | null;
+    startIndex: number;
+  }) {
+    const clauses = [`c.developer_id = $${input.startIndex}::uuid`, "c.archived_at IS NULL"];
+    const params: unknown[] = [input.developerId];
+    if (input.scope === "developer") {
+      clauses.push("c.scope = 'developer'");
+    } else if (input.scope === "project") {
+      params.push(input.projectId);
+      clauses.push(
+        `(c.project_id = $${input.startIndex + params.length - 1}::uuid OR c.scope = 'developer')`
+      );
+    }
+    if (input.scopeKind) {
+      params.push(input.scopeKind);
+      clauses.push(`c.scope_kind = $${input.startIndex + params.length - 1}`);
+    }
+    if (input.audience) {
+      params.push(input.audience);
+      clauses.push(
+        `EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(coalesce(c.audience, '[]'::jsonb)) AS audience_item
+          WHERE audience_item->>'kind' = $${input.startIndex + params.length - 1}
+        )`
+      );
+    }
+    return { whereSql: clauses.join(" AND "), params };
   }
 
   async setCheckpoint(projectId: string | null | undefined, payload: JsonObject) {
