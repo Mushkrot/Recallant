@@ -402,6 +402,59 @@ export class RecallantDb {
     });
   }
 
+  async registerProject(input: {
+    projectId: string;
+    developerId?: string;
+    projectPath: string;
+    name?: string;
+    captureProfile?: CaptureProfile;
+  }) {
+    const developerId = input.developerId ?? this.config.developerId ?? randomUUID();
+    const projectName =
+      input.name ?? input.projectPath.split("/").filter(Boolean).at(-1) ?? "recallant-project";
+    await withTransaction(this.pool, async (client) => {
+      await client.query(
+        `
+          INSERT INTO developers (id, name)
+          VALUES ($1, $2)
+          ON CONFLICT (id) DO UPDATE SET updated_at = now()
+        `,
+        [developerId, "Recallant Developer"]
+      );
+      await client.query(
+        `
+          INSERT INTO projects (id, developer_id, name, primary_path)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (id) DO UPDATE
+          SET name = EXCLUDED.name,
+              primary_path = EXCLUDED.primary_path,
+              updated_at = now()
+        `,
+        [input.projectId, developerId, projectName, input.projectPath]
+      );
+      await this.ensureDefaultModelSettings(client);
+      await client.query(
+        `
+          INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+          VALUES ($1, 'capture_profile', $2, 'recallant init', 'recallant-cli')
+          ON CONFLICT (project_id, key) DO UPDATE
+          SET value = EXCLUDED.value, reason = EXCLUDED.reason, updated_by = EXCLUDED.updated_by, updated_at = now()
+        `,
+        [input.projectId, JSON.stringify(input.captureProfile ?? "standard")]
+      );
+      await client.query(
+        `
+          INSERT INTO settings_audit_events (
+            scope_kind, scope_id, key, old_value, new_value, actor_kind, actor_id, reason
+          )
+          VALUES ('project', $1, 'capture_profile', NULL, $2, 'system', 'recallant-cli', 'recallant init')
+        `,
+        [input.projectId, JSON.stringify(input.captureProfile ?? "standard")]
+      );
+    });
+    return { developerId, projectId: input.projectId };
+  }
+
   async startSession(input: StartSessionInput) {
     const project = await this.ensureProject(input.project_path);
     return withTransaction(this.pool, async (client) => {
