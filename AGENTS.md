@@ -4,7 +4,9 @@
 
 Work autonomously. The owner has authorized agents to follow the documented implementation plan, make ordinary technical decisions, verify changes, and create scoped commits at logical rollback checkpoints without asking for separate permission each time.
 
-Stop only when the next step genuinely requires the owner: security/public exposure, secrets, paid API use, destructive operations, server/firewall/service changes, or a real contradiction in the specs.
+Do not stop just to report progress, summarize completed work, ask whether to continue, or wait for approval on an ordinary implementation step. Progress reports and commits are checkpoints, not stopping points.
+
+Stop only when the next step genuinely requires the owner: security/public exposure, secrets, paid API use, destructive operations, server/firewall/service changes, or a real contradiction in the specs. If none of those blockers exists, continue to the next documented implementation step.
 
 ## Canonical Context
 

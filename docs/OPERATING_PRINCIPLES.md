@@ -130,7 +130,8 @@ Agents working on Recallant should:
 - continue autonomously through the next reasonable implementation step when the task graph and specs are clear;
 - make conservative technical decisions from the docs and upstream review when no owner-only decision is required;
 - stop only for genuinely owner-dependent choices, security/public-exposure changes, destructive operations, paid API use, secrets, server/firewall/service changes, or contradictions in the specification;
-- write concise progress reports at meaningful checkpoints rather than stopping just to announce routine progress.
+- treat progress reports and commits as checkpoints, not as stop conditions;
+- do not stop just to summarize completed work, ask whether to continue, or wait for approval on ordinary implementation, verification, documentation updates, and scoped commits.
 
 This autonomy does not weaken safety gates. It removes unnecessary confirmation prompts for ordinary implementation, verification, documentation updates, and scoped commits.
 
