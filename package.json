@@ -29,6 +29,7 @@
     "phase6:smoke:graph": "node scripts/smoke-phase6-graph-context-forget.mjs",
     "review-ui:smoke": "node scripts/smoke-review-ui.mjs",
     "phase8:smoke:backup": "node scripts/smoke-phase8-backup.mjs",
+    "phase8:smoke:errors": "node scripts/smoke-phase8-errors-rate-limit.mjs",
     "phase8:smoke:limits": "node scripts/smoke-phase8-size-limits.mjs",
     "phase8:smoke:search-p95": "node scripts/smoke-phase8-search-p95.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
