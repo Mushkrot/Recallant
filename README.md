@@ -12,7 +12,7 @@ Start with [docs/README.md](docs/README.md); it defines the canonical reading or
 
 ## Status
 
-This repository currently contains **documentation only**: PRD, architecture, data model, MCP contract, and implementation guidance for agents. Implementation code is created as a separate step according to [docs/AGENT_IMPLEMENTATION_GUIDE.md](docs/AGENT_IMPLEMENTATION_GUIDE.md).
+Implementation has started. The repository now contains the documentation pack plus the Phase 0 TypeScript monorepo skeleton described in [docs/AGENT_IMPLEMENTATION_GUIDE.md](docs/AGENT_IMPLEMENTATION_GUIDE.md).
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 

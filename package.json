@@ -1,0 +1,31 @@
+{
+  "name": "recallant",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Governed memory for AI agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "format": "prettier --write \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
+    "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
+    "lint": "eslint .",
+    "test": "npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.27.0",
+    "@types/node": "^20.17.50",
+    "eslint": "^9.27.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.1"
+  }
+}

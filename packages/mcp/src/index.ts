@@ -1,0 +1,1 @@
+export const recallantMcpServerName = "recallant";

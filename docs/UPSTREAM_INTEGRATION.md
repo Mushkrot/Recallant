@@ -4,6 +4,8 @@ Policy: **borrow proven ideas**, but own Recallant's contracts and schema. At th
 
 Current detailed research snapshot: [UPSTREAM_RESEARCH_2026-05-19.md](UPSTREAM_RESEARCH_2026-05-19.md).
 
+Implementation-facing local review: [UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md](UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md).
+
 Important: Recallant architecture is not a license to copy upstream blindly. The SHAs below are research snapshots for reproducible analysis; they do not mean code should be transplanted without adaptation.
 
 Current working position: **OB1 / Open Brain is the preferred architectural foundation**. Other projects remain sources for strong subsystem ideas. See [ADR-0004-ob1-as-preferred-foundation.md](ADR-0004-ob1-as-preferred-foundation.md).
@@ -40,7 +42,8 @@ Before implementation, selected upstream repositories should be cloned or inspec
 **Action for implementers:** clone or inspect OB1 locally, produce a diff-list of what remains useful and what is discarded, and record the implementation pin here if code is adapted:
 
 - OB1 research snapshot: `151a8d1c922ffadad08399508efe46b207a5894e`
-- OB1 implementation pin: not selected yet; record only if implementation code is adapted.
+- OB1 implementation review pin: `151a8d1c922ffadad08399508efe46b207a5894e`
+- OB1 implementation code pin: not selected yet; record only if implementation code is adapted.
 
 ## 2. MemPalace (`MemPalace/mempalace`)
 
@@ -55,7 +58,9 @@ Before implementation, selected upstream repositories should be cloned or inspec
 
 **Research snapshot:** `develop` at `1b94f4efb4949765d6965936476c236df13fd108`; latest release observed `v3.3.5`.
 
-**Implementation pin:** not selected yet; record only if implementation code is adapted.
+**Implementation review pin:** `1b94f4efb4949765d6965936476c236df13fd108`.
+
+**Implementation code pin:** not selected yet; record only if implementation code is adapted.
 
 ## 3. MF0-1984 (`PavelMuntyan/MF0-1984`)
 
@@ -72,7 +77,9 @@ Before implementation, selected upstream repositories should be cloned or inspec
 
 **Research snapshot:** `9722af674bef7b85350617607db5dffd5e4ae6fe`, app version `1.9.28`.
 
-**Implementation pin:** not selected yet; record only if implementation code is adapted.
+**Implementation review pin:** `9722af674bef7b85350617607db5dffd5e4ae6fe`.
+
+**Implementation code pin:** not selected yet; record only if implementation code is adapted.
 
 ## 4. agent-bootstrap (owner prior sketch)
 
@@ -117,7 +124,9 @@ This was not part of the original "three", but it is useful for ideas around cog
 
 **Research snapshot:** `de39bcd74c7d0a73982def1c052d0b69ecefd7f6`.
 
-**Implementation pin:** not selected yet; record only if implementation code is adapted.
+**Implementation review pin:** `de39bcd74c7d0a73982def1c052d0b69ecefd7f6`.
+
+**Implementation code pin:** not selected yet; record only if implementation code is adapted.
 
 ## 7. OpenMemory by Mem0 (`mem0ai/mem0/openmemory`) — historical / do not build on directly
 
@@ -127,7 +136,8 @@ This is a separate project from CaviraOSS/OpenMemory. Its README now says OpenMe
 
 ## 8. Reuse checklist (agents must complete)
 
-- [ ] Pinned SHAs recorded above
+- [x] Pinned SHAs recorded above for implementation review
+- [x] Local upstream inspection performed before Phase 0; see [UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md](UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md)
 - [ ] List of reused/copied files with paths, if any
-- [ ] Boundary contracts documented before adapting code
+- [x] Boundary contracts documented before adapting code
 - [ ] Tests proving boundary contracts (`TEST_CONTRACT.md`)

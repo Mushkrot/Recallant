@@ -91,7 +91,8 @@ Additional settled points:
 - Manual session closeout should be full and durable: raw/spool, governed memories, links, checkpoint, `PROJECT_LOG.md`, and sync state.
 - Normal successful closeout should be quiet by default. Show a short closeout report only when attention is needed: unsynced spool, conflicts, pending review, failed writes, incomplete repo sync, low-confidence extraction, or server/model/provider errors.
 - Human memory beyond coding remains architecture-ready only in v1; passive personal-life capture is future work.
-- Implementation is explicitly paused until architecture documentation is complete and the owner says to begin implementation.
+- Implementation is authorized and active as of 2026-05-22. The owner explicitly wants Recallant implementation agents to work autonomously, follow the documented phase plan, make ordinary technical decisions, and create scoped commits at logical rollback checkpoints without asking for separate permission.
+- Agents should stop only for genuinely owner-dependent choices, security/public-exposure changes, secrets, paid API use, destructive operations, server/firewall/service changes, or real specification contradictions.
 - Target deployment is the owner's Linux server, reached through SSH/Tailscale; Recallant should be private-by-default and not add public attack surface. Security/access decision: v1 uses private network access plus Recallant-level auth/session/token even inside Tailnet/SSH. Cloudflare-managed subdomain access is expected in the near future, so v1 routing/auth must be Cloudflare-ready, but public/subdomain access remains explicit opt-in and must use edge auth plus Recallant auth.
 - Recallant server definition is accepted: it is the always-available private backend on the Linux server that owns memory runtime, MCP endpoints, Review UI/admin API, Postgres/model access, background jobs, and sync from local spools.
 - Review UI placement is accepted: it runs on the Recallant server. v1 starts as a compact private workbench and should be designed as the beginning of a fuller Recallant management platform. Future access through a dedicated Cloudflare-managed subdomain is allowed and likely near-future, with exact routing/auth details to be supplied later by the owner.
@@ -135,20 +136,17 @@ Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `
 
 Next session should start here:
 
-1. Confirm whether the owner is ready to begin implementation.
-2. Resolve the only small pre-Phase-0 question if still open: license choice. Current recommendation is `Apache-2.0` for a public platform because it is permissive and includes an explicit patent grant. `MIT` remains the simpler permissive alternative.
-3. Begin Phase 0 from `AGENT_IMPLEMENTATION_GUIDE.md`:
-   - create the repository skeleton;
-   - set up a TypeScript-first workspace/toolchain;
-   - add formatter/linter/test scaffolding and a minimal CI placeholder;
-   - create package boundaries for CLI, server, Review UI, core, DB, MCP, contracts, and adapters.
-4. Build only stubs at first:
+1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
+2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
+3. If Phase 0 is committed, begin Phase 1 database/migrations from `DATA_MODEL.md`; otherwise finish and commit the Phase 0 skeleton first.
+4. Build only stubs at first where the current phase calls for stubs:
    - `recallant doctor`;
    - `recallant init`;
    - `recallant discover`;
    - MCP server name `recallant`;
    - MCP tool stubs for `memory_start_session`, `memory_get_context_pack`, `memory_closeout`, `memory_append_event`, `memory_heartbeat`, and `memory_forget`.
-5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
+5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
+6. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 
 Do not reopen the product name, v1 scope, OB1/MF0 synthesis, managed memory decision, natural-language management direction, owner-server security/ports constraints, or Recallant/AMP rename unless the owner explicitly requests it.
 

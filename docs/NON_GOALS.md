@@ -8,7 +8,7 @@ The following items are intentionally outside the current platform specification
 - Do not optimize for marketing SaaS features such as billing, multi-tenant self-serve signup, or public product operations.
 - Do not build a throwaway MVP that drops provenance, review/use policy, or governed agent memory to move faster. Core quality matters more than initial speed.
 - Do not build full passive personal-life capture in v1. The architecture should leave an OB1-style path through domains, scopes, and connectors.
-- Do not start implementation before the owner explicitly authorizes it; the current deliverable is architecture documentation.
+- Do not start implementation before the owner explicitly authorizes it. This authorization was given on 2026-05-22; this non-goal remains a guard against future premature implementation starts before owner approval.
 - Do not expand the first implementation scope beyond the full coding-agent memory core without a separate owner decision; see `ADR-0025-v1-core-and-expansion-boundary.md`.
 
 ## Scale and deployment

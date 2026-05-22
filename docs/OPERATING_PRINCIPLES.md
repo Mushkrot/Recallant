@@ -116,7 +116,23 @@ The project should look like work produced by a senior engineering team and shou
 
 Development should use meaningful commits at natural checkpoints. Commits should be scoped, easy to read, and useful for rollback.
 
+Agents should commit autonomously when a coherent checkpoint is complete and verified, especially at phase gates, after substantial documentation decisions, and before starting work that would be harder to roll back. Do not wait for a separate owner prompt just to commit a well-scoped verified checkpoint.
+
 Do not bundle unrelated runtime state or accidental local files into commits. Documentation and tests should be updated with the code when behavior or contracts change.
+
+## 10.1 Recallant implementation autonomy
+
+Recallant is the project that changes how future projects are worked on, so implementation agents have a broader autonomy mandate here than in ordinary application repositories.
+
+Agents working on Recallant should:
+
+- read the documentation and phase plan first, then follow it without asking the owner to restate settled decisions;
+- continue autonomously through the next reasonable implementation step when the task graph and specs are clear;
+- make conservative technical decisions from the docs and upstream review when no owner-only decision is required;
+- stop only for genuinely owner-dependent choices, security/public-exposure changes, destructive operations, paid API use, secrets, server/firewall/service changes, or contradictions in the specification;
+- write concise progress reports at meaningful checkpoints rather than stopping just to announce routine progress.
+
+This autonomy does not weaken safety gates. It removes unnecessary confirmation prompts for ordinary implementation, verification, documentation updates, and scoped commits.
 
 ## 11. Existing local services and portability
 

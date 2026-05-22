@@ -2,7 +2,7 @@
 
 This document defines the implementation order for an AI agent building Recallant.
 
-**Current status:** do not execute this guide yet. Implementation is paused until architecture documentation is complete and the owner explicitly authorizes coding. See [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
+**Current status:** implementation is authorized and Phase 0 has started. The earlier documentation-first pause from [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md) was lifted by the owner on 2026-05-22.
 
 This guide implements the v1 full coding-agent memory core defined in [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md). Do not add future expansion work such as personal-life capture, external productivity connectors, object storage, dedicated vector/graph DBs, public packaging, or multi-user/SaaS features unless the owner explicitly reopens scope.
 

@@ -37,7 +37,7 @@ Managed memory includes explicit erasure. Archive/reject/supersede are normal go
 
 Scope boundary is explicit: v1 is the full working coding-agent memory core; broader personal-life capture, external connectors, specialized storage systems, and public packaging are future expansion paths. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 
-Implementation is not authorized yet. Architecture documentation remains the current deliverable; see [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
+Implementation is now authorized and has started with the Phase 0 TypeScript monorepo skeleton. The earlier documentation-first pause is retained as historical context in [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
 
 ## 1. System context
 

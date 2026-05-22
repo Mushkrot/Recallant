@@ -1,4 +1,5 @@
 # Local editor/agent state
+.upstream/
 .claude/settings.local.json
 .cursor/
 .vscode/
@@ -20,6 +21,7 @@ node_modules/
 dist/
 build/
 coverage/
+tsconfig.tsbuildinfo
 .turbo/
 .next/
 .vite/
