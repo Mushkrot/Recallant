@@ -169,7 +169,15 @@ const closeout = await callTool(8, "memory_closeout", {
     next_step: "continue implementation",
     open_questions: []
   },
-  governed_memory_candidates: [],
+  governed_memory_candidates: [
+    {
+      memory_type: "procedure",
+      title: "Closeout candidate fixture",
+      body: "Closeout should preserve governed-memory candidates for review.",
+      confidence: 0.9,
+      source_refs: []
+    }
+  ],
   artifact_refs: [],
   local_spool_status: {
     status: "unsynced",
@@ -183,6 +191,9 @@ if (
   !closeout.warnings?.some((warning) => warning.includes("unsynced"))
 ) {
   throw new Error(`Closeout did not warn about unsynced spool: ${JSON.stringify(closeout)}`);
+}
+if (closeout.created_memory_ids?.length !== 1 || closeout.needs_review_ids?.length !== 1) {
+  throw new Error(`Closeout did not create governed-memory candidate: ${JSON.stringify(closeout)}`);
 }
 
 await client.query(

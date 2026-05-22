@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createRecallantDbFromEnv,
+  type AgentMemorySourceRefInput,
   type ArchiveInput,
   type ContextPackInput,
   type CreateAgentMemoryInput,
@@ -85,6 +86,31 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
 
 function db() {
   return createRecallantDbFromEnv();
+}
+
+function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemorySourceRefInput[] {
+  const allowed = new Set(["event", "chunk", "raw_artifact", "edge", "checkpoint", "external"]);
+  const refs = rawRefs
+    .filter((ref): ref is Record<string, unknown> => typeof ref === "object" && ref !== null)
+    .filter((ref) => allowed.has(String(ref.source_kind)) && typeof ref.source_id === "string")
+    .map((ref) => ({
+      source_kind: String(ref.source_kind),
+      source_id: String(ref.source_id),
+      quote: typeof ref.quote === "string" ? ref.quote : null,
+      metadata:
+        typeof ref.metadata === "object" && ref.metadata !== null
+          ? (ref.metadata as JsonObject)
+          : {}
+    }));
+  if (refs.length > 0) return refs;
+  return [
+    {
+      source_kind: "checkpoint",
+      source_id: sessionId,
+      quote: null,
+      metadata: { fallback_reason: "closeout_candidate_without_source_refs" }
+    }
+  ];
 }
 
 async function syncProjectLog(payload: JsonObject) {
@@ -753,15 +779,48 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           "closeout",
           args.local_spool_status as JsonObject | null | undefined
         );
+        const createdMemoryIds: string[] = [];
+        const needsReviewIds: string[] = [];
+        const warnings = [...(checkpoint?.warnings ?? [])];
+        for (const candidate of args.governed_memory_candidates as Array<Record<string, unknown>>) {
+          try {
+            const created = await database.createAgentMemory({
+              memory_type: String(candidate.memory_type),
+              scope: "project",
+              title: String(candidate.title),
+              body: String(candidate.body),
+              confidence: typeof candidate.confidence === "number" ? candidate.confidence : null,
+              source_refs: closeoutSourceRefs(
+                Array.isArray(candidate.source_refs) ? candidate.source_refs : [],
+                String(args.session_id)
+              ),
+              created_by: "agent",
+              metadata: { created_from: "memory_closeout" }
+            });
+            if (created.memory_id) createdMemoryIds.push(created.memory_id);
+            if (created.status === "candidate" || created.status === "needs_review") {
+              needsReviewIds.push(created.memory_id);
+            }
+          } catch (error) {
+            warnings.push(
+              `Failed to create closeout governed-memory candidate: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          }
+        }
         return {
           ok: true,
           session_id: args.session_id,
           checkpoint_updated_at: checkpoint?.updated_at ?? nowIso(),
-          created_memory_ids: [],
-          needs_review_ids: [],
+          created_memory_ids: createdMemoryIds,
+          needs_review_ids: needsReviewIds,
           spool_sync_status: checkpoint?.spool_sync_status ?? "not_provided",
-          report_required: checkpoint?.report_required ?? false,
-          warnings: checkpoint?.warnings ?? [],
+          report_required:
+            checkpoint?.report_required === true ||
+            needsReviewIds.length > 0 ||
+            warnings.length > 0,
+          warnings,
           project_log_update: {
             required: true,
             suggested_payload: args.checkpoint_payload
