@@ -153,6 +153,7 @@ Latest implementation checkpoints:
 - Phase 9 retrieval decay/supersedes slice is implemented: `memory_search` applies configurable score decay (`RECALLANT_DECAY_ENABLED`, `RECALLANT_DECAY_HALFLIFE_DAYS`, `RECALLANT_DECAY_MIN`) and applies a configurable penalty to chunks superseded by `memory_link(relation_type="supersedes")`, returning `superseded_by` in hits. It is verified by `scripts/smoke-phase9-decay-supersedes.mjs`; `scripts/smoke-phase5-retrieval.mjs` covers retrieval regression.
 - Phase 9 analyze/cleanup slice is implemented: `recallant analyze --dry-run` reports stale/not-accessed, duplicate-text, superseded, and low-value chunk candidates plus stale/superseded, duplicate, poor-provenance, and conflicting connector-account governed-memory hygiene candidates; `recallant cleanup --archive --dry-run` emits candidate actions and warnings without changing data; `recallant cleanup --archive --confirm` can archive derived chunks only, preserving L0 events, raw artifacts, embeddings, and governed memories. Hard delete remains policy-blocked. It is verified by `scripts/smoke-phase9-cleanup.mjs`.
 - Repo-contract sync slice is implemented: after `memory_set_checkpoint`, MCP attempts to update an existing `PROJECT_LOG.md` under `RECALLANT_PROJECT_PATH` with `current_status`, `current_focus`, `next_step`, and open questions while preserving other sections. Missing project logs are skipped instead of creating files in arbitrary working directories. It is verified by `scripts/smoke-repo-contract.mjs`.
+- Local spool/sync slice is implemented: `recallant spool-append` writes append-only local JSONL records for offline turns/events with stable dedup keys and raw-artifact pointers; `recallant sync-spool` supports dry-run and idempotent Postgres sync through a local sync manifest; `recallant prune-spool --synced` removes only confirmed synced local records, while unsafe pruning remains policy-blocked. It is verified by `scripts/smoke-spool.mjs`.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
@@ -162,7 +163,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Continue with remaining cleanup/lifecycle polish, local spool/sync safety, and broader smoke suites. Do not perform production service changes, paid API calls, or destructive erasure without owner participation.
+3. Continue with remaining lifecycle polish, closeout/context-pack visibility for spool sync state, and broader smoke suites. Do not perform production service changes, paid API calls, or destructive erasure without owner participation.
 4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 

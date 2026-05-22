@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { createRecallantDbFromEnv } from "@recallant/db";
+import type { RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
 
@@ -40,6 +41,38 @@ export function describeCliBoundary() {
 function parseFlag(argv: readonly string[], name: string) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function spoolDir(argv: readonly string[]) {
+  return resolve(
+    parseFlag(argv, "--spool-dir") ??
+      process.env.RECALLANT_SPOOL_DIR ??
+      join(process.cwd(), ".recallant", "spool")
+  );
+}
+
+function spoolPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "spool.jsonl");
+}
+
+function spoolManifestPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "sync-manifest.json");
+}
+
+async function readJsonl(path: string) {
+  const content = await readOptional(path);
+  if (!content?.trim()) return [];
+  return content
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function readSpoolManifest(argv: readonly string[]) {
+  const content = await readOptional(spoolManifestPath(argv));
+  if (!content) return { synced: {} as Record<string, unknown> };
+  const parsed = JSON.parse(content) as { synced?: Record<string, unknown> };
+  return { synced: parsed.synced ?? {} };
 }
 
 function parseInitOptions(argv: readonly string[]): InitOptions {
@@ -771,6 +804,152 @@ async function runCleanup(argv: readonly string[]) {
   );
 }
 
+async function runSpoolAppend(argv: readonly string[]) {
+  const recordKind = parseFlag(argv, "--kind") ?? "turn";
+  const role = parseFlag(argv, "--role") ?? "user";
+  const text = parseFlag(argv, "--text") ?? "";
+  const eventKind = parseFlag(argv, "--event-kind") ?? "other";
+  const rawArtifactJson = parseFlag(argv, "--raw-artifact-json");
+  const rawArtifacts = rawArtifactJson ? JSON.parse(rawArtifactJson) : [];
+  const payload =
+    recordKind === "event"
+      ? {
+          client_kind: "codex",
+          event_kind: eventKind,
+          text,
+          metadata: {},
+          raw_artifacts: rawArtifacts
+        }
+      : { client_kind: "codex", role, text };
+  const dedupKey =
+    parseFlag(argv, "--dedup-key") ??
+    `spool:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+  const record = {
+    local_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    record_kind: recordKind,
+    dedup_key: dedupKey,
+    payload: { ...payload, dedup_key: dedupKey }
+  };
+  await mkdir(spoolDir(argv), { recursive: true });
+  await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "spool_append",
+        spool_path: spoolPath(argv),
+        local_id: record.local_id,
+        dedup_key: dedupKey,
+        synced: false
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runSyncSpool(argv: readonly string[]) {
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  if (argv.includes("--dry-run")) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "sync_spool",
+          dry_run: true,
+          writes_database: false,
+          unsynced_count: unsynced.length,
+          records: unsynced.map((record) => ({
+            local_id: record.local_id,
+            record_kind: record.record_kind,
+            dedup_key: record.dedup_key
+          }))
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for sync-spool");
+  const synced = { ...manifest.synced };
+  try {
+    for (const record of unsynced) {
+      const payload = record.payload as Record<string, unknown>;
+      const result =
+        record.record_kind === "event"
+          ? await database.appendEvent({
+              client_kind: String(payload.client_kind ?? "codex"),
+              event_kind: String(payload.event_kind ?? "other"),
+              text: (payload.text as string | null | undefined) ?? null,
+              metadata: (payload.metadata as Record<string, unknown> | undefined) ?? {},
+              raw_artifacts: (payload.raw_artifacts as RawArtifactInput[] | undefined) ?? [],
+              dedup_key: String(payload.dedup_key ?? record.dedup_key)
+            })
+          : await database.appendTurn({
+              client_kind: String(payload.client_kind ?? "codex"),
+              role: payload.role === "assistant" ? "assistant" : "user",
+              text: String(payload.text ?? ""),
+              dedup_key: String(payload.dedup_key ?? record.dedup_key)
+            });
+      synced[String(record.local_id)] = {
+        server_event_id: result.event_id,
+        status: result.status,
+        synced_at: new Date().toISOString()
+      };
+    }
+  } finally {
+    await database.close();
+  }
+  await mkdir(spoolDir(argv), { recursive: true });
+  await writeFile(spoolManifestPath(argv), `${JSON.stringify({ synced }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "sync_spool",
+        dry_run: false,
+        synced_count: unsynced.length,
+        manifest_path: spoolManifestPath(argv),
+        mappings: synced
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runPruneSpool(argv: readonly string[]) {
+  if (!argv.includes("--synced")) {
+    throw new Error("POLICY_BLOCKED: prune-spool requires --synced");
+  }
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const kept = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  await mkdir(spoolDir(argv), { recursive: true });
+  await writeFile(
+    spoolPath(argv),
+    kept.map((record) => JSON.stringify(record)).join("\n") + (kept.length ? "\n" : "")
+  );
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "prune_spool",
+        pruned_count: records.length - kept.length,
+        kept_unsynced_count: kept.length,
+        spool_path: spoolPath(argv)
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
@@ -789,9 +968,12 @@ async function main(argv: readonly string[]) {
   if (command === "restore-plan") return runRestorePlan(argv);
   if (command === "analyze") return runAnalyze(argv);
   if (command === "cleanup") return runCleanup(argv);
+  if (command === "spool-append") return runSpoolAppend(argv);
+  if (command === "sync-spool") return runSyncSpool(argv);
+  if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup>\n"
+    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }
