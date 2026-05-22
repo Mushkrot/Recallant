@@ -247,6 +247,20 @@ function readPositiveIntEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readPositiveFloatEnv(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readFloatEnvInRange(name: string, fallback: number, min: number, max: number) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
 function assertMaxChars(kind: string, text: string | null | undefined, maxChars: number) {
   const length = text?.length ?? 0;
   if (length > maxChars) {
@@ -356,6 +370,15 @@ function parseIsoOrNow(value: string | null | undefined) {
 
 function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
+}
+
+function retrievalDecay(occurredAt: string) {
+  if (process.env.RECALLANT_DECAY_ENABLED === "false") return 1;
+  const halflifeDays = readPositiveFloatEnv("RECALLANT_DECAY_HALFLIFE_DAYS", 365);
+  const minDecay = readFloatEnvInRange("RECALLANT_DECAY_MIN", 0.15, 0, 1);
+  const ageMs = Math.max(0, Date.now() - new Date(occurredAt).getTime());
+  const ageDays = ageMs / 86_400_000;
+  return Math.max(minDecay, 0.5 ** (ageDays / halflifeDays));
 }
 
 function chunkText(text: string, maxChars = 4_000) {
@@ -763,11 +786,40 @@ export class RecallantDb {
         text: candidate.text,
         source_event_id: candidate.source_event_id,
         occurred_at: candidate.occurred_at,
-        score: candidate.vectorScore * 0.65 + candidate.lexicalScore * 0.35,
-        path: Array.from(candidate.paths).join("+")
+        score:
+          (candidate.vectorScore * 0.65 + candidate.lexicalScore * 0.35) *
+          retrievalDecay(candidate.occurred_at),
+        path: Array.from(candidate.paths).join("+"),
+        superseded_by: null as string | null
       }))
       .sort((left, right) => right.score - left.score)
       .slice(0, topK);
+
+    if (rows.length > 0) {
+      const superseded = await this.pool.query<{ dst_id: string; src_id: string }>(
+        `
+          SELECT dst_id, src_id
+          FROM edges
+          WHERE project_id = $1
+            AND relation_type = 'supersedes'
+            AND src_kind = 'chunk'
+            AND dst_kind = 'chunk'
+            AND dst_id = ANY($2::text[])
+        `,
+        [context.projectId, rows.map((row) => row.id)]
+      );
+      const supersededBy = new Map(superseded.rows.map((row) => [row.dst_id, row.src_id]));
+      const penalty = readFloatEnvInRange("RECALLANT_SUPERSEDES_SCORE_MULTIPLIER", 0.2, 0, 1);
+      for (const row of rows) {
+        const replacement = supersededBy.get(row.id);
+        if (replacement) {
+          row.score *= penalty;
+          row.path = `${row.path}+superseded`;
+          row.superseded_by = replacement;
+        }
+      }
+      rows.sort((left, right) => right.score - left.score);
+    }
 
     if (input.graph_expand && rows.length > 0) {
       const graphRows = await this.expandGraphRows({
@@ -794,6 +846,7 @@ export class RecallantDb {
         score: row.score,
         path: row.path,
         why: row.path,
+        superseded_by: row.superseded_by,
         occurred_at: row.occurred_at,
         text_excerpt: excerpt,
         excerpt
@@ -1643,7 +1696,8 @@ export class RecallantDb {
         source_event_id: row.source_event_id,
         occurred_at: row.occurred_at,
         score: Number(row.weight) * 0.2,
-        path: "graph"
+        path: "graph",
+        superseded_by: null
       }));
   }
 
