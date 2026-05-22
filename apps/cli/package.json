@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@recallant/adapters": "file:../../packages/adapters",
-    "@recallant/core": "file:../../packages/core"
+    "@recallant/core": "file:../../packages/core",
+    "@recallant/mcp": "file:../../packages/mcp"
   }
 }

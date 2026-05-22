@@ -22,6 +22,7 @@
     "format": "prettier --write \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "lint": "eslint .",
+    "mcp:smoke": "node scripts/smoke-mcp.mjs",
     "test": "npm run build"
   },
   "devDependencies": {

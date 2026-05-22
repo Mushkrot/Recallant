@@ -8,6 +8,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["**/*.{js,mjs}"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        setTimeout: "readonly"
+      }
+    }
+  },
+  {
     files: ["**/*.ts"],
     languageOptions: {
       parserOptions: {
