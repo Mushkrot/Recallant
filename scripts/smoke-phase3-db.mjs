@@ -159,7 +159,7 @@ if (lightEvent.capture_profile !== "light" || lightEvent.captured_text_chars !==
   throw new Error(`Session capture override was not applied: ${JSON.stringify(lightEvent)}`);
 }
 
-await callTool(8, "memory_closeout", {
+const closeout = await callTool(8, "memory_closeout", {
   session_id: started.session_id,
   closeout_intent: "task_complete",
   summary: "Phase 3 smoke complete.",
@@ -170,8 +170,20 @@ await callTool(8, "memory_closeout", {
     open_questions: []
   },
   governed_memory_candidates: [],
-  artifact_refs: []
+  artifact_refs: [],
+  local_spool_status: {
+    status: "unsynced",
+    unsynced_count: 1,
+    spool_path: "/tmp/recallant-spool-smoke/spool.jsonl"
+  }
 });
+if (
+  closeout.report_required !== true ||
+  closeout.spool_sync_status !== "unsynced" ||
+  !closeout.warnings?.some((warning) => warning.includes("unsynced"))
+) {
+  throw new Error(`Closeout did not warn about unsynced spool: ${JSON.stringify(closeout)}`);
+}
 
 await client.query(
   `

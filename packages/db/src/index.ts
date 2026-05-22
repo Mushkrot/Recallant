@@ -145,6 +145,7 @@ export type ContextPackInput = {
   max_chars_total?: number;
   include_raw_evidence?: "auto" | "never" | "always";
   include_recovery?: boolean;
+  local_spool_status?: JsonObject | null;
 };
 
 export type ForgetInput = {
@@ -984,6 +985,7 @@ export class RecallantDb {
         binding_rules: rules.rows,
         working_memories: working.memories,
         operational_bindings: [],
+        local_spool_status: input.local_spool_status ?? { status: "unknown" },
         evidence_excerpts: evidence.hits,
         suggested_next_fetches: []
       },
@@ -1780,7 +1782,12 @@ export class RecallantDb {
     return result.rows[0] ?? { payload: null, updated_at: null };
   }
 
-  async closeout(sessionId: string, checkpointPayload: JsonObject, endedReason = "closeout") {
+  async closeout(
+    sessionId: string,
+    checkpointPayload: JsonObject,
+    endedReason = "closeout",
+    localSpoolStatus?: JsonObject | null
+  ) {
     const context = await this.contextForSession(sessionId);
     const checkpoint = await this.setCheckpoint(context.projectId, checkpointPayload);
     await this.pool.query(
@@ -1791,7 +1798,21 @@ export class RecallantDb {
       `,
       [sessionId, endedReason]
     );
-    return checkpoint;
+    const warnings: string[] = [];
+    const unsyncedCount =
+      typeof localSpoolStatus?.unsynced_count === "number" ? localSpoolStatus.unsynced_count : 0;
+    const spoolStatus = String(localSpoolStatus?.status ?? "not_provided");
+    if (spoolStatus === "unsynced" || unsyncedCount > 0) {
+      warnings.push(
+        `Local spool has ${unsyncedCount} unsynced record(s). Run recallant sync-spool.`
+      );
+    }
+    return {
+      ...checkpoint,
+      spool_sync_status: spoolStatus,
+      report_required: warnings.length > 0,
+      warnings
+    };
   }
 
   private async contextForSession(sessionId?: string | null): Promise<ProjectContext> {

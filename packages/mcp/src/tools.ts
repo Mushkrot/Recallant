@@ -208,7 +208,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       project_id: uuidString.nullable().optional(),
       max_chars_total: z.number().int().positive().default(12_000),
       include_raw_evidence: z.enum(["auto", "never", "always"]).default("auto"),
-      include_recovery: z.boolean().default(true)
+      include_recovery: z.boolean().default(true),
+      local_spool_status: z.record(z.string(), z.unknown()).nullable().optional()
     }),
     handler: async (args) => {
       const database = db();
@@ -740,14 +741,17 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
             note: nullableString
           })
         )
-        .default([])
+        .default([]),
+      local_spool_status: z.record(z.string(), z.unknown()).nullable().optional()
     }),
     handler: async (args) => {
       const database = db();
       if (database) {
         const checkpoint = await database.closeout(
           args.session_id as string,
-          args.checkpoint_payload as JsonObject
+          args.checkpoint_payload as JsonObject,
+          "closeout",
+          args.local_spool_status as JsonObject | null | undefined
         );
         return {
           ok: true,
@@ -755,9 +759,9 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           checkpoint_updated_at: checkpoint?.updated_at ?? nowIso(),
           created_memory_ids: [],
           needs_review_ids: [],
-          spool_sync_status: "not_applicable",
-          report_required: false,
-          warnings: [],
+          spool_sync_status: checkpoint?.spool_sync_status ?? "not_provided",
+          report_required: checkpoint?.report_required ?? false,
+          warnings: checkpoint?.warnings ?? [],
           project_log_update: {
             required: true,
             suggested_payload: args.checkpoint_payload

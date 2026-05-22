@@ -81,6 +81,20 @@ if (dryRun.writes_database !== false || dryRun.unsynced_count !== 2) {
   throw new Error(`sync-spool dry-run failed: ${JSON.stringify(dryRun)}`);
 }
 
+const contextPack = run([
+  "context",
+  "--project-dir",
+  projectPath,
+  "--spool-dir",
+  spoolDir,
+  "--task-hint",
+  "offline spool"
+]);
+const packSpoolStatus = contextPack.sections?.local_spool_status;
+if (packSpoolStatus?.status !== "unsynced" || packSpoolStatus?.unsynced_count !== 2) {
+  throw new Error(`Context pack did not expose unsynced spool status: ${JSON.stringify(contextPack)}`);
+}
+
 const firstSync = run(["sync-spool", "--spool-dir", spoolDir]);
 if (firstSync.synced_count !== 2 || !firstSync.mappings[turn.local_id] || !firstSync.mappings[event.local_id]) {
   throw new Error(`sync-spool failed: ${JSON.stringify(firstSync)}`);

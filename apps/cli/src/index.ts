@@ -75,6 +75,20 @@ async function readSpoolManifest(argv: readonly string[]) {
   return { synced: parsed.synced ?? {} };
 }
 
+async function getLocalSpoolStatus(argv: readonly string[]) {
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  return {
+    status: unsynced.length > 0 ? "unsynced" : records.length > 0 ? "synced" : "empty",
+    spool_path: spoolPath(argv),
+    manifest_path: spoolManifestPath(argv),
+    record_count: records.length,
+    unsynced_count: unsynced.length,
+    checked_at: new Date().toISOString()
+  };
+}
+
 function parseInitOptions(argv: readonly string[]): InitOptions {
   const captureProfile = parseFlag(argv, "--capture-profile") ?? "standard";
   if (!["light", "standard", "detailed", "custom"].includes(captureProfile)) {
@@ -283,7 +297,8 @@ async function runContext(argv: readonly string[]) {
     session_id: String(started.session_id),
     task_hint: parseFlag(argv, "--task-hint") ?? "context preview",
     include_raw_evidence: "auto",
-    include_recovery: true
+    include_recovery: true,
+    local_spool_status: await getLocalSpoolStatus(argv)
   });
   process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
 }
