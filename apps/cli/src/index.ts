@@ -450,6 +450,69 @@ async function runBackupVerify(argv: readonly string[]) {
   }
 }
 
+async function runRestorePlan(argv: readonly string[]) {
+  const manifestPath = parseFlag(argv, "--manifest");
+  if (!manifestPath) throw new Error("--manifest is required");
+  const remapPath = parseFlag(argv, "--remap");
+  const resolvedManifest = resolve(manifestPath);
+  const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
+    files: Array<{ path: string; sha256: string }>;
+    schema_version: string;
+  };
+  const tablesJson = await readFile(join(resolvedManifest, "..", "tables.json"), "utf8");
+  const actualHash = createHash("sha256").update(tablesJson).digest("hex");
+  const expectedHash = manifest.files.find((file) => file.path === "tables.json")?.sha256;
+  if (actualHash !== expectedHash) throw new Error("Backup hash verification failed");
+  const tables = JSON.parse(tablesJson) as Record<string, unknown[]>;
+  const remap = remapPath
+    ? (JSON.parse(await readFile(resolve(remapPath), "utf8")) as Record<string, unknown>)
+    : {};
+  const projectRoots =
+    remap.project_roots && typeof remap.project_roots === "object"
+      ? (remap.project_roots as Record<string, string>)
+      : {};
+  const rawArtifactRoots =
+    remap.raw_artifact_roots && typeof remap.raw_artifact_roots === "object"
+      ? (remap.raw_artifact_roots as Record<string, string>)
+      : {};
+  const projects = rowsOf(tables, "projects").map((project) => {
+    const oldPrimaryPath = String(project.primary_path ?? "");
+    return {
+      project_id: project.id,
+      name: project.name,
+      old_primary_path: oldPrimaryPath,
+      new_primary_path: projectRoots[oldPrimaryPath] ?? oldPrimaryPath,
+      needs_mapping: oldPrimaryPath.length > 0 && projectRoots[oldPrimaryPath] === undefined
+    };
+  });
+  const rawArtifacts = rowsOf(tables, "raw_artifacts");
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "restore_plan",
+        writes_database: false,
+        production_overwritten: false,
+        schema_version: manifest.schema_version,
+        projects,
+        raw_artifacts: {
+          count: rawArtifacts.length,
+          remapped_roots: rawArtifactRoots
+        },
+        secret_references: remap.secret_refs ?? {},
+        connector_accounts: remap.connector_accounts ?? {},
+        environment_facts: remap.environment_facts ?? {},
+        port_assignments: remap.ports ?? {},
+        warnings: projects.some((project) => project.needs_mapping)
+          ? ["Some project roots have no remap entry."]
+          : []
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
@@ -465,9 +528,10 @@ async function main(argv: readonly string[]) {
   if (command === "context") return runContext(argv);
   if (command === "backup") return runBackup(argv);
   if (command === "backup-verify") return runBackupVerify(argv);
+  if (command === "restore-plan") return runRestorePlan(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify>\n"
+    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan>\n"
   );
   process.exitCode = 1;
 }

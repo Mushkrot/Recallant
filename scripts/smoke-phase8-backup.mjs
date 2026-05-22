@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecallantDb } from "../packages/db/dist/index.js";
@@ -148,6 +148,42 @@ if (
   Number(verify.bounded_search_matches) < 1
 ) {
   throw new Error(`Backup verification failed: ${JSON.stringify(verify)}`);
+}
+
+const remapPath = join(backupRoot, "restore-remap.json");
+const newProjectPath = `/new-server/projects/recallant-phase8-${projectId}`;
+await writeFile(
+  remapPath,
+  `${JSON.stringify(
+    {
+      project_roots: { [projectPath]: newProjectPath },
+      raw_artifact_roots: { "smoke://": "restored-smoke://" },
+      secret_refs: { OPENAI_API_KEY: "target-secret-store:OPENAI_API_KEY" },
+      connector_accounts: { github: "reauthorize-on-target" },
+      environment_facts: { ollama: "recheck-on-target" },
+      ports: { recallant_http: 3005 }
+    },
+    null,
+    2
+  )}\n`
+);
+const restorePlan = run(["restore-plan", "--manifest", backup.manifest_path, "--remap", remapPath]);
+if (
+  restorePlan.ok !== true ||
+  restorePlan.writes_database !== false ||
+  restorePlan.production_overwritten !== false ||
+  !restorePlan.projects.some(
+    (project) =>
+      project.project_id === projectId &&
+      project.old_primary_path === projectPath &&
+      project.new_primary_path === newProjectPath &&
+      project.needs_mapping === false
+  ) ||
+  restorePlan.secret_references.OPENAI_API_KEY !== "target-secret-store:OPENAI_API_KEY" ||
+  restorePlan.connector_accounts.github !== "reauthorize-on-target" ||
+  restorePlan.environment_facts.ollama !== "recheck-on-target"
+) {
+  throw new Error(`Restore remap plan failed: ${JSON.stringify(restorePlan)}`);
 }
 
 process.stdout.write("Phase 8 backup smoke passed\n");
