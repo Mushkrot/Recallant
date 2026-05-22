@@ -32,6 +32,7 @@
     "phase8:smoke:errors": "node scripts/smoke-phase8-errors-rate-limit.mjs",
     "phase8:smoke:limits": "node scripts/smoke-phase8-size-limits.mjs",
     "phase8:smoke:search-p95": "node scripts/smoke-phase8-search-p95.mjs",
+    "phase9:smoke:archive": "node scripts/smoke-phase9-archive.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"

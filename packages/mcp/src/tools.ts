@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   createRecallantDbFromEnv,
+  type ArchiveInput,
   type ContextPackInput,
   type CreateAgentMemoryInput,
   type ForgetInput,
@@ -278,7 +279,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       top_k: z.number().int().positive().default(8),
       max_chars_total: z.number().int().positive().default(12_000),
       graph_expand: z.boolean().default(false),
-      graph_budget_nodes: z.number().int().nonnegative().default(8)
+      graph_budget_nodes: z.number().int().nonnegative().default(8),
+      include_archived: z.boolean().default(false)
     }),
     handler: async (args) => {
       const database = db();
@@ -293,7 +295,8 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           scope_kind: args.scope_kind as string | null | undefined,
           audience: args.audience as string | null | undefined,
           graph_expand: args.graph_expand as boolean | undefined,
-          graph_budget_nodes: args.graph_budget_nodes as number | undefined
+          graph_budget_nodes: args.graph_budget_nodes as number | undefined,
+          include_archived: args.include_archived as boolean | undefined
         });
       }
       return stubResponse("memory_search", { hits: [], truncated: false });
@@ -363,12 +366,15 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
       chunk_id: uuidString,
       action: z.enum(["archive", "unarchive"])
     }),
-    handler: (args) =>
-      stubResponse("memory_archive", {
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.archiveChunk(args as ArchiveInput);
+      return stubResponse("memory_archive", {
         ok: true,
         chunk_id: args.chunk_id,
         archived_at: args.action === "archive" ? nowIso() : null
-      })
+      });
+    }
   },
   {
     name: "memory_forget",

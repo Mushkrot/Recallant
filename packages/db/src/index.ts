@@ -133,6 +133,11 @@ export type LinkMemoryInput = {
   metadata?: JsonObject;
 };
 
+export type ArchiveInput = {
+  chunk_id: string;
+  action: "archive" | "unarchive";
+};
+
 export type ContextPackInput = {
   session_id: string;
   task_hint?: string | null;
@@ -636,6 +641,7 @@ export class RecallantDb {
     audience?: string | null;
     graph_expand?: boolean;
     graph_budget_nodes?: number;
+    include_archived?: boolean;
   }) {
     const context = input.session_id
       ? await this.contextForSession(input.session_id)
@@ -654,6 +660,7 @@ export class RecallantDb {
       scope: input.scope ?? "project",
       scopeKind: input.scope_kind ?? null,
       audience: input.audience ?? null,
+      includeArchived: input.include_archived === true,
       startIndex: 2
     });
     const candidates = new Map<
@@ -826,6 +833,26 @@ export class RecallantDb {
       ...row,
       text: String(row.text ?? "").slice(0, maxChars),
       truncated: String(row.text ?? "").length > maxChars
+    };
+  }
+
+  async archiveChunk(input: ArchiveInput) {
+    const result = await this.pool.query<{ id: string; archived_at: string | null }>(
+      `
+        UPDATE chunks
+        SET archived_at = CASE WHEN $2 = 'archive' THEN now() ELSE NULL END
+        WHERE id = $1
+        RETURNING id, archived_at
+      `,
+      [input.chunk_id, input.action]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error(`VALIDATION_ERROR: unknown chunk_id ${input.chunk_id}`);
+    return {
+      ok: true,
+      chunk_id: row.id,
+      action: input.action,
+      archived_at: row.archived_at
     };
   }
 
@@ -1538,9 +1565,11 @@ export class RecallantDb {
     scope: string;
     scopeKind: string | null;
     audience: string | null;
+    includeArchived?: boolean;
     startIndex: number;
   }) {
-    const clauses = [`c.developer_id = $${input.startIndex}::uuid`, "c.archived_at IS NULL"];
+    const clauses = [`c.developer_id = $${input.startIndex}::uuid`];
+    if (!input.includeArchived) clauses.push("c.archived_at IS NULL");
     const params: unknown[] = [input.developerId];
     if (input.scope === "developer") {
       clauses.push("c.scope = 'developer'");

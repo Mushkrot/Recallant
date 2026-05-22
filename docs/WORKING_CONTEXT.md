@@ -149,6 +149,7 @@ Latest implementation checkpoints:
 - Phase 8 private HTTP/Cloudflare-ready slice is implemented: server config defaults to `127.0.0.1`, rejects public `0.0.0.0`/`::` bind unless `RECALLANT_ALLOW_PUBLIC_BIND=true`, exposes safe HTTP security metadata, keeps Cloudflare mode disabled by default, and when `RECALLANT_CLOUDFLARE_MODE=enabled` requires configured edge auth plus Recallant bearer auth. It is verified by `scripts/smoke-review-ui.mjs`.
 - Phase 8 search p95 fixture is implemented: `scripts/smoke-phase8-search-p95.mjs` loads a 10k-chunk lexical fixture and verifies `memory_search` p95 stays below `RECALLANT_SEARCH_P95_BUDGET_MS` (default 1500ms). The current Docker smoke passed at about 11ms p95.
 - Phase 8 structured error/rate-limit slice is implemented: MCP tool handlers now return structured JSON errors with `error.code`, `message`, and `retryable`; validation errors map to `VALIDATION_ERROR`, and `RECALLANT_MCP_RATE_LIMIT_PER_MINUTE` enables per-tool in-process rate limiting with `RATE_LIMITED` retryable errors. It is verified by `scripts/smoke-phase8-errors-rate-limit.mjs`; existing validation/governed-memory smokes still pass.
+- Phase 9 archive/unarchive slice is implemented: `memory_archive` now updates `chunks.archived_at` in Postgres, `memory_search` excludes archived chunks by default, and `include_archived=true` can explicitly include them. Ordinary archive/unarchive preserves L0 events and raw artifact records. It is verified by `scripts/smoke-phase9-archive.mjs`; `scripts/smoke-phase5-retrieval.mjs` covers retrieval regression.
 
 Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
 
@@ -158,7 +159,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Continue from Phase 9 cleanup/analysis unless a small missing Phase 8 hardening gap is found; do not perform production service changes, paid API calls, or destructive erasure without owner participation.
+3. Continue Phase 9 cleanup/analysis: retrieval decay, supersedes penalty, analyze/cleanup dry-run reports, and conservative cleanup behavior. Do not perform production service changes, paid API calls, or destructive erasure without owner participation.
 4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
 
