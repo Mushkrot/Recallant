@@ -580,6 +580,37 @@ async function queryCleanupCandidates(argv: readonly string[]) {
       `,
       [Number.isFinite(limit) ? limit : 50]
     );
+    const staleMemories = await client.query(
+      `
+        SELECT id AS memory_id, project_id, scope, memory_type, title, status, use_policy,
+               updated_at, superseded_by
+        FROM agent_memories
+        WHERE status IN ('stale', 'superseded')
+        ORDER BY updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const duplicateMemories = await client.query(
+      `
+        WITH duplicate_memory AS (
+          SELECT lower(title) AS normalized_title
+          FROM agent_memories
+          WHERE status NOT IN ('rejected', 'archived', 'superseded')
+          GROUP BY lower(title)
+          HAVING count(*) > 1
+          LIMIT $1::int
+        )
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.memory_type, m.title,
+               m.status, m.use_policy, m.updated_at
+        FROM agent_memories m
+        JOIN duplicate_memory d ON d.normalized_title = lower(m.title)
+        WHERE m.status NOT IN ('rejected', 'archived', 'superseded')
+        ORDER BY lower(m.title), m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
     return {
       policy: {
         not_accessed_days: notAccessedDays,
@@ -588,7 +619,9 @@ async function queryCleanupCandidates(argv: readonly string[]) {
       },
       stale_chunks: stale.rows,
       duplicate_chunks: duplicates.rows,
-      superseded_chunks: superseded.rows
+      superseded_chunks: superseded.rows,
+      stale_or_superseded_memories: staleMemories.rows,
+      duplicate_memories: duplicateMemories.rows
     };
   } finally {
     await client.end();
@@ -608,7 +641,9 @@ async function runAnalyze(argv: readonly string[]) {
         summary: {
           stale_chunks: report.stale_chunks.length,
           duplicate_chunks: report.duplicate_chunks.length,
-          superseded_chunks: report.superseded_chunks.length
+          superseded_chunks: report.superseded_chunks.length,
+          stale_or_superseded_memories: report.stale_or_superseded_memories.length,
+          duplicate_memories: report.duplicate_memories.length
         }
       },
       null,

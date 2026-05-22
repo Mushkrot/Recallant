@@ -15,7 +15,11 @@ const replacementEventId = randomUUID();
 const oldChunkId = randomUUID();
 const duplicateChunkId = randomUUID();
 const replacementChunkId = randomUUID();
+const staleMemoryId = randomUUID();
+const duplicateMemoryA = randomUUID();
+const duplicateMemoryB = randomUUID();
 const duplicateText = `Phase 9 cleanup duplicate fixture ${randomUUID()}.`;
+const duplicateMemoryTitle = `Phase 9 duplicate governed memory ${randomUUID()}`;
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
@@ -77,6 +81,26 @@ try {
     `,
     [projectId, replacementChunkId, duplicateChunkId, JSON.stringify({ smoke: true })]
   );
+  await client.query(
+    `
+      INSERT INTO agent_memories (
+        id, developer_id, project_id, scope, memory_type, title, body,
+        status, use_policy, confidence, created_by
+      )
+      VALUES
+        ($1, $5, $6, 'project', 'decision', 'Phase 9 stale governed memory', 'Stale governed memory fixture.', 'stale', 'evidence_only', 0.8, 'agent'),
+        ($2, $5, $6, 'project', 'decision', $4, 'Duplicate governed memory A.', 'accepted', 'recall_allowed', 0.9, 'agent'),
+        ($3, $5, $6, 'project', 'decision', $4, 'Duplicate governed memory B.', 'accepted', 'recall_allowed', 0.9, 'agent')
+    `,
+    [
+      staleMemoryId,
+      duplicateMemoryA,
+      duplicateMemoryB,
+      duplicateMemoryTitle,
+      developerId,
+      projectId
+    ]
+  );
 } finally {
   await client.end();
 }
@@ -101,7 +125,9 @@ if (
   analyze.writes_database !== false ||
   analyze.summary.stale_chunks < 1 ||
   analyze.summary.duplicate_chunks < 2 ||
-  analyze.summary.superseded_chunks < 1
+  analyze.summary.superseded_chunks < 1 ||
+  analyze.summary.stale_or_superseded_memories < 1 ||
+  analyze.summary.duplicate_memories < 2
 ) {
   throw new Error(`Analyze dry-run report failed: ${JSON.stringify(analyze)}`);
 }
