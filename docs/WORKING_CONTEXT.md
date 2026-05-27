@@ -96,8 +96,9 @@ Additional settled points:
 - Target deployment is the owner's Linux server. The first production deployment is now accepted:
   human UI at `recallant.unicloud.ca` behind Cloudflare Access for `highmac@gmail.com`, routed by
   Cloudflare Tunnel `mainserver` to the localhost-only origin `http://127.0.0.1:3005`. Recallant
-  validates Cloudflare Access identity/JWT and issues its own secure session cookie. API/automation
-  still uses `Authorization: Bearer <RECALLANT_AUTH_TOKEN>`. Agents use local stdio MCP
+  validates Cloudflare Access identity headers/JWT assertion against `RECALLANT_ADMIN_EMAILS` and
+  issues its own secure session cookie. API/automation still uses
+  `Authorization: Bearer <RECALLANT_AUTH_TOKEN>`. Agents use local stdio MCP
   (`recallant mcp-server`), not remote MCP over Cloudflare in the first deployment.
 - Recallant server definition is accepted: it is the always-available private backend on the Linux server that owns memory runtime, MCP endpoints, Review UI/admin API, Postgres/model access, background jobs, and sync from local spools.
 - Review UI placement is accepted: it runs on the Recallant server. v1 starts as a compact private workbench and should be designed as the beginning of a fuller Recallant management platform. The first production owner-server access path is `recallant.unicloud.ca` through Cloudflare Access and Tunnel to the localhost-only Recallant origin.
@@ -147,7 +148,9 @@ Production deployment progress as of 2026-05-27:
 - the dedicated Recallant Postgres/pgvector container is active and healthy on
   `127.0.0.1:15432`;
 - `0001_initial.sql` has been applied to `recallant_agent_work`;
-- `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for both services.
+- `recallant.service` is active and enabled on `127.0.0.1:3005`;
+- HTTP auth supports bearer API access and Cloudflare Access identity to signed session cookie;
+- `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
 ## Expansion stance
 

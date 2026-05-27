@@ -1,4 +1,6 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { pathToFileURL } from "node:url";
 import { getRecallantCoreInfo } from "@recallant/core";
 import {
   createRecallantDbFromEnv,
@@ -22,6 +24,7 @@ export function getRecallantHttpConfig() {
   const host = process.env.RECALLANT_HOST ?? "127.0.0.1";
   const port = Number(process.env.RECALLANT_PORT ?? 3005);
   const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
+  const adminEmails = getConfiguredAdminEmails();
   const publicBindRequested = host === "0.0.0.0" || host === "::";
   if (publicBindRequested && process.env.RECALLANT_ALLOW_PUBLIC_BIND !== "true") {
     throw new Error(
@@ -36,6 +39,9 @@ export function getRecallantHttpConfig() {
       "VALIDATION_ERROR: Cloudflare mode requires RECALLANT_CLOUDFLARE_EDGE_AUTH=required"
     );
   }
+  if (cloudflareMode === "enabled" && adminEmails.length === 0) {
+    throw new Error("VALIDATION_ERROR: Cloudflare mode requires RECALLANT_ADMIN_EMAILS");
+  }
   return {
     host,
     port,
@@ -44,7 +50,8 @@ export function getRecallantHttpConfig() {
     recallant_auth_required: true,
     cloudflare: {
       mode: cloudflareMode,
-      edge_auth_required: cloudflareMode === "enabled"
+      edge_auth_required: cloudflareMode === "enabled",
+      admin_email_count: adminEmails.length
     }
   };
 }
@@ -57,29 +64,128 @@ function escapeHtml(value: unknown) {
     .replaceAll('"', "&quot;");
 }
 
-function authorized(request: IncomingMessage) {
+function getConfiguredAdminEmails() {
+  return (process.env.RECALLANT_ADMIN_EMAILS ?? process.env.RECALLANT_ADMIN_EMAIL ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function getHeaderValue(request: IncomingMessage, name: string) {
+  const value = request.headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function parseCookies(request: IncomingMessage) {
+  const header = getHeaderValue(request, "cookie");
+  const cookies = new Map<string, string>();
+  if (!header) return cookies;
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=");
+    if (index === -1) continue;
+    cookies.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()));
+  }
+  return cookies;
+}
+
+function getSessionSecret() {
+  return process.env.RECALLANT_SESSION_SECRET ?? "";
+}
+
+function signSessionPayload(payload: string) {
+  const secret = getSessionSecret();
+  if (!secret) return "";
+  return createHmac("sha256", secret).update(payload).digest("base64url");
+}
+
+function createSessionCookie(email: string) {
+  const payload = Buffer.from(
+    JSON.stringify({ email: email.toLowerCase(), issued_at: Date.now() }),
+    "utf8"
+  ).toString("base64url");
+  const signature = signSessionPayload(payload);
+  if (!signature) return "";
+  const secure = process.env.RECALLANT_CLOUDFLARE_MODE === "enabled" ? "; Secure" : "";
+  return [
+    `recallant_session=${encodeURIComponent(`${payload}.${signature}`)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    "Max-Age=28800",
+    secure
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function verifySessionCookie(request: IncomingMessage) {
+  const cookie = parseCookies(request).get("recallant_session");
+  if (!cookie) return undefined;
+  const [payload, signature] = cookie.split(".");
+  if (!payload || !signature) return undefined;
+  const expected = signSessionPayload(payload);
+  if (!expected) return undefined;
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return undefined;
+  }
+  let parsed: { email?: string; issued_at?: number };
+  try {
+    parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      email?: string;
+      issued_at?: number;
+    };
+  } catch {
+    return undefined;
+  }
+  if (!parsed.email || !parsed.issued_at) return undefined;
+  if (Date.now() - parsed.issued_at > 8 * 60 * 60 * 1000) return undefined;
+  if (!getConfiguredAdminEmails().includes(parsed.email.toLowerCase())) return undefined;
+  return parsed.email.toLowerCase();
+}
+
+function getCloudflareIdentity(request: IncomingMessage) {
+  if (process.env.RECALLANT_CLOUDFLARE_MODE !== "enabled") return undefined;
+  if (process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH !== "required") return undefined;
+  const email = getHeaderValue(request, "cf-access-authenticated-user-email")?.toLowerCase();
+  const jwt = getHeaderValue(request, "cf-access-jwt-assertion");
+  if (!email || !jwt) return undefined;
+  if (!getConfiguredAdminEmails().includes(email)) return undefined;
+  return email;
+}
+
+function bearerAuthorized(request: IncomingMessage) {
   const token = process.env.RECALLANT_AUTH_TOKEN;
   if (!token) return false;
   const header = request.headers.authorization;
-  const recallantAuth = header === `Bearer ${token}`;
-  if (!recallantAuth) return false;
-  if (process.env.RECALLANT_CLOUDFLARE_MODE !== "enabled") return true;
-  if (process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH !== "required") return false;
-  return Boolean(
-    request.headers["cf-access-authenticated-user-email"] ||
-    request.headers["cf-access-jwt-assertion"]
-  );
+  return header === `Bearer ${token}`;
+}
+
+function authorize(request: IncomingMessage) {
+  if (bearerAuthorized(request)) return { ok: true, mode: "bearer" };
+  const sessionEmail = verifySessionCookie(request);
+  if (sessionEmail) return { ok: true, mode: "session", email: sessionEmail };
+  const cloudflareEmail = getCloudflareIdentity(request);
+  if (cloudflareEmail) return { ok: true, mode: "cloudflare", email: cloudflareEmail };
+  return { ok: false, mode: "none" };
 }
 
 function write(
   response: ServerResponse,
   statusCode: number,
   body: string,
-  contentType = "text/html"
+  contentType = "text/html",
+  headers: Record<string, string | string[]> = {}
 ) {
   response.writeHead(statusCode, {
     "content-type": `${contentType}; charset=utf-8`,
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...headers
   });
   response.end(body);
 }
@@ -210,17 +316,26 @@ export function createRecallantHttpServer() {
       );
       return;
     }
-    if (!authorized(request)) {
+    const auth = authorize(request);
+    if (!auth.ok) {
       write(response, 401, "Unauthorized", "text/plain");
       return;
     }
+    const sessionCookie =
+      auth.mode === "cloudflare" && auth.email ? createSessionCookie(auth.email) : "";
     const database = createRecallantDbFromEnv();
     if (!database) {
       write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
       return;
     }
     if (request.url === "/" || request.url === "/review") {
-      write(response, 200, renderDashboard(await database.getReviewDashboard()));
+      write(
+        response,
+        200,
+        renderDashboard(await database.getReviewDashboard()),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
       return;
     }
     if (request.url === "/api/review-dashboard") {
@@ -256,9 +371,10 @@ export async function startRecallantHttpServer() {
   const { host, port } = getRecallantHttpConfig();
   const server = createRecallantHttpServer();
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
+  process.stdout.write(`Recallant HTTP server listening on http://${host}:${port}\n`);
   return server;
 }
 
-if (process.argv[1]?.endsWith("/index.js")) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await startRecallantHttpServer();
 }

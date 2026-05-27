@@ -9,6 +9,10 @@ const databaseUrl =
 
 const token = `review-smoke-${randomUUID()}`;
 process.env.RECALLANT_AUTH_TOKEN = token;
+process.env.RECALLANT_SESSION_SECRET = `review-session-${randomUUID()}`;
+delete process.env.RECALLANT_CLOUDFLARE_MODE;
+delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
+delete process.env.RECALLANT_ADMIN_EMAILS;
 
 const defaultHttpConfig = getRecallantHttpConfig();
 if (
@@ -196,28 +200,58 @@ try {
 
   process.env.RECALLANT_CLOUDFLARE_MODE = "enabled";
   process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH = "required";
+  process.env.RECALLANT_ADMIN_EMAILS = "owner@example.invalid";
   const cloudflareConfig = getRecallantHttpConfig();
-  if (cloudflareConfig.cloudflare.edge_auth_required !== true) {
+  if (
+    cloudflareConfig.cloudflare.edge_auth_required !== true ||
+    cloudflareConfig.cloudflare.admin_email_count !== 1
+  ) {
     throw new Error(`Cloudflare config failed: ${JSON.stringify(cloudflareConfig)}`);
   }
-  const missingEdgeAuth = await fetch(`${baseUrl}/review`, {
+  const bearerStillAuthorized = await fetch(`${baseUrl}/review`, {
     headers: { authorization: `Bearer ${token}` }
   });
-  if (missingEdgeAuth.status !== 401) {
-    throw new Error(`Cloudflare mode allowed missing edge auth: ${missingEdgeAuth.status}`);
+  if (bearerStillAuthorized.status !== 200) {
+    throw new Error(
+      `Cloudflare mode blocked Recallant bearer API auth: ${bearerStillAuthorized.status}`
+    );
+  }
+  const browserMissingEdgeAuth = await fetch(`${baseUrl}/review`);
+  if (browserMissingEdgeAuth.status !== 401) {
+    throw new Error(`Cloudflare mode allowed browser without edge auth: ${browserMissingEdgeAuth.status}`);
+  }
+  const wrongEdgeIdentity = await fetch(`${baseUrl}/review`, {
+    headers: {
+      "cf-access-authenticated-user-email": "intruder@example.invalid",
+      "cf-access-jwt-assertion": "signed-by-cloudflare"
+    }
+  });
+  if (wrongEdgeIdentity.status !== 401) {
+    throw new Error(`Cloudflare mode allowed non-admin identity: ${wrongEdgeIdentity.status}`);
   }
   const edgeAuthorized = await fetch(`${baseUrl}/review`, {
     headers: {
-      authorization: `Bearer ${token}`,
-      "cf-access-authenticated-user-email": "owner@example.invalid"
+      "cf-access-authenticated-user-email": "owner@example.invalid",
+      "cf-access-jwt-assertion": "signed-by-cloudflare"
     }
   });
   if (edgeAuthorized.status !== 200) {
-    throw new Error(`Cloudflare edge-auth + Recallant token failed: ${edgeAuthorized.status}`);
+    throw new Error(`Cloudflare edge-auth browser session failed: ${edgeAuthorized.status}`);
+  }
+  const setCookie = edgeAuthorized.headers.get("set-cookie");
+  if (!setCookie?.includes("recallant_session=") || !setCookie.includes("HttpOnly")) {
+    throw new Error(`Cloudflare edge-auth did not issue a secure session cookie: ${setCookie}`);
+  }
+  const sessionAuthorized = await fetch(`${baseUrl}/api/review-dashboard`, {
+    headers: { cookie: setCookie.split(";")[0] }
+  });
+  if (sessionAuthorized.status !== 200) {
+    throw new Error(`Recallant session cookie auth failed: ${sessionAuthorized.status}`);
   }
 } finally {
   delete process.env.RECALLANT_CLOUDFLARE_MODE;
   delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
+  delete process.env.RECALLANT_ADMIN_EMAILS;
   server.close();
   await db.close();
 }

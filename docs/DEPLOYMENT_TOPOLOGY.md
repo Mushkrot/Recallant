@@ -103,6 +103,7 @@ Cloudflare ingress: Tunnel mainserver -> http://127.0.0.1:3005
 Cloudflare Access: required; allowed human owner email highmac@gmail.com
 Recallant browser auth: validate Cloudflare Access identity/JWT and issue a secure session cookie
 Recallant API/automation auth: Authorization: Bearer <RECALLANT_AUTH_TOKEN>
+Recallant admin allowlist: RECALLANT_ADMIN_EMAILS=highmac@gmail.com
 Agent MCP access: local stdio MCP; remote MCP over Cloudflare is not enabled in this deployment
 ```
 
@@ -114,6 +115,11 @@ Cloudflare path:
   `recallant.unicloud.ca`.
 - Cloudflare access is explicit owner configuration, not an unauthenticated public default.
 - Cloudflare mode uses Cloudflare Tunnel `mainserver`, Cloudflare Access, and Recallant auth/session.
+- Browser UI auth validates Cloudflare Access identity headers/JWT assertion at the private origin
+  against `RECALLANT_ADMIN_EMAILS`, then issues a signed `recallant_session` cookie. Do not add a
+  second password or second email magic-link layer for the first deployment.
+- API and automation auth uses `Authorization: Bearer <RECALLANT_AUTH_TOKEN>` and does not depend
+  on browser session state.
 - No unauthenticated public management UI is allowed.
 - No public MCP/raw-artifact route is allowed. Admin/API calls exposed through the UI origin still
   require Cloudflare Access and Recallant auth/session/token.

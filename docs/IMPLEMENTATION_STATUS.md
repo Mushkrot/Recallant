@@ -30,9 +30,9 @@ checkpoint. The accepted first owner-server deployment is:
 - Human UI hostname: `recallant.unicloud.ca`.
 - Cloudflare path: Cloudflare Access for `highmac@gmail.com` -> Tunnel `mainserver` ->
   `http://127.0.0.1:3005`.
-- Recallant human auth: validate Cloudflare Access identity/JWT, then issue a secure Recallant
-  session cookie. Do not add a second email magic-link flow or second UI password for the first
-  deployment.
+- Recallant human auth: validate Cloudflare Access identity/JWT for an allowlisted
+  `RECALLANT_ADMIN_EMAILS` identity, then issue a secure Recallant session cookie. Do not add a
+  second email magic-link flow or second UI password for the first deployment.
 - API/automation auth: keep `Authorization: Bearer <RECALLANT_AUTH_TOKEN>`.
 - Agent access: use the existing local stdio MCP path (`recallant mcp-server`). Do not expose remote
   MCP through Cloudflare in the first deployment.
@@ -59,6 +59,15 @@ The production Postgres/pgvector prerequisite has also been completed on the own
 `recallant-postgres` is healthy, bound to `127.0.0.1:15432`, backed by
 `/ai/recallant-data/postgres`, migrated with `0001_initial.sql`, and verified with `pgcrypto` and
 `vector` installed. Local backup storage exists at `/ai/recallant-data/backups`.
+
+The HTTP auth implementation now supports both accepted auth paths: bearer token auth for
+agents/API and Cloudflare Access identity plus signed Recallant session cookie for the browser UI.
+The production secret file includes `RECALLANT_ADMIN_EMAILS=highmac@gmail.com`.
+
+The Recallant HTTP service is installed as `recallant.service`, enabled, active, and bound to
+`127.0.0.1:3005`. Local verification confirmed `/health`, `401` for unauthenticated `/review`,
+`200` for bearer-authenticated API access, and `200` for Cloudflare identity -> Recallant session
+cookie -> API access.
 
 ## Recent Commit Checkpoints
 

@@ -38,6 +38,12 @@ recallant doctor
 # OK Recallant server version 1.x.x
 ```
 
+On the owner's server, the production HTTP process runs as `recallant.service` and starts with:
+
+```bash
+npm run server:start
+```
+
 On the owner's server, any long-running port-bound service must be registered in `/ai/PORTS.yaml` before start, and security/exposure changes must consult `/ai/SECURITY`.
 
 Use `make prod-db-up`, `make prod-db-migrate`, and `make prod-db-status` for the production
