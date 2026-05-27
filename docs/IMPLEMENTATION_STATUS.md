@@ -75,6 +75,16 @@ allow policy for `highmac@gmail.com`, and `/etc/cloudflared/config.yml` ingress 
 `http://localhost:3005`. Public unauthenticated access was verified to redirect to Cloudflare
 Access login while the localhost origin remains healthy.
 
+Local production backups are automated with `recallant-backup.timer`. The timer runs
+`recallant-backup.service` daily at `03:15 UTC`, creates a local backup under
+`/ai/recallant-data/backups`, immediately runs `backup-verify`, and updates
+`/ai/recallant-data/backups/latest-manifest.json`. The first manual service run completed
+successfully on 2026-05-27.
+
+Production `recallant doctor` was verified with Postgres reachable, Ollama reachable, no missing
+expected local models, and paid APIs still disabled. Local stdio MCP smoke also passed on the
+production env.
+
 ## Recent Commit Checkpoints
 
 - `77ca937 Add local spool sync CLI`

@@ -44,6 +44,10 @@ On the owner's server, the production HTTP process runs as `recallant.service` a
 npm run server:start
 ```
 
+Production local backups are automated by `recallant-backup.timer`. Each run creates a backup under
+`/ai/recallant-data/backups`, verifies it with `recallant backup-verify`, and updates
+`/ai/recallant-data/backups/latest-manifest.json`.
+
 On the owner's server, any long-running port-bound service must be registered in `/ai/PORTS.yaml` before start, and security/exposure changes must consult `/ai/SECURITY`.
 
 Use `make prod-db-up`, `make prod-db-migrate`, and `make prod-db-status` for the production

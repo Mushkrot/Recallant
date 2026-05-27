@@ -152,6 +152,8 @@ Production deployment progress as of 2026-05-27:
 - HTTP auth supports bearer API access and Cloudflare Access identity to signed session cookie;
 - Cloudflare DNS, Access app/policy, and Tunnel ingress are configured for
   `recallant.unicloud.ca -> http://localhost:3005`;
+- `recallant-backup.timer` is active/enabled for daily local backup plus restore verification at
+  `03:15 UTC`, with backups under `/ai/recallant-data/backups`;
 - `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
 ## Expansion stance

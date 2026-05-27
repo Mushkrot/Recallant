@@ -190,6 +190,13 @@ Initial v1 backup placement:
 - backups must include Postgres domain databases and raw artifact storage,
 - restore verification must be possible without overwriting production.
 
+Owner-server first deployment:
+
+- `recallant-backup.timer` runs daily at `03:15 UTC`,
+- `recallant-backup.service` executes `scripts/recallant-production-backup.sh`,
+- each run creates a local backup, runs restore verification, and updates
+  `/ai/recallant-data/backups/latest-manifest.json`.
+
 Future target:
 
 - second-server replication remains an architecture-ready future option,
