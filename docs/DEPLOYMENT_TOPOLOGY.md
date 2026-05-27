@@ -115,6 +115,9 @@ Cloudflare path:
   `recallant.unicloud.ca`.
 - Cloudflare access is explicit owner configuration, not an unauthenticated public default.
 - Cloudflare mode uses Cloudflare Tunnel `mainserver`, Cloudflare Access, and Recallant auth/session.
+- The first production Cloudflare objects are active: DNS CNAME `recallant.unicloud.ca` to Tunnel
+  `mainserver`, Access app `Recallant`, allow policy for `highmac@gmail.com`, and cloudflared
+  ingress to `http://localhost:3005`.
 - Browser UI auth validates Cloudflare Access identity headers/JWT assertion at the private origin
   against `RECALLANT_ADMIN_EMAILS`, then issues a signed `recallant_session` cookie. Do not add a
   second password or second email magic-link layer for the first deployment.

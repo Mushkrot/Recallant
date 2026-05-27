@@ -69,6 +69,12 @@ The Recallant HTTP service is installed as `recallant.service`, enabled, active,
 `200` for bearer-authenticated API access, and `200` for Cloudflare identity -> Recallant session
 cookie -> API access.
 
+Cloudflare routing is now configured for the owner-server deployment: `recallant.unicloud.ca` has a
+proxied CNAME to Tunnel `mainserver`, a Cloudflare Access self-hosted app named `Recallant`, an
+allow policy for `highmac@gmail.com`, and `/etc/cloudflared/config.yml` ingress to
+`http://localhost:3005`. Public unauthenticated access was verified to redirect to Cloudflare
+Access login while the localhost origin remains healthy.
+
 ## Recent Commit Checkpoints
 
 - `77ca937 Add local spool sync CLI`

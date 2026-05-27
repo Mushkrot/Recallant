@@ -150,6 +150,8 @@ Production deployment progress as of 2026-05-27:
 - `0001_initial.sql` has been applied to `recallant_agent_work`;
 - `recallant.service` is active and enabled on `127.0.0.1:3005`;
 - HTTP auth supports bearer API access and Cloudflare Access identity to signed session cookie;
+- Cloudflare DNS, Access app/policy, and Tunnel ingress are configured for
+  `recallant.unicloud.ca -> http://localhost:3005`;
 - `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
 ## Expansion stance
