@@ -4,10 +4,28 @@
 
 On a Linux server, Recallant needs Postgres/pgvector and the Recallant server. A local model provider such as Ollama is used when configured and reachable; use an existing installation instead of starting a duplicate stack by default.
 
-Example implementation profile:
+Owner-server production profile:
 
-```bash
-docker compose up -d   # postgres + recallant-server
+```text
+Human UI:
+  https://recallant.unicloud.ca
+    -> Cloudflare Access (highmac@gmail.com)
+    -> Cloudflare Tunnel mainserver
+    -> http://127.0.0.1:3005
+    -> Recallant session cookie
+
+Agents:
+  recallant mcp-server over local stdio MCP
+
+Postgres:
+  Docker Compose pgvector service
+  127.0.0.1:15432 -> container 5432
+
+Secrets:
+  /opt/secure-configs/recallant.env
+
+Data:
+  /ai/recallant-data
 ```
 
 Check:
@@ -20,6 +38,10 @@ recallant doctor
 ```
 
 On the owner's server, any long-running port-bound service must be registered in `/ai/PORTS.yaml` before start, and security/exposure changes must consult `/ai/SECURITY`.
+
+For the first production deployment, do not expose remote MCP through Cloudflare. The Cloudflare
+hostname is for the human Review/Management UI and same-origin admin API. Agents use the local
+stdio MCP command printed by `recallant init`.
 
 ## Step 1 - Create and register a new project
 
@@ -77,7 +99,7 @@ Suggested commands:
       "env": {
         "RECALLANT_PROJECT_ID": "550e8400-e29b-41d4-a716-446655440000",
         "RECALLANT_DEVELOPER_ID": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@localhost:5432/recallant"
+        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@127.0.0.1:15432/recallant_agent_work"
       }
     }
   }

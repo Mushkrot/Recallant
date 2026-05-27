@@ -21,7 +21,10 @@ The Review UI is part of the Recallant server deployment. v1 starts as a compact
 
 ## 2. Target environment
 
-The owner's target environment is a personal Linux server. Access should normally happen through SSH and Tailscale.
+The owner's target environment is a personal Linux server. Access normally happens through SSH
+and Tailscale for operations, while the owner-facing Recallant UI is deployed through the same
+Cloudflare Tunnel + Cloudflare Access pattern already used by private owner applications on the
+server.
 
 Important assumptions:
 
@@ -30,7 +33,8 @@ Important assumptions:
 - The server may already provide local-model services such as Ollama; Recallant should reuse configured existing services instead of creating duplicate stacks.
 - Recallant should not increase public attack surface unnecessarily.
 - Even when the client machine is on the local network, the owner prefers connecting through Tailscale for security.
-- Recallant should be private-by-default and reachable over Tailnet/VPN rather than exposed to the public internet.
+- Recallant should keep its origin private and reachable only through localhost/private server
+  paths. The owner-facing UI may be exposed through Cloudflare Access at an explicit hostname.
 - Recallant should still use its own auth/session/token layer inside the private network.
 - Future Cloudflare access is expected soon enough that the routing/auth design must stay Cloudflare-ready.
 - The current server layout and paths are deployment-profile facts, not universal product assumptions.
@@ -44,14 +48,14 @@ Codex / CLI on workstation
   v
 local recallant client / spool
   |
-  | Tailscale private address / SSH tunnel
+  | local stdio MCP process with server/env/secret bindings
   v
 Recallant server on Linux
   |
   +-- Postgres / pgvector
   +-- raw artifact storage
   +-- model router
-  +-- existing Ollama/local GPU workers when configured
+  +-- existing localhost-only Ollama/local GPU service when configured
   +-- background jobs
   +-- private Management UI/chat/admin API
   +-- future management platform UI
@@ -62,7 +66,24 @@ Recallant server on Linux
 
 ## 4. Network posture
 
-Default recommendation:
+Accepted first production deployment:
+
+```text
+Human owner:
+  https://recallant.unicloud.ca
+    -> Cloudflare Access allow policy for highmac@gmail.com
+    -> Cloudflare Tunnel mainserver
+    -> http://127.0.0.1:3005
+    -> Recallant validates Cloudflare Access identity/JWT
+    -> Recallant secure session cookie
+
+Agents:
+  Codex / future MCP clients
+    -> local stdio MCP command: recallant mcp-server
+    -> Recallant Postgres/server secrets through server-side env bindings
+```
+
+Operational rules:
 
 - Bind Recallant server, Review UI, and admin services to localhost or Tailnet interface only.
 - Do not expose Recallant directly on public internet.
@@ -76,21 +97,63 @@ Default recommendation:
 Current owner-server planning profile:
 
 ```text
-Review UI/admin API: 127.0.0.1:3005
-Remote access: SSH/Tailscale only by default
-Cloudflare: disabled until explicitly configured
+Review UI/admin API origin: 127.0.0.1:3005
+Cloudflare hostname: recallant.unicloud.ca
+Cloudflare ingress: Tunnel mainserver -> http://127.0.0.1:3005
+Cloudflare Access: required; allowed human owner email highmac@gmail.com
+Recallant browser auth: validate Cloudflare Access identity/JWT and issue a secure session cookie
+Recallant API/automation auth: Authorization: Bearer <RECALLANT_AUTH_TOKEN>
+Agent MCP access: local stdio MCP; remote MCP over Cloudflare is not enabled in this deployment
 ```
 
 The port is an owner-server inventory choice, not a universal product invariant. Other servers may use another port through settings.
 
-Cloudflare-ready path:
+Cloudflare path:
 
-- The owner may later expose the management UI through a dedicated Cloudflare-managed subdomain, and this is a likely near-future deployment mode.
-- Cloudflare access is an explicit deployment mode, not the v1 private default.
-- Details are a future deployment-profile decision: subdomain, Cloudflare Tunnel vs proxied route, Access policy, Recallant session model, and reverse-proxy layout.
-- Future Cloudflare access must use Cloudflare Access or equivalent edge authentication plus Recallant auth/session.
+- The owner-facing management UI is deployed through the dedicated Cloudflare-managed subdomain
+  `recallant.unicloud.ca`.
+- Cloudflare access is explicit owner configuration, not an unauthenticated public default.
+- Cloudflare mode uses Cloudflare Tunnel `mainserver`, Cloudflare Access, and Recallant auth/session.
 - No unauthenticated public management UI is allowed.
-- No public MCP/admin/raw-artifact route is allowed without explicit owner configuration and auth.
+- No public MCP/raw-artifact route is allowed. Admin/API calls exposed through the UI origin still
+  require Cloudflare Access and Recallant auth/session/token.
+
+## 4.1 Runtime and data layout
+
+Accepted first production layout:
+
+```text
+Code:
+  /ai/recallant
+
+Persistent runtime data:
+  /ai/recallant-data
+
+Secrets:
+  /opt/secure-configs/recallant.env
+
+Recallant app:
+  systemd service on the host
+  cwd=/ai/recallant
+  bind=127.0.0.1:3005
+
+Recallant Postgres/pgvector:
+  Docker Compose service
+  host bind=127.0.0.1:15432
+  container port=5432
+  database=recallant_agent_work
+  data=/ai/recallant-data/postgres
+
+Local model provider:
+  existing shared Ollama service
+  url=http://127.0.0.1:11434
+  no duplicate Ollama stack
+```
+
+`/opt/secure-configs/recallant.env` is the single production secret/env file for the app and
+database stack. It contains the Postgres password, `RECALLANT_DATABASE_URL`,
+`RECALLANT_AUTH_TOKEN`, session secret material, Cloudflare mode flags, and the Ollama URL. Do not
+copy these values into git, docs, settings tables, backup manifests, or chat.
 
 ## 5. Local/offline behavior
 
@@ -107,24 +170,21 @@ The server remains the canonical source of truth after sync.
 
 Initial v1 backup placement:
 
-- automated backups may be written to encrypted local backup storage on the same Recallant server,
+- automated backups are written to local backup storage under `/ai/recallant-data/backups`,
 - backups must include Postgres domain databases and raw artifact storage,
 - restore verification must be possible without overwriting production.
 
 Future target:
 
-- replicate encrypted backups to a second server on the owner's network,
-- connect through SSH/Tailscale or another explicit private transport,
-- keep this as a backup target, not as another live source of truth.
+- second-server replication remains an architecture-ready future option,
+- no second backup server is available or expected in the near term,
+- keep future replication as a backup target, not as another live source of truth.
 
 See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) and [ADR-0028-practical-backup-restore-policy.md](ADR-0028-practical-backup-restore-policy.md).
 
 ## 7. Open decisions
 
-- Whether the MCP server itself runs remotely over streamable HTTP, or Codex uses a local wrapper that forwards to the remote Recallant server.
-- Whether SSH tunnel is required for all server operations or Tailnet address is sufficient.
-- Whether Postgres is reachable only from the Recallant server container/process or also from trusted admin CLI.
-- Whether Review UI is served by the same Recallant HTTP service or as a separate `recallant-review-ui` process behind the same private network boundary.
-- Exact future Cloudflare deployment mode, subdomain, Access policy, and Recallant session mechanism.
-- Exact backup tool and future second-server path.
-- Whether the production Review UI/admin API stays on port `3005` for the first owner-server deployment or is remapped before service start.
+- Whether future remote MCP should be added as authenticated streamable HTTP. It is not part of
+  the first production deployment.
+- Exact backup schedule/retention values after observing real data volume.
+- Whether future second-server backup replication is added when a second server exists.

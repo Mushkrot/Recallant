@@ -82,7 +82,7 @@ Config path: `~/.claude/settings.json` globally or `.claude/settings.json` in th
       "env": {
         "RECALLANT_PROJECT_ID": "<project_id from .recallant/config>",
         "RECALLANT_DEVELOPER_ID": "<developer_id>",
-        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@localhost:5432/recallant"
+        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@127.0.0.1:15432/recallant_agent_work"
       }
     }
   }
@@ -102,7 +102,7 @@ Config path: `.cursor/mcp.json` in the project directory.
       "env": {
         "RECALLANT_PROJECT_ID": "<project_id from .recallant/config>",
         "RECALLANT_DEVELOPER_ID": "<developer_id>",
-        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@localhost:5432/recallant"
+        "RECALLANT_DATABASE_URL": "postgresql://recallant:secret@127.0.0.1:15432/recallant_agent_work"
       }
     }
   }

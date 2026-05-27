@@ -33,6 +33,21 @@ Recallant must be **Cloudflare-ready**:
 - future Cloudflare mode must use Cloudflare Access or equivalent edge auth plus Recallant auth,
 - no unauthenticated public Review UI/admin API is allowed.
 
+Owner-server production refinement, accepted on 2026-05-27:
+
+- human Review UI access uses `https://recallant.unicloud.ca`,
+- Cloudflare Tunnel `mainserver` routes the hostname to the private origin
+  `http://127.0.0.1:3005`,
+- Cloudflare Access allows the human owner email `highmac@gmail.com`,
+- Recallant validates Cloudflare Access identity/JWT and then issues its own secure browser
+  session cookie,
+- Recallant does not send a second magic-link email and does not require a second UI password in
+  this deployment,
+- `Authorization: Bearer <RECALLANT_AUTH_TOKEN>` remains available for API, automation, smoke
+  checks, and non-browser admin calls,
+- agent MCP access uses the existing local stdio `recallant mcp-server` path; remote MCP over the
+  Cloudflare hostname is not enabled in the first production deployment.
+
 ## Practical v1 default
 
 Default v1 deployment:
@@ -49,9 +64,10 @@ Future Cloudflare-ready deployment:
 
 ```text
 Browser
-  -> Cloudflare-managed Recallant subdomain
-  -> Cloudflare Access or equivalent policy
-  -> Recallant auth/session
+  -> recallant.unicloud.ca
+  -> Cloudflare Access allow policy
+  -> Recallant validates Cloudflare Access identity/JWT
+  -> Recallant secure session cookie
   -> Recallant server private origin
 ```
 
@@ -65,7 +81,6 @@ Browser
 
 ## Follow-up decisions
 
-- Exact Recallant auth mechanism for v1: single admin password, magic link, local admin token, session cookie, or another simple single-user model.
-- Exact Cloudflare mode: Cloudflare Tunnel vs proxied subdomain vs another reverse-proxy setup.
-- Exact subdomain naming.
-- Whether remote MCP uses streamable HTTP behind auth or a local wrapper that forwards over private network.
+- Whether future remote MCP uses streamable HTTP behind auth or remains local stdio/wrapper only.
+- Whether a password login is added later as an optional fallback if Cloudflare Access is
+  unavailable. It is not required for the first production deployment.

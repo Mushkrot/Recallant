@@ -1,6 +1,6 @@
 # Working context snapshot
 
-Last updated: 2026-05-22.
+Last updated: 2026-05-27.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
@@ -93,9 +93,14 @@ Additional settled points:
 - Human memory beyond coding remains architecture-ready only in v1; passive personal-life capture is future work.
 - Implementation is authorized and active as of 2026-05-22. The owner explicitly wants Recallant implementation agents to work autonomously, follow the documented phase plan, make ordinary technical decisions, and create scoped commits at logical rollback checkpoints without asking for separate permission.
 - Agents should stop only for genuinely owner-dependent choices, security/public-exposure changes, secrets, paid API use, destructive operations, server/firewall/service changes, or real specification contradictions.
-- Target deployment is the owner's Linux server, reached through SSH/Tailscale; Recallant should be private-by-default and not add public attack surface. Security/access decision: v1 uses private network access plus Recallant-level auth/session/token even inside Tailnet/SSH. Cloudflare-managed subdomain access is expected in the near future, so v1 routing/auth must be Cloudflare-ready, but public/subdomain access remains explicit opt-in and must use edge auth plus Recallant auth.
+- Target deployment is the owner's Linux server. The first production deployment is now accepted:
+  human UI at `recallant.unicloud.ca` behind Cloudflare Access for `highmac@gmail.com`, routed by
+  Cloudflare Tunnel `mainserver` to the localhost-only origin `http://127.0.0.1:3005`. Recallant
+  validates Cloudflare Access identity/JWT and issues its own secure session cookie. API/automation
+  still uses `Authorization: Bearer <RECALLANT_AUTH_TOKEN>`. Agents use local stdio MCP
+  (`recallant mcp-server`), not remote MCP over Cloudflare in the first deployment.
 - Recallant server definition is accepted: it is the always-available private backend on the Linux server that owns memory runtime, MCP endpoints, Review UI/admin API, Postgres/model access, background jobs, and sync from local spools.
-- Review UI placement is accepted: it runs on the Recallant server. v1 starts as a compact private workbench and should be designed as the beginning of a fuller Recallant management platform. Future access through a dedicated Cloudflare-managed subdomain is allowed and likely near-future, with exact routing/auth details to be supplied later by the owner.
+- Review UI placement is accepted: it runs on the Recallant server. v1 starts as a compact private workbench and should be designed as the beginning of a fuller Recallant management platform. The first production owner-server access path is `recallant.unicloud.ca` through Cloudflare Access and Tunnel to the localhost-only Recallant origin.
 - Review UI first screen is accepted: Review Inbox / Command Center. It prioritizes conflicts, candidate rules, important/needs-review memories, and duplicates, with scope/profile, critical status, selected-item evidence, and direct review actions.
 - Review UI detail decision is accepted: v1 uses compact workbench Option B, not a minimal approval table and not a full admin platform. Required areas: project navigation, Review Inbox, Rules, selected-item detail/source panel, conflicts/duplicates, action controls, Cost / Paid API, and project Settings shortcut.
 - Settings location is accepted: authoritative settings live centrally on Recallant server/Postgres. UI management starts from all managed projects or a project selector, then opens project-specific Review/Settings. `.recallant/config` in a repo is only a pointer to `project_id` and `recallant_server_url`, not policy source of truth.
@@ -117,8 +122,24 @@ Additional settled points:
 - Conflict-resolution priority Q13 is accepted: resolve by applicability first, then authority, then scope specificity, then recency; high-risk or equal-authority conflicts go to Review UI / owner confirmation. See `ADR-0041-conflict-resolution-priority.md`.
 - Managed AI-native platform decision is accepted: Recallant must be controllable through natural-language management chat, use AI heavily for extraction/cleanup/conflict/context planning, keep deterministic policy for safety/destructive operations, and support explicit permanent erasure. See `ADR-0042-managed-ai-native-platform-and-operations.md` and `OPERATING_PRINCIPLES.md`.
 - The owner confirmed engineering-quality rules: code/docs/comments/API text/commit messages are English; conversation with the owner can stay Russian; implementation should be modular, low-coupling, testable, and publicly presentable; use meaningful scoped commits.
-- Existing services must be reused through capability bindings where practical. On the owner server, use an existing configured Ollama endpoint rather than starting a duplicate stack; on other servers Ollama may be missing or different and must not break Recallant.
+- Existing services must be reused through capability bindings where practical. On the owner server,
+  use the single existing Ollama service rather than starting a duplicate stack. As of 2026-05-27 it
+  has been upgraded to Ollama `0.24.0`, bound to `127.0.0.1:11434`, enabled, and documented in
+  `/ai/SECURITY` and `/ai/PORTS.yaml`.
 - Owner-server infrastructure constraints are accepted: consult `/ai/SECURITY` before exposure/auth/firewall/service/secret changes; register Recallant ports in `/ai/PORTS.yaml` before service start; represent `/opt/secure-configs/.env` as a secret reference/capability binding, not raw memory content.
+
+Accepted owner-server deployment layout:
+
+- code: `/ai/recallant`;
+- persistent runtime data: `/ai/recallant-data`;
+- secrets/env: `/opt/secure-configs/recallant.env`;
+- Recallant app runtime: host `systemd`, bound to `127.0.0.1:3005`;
+- Recallant Postgres/pgvector runtime: isolated Docker Compose service, host bind
+  `127.0.0.1:15432 -> container 5432`, database `recallant_agent_work`, data under
+  `/ai/recallant-data/postgres`;
+- backups: local backups under `/ai/recallant-data/backups`; second-server replication remains
+  future-only;
+- paid APIs: disabled for first production deployment.
 
 ## Expansion stance
 
@@ -165,9 +186,12 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Continue with remaining lifecycle polish, closeout/context-pack visibility for spool sync state, and broader smoke suites. Do not perform production service changes, paid API calls, or destructive erasure without owner participation.
+3. Implement the accepted production deployment plan. Production service changes for the accepted
+   Recallant/Ollama/Postgres/Cloudflare Access profile are authorized; do not perform additional
+   public exposure, paid API calls, or destructive erasure without owner participation.
 4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
-5. Do not start port-bound services until the owner-server deployment profile is ready and `/ai/PORTS.yaml` remains consistent. Recallant currently has a planning reservation for localhost port `3005`.
+5. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material
+   deployment change.
 
 Do not reopen the product name, v1 scope, OB1/MF0 synthesis, managed memory decision, natural-language management direction, owner-server security/ports constraints, or Recallant/AMP rename unless the owner explicitly requests it.
 

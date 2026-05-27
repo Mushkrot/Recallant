@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-05-22.
+Last updated: 2026-05-27.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
@@ -21,6 +21,36 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
+
+## Accepted Production Deployment Plan
+
+The owner has authorized autonomous production deployment work after the local implementation
+checkpoint. The accepted first owner-server deployment is:
+
+- Human UI hostname: `recallant.unicloud.ca`.
+- Cloudflare path: Cloudflare Access for `highmac@gmail.com` -> Tunnel `mainserver` ->
+  `http://127.0.0.1:3005`.
+- Recallant human auth: validate Cloudflare Access identity/JWT, then issue a secure Recallant
+  session cookie. Do not add a second email magic-link flow or second UI password for the first
+  deployment.
+- API/automation auth: keep `Authorization: Bearer <RECALLANT_AUTH_TOKEN>`.
+- Agent access: use the existing local stdio MCP path (`recallant mcp-server`). Do not expose remote
+  MCP through Cloudflare in the first deployment.
+- App runtime: host `systemd` service from `/ai/recallant`.
+- Database runtime: separate Docker Compose Postgres/pgvector service, not a shared app database.
+- Database bind: `127.0.0.1:15432` on the host to `5432` inside the container.
+- Database name: `recallant_agent_work`.
+- Persistent runtime data: `/ai/recallant-data`.
+- Secret/env file: `/opt/secure-configs/recallant.env`, single file for the app and database stack.
+- Backups: local backups under `/ai/recallant-data/backups`; second-server replication remains
+  future-only because no second server is available.
+- Local models: use the single existing server Ollama service, not a duplicate stack.
+- Paid APIs: disabled for the first production deployment.
+
+The Ollama prerequisite has already been completed on the owner server: the existing service was
+upgraded to `0.24.0`, changed from the old unsafe `0.0.0.0` bind to `127.0.0.1:11434`, enabled, and
+verified with existing models `qwen2.5-coder:7b`, `qwen2.5-coder:14b`, and `mistral-small:24b`.
+Server operations docs in `/ai/SECURITY` and `/ai/PORTS.yaml` were updated.
 
 ## Recent Commit Checkpoints
 
@@ -48,17 +78,11 @@ The core smoke suite includes MCP handshake, lifecycle, embeddings, retrieval, g
 
 ## Current Boundary
 
-Autonomous safe implementation is complete up to the current documented local/server-private core checkpoint.
+The owner has answered the deployment-profile questions above and authorized autonomous
+implementation of ordinary deployment steps with scoped commits and verification after each
+checkpoint.
 
-Next meaningful work likely needs owner participation because it crosses one or more protected boundaries:
-
-- owner-server deployment profile and service setup,
-- `/ai/PORTS.yaml` registration,
-- `/ai/SECURITY` review before exposure/auth/firewall/Cloudflare changes,
-- public/subdomain routing decisions,
-- secrets or production environment values,
-- paid API/provider enablement,
-- destructive erasure beyond tested confirmation paths,
-- deeper natural-language management/model-router behavior that changes product policy.
-
-Until those are confirmed, continue only with local, reversible implementation and tests.
+Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
+generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare
+Access, paid API enablement, destructive erasure, firewall rule changes that risk lockout, or a real
+specification contradiction.

@@ -12,8 +12,8 @@ Recallant v1 requires a Review UI for governed-memory hygiene. The owner clarifi
 - v1 starts as a compact private workbench rather than a simple approval page,
 - the long-term direction is a fuller management platform,
 - future access may be through a dedicated Cloudflare-managed subdomain because the owner's Linux server already hosts several Cloudflare-managed projects,
-- exact Cloudflare routing/auth details will be provided later,
-- the owner has now confirmed that Cloudflare access should be considered near-future, while v1 still starts private-by-default.
+- Cloudflare routing/auth details were refined for the first owner-server production deployment on
+  2026-05-27.
 
 ## Decision
 
@@ -26,6 +26,8 @@ For v1:
 - keep it connected to the same server-side policy path as MCP/CLI review actions,
 - keep it private by default through localhost/Tailscale/SSH tunnel or equivalent private access,
 - require Recallant-level auth/session even on private access.
+- on the owner server, expose the human UI at `recallant.unicloud.ca` through Cloudflare Access and
+  Cloudflare Tunnel to the localhost-only Recallant origin.
 
 For evolution:
 
@@ -42,12 +44,12 @@ For evolution:
 - Review UI is not a Codex UI and not a per-project static page. It is part of the Recallant server product surface.
 - The UI can be implemented as a separate web process or bundled web app, but operationally it belongs to the Recallant server deployment.
 - The initial UI should avoid becoming a full admin platform, but it must include the compact v1 workbench areas accepted in ADR-0033 and its routing/API shape should not block future management-platform expansion.
-- Public/subdomain access must not be enabled by default. Cloudflare access is a near-future deployment mode requiring explicit owner configuration, edge auth such as Cloudflare Access, and Recallant auth.
+- Public/subdomain access must not be unauthenticated. The accepted owner-server deployment uses
+  Cloudflare Access for `highmac@gmail.com` plus Recallant session/token auth, with the origin bound
+  to `127.0.0.1:3005`.
 
 ## Open questions
 
-- Which Cloudflare mode should be used later: regular proxied subdomain, Cloudflare Tunnel, Cloudflare Access, or another setup?
-- What subdomain naming convention should be used?
-- Which simple Recallant auth model should v1 use: single admin password, local admin token, session cookie, or another single-user mechanism?
-- Should v1 use a separate UI process such as `recallant-review-ui`, or serve the UI from the same HTTP service as the admin API?
 - Which management-platform sections follow after governed-memory review and the required paid API cost dashboard: capture profiles, sessions/recovery, sync/spool state, or broader model routing?
+- Whether a separate UI process is useful later. The first production deployment serves the UI/admin
+  API from the same Recallant HTTP service.
