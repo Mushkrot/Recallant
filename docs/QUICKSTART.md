@@ -19,6 +19,7 @@ Agents:
 
 Postgres:
   Docker Compose pgvector service
+  docker-compose.production.yml
   127.0.0.1:15432 -> container 5432
 
 Secrets:
@@ -38,6 +39,11 @@ recallant doctor
 ```
 
 On the owner's server, any long-running port-bound service must be registered in `/ai/PORTS.yaml` before start, and security/exposure changes must consult `/ai/SECURITY`.
+
+Use `make prod-db-up`, `make prod-db-migrate`, and `make prod-db-status` for the production
+Postgres service. These targets call `scripts/recallant-prod-compose.sh`, which sources
+`/opt/secure-configs/recallant.env` without printing it and passes only the database variables to
+the Postgres container. Do not inspect production compose with resolved real secrets.
 
 For the first production deployment, do not expose remote MCP through Cloudflare. The Cloudflare
 hostname is for the human Review/Management UI and same-origin admin API. Agents use the local

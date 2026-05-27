@@ -139,6 +139,7 @@ Recallant app:
 
 Recallant Postgres/pgvector:
   Docker Compose service
+  compose file=/ai/recallant/docker-compose.production.yml
   host bind=127.0.0.1:15432
   container port=5432
   database=recallant_agent_work
@@ -154,6 +155,12 @@ Local model provider:
 database stack. It contains the Postgres password, `RECALLANT_DATABASE_URL`,
 `RECALLANT_AUTH_TOKEN`, session secret material, Cloudflare mode flags, and the Ollama URL. Do not
 copy these values into git, docs, settings tables, backup manifests, or chat.
+
+The production Postgres compose file must not use `/opt/secure-configs/recallant.env` as a raw
+`env_file`, because that would inject unrelated app/session/API secrets into the database container
+and can print resolved values during compose inspection. Production database commands go through
+`scripts/recallant-prod-compose.sh`, which sources the single env file locally and passes only
+`POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` into the Postgres service.
 
 ## 5. Local/offline behavior
 

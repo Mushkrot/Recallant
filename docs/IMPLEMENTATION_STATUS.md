@@ -38,10 +38,13 @@ checkpoint. The accepted first owner-server deployment is:
   MCP through Cloudflare in the first deployment.
 - App runtime: host `systemd` service from `/ai/recallant`.
 - Database runtime: separate Docker Compose Postgres/pgvector service, not a shared app database.
+- Production database compose file: `docker-compose.production.yml`.
 - Database bind: `127.0.0.1:15432` on the host to `5432` inside the container.
 - Database name: `recallant_agent_work`.
 - Persistent runtime data: `/ai/recallant-data`.
 - Secret/env file: `/opt/secure-configs/recallant.env`, single file for the app and database stack.
+  Production database commands source it through `scripts/recallant-prod-compose.sh` and pass only
+  Postgres variables into the database container.
 - Backups: local backups under `/ai/recallant-data/backups`; second-server replication remains
   future-only because no second server is available.
 - Local models: use the single existing server Ollama service, not a duplicate stack.
@@ -51,6 +54,11 @@ The Ollama prerequisite has already been completed on the owner server: the exis
 upgraded to `0.24.0`, changed from the old unsafe `0.0.0.0` bind to `127.0.0.1:11434`, enabled, and
 verified with existing models `qwen2.5-coder:7b`, `qwen2.5-coder:14b`, and `mistral-small:24b`.
 Server operations docs in `/ai/SECURITY` and `/ai/PORTS.yaml` were updated.
+
+The production Postgres/pgvector prerequisite has also been completed on the owner server:
+`recallant-postgres` is healthy, bound to `127.0.0.1:15432`, backed by
+`/ai/recallant-data/postgres`, migrated with `0001_initial.sql`, and verified with `pgcrypto` and
+`vector` installed. Local backup storage exists at `/ai/recallant-data/backups`.
 
 ## Recent Commit Checkpoints
 

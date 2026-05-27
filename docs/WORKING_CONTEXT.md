@@ -135,11 +135,19 @@ Accepted owner-server deployment layout:
 - secrets/env: `/opt/secure-configs/recallant.env`;
 - Recallant app runtime: host `systemd`, bound to `127.0.0.1:3005`;
 - Recallant Postgres/pgvector runtime: isolated Docker Compose service, host bind
-  `127.0.0.1:15432 -> container 5432`, database `recallant_agent_work`, data under
-  `/ai/recallant-data/postgres`;
+  `127.0.0.1:15432 -> container 5432`, compose file `docker-compose.production.yml`, database
+  `recallant_agent_work`, data under `/ai/recallant-data/postgres`;
 - backups: local backups under `/ai/recallant-data/backups`; second-server replication remains
   future-only;
 - paid APIs: disabled for first production deployment.
+
+Production deployment progress as of 2026-05-27:
+
+- the existing server Ollama service is active on `127.0.0.1:11434`;
+- the dedicated Recallant Postgres/pgvector container is active and healthy on
+  `127.0.0.1:15432`;
+- `0001_initial.sql` has been applied to `recallant_agent_work`;
+- `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for both services.
 
 ## Expansion stance
 
