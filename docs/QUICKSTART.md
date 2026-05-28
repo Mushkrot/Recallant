@@ -29,6 +29,10 @@ Data:
   /ai/recallant-data
 ```
 
+The production env file must include stable `RECALLANT_PROJECT_ID` and
+`RECALLANT_PROJECT_PATH=/ai/recallant`; otherwise short-lived server/CLI processes can create
+duplicate project rows for the same path.
+
 Check:
 
 ```bash

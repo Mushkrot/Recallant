@@ -85,6 +85,14 @@ Production `recallant doctor` was verified with Postgres reachable, Ollama reach
 expected local models, and paid APIs still disabled. Local stdio MCP smoke also passed on the
 production env.
 
+The first production UI cleanup is complete. The production env now includes stable
+`RECALLANT_PROJECT_ID` and `RECALLANT_PROJECT_PATH=/ai/recallant`, preventing one-off dashboard,
+doctor, or smoke processes from creating duplicate project rows. After a fresh backup+verify, 13
+empty duplicate `/ai/recallant` project rows were removed with safety checks that skipped any row
+with sessions, events, chunks, memories, settings, model calls, approvals, or adapter settings.
+The Review UI project list now collapses projects by path, shows counts compactly, and renders
+structured settings as formatted JSON instead of `[object Object]`.
+
 ## Recent Commit Checkpoints
 
 - `77ca937 Add local spool sync CLI`

@@ -154,6 +154,10 @@ Production deployment progress as of 2026-05-27:
   `recallant.unicloud.ca -> http://localhost:3005`;
 - `recallant-backup.timer` is active/enabled for daily local backup plus restore verification at
   `03:15 UTC`, with backups under `/ai/recallant-data/backups`;
+- production env has stable `RECALLANT_PROJECT_ID` and `RECALLANT_PROJECT_PATH=/ai/recallant`;
+- the initial duplicate empty `/ai/recallant` project rows created before that env pin were
+  cleaned up after backup verification;
+- the Review UI project/settings panels have been compacted for the first production workbench;
 - `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
 ## Expansion stance

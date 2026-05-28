@@ -197,25 +197,111 @@ async function readJson(request: IncomingMessage) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+function shortId(value: unknown) {
+  return String(value ?? "").slice(0, 8);
+}
+
+function formatDate(value: unknown) {
+  if (!value) return "";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+function formatDisplayValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return String(value);
+}
+
+function renderMeta(entries: Array<[string, unknown]>) {
+  const visible = entries.filter(
+    ([, value]) => value !== null && value !== undefined && value !== ""
+  );
+  if (visible.length === 0) return "";
+  return `<dl>
+    ${visible
+      .map(
+        ([key, value]) =>
+          `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(formatDisplayValue(value))}</dd></div>`
+      )
+      .join("")}
+  </dl>`;
+}
+
 function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string) {
   if (rows.length === 0) return `<p class="empty">${escapeHtml(emptyLabel)}</p>`;
   return rows
     .map(
       (row) => `<article class="item">
         <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.project_id)}</h3>
-        <p>${escapeHtml(row.body ?? row.primary_path ?? row.model ?? row.value ?? "")}</p>
-        <dl>
-          ${Object.entries(row)
+        <p>${escapeHtml(row.body ?? row.primary_path ?? row.model ?? formatDisplayValue(row.value))}</p>
+        ${renderMeta(
+          Object.entries(row)
             .filter(([key]) => !["title", "body", "name", "primary_path"].includes(key))
             .slice(0, 6)
-            .map(
-              ([key, value]) =>
-                `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(JSON.stringify(value))}</dd></div>`
-            )
-            .join("")}
-        </dl>
+        )}
       </article>`
     )
+    .join("");
+}
+
+function renderProjects(rows: Array<Record<string, unknown>>, currentProjectId: unknown) {
+  if (rows.length === 0) return `<p class="empty">No managed projects yet.</p>`;
+  return rows
+    .map((row) => {
+      const active = row.project_id === currentProjectId;
+      return `<article class="project ${active ? "active" : ""}">
+        <div>
+          <h3>${escapeHtml(row.name ?? "project")}</h3>
+          <p>${escapeHtml(row.primary_path ?? "No path recorded")}</p>
+        </div>
+        <div class="project-meta">
+          <span>ID ${escapeHtml(shortId(row.project_id))}</span>
+          <span>${escapeHtml(row.memory_domain ?? "agent_work")}</span>
+          <span>${escapeHtml(formatDate(row.updated_at))}</span>
+        </div>
+        <div class="metrics">
+          <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+          <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+          <span>${escapeHtml(row.event_count ?? 0)} events</span>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+function renderSettings(rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return `<p class="empty">No project settings configured.</p>`;
+  return rows
+    .map((row) => {
+      const value = formatDisplayValue(row.value);
+      const structured = value.includes("\n") || value.length > 48;
+      return `<article class="setting">
+        <div class="setting-head">
+          <h3>${escapeHtml(row.key)}</h3>
+          <span>${escapeHtml(row.source)}</span>
+        </div>
+        ${
+          structured
+            ? `<pre>${escapeHtml(value)}</pre>`
+            : `<p class="setting-value">${escapeHtml(value || "Not set")}</p>`
+        }
+      </article>`;
+    })
     .join("");
 }
 
@@ -231,25 +317,38 @@ function renderDashboard(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Recallant Review Command Center</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f7f7f4; color: #202124; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f6f7f9; color: #20242c; }
     body { margin: 0; }
-    header { padding: 20px 28px; border-bottom: 1px solid #d8d8d2; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    header { padding: 20px 28px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 360px); gap: 18px; padding: 18px; }
+    main { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 380px); gap: 18px; padding: 18px; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
-    .panel { background: #fff; border: 1px solid #d8d8d2; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
-    .item { border-top: 1px solid #e7e7e1; padding: 10px 0; }
+    .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .item { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .item:first-child { border-top: 0; }
     .item h3 { font-size: 14px; margin: 0 0 5px; }
-    .item p { margin: 0 0 8px; color: #55584f; font-size: 13px; overflow-wrap: anywhere; }
+    .item p { margin: 0 0 8px; color: #565d6b; font-size: 13px; overflow-wrap: anywhere; }
     dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; margin: 0; font-size: 12px; }
-    dt { color: #6d7068; }
+    dt { color: #6a7280; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
-    .pill { border: 1px solid #c9c9c2; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7f7f4; }
-    .chat { min-height: 92px; border: 1px dashed #b8b8b0; border-radius: 8px; padding: 10px; color: #55584f; font-size: 13px; }
-    .empty { color: #777a72; font-size: 13px; }
+    .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
+    .project { border-top: 1px solid #e5e9f0; padding: 11px 0; }
+    .project:first-child { border-top: 0; }
+    .project.active h3::after { content: " active"; color: #246b5a; font-size: 11px; font-weight: 600; }
+    .project h3, .setting h3 { font-size: 14px; margin: 0 0 4px; }
+    .project p { margin: 0; color: #4f5867; font-size: 13px; overflow-wrap: anywhere; }
+    .project-meta, .metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .project-meta span, .metrics span { background: #f2f5f8; border: 1px solid #dce3ec; border-radius: 999px; padding: 3px 7px; color: #4f5867; font-size: 11px; }
+    .setting { border-top: 1px solid #e5e9f0; padding: 10px 0; }
+    .setting:first-child { border-top: 0; }
+    .setting-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .setting-head span { color: #6a7280; font-size: 12px; }
+    .setting-value { margin: 0; color: #303845; font-size: 13px; overflow-wrap: anywhere; }
+    pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
+    .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
+    .empty { color: #6f7785; font-size: 13px; }
     @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -257,7 +356,7 @@ function renderDashboard(
   <header>
     <h1>Recallant Review Command Center</h1>
     <div class="status">
-      <span class="pill">Project ${escapeHtml(data.current_project_id)}</span>
+      <span class="pill">Project ${escapeHtml(shortId(data.current_project_id))}</span>
       <span class="pill">Private UI</span>
     </div>
   </header>
@@ -265,7 +364,7 @@ function renderDashboard(
     <aside>
       <section class="panel">
         <h2>Projects</h2>
-        ${renderRows(data.projects, "No managed projects yet.")}
+        ${renderProjects(data.projects, data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Critical Status</h2>
@@ -293,7 +392,7 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Settings</h2>
-        ${renderRows(data.settings, "No project settings configured.")}
+        ${renderSettings(data.settings)}
       </section>
       <section class="panel">
         <h2>Management Chat</h2>

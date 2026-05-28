@@ -407,6 +407,8 @@ async function withTransaction<T>(pool: Pool, fn: (client: PoolClient) => Promis
 
 export class RecallantDb {
   private readonly pool: Pool;
+  private readonly fallbackDeveloperId = randomUUID();
+  private projectContext?: ProjectContext;
 
   constructor(private readonly config: RecallantDbConfig) {
     this.pool = new Pool({ connectionString: config.databaseUrl });
@@ -417,8 +419,16 @@ export class RecallantDb {
   }
 
   async ensureProject(projectPath?: string | null): Promise<ProjectContext> {
+    const developerId = this.config.developerId ?? this.fallbackDeveloperId;
+    const primaryPath = projectPath ?? this.config.projectPath ?? process.cwd();
+    if (
+      this.projectContext &&
+      this.projectContext.developerId === developerId &&
+      (this.config.projectId || !projectPath || primaryPath === this.config.projectPath)
+    ) {
+      return this.projectContext;
+    }
     return withTransaction(this.pool, async (client) => {
-      const developerId = this.config.developerId ?? randomUUID();
       await client.query(
         `
           INSERT INTO developers (id, name)
@@ -428,9 +438,27 @@ export class RecallantDb {
         [developerId, "Recallant Developer"]
       );
 
-      const projectId = this.config.projectId ?? randomUUID();
-      const primaryPath = projectPath ?? this.config.projectPath ?? process.cwd();
+      let projectId = this.config.projectId;
       const projectName = primaryPath.split("/").filter(Boolean).at(-1) ?? "recallant-project";
+      if (!projectId) {
+        const existing = await client.query<{ id: string }>(
+          `
+            SELECT p.id
+            FROM projects p
+            WHERE p.developer_id = $1
+              AND p.primary_path IS NOT DISTINCT FROM $2
+            ORDER BY (
+              (SELECT count(*) FROM sessions s WHERE s.project_id = p.id) +
+              (SELECT count(*) FROM events e WHERE e.project_id = p.id) +
+              (SELECT count(*) FROM agent_memories m WHERE m.project_id = p.id)
+            ) DESC,
+            p.updated_at DESC
+            LIMIT 1
+          `,
+          [developerId, primaryPath]
+        );
+        projectId = existing.rows[0]?.id ?? randomUUID();
+      }
       await client.query(
         `
           INSERT INTO projects (id, developer_id, name, primary_path)
@@ -443,7 +471,11 @@ export class RecallantDb {
       );
       await this.ensureDefaultModelSettings(client);
 
-      return { developerId, projectId };
+      const context = { developerId, projectId };
+      if (this.config.projectId || !projectPath || primaryPath === this.config.projectPath) {
+        this.projectContext = context;
+      }
+      return context;
     });
   }
 
@@ -454,7 +486,7 @@ export class RecallantDb {
     name?: string;
     captureProfile?: CaptureProfile;
   }) {
-    const developerId = input.developerId ?? this.config.developerId ?? randomUUID();
+    const developerId = input.developerId ?? this.config.developerId ?? this.fallbackDeveloperId;
     const projectName =
       input.name ?? input.projectPath.split("/").filter(Boolean).at(-1) ?? "recallant-project";
     await withTransaction(this.pool, async (client) => {
@@ -1465,11 +1497,34 @@ export class RecallantDb {
     const context = await this.ensureProject();
     const projects = await this.pool.query(
       `
-        SELECT id AS project_id, name, primary_path, project_kind, memory_domain, updated_at
-        FROM projects
-        WHERE developer_id = $1
+        WITH project_usage AS (
+          SELECT
+            p.id,
+            p.name,
+            p.primary_path,
+            p.project_kind,
+            p.memory_domain,
+            p.updated_at,
+            (SELECT count(*)::int FROM sessions s WHERE s.project_id = p.id) AS session_count,
+            (SELECT count(*)::int FROM events e WHERE e.project_id = p.id) AS event_count,
+            (SELECT count(*)::int FROM agent_memories m WHERE m.project_id = p.id) AS memory_count
+          FROM projects p
+          WHERE p.developer_id = $1
+        ),
+        ranked AS (
+          SELECT *,
+            row_number() OVER (
+              PARTITION BY coalesce(primary_path, id::text)
+              ORDER BY (session_count + event_count + memory_count) DESC, updated_at DESC
+            ) AS rank
+          FROM project_usage
+        )
+        SELECT id AS project_id, name, primary_path, project_kind, memory_domain, updated_at,
+               session_count, event_count, memory_count
+        FROM ranked
+        WHERE rank = 1
         ORDER BY updated_at DESC
-        LIMIT 50
+        LIMIT 20
       `,
       [context.developerId]
     );
