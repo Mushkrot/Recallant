@@ -116,7 +116,8 @@ An import result is not just "a memory." Import should classify findings into st
 
 ## Open follow-ups
 
-These follow-ups are now tracked by the active [Pre-Pilot Readiness](PRE_PILOT_READINESS.md) plan:
+These follow-ups were tracked by [Pre-Pilot Readiness](PRE_PILOT_READINESS.md) and are refined by
+Phase 10 autonomous attach:
 
 - Exact CLI flags and preview output format.
 - Exact dedup strategy for repeated imports.

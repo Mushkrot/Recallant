@@ -11,6 +11,10 @@ Project memory is isolated by default. Cross-project knowledge is available when
 asks for it, when a developer/environment/capability record is intentionally applicable, or when the
 Context Pack Builder has a specific policy reason to include it.
 
+Default behavior is narrow: Recallant does not proactively add examples from other projects to
+ordinary context packs. The agent may decide to make an explicit cross-project recall request when
+the current task clearly needs a prior pattern.
+
 Short version:
 
 ```text
@@ -48,6 +52,9 @@ It should exclude unrelated project memories unless:
 - a resolver hint or policy explicitly says a known project is a reference for this task;
 - the owner is in review/debug mode.
 
+It should not add "1-3 similar examples" automatically for every non-trivial task. Cross-project
+examples are targeted help, not ambient context.
+
 ## Cross-project query behavior
 
 Cross-project retrieval must be explicit and labeled. A result from another project should include:
@@ -76,11 +83,13 @@ When an agent finds useful memory from another project, it should:
 1. inspect the source enough to understand applicability;
 2. implement or adapt the pattern in the current project;
 3. write project-local evidence and checkpoint updates;
-4. create a current-project governed memory proposal if the pattern should be remembered here;
+4. create a current-project governed memory with source refs when the pattern was actually applied;
 5. request promotion only when the pattern is truly general.
 
 The source project remains the source project. The new project gets its own memory once the pattern
 is actually applied or accepted there.
+
+If the pattern was not applied, the cross-project hit remains an example only.
 
 ## Secret and capability handling
 

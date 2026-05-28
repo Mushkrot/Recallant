@@ -33,9 +33,12 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   are summarized in owner-readable language with status/use/type badges, recommended actions, and
   technical details hidden behind expandable sections.
 - Product direction update: autonomous project attach is the target everyday workflow, with
-  `manual`, `guided`, and `autopilot` modes preserved for cautious operation; controlled
-  cross-project recall is accepted so agents can use source-linked examples from other projects
-  without automatic memory mixing.
+  `autopilot` as the ordinary-project default and `manual`/`guided` preserved for cautious
+  operation. Attach must intelligently migrate existing agent files, locally back them up before
+  changing them, keep `PROJECT_LOG.md` as compact fallback/checkpoint, and downgrade
+  production-sensitive projects to guided unless production-safe autopilot is explicitly approved.
+  Controlled cross-project recall is accepted so agents can use source-linked examples from other
+  projects without automatic memory mixing.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -138,7 +141,8 @@ Current work order:
 Next recommended work:
 
 1. Implement `recallant attach --mode manual|guided|autopilot` as the product workflow over the
-   existing init/discover/import/lint/context/doctor/report building blocks.
+   existing init/discover/import/lint/context/doctor/report building blocks. If mode is omitted,
+   default to `autopilot` for ordinary projects, and implement all three modes in the first slice.
 2. Add governed project-level detach/delete dry-run and confirmed cleanup so copied projects can be
    removed without manual SQL.
 3. Add explicit controlled cross-project recall modes that label results from other projects as
@@ -253,10 +257,11 @@ The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mou
 
 ## Current Boundary
 
-The accepted production deployment profile has been implemented. Continue with Pre-Pilot Readiness.
+The accepted production deployment profile and Pre-Pilot copied-project readiness have been
+implemented. Continue with Phase 10 autonomous attach and controlled cross-project recall.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare
 Access, paid API enablement, destructive erasure, firewall rule changes that risk lockout, a real
-specification contradiction, or attaching a real working project before the Pre-Pilot Readiness exit
-gate.
+specification contradiction, or attaching a live production-sensitive project outside the documented
+Phase 10 safety gates.

@@ -11,7 +11,8 @@ Decision status: v1 import workflow accepted. See [ADR-0013-closeout-intent-and-
 
 Attach modes are accepted in [ADR-0043-autonomous-project-attach-modes.md](ADR-0043-autonomous-project-attach-modes.md).
 
-Current implementation note: before attaching the first real working project, complete the import-related workstreams in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md). Existing projects should be tested through a duplicated sandbox copy first.
+Current implementation note: Pre-Pilot Readiness and the first copied-project pilot are complete.
+Phase 10 should implement attach modes before broad live-project onboarding.
 
 Core rule:
 
@@ -32,12 +33,17 @@ Examples:
 
 - `AGENTS.md`
 - `PROJECT_LOG.md`
+- `PROJECT_LOG_*.md` archives as historical evidence-only
 - `.cursor/SESSION_HANDOFF.md`
 - `CLAUDE.md` / adapter files as client-specific context, not universal truth
 - `Docs/Codex_Context_Index.md`
 - selected docs chosen explicitly by the owner/agent
 
 Use when bootstrapping an existing project.
+
+Autopilot may extract high-confidence ordinary project-local memories and decisions from these
+sources when source refs exist. Risky, broad, stale, low-confidence, security/deploy/destructive,
+paid-API, connector/account, and capability-binding findings remain evidence-only or go to Review.
 
 ### Environment and server facts
 
@@ -61,6 +67,10 @@ Examples:
 - connector/account bindings such as personal vs corporate Google Drive.
 
 Never import raw secret values into ordinary memory.
+
+If `.env.example` or similar safe example files are imported, store only variable names, purpose, and
+service/capability hints. If a likely raw secret is present, do not import it; route warning/review
+according to attach mode and production sensitivity.
 
 ### Explicit exports and selected external material
 

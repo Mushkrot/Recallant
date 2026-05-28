@@ -132,12 +132,18 @@ Additional settled points:
 - Conflict-resolution priority Q13 is accepted: resolve by applicability first, then authority, then scope specificity, then recency; high-risk or equal-authority conflicts go to Review UI / owner confirmation. See `ADR-0041-conflict-resolution-priority.md`.
 - Managed AI-native platform decision is accepted: Recallant must be controllable through natural-language management chat, use AI heavily for extraction/cleanup/conflict/context planning, keep deterministic policy for safety/destructive operations, and support explicit permanent erasure. See `ADR-0042-managed-ai-native-platform-and-operations.md` and `OPERATING_PRINCIPLES.md`.
 - Autonomous attach modes are accepted: `manual` preserves the cautious explicit workflow,
-  `guided` produces a plan and waits for confirmation, and `autopilot` may execute low-risk attach
-  steps and report the result while preserving safety gates. See
+  `guided` produces a plan and waits for confirmation, and `autopilot` is the ordinary-project
+  default. Autopilot may execute low-risk attach steps and report the result while preserving safety
+  gates. It must intelligently migrate agent startup files, locally back up discovered agent files
+  before changing existing ones, keep `PROJECT_LOG.md` as compact fallback/checkpoint, and downgrade
+  production-sensitive projects to `guided` unless production-safe autopilot is explicitly approved.
+  See
   `ADR-0043-autonomous-project-attach-modes.md` and `AUTONOMOUS_ATTACH.md`.
 - Controlled cross-project recall is accepted: project memory is isolated by default, while agents
   can explicitly retrieve source-linked examples from other projects and applicable
-  developer/environment/capability records. See `ADR-0044-controlled-cross-project-recall.md` and
+  developer/environment/capability records. Agents may initiate this when a task needs a prior
+  pattern; if the pattern is applied, they create current-project memory with source refs. See
+  `ADR-0044-controlled-cross-project-recall.md` and
   `CROSS_PROJECT_RECALL.md`.
 - The owner confirmed engineering-quality rules: code/docs/comments/API text/commit messages are English; conversation with the owner can stay Russian; implementation should be modular, low-coupling, testable, and publicly presentable; use meaningful scoped commits.
 - Existing services must be reused through capability bindings where practical. On the owner server,
@@ -200,6 +206,14 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   should analyze, choose safe optimal actions, execute them, and report.
 - Autonomous project attach is desired, but more cautious `manual` and `guided` modes must remain
   available.
+- If no mode is specified, `autopilot` is the default for ordinary projects.
+- Existing agent files must be analyzed and migrated, not overwritten blindly: preserve important
+  project rules, import history as evidence, normalize startup flow to Recallant, and keep a local
+  `.recallant/backups/attach-*` backup of discovered agent files before changing existing ones.
+- `PROJECT_LOG.md` remains mandatory as compact agent-readable fallback/checkpoint; Recallant is the
+  main source of truth.
+- Production-sensitive projects auto-downgrade requested autopilot to `guided` unless
+  production-safe autopilot is explicitly approved.
 - Cross-project recall should let agents use examples from other projects when explicitly useful,
   without automatically mixing unrelated project memory.
 - The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and

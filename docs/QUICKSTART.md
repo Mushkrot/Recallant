@@ -1,9 +1,10 @@
 # Quickstart - connect a project to Recallant
 
 Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md) and the first copied-project
-pilot are complete. The next implementation layer is the safer product-level attach workflow in
-[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md), with manual/guided modes available before trusting
-autopilot on important live projects.
+pilot are complete. The next implementation layer is the product-level attach workflow in
+[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md). `autopilot` is the default for ordinary projects, while
+production-sensitive projects downgrade to `guided` unless production-safe autopilot is explicitly
+approved.
 
 ## Prerequisite: server is running
 
@@ -78,6 +79,7 @@ stdio MCP command printed by `recallant init`.
 Target product workflow:
 
 ```bash
+recallant attach . --target codex
 recallant attach . --target codex --mode autopilot
 ```
 
@@ -86,6 +88,23 @@ Attach modes:
 - `manual`: cautious mode; only explicit commands write durable data.
 - `guided`: Recallant creates a complete plan and waits for confirmation.
 - `autopilot`: Recallant runs safe setup/import/check steps and produces a report.
+
+If no mode is specified, `autopilot` is used unless production-sensitive detection switches the run
+to `guided`.
+
+For production-sensitive projects:
+
+```bash
+recallant attach /ai/buddhisthelp --target codex --mode autopilot
+# Production-sensitive project detected.
+# Switching to guided mode.
+```
+
+Production-safe autopilot requires explicit approval and still keeps hard safety gates:
+
+```bash
+recallant attach /ai/buddhisthelp --target codex --mode autopilot --production-approved
+```
 
 Until `attach` is fully implemented, use the lower-level `init`, `discover`, and `import` commands
 below.

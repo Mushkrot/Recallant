@@ -18,6 +18,10 @@ not silently become another project's rules.
 
 Recallant treats project memory as **isolated by default and reusable by explicit intent**.
 
+The default is narrow. Recallant should not automatically inject examples from other projects into
+ordinary startup context. Agents may decide to ask for cross-project examples when the task clearly
+needs a prior pattern.
+
 The default context pack for project A may include:
 
 - project/repo/subproject memories for project A;
@@ -68,7 +72,7 @@ Every cross-project hit must show:
 A useful pattern from project B can become reusable for project A in three ways:
 
 1. the agent uses it as source-linked evidence for a project-A implementation;
-2. the agent creates a project-A governed memory proposal with source refs;
+2. after applying it, the agent creates a project-A governed memory with source refs;
 3. the owner or review policy promotes a general rule to developer/environment/capability scope.
 
 No cross-project record becomes a project-A rule just because it matched search.

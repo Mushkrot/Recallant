@@ -125,9 +125,15 @@ A new or existing project must connect to Recallant without manually copying rul
 - [ ] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, and the required MCP/config output for Codex.
 - [ ] `recallant init --dry-run` shows a plan without making changes.
 - [ ] `recallant attach <project-dir> --mode manual|guided|autopilot` is the product-level workflow that can coordinate init, discovery, import, lint, context preview, diagnostics, and reporting.
+- [ ] If mode is omitted, `attach` defaults to `autopilot` unless production-sensitive detection downgrades it.
 - [ ] `manual` mode preserves the old cautious workflow: discovery is read-only, dry-run writes nothing, and durable imports require explicit selected commands.
 - [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
-- [ ] `autopilot` mode may import low-risk source-linked evidence, create ordinary recallable memories, prepare bootstrap files, run checks, and produce a report without asking for each safe step.
+- [ ] `autopilot` mode may import low-risk source-linked evidence, extract ordinary project-local memories, prepare and normalize bootstrap/startup files, run checks, and produce a short report without asking for each safe step.
+- [ ] Before changing existing agent files, attach creates a local backup of all discovered agent files; backups are gitignored and redacted for raw secrets.
+- [ ] `AGENTS.md` remains the primary agent entrypoint, `PROJECT_LOG.md` remains a compact fallback/checkpoint, and Recallant is the main source of truth.
+- [ ] Old archive/handoff files import as historical evidence-only by default and are not startup reads.
+- [ ] Already-attached projects update idempotently without duplicate project ids or duplicate imports.
+- [ ] Production-sensitive projects requested with `autopilot` switch to `guided` unless production-safe autopilot is explicitly approved.
 - [ ] `autopilot` does not silently promote broad/risky memories to `instruction_grade`, import raw secrets, enable paid API, change public exposure, perform destructive cleanup, or bind connector/capability records as active behavior without policy review.
 - [ ] Project bootstrap does not copy large historical documents into the new project.
 - [ ] The architecture allows Journey-style kit/skill distribution as an alternate installation path.
@@ -151,7 +157,8 @@ Agents must be able to find useful patterns from other projects without mixing p
 - [ ] The default context pack includes the current project plus applicable developer/environment/capability records, but excludes unrelated project memories.
 - [ ] An explicit cross-project query can return source-linked examples from other projects.
 - [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and whether the result is an example or a binding rule.
-- [ ] A memory from project B does not become a project-A rule unless the agent creates a project-A governed memory proposal or the owner/review policy promotes a general rule.
+- [ ] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern.
+- [ ] A memory from project B does not become a project-A rule unless the pattern is applied and the agent creates project-A memory with source refs, or the owner/review policy promotes a general rule.
 - [ ] Connector/account and capability-binding results from other projects require review/confirmation before becoming active long-term behavior for the current project.
 
 ### G8 — Context-budget discipline

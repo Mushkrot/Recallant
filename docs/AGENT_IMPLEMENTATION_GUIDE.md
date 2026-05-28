@@ -206,9 +206,10 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 ## Pre-Pilot Readiness - Launch preparation before first real project
 
-The current active work order is defined in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+The completed work order is defined in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
 
-This is not a broad new product phase and does not reopen future-scope items. It is the readiness layer needed before the first real project pilot:
+This is not a broad new product phase and does not reopen future-scope items. It was the readiness
+layer needed before the first copied-project pilot:
 
 - safe existing-project discovery/preflight,
 - explicit import write mode with reviewable candidates,
@@ -231,28 +232,61 @@ building blocks into the owner-facing workflow described in
 
 - [ ] `recallant attach <project-dir> --mode manual|guided|autopilot --target <client>` coordinates
   init/discover/import/lint/context/doctor/report through one workflow.
+- [ ] If mode is omitted, attach defaults to `autopilot` for non-production-sensitive projects.
+- [ ] First implementation includes all three modes; do not defer `autopilot`.
 - [ ] `manual` mode preserves the explicit current workflow and writes only what the owner/agent
   explicitly requests.
 - [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
 - [ ] `autopilot` mode runs safe attach steps automatically: project registration, pointer config,
-  thin agent instructions, selected low-risk evidence imports, context lint, context-pack preview,
-  diagnostics, and report generation.
+  agent-file migration, selected low-risk evidence imports, structured ordinary memory extraction,
+  context lint, context-pack preview, MCP smoke when possible, Review UI/API visibility check,
+  diagnostics, and short owner-readable report generation.
+- [ ] Attach detects existing connections and updates idempotently without creating duplicate
+  `project_id` rows or duplicate imports.
+- [ ] New empty projects get a starter project-local memory describing the attach and Recallant
+  source-of-truth/fallback model.
+- [ ] Agent startup file migration analyzes `AGENTS.md`, compact/current `PROJECT_LOG.md`,
+  client-specific files such as `CLAUDE.md` and `.cursor/rules`, current handoff files, and related
+  agent docs.
+- [ ] Before changing existing agent files, attach creates a local gitignored backup of all
+  discovered agent files under `.recallant/backups/attach-<timestamp>/`, with a manifest and
+  redacted raw secrets.
+- [ ] Autopilot may normalize startup files after backup: keep important project rules, migrate
+  project memory to Recallant, shrink history/handoff sections, and route future startup through
+  `memory_start_session` and `memory_get_context_pack`.
+- [ ] `PROJECT_LOG.md` remains required as a compact agent-readable fallback/checkpoint, not as the
+  full memory source.
 - [ ] Autopilot preserves hard safety gates: no raw secrets, no paid API enablement, no public
   exposure/service/firewall changes, no destructive cleanup, no broad/global instruction promotion,
   and no active connector/capability binding without policy review.
-- [ ] Attach reports are owner-readable first and include technical detail links/JSON for agents.
+- [ ] Attach imports `.env.example` and similar safe examples as variable names/purpose and
+  secret/capability references only, never values.
+- [ ] Production-sensitive projects are detected through explicit flags/settings and automatic
+  deployment/security/public-service hints. Requested autopilot downgrades to guided unless
+  production-safe autopilot is explicitly approved.
+- [ ] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts,
+  public/security/firewall/deploy changes, paid API enablement, erasure, and active
+  connector/capability binding without separate confirmation.
+- [ ] Attach reports are very short and owner-readable by default, with technical detail links/JSON
+  available for agents.
 - [ ] Governed project detach/delete supports dry-run, visible affected counts, reversible archive or
   policy-safe cleanup, and no impact on unrelated projects.
+- [ ] Live project detach defaults to hide/archive in Recallant without touching files or physically
+  deleting records; sandbox cleanup can remove Recallant records and local Recallant artifacts after
+  dry-run and confirmation; sensitive/wrong memory uses `forget forever`.
 - [ ] Cross-project recall supports explicit modes for same-project recall, developer rules,
   environment facts, similar-project examples, and broad review/debug search.
 - [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and
   applicability warning.
+- [ ] Agents may initiate cross-project recall when the task clearly needs a prior pattern, but
+  ordinary context packs do not include similar-project examples by default.
+- [ ] If a prior pattern from another project is actually applied, the agent creates current-project
+  memory with source refs; otherwise the result remains example/evidence only.
 - [ ] Context Pack Builder excludes unrelated project memory by default while still including
   applicable developer/environment/capability/connector-account records.
 
 **Gate:** Phase 10 checks in [TEST_CONTRACT.md](TEST_CONTRACT.md) pass, and a copied-project sandbox
-can be attached in `guided` and `autopilot` modes without modifying or polluting the original
-project.
+can be attached in all three modes without modifying or polluting the original project.
 
 ## Parallelization rules
 

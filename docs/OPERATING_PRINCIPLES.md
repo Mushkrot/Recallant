@@ -36,9 +36,17 @@ Autonomous attach is the target everyday experience, but not the only mode.
 - `autopilot`: Recallant safely attaches the project, imports low-risk source-linked evidence, prepares
   agent bootstrap files, runs diagnostics, and reports what it did.
 
+`autopilot` is the default for ordinary projects. Production-sensitive projects automatically move to
+`guided` unless the owner explicitly approves production-safe autopilot.
+
 Autopilot does not weaken safety policy. It must not silently import raw secrets, enable paid APIs,
 change public exposure, perform destructive actions, or promote broad/risky rules to
 `instruction_grade`.
+
+Attach should migrate agent files intelligently. It should preserve important project rules, move
+history and durable memory into Recallant, keep `AGENTS.md` as the agent entrypoint, keep
+`PROJECT_LOG.md` as compact fallback/checkpoint, and locally back up discovered agent files before
+changing existing ones.
 
 Cross-project recall is a library, not a memory soup. Agents may ask for examples from other
 projects, but those examples remain source-linked evidence until applied to the current project or

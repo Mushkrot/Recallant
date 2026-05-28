@@ -13,8 +13,8 @@ After running `recallant init` in a project directory:
 | File | Role |
 |------|------|
 | `.recallant/config` | Local project pointer: `project_id`, `recallant_server_url`. Do not commit to git. |
-| `AGENTS.md` | Canonical thin agent entrypoint; must include the `Memory (Recallant)` section below. |
-| `PROJECT_LOG.md` | Human-readable checkpoint mirroring the meaning of `memory_get_checkpoint`. |
+| `AGENTS.md` | Canonical agent entrypoint/router; must include the `Memory (Recallant)` section below while preserving important project rules. |
+| `PROJECT_LOG.md` | Compact agent-readable fallback/checkpoint mirroring the meaning of `memory_get_checkpoint`. |
 
 `.recallant/config` may be YAML or JSON:
 
@@ -28,6 +28,13 @@ Add `.recallant/` to the target project's `.gitignore`; it contains local pointe
 `.recallant/config` is only a pointer. It must not become the source of truth for capture profile, context budget, model routing, review behavior, or other Recallant policies. Authoritative settings live on the Recallant server; see [SETTINGS.md](SETTINGS.md).
 
 `recallant init` must be idempotent and target-aware. The default near-term target is Codex, but the same bootstrap should support Cursor, Claude Code, Windsurf, and other targets through generated adapters rather than duplicated manual setup.
+
+`recallant attach` is the higher-level workflow. For existing projects it should analyze all
+agent startup/config/handoff files, preserve important project rules, migrate old local history into
+Recallant, and normalize startup files so future agents use Recallant as the main memory source.
+Before changing any existing agent file, attach creates a local `.recallant/backups/attach-*`
+rollback snapshot of all discovered agent files. The backup is local/gitignored and redacted for raw
+secrets.
 
 ## 2. Canonical `Memory (Recallant)` section for `AGENTS.md`
 
@@ -43,11 +50,15 @@ The implementing agent inserts the following block into each target repository. 
 - After meaningful progress: update checkpoint via `memory_set_checkpoint` and update `PROJECT_LOG.md` to match fields `current_focus` and `next_step`.
 - On clear pause/exit/closeout intent: call `memory_closeout` and update `PROJECT_LOG.md` from the closeout payload.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the
-  pattern locally, and create a governed memory proposal with source refs. Broad developer/global
-  promotion requires owner/review policy.
+  pattern locally, and create current-project memory with source refs after applying it. Broad
+  developer/global promotion requires owner/review policy.
 - Never paste secrets into memory tools.
 - If MCP is unavailable: update `PROJECT_LOG.md` and, when available, write local spool.
 ```
+
+`AGENTS.md` may contain project-specific rules outside the Memory block. Attach should not delete
+those rules silently. It should move durable project knowledge into Recallant when appropriate and
+leave the local file as a thin startup router.
 
 ## 3. Field mapping
 
@@ -59,6 +70,11 @@ The implementing agent inserts the following block into each target repository. 
 | `open_questions` | `## Risks / Open Questions` |
 
 The deterministic sync procedure is tested in `TEST_CONTRACT.md`.
+
+`PROJECT_LOG.md` should not be a full history file. Keep current state, current focus, next step,
+active constraints, open questions, recent decisions, and Recallant fallback instructions. Historical
+logs and archived handoffs should be imported into Recallant as evidence and omitted from startup
+reads.
 
 ## 4. MCP client configuration (per project)
 

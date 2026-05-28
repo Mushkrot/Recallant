@@ -52,7 +52,14 @@ R0 Documentation And Handoff Readiness is complete for the current checkpoint. R
 
 The current implementation target is Phase 10:
 
-- `recallant attach --mode manual|guided|autopilot`;
+- `recallant attach --mode manual|guided|autopilot`, with omitted mode defaulting to `autopilot` for
+  ordinary projects;
+- production-sensitive detection that downgrades requested autopilot to `guided` unless
+  production-safe autopilot is explicitly approved;
+- intelligent migration of `AGENTS.md`, `PROJECT_LOG.md`, client-specific startup files, and current
+  handoffs into Recallant-style startup, with local `.recallant/backups/attach-*` backup before
+  existing file changes;
+- compact `PROJECT_LOG.md` as agent-readable fallback/checkpoint;
 - owner-readable attach reports;
 - governed project detach/delete dry-run and confirmed cleanup;
 - explicit controlled cross-project recall modes for source-linked examples from other projects;
@@ -87,6 +94,8 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 ## Success Condition For The Next Session
 
 The next session should implement the first Phase 10 slice: documented and tested `recallant attach`
-mode planning, starting with `manual`/`guided` behavior and the safety policy that `autopilot` will
-enforce. A strong second slice is governed project detach/delete dry-run so the GutenDocx sandbox can
-be cleaned without manual SQL after owner confirmation.
+mode planning/execution for all three modes, with `autopilot` as default for ordinary projects,
+production-sensitive downgrade, agent-file backup/migration, safe import/extraction, short report,
+MCP smoke when possible, and Review UI/API visibility. A strong second slice is governed
+project detach/delete dry-run so the GutenDocx sandbox can be cleaned without manual SQL after owner
+confirmation.

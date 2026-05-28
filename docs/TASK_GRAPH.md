@@ -43,3 +43,9 @@ Phase 10 is the next product-readiness layer after the first copied-project pilo
 safe lower-level workflow into `recallant attach --mode manual|guided|autopilot`, adds governed
 detach/delete, and makes controlled cross-project recall explicit. See
 [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
+
+Phase 10 implementation order:
+
+1. `recallant attach` with `manual`, `guided`, and default `autopilot`.
+2. governed detach/cleanup.
+3. controlled cross-project recall.

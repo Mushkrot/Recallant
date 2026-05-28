@@ -24,6 +24,7 @@ Use this only on a copied sandbox until the owner explicitly chooses to attach a
 Target attach workflow:
 
 ```bash
+recallant attach <project> --target codex
 recallant attach <project> --target codex --mode manual
 recallant attach <project> --target codex --mode guided
 recallant attach <project> --target codex --mode autopilot
@@ -36,9 +37,20 @@ Mode expectations:
 - `autopilot`: attach the project, import safe source-linked evidence, run checks, and report without
   asking for every low-risk step.
 
+If no mode is supplied, `autopilot` is the default for non-production-sensitive projects.
+
 Autopilot still must not import raw secrets, enable paid APIs, perform public exposure/service
 changes, erase/delete data, or promote broad/risky records to instruction-grade without policy
 review.
+
+For existing projects, attach migrates agent startup files rather than replacing them blindly:
+
+- analyze `AGENTS.md`, `PROJECT_LOG.md`, client-specific files, current handoffs, and related agent
+  docs;
+- preserve important project rules;
+- move long history/handoff material to Recallant as evidence;
+- add or update Recallant startup instructions;
+- locally back up all discovered agent files before changing any existing one.
 
 Lower-level manual commands remain:
 
@@ -60,6 +72,10 @@ recallant context --project-dir <project> --task-hint "initial work"
 
 `recallant init` may show import candidates but does not import historical material.
 
+For new empty projects, `recallant attach` should also create starter project-local memory recording
+that the project is attached and that Recallant is the primary source of truth while
+`PROJECT_LOG.md` is fallback/checkpoint.
+
 ## Cross-Project Recall Contract
 
 Agents may use other projects as source-linked examples when the current task needs a prior pattern,
@@ -72,8 +88,10 @@ Rules:
   facts;
 - unrelated project memories are not loaded by default;
 - cross-project search must be explicit and labeled as examples/evidence;
-- a result from another project does not become a rule for the current project unless a governed
-  memory is created for the current project or the owner/review policy promotes a general rule;
+- agents may initiate cross-project recall when the current task clearly needs a prior pattern;
+- a result from another project does not become a rule for the current project unless the pattern is
+  actually applied and a governed memory is created for the current project, or the owner/review
+  policy promotes a general rule;
 - never expose raw secret values from another project.
 
 ## File Ownership
@@ -88,8 +106,12 @@ Keep local or ignored unless the owner explicitly wants otherwise:
 
 - `.recallant/config`, because it is a pointer to central settings,
 - `.recallant/spool/`, because it is local runtime state,
+- `.recallant/backups/`, because it contains local rollback material for attach file migration,
 - local env/secrets and any raw exported memory material.
 
 ## Context Lint Expectations
 
 `recallant lint-context` should pass for fresh generated bootstrap files. It should fail or warn when agent bootstrap files become history dumps, duplicate adapter rules, or contain secret-like material.
+
+`PROJECT_LOG.md` should stay compact and agent-readable. It is the fallback/checkpoint file, not the
+full memory store.
