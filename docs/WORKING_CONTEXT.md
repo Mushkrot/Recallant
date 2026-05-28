@@ -209,6 +209,7 @@ Latest implementation checkpoints:
 - Pre-Pilot R2 explicit import write mode is implemented. Confirmed `recallant import <path> --project-dir <path>` writes a source-linked `import_batch` event, raw artifact pointer, scoped chunks, embeddings when available, and a governed memory candidate/needs-review record; repeated import of the same project/source/hash/result-class is idempotent. Secret-reference imports store variable names/status only and redacted text. It is verified by `scripts/smoke-pre-pilot-import.mjs`.
 - Pre-Pilot R3 Review UI import/action readiness is implemented. The dashboard/API expose import candidates, selected detail with source refs/review history/provenance/status/use policy/scope/audience/confidence, conflict/duplicate candidates, available review actions, and a cleanup/forget confirmation entrypoint. It is verified by `scripts/smoke-review-ui.mjs`.
 - Pre-Pilot R4 pilot sandbox workflow is implemented and documented in `docs/PILOT_SANDBOX_WORKFLOW.md`. `scripts/smoke-pre-pilot-sandbox.mjs` copies a fixture into a temporary sandbox, runs discover/import dry-run/confirmed import, exercises MCP start/context/append/search/recall/closeout, verifies DB records, and checks that the original fixture was not modified.
+- Pre-Pilot R5 agent onboarding contract is implemented and documented in `docs/AGENT_ONBOARDING_CONTRACT.md`. `recallant init --target codex` generates a thin Memory section with real MCP tool names and no longer references the nonexistent `memory_promote` tool. It is covered by `scripts/smoke-phase7-cli.mjs`.
 
 Production deployment and the first UI cleanup are complete. The owner asked to preserve the next-step plan before closing the session. The active next plan is `docs/PRE_PILOT_READINESS.md`.
 
@@ -218,7 +219,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Read `docs/PRE_PILOT_READINESS.md` and `docs/SESSION_HANDOFF_CURRENT.md`.
-3. Start with Workstream R5: Agent Onboarding Contract.
+3. Start with Workstream R6: Operational Readiness Check.
 4. Do not connect a real working project until the Pre-Pilot Readiness exit gate is met.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

@@ -56,6 +56,10 @@ if (
   config.project_id !== init.project_id ||
   config.recallant_server_url !== "http://127.0.0.1:3005" ||
   !agents.includes("## Memory (Recallant)") ||
+  !agents.includes("memory_start_session") ||
+  !agents.includes("memory_get_context_pack") ||
+  !agents.includes("memory_create_agent_memory") ||
+  agents.includes("memory_promote") ||
   !projectLog.includes("Current focus: project onboarding") ||
   init.capture_profile !== "detailed" ||
   !JSON.stringify(init.mcp_config).includes("recallant")

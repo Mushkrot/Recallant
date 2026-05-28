@@ -23,9 +23,9 @@ const memorySection = `## Memory (Recallant)
 - Before non-trivial work after session start: call \`memory_get_context_pack\` with the current task hint.
 - Use \`memory_search\` for raw evidence/chunks only when the context pack says more evidence is needed or the task changes.
 - Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
-- After meaningful progress: update checkpoint via \`memory_set_checkpoint\` and update \`PROJECT_LOG.md\` to match fields \`current_focus\` and \`next_step\`.
+- After meaningful progress: write meaningful events/memories through \`memory_append_event\` or \`memory_create_agent_memory\`, update checkpoint via \`memory_set_checkpoint\`, and update \`PROJECT_LOG.md\` to match fields \`current_focus\` and \`next_step\`.
 - On clear pause/exit/closeout intent: call \`memory_closeout\` and update \`PROJECT_LOG.md\` from the closeout payload.
-- To share a pattern across projects: call \`memory_promote\` on the relevant chunk or create a governed memory proposal.
+- To share a pattern across projects: create a governed memory proposal with source refs; instruction-grade promotion must go through review.
 - Never paste secrets into memory tools.
 - If MCP is unavailable: update \`PROJECT_LOG.md\` and, when available, write local spool.
 `;

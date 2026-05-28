@@ -203,7 +203,7 @@ Implemented checkpoint:
 
 ## Workstream R5 - Agent Onboarding Contract
 
-Status: not started.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -226,6 +226,13 @@ Implement or harden:
 Gate:
 
 - A new sandbox project can be initialized and opened by a new agent without requiring chat history.
+
+Implemented checkpoint:
+
+- [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) documents the startup contract, existing-project onboarding, new-project onboarding, file ownership, and context lint expectations.
+- `recallant init --target codex` now generates a thin Memory section that references real MCP tools: `memory_start_session`, `memory_get_context_pack`, `memory_append_event`, `memory_create_agent_memory`, `memory_set_checkpoint`, and `memory_closeout`.
+- The generated Memory section no longer references the nonexistent `memory_promote` tool.
+- `npm run phase7:smoke` checks the generated onboarding contract and confirms fresh init/lint/context still work without chat history.
 
 ## Workstream R6 - Operational Readiness Check
 

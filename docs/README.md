@@ -41,11 +41,12 @@ Current operator note: before connecting the first real existing project, comple
 27. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
 28. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
 29. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
-30. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant init`, client connection, cross-project search.
-31. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
-32. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
-33. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
-34. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
+30. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
+31. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant init`, client connection, cross-project search.
+32. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
+33. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
+34. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
+35. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
 
 ## ADR (Architecture Decision Records)
 
