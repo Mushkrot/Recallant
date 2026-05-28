@@ -45,6 +45,11 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   pointer config, MCP hints, `.gitignore`, `AGENTS.md`, compact `PROJECT_LOG.md`, local redacted
   backups for agent files, safe imports, starter memory, structured low-risk source memories,
   startup/context-pack smoke, Review UI/API visibility check, diagnostics, and a short owner report.
+- Phase 10 detach first slice: `recallant detach` and `recallant project-detach` provide governed
+  project cleanup with dry-run affected counts, confirmation-required writes, live hide-only detach,
+  sandbox hide plus active-chunk archiving, Review UI project-list hiding, active-search blocking
+  for detached projects, and hard-delete policy blocking that points sensitive/wrong memory to the
+  separate forget workflow.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -145,14 +150,14 @@ Current work order:
 7. GutenDocx copied-project pilot. Complete for the first real-project sandbox checkpoint.
 8. Phase 10 attach first slice. Complete for copied-project fixtures and covered by
    `scripts/smoke-phase10-attach.mjs`.
+9. Phase 10 detach first slice. Complete for copied-project fixtures and covered by
+   `scripts/smoke-phase10-detach.mjs`.
 
 Next recommended work:
 
-1. Add governed project-level detach/delete dry-run and confirmed cleanup so copied projects can be
-   removed without manual SQL.
-2. Add explicit controlled cross-project recall modes that label results from other projects as
+1. Add explicit controlled cross-project recall modes that label results from other projects as
    examples/evidence unless already applicable by scope/use policy.
-3. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
+2. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
    reports, and review items rather than agent-oriented metadata.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
@@ -258,14 +263,25 @@ Latest local model readiness validation:
   with `keep_alive=0s`
 - `recallant doctor` reports no missing expected Ollama models
 
+Latest Phase 10 attach/detach validation:
+
+- Docker network execution of `npm run phase10:smoke` passed against the isolated
+  `recallant-dev` database.
+- Attach smoke verifies manual dry-run, guided confirmation gating, default autopilot sandbox
+  attach, redacted local backups, idempotent re-attach, safe import policy, startup/context-pack
+  smoke, Review visibility, and production-sensitive downgrade.
+- Detach smoke verifies dry-run affected counts with no writes, hard-delete policy blocking,
+  confirmed sandbox detach hiding the project and archiving active chunks, local config left intact,
+  live detach hiding without archiving chunks or touching files, active search blocked for detached
+  projects, dashboard project-list hiding, and unrelated active project search unaffected.
+
 Smoke scripts that previously assumed a Docker `/work` mount now use the current repository root, so
 the full local host `smoke:core` suite can run against the isolated `recallant-dev` database.
 
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
-attach slice have been implemented. Continue with governed detach/cleanup, then controlled
-cross-project recall.
+attach/detach slices have been implemented. Continue with controlled cross-project recall.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

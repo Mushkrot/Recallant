@@ -46,6 +46,7 @@ detach/delete, and makes controlled cross-project recall explicit. See
 
 Phase 10 implementation order:
 
-1. `recallant attach` with `manual`, `guided`, and default `autopilot`.
-2. governed detach/cleanup.
-3. controlled cross-project recall.
+1. `recallant attach` with `manual`, `guided`, and default `autopilot`. Complete for the first
+   implementation slice.
+2. governed detach/cleanup. Complete for the first implementation slice.
+3. controlled cross-project recall. Next unfinished slice.

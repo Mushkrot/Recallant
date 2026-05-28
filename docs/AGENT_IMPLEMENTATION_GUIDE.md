@@ -269,9 +269,9 @@ building blocks into the owner-facing workflow described in
   connector/capability binding without separate confirmation.
 - [x] Attach reports are very short and owner-readable by default, with technical detail links/JSON
   available for agents.
-- [ ] Governed project detach/delete supports dry-run, visible affected counts, reversible archive or
+- [x] Governed project detach/delete supports dry-run, visible affected counts, reversible archive or
   policy-safe cleanup, and no impact on unrelated projects.
-- [ ] Live project detach defaults to hide/archive in Recallant without touching files or physically
+- [x] Live project detach defaults to hide/archive in Recallant without touching files or physically
   deleting records; sandbox cleanup can remove Recallant records and local Recallant artifacts after
   dry-run and confirmation; sensitive/wrong memory uses `forget forever`.
 - [ ] Cross-project recall supports explicit modes for same-project recall, developer rules,

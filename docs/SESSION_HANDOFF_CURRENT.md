@@ -8,13 +8,12 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 Recallant is deployed on the owner server, the first production UI cleanup has been completed, and
 the GutenDocx copied-project sandbox pilot is complete. The active product direction is now Phase 10:
-autonomous project attach plus controlled cross-project recall.
+autonomous project attach/detach plus controlled cross-project recall.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet. The next work is to implement the product-level workflow that can
-attach projects in `manual`, `guided`, or `autopilot` mode, then add governed detach/cleanup and
-controlled cross-project recall.
+attach/detach projects safely, then add controlled cross-project recall.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -62,9 +61,19 @@ The current Phase 10 attach target is complete for the first implementation slic
 - compact `PROJECT_LOG.md` as agent-readable fallback/checkpoint;
 - owner-readable attach reports;
 
+The current Phase 10 detach target is complete for the first implementation slice:
+
+- `recallant detach` / `recallant project-detach` supports dry-run affected counts and
+  confirmation-gated writes;
+- live project detach hides the project in Recallant without touching files, physically deleting
+  records, or archiving chunks;
+- sandbox detach hides the project from active UI/search and archives active chunks, while leaving
+  local sandbox files untouched and offering separate local cleanup as a follow-up;
+- hard delete / permanent erasure is policy-blocked from ordinary detach and must use the separate
+  forget workflow.
+
 The next Phase 10 targets are:
 
-- governed project detach/delete dry-run and confirmed cleanup;
 - explicit controlled cross-project recall modes for source-linked examples from other projects;
 - no automatic mixing of unrelated project memories into default context packs.
 
@@ -96,6 +105,5 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should implement governed project detach/delete dry-run and confirmed cleanup so
-the GutenDocx sandbox can be removed without manual SQL after owner confirmation. After that, add
-controlled cross-project recall modes for source-linked examples from other projects.
+The next session should add controlled cross-project recall modes for source-linked examples from
+other projects. Do not make similar-project examples part of ordinary startup context by default.

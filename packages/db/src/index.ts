@@ -196,6 +196,19 @@ export type ProjectSettingInput = {
   };
 };
 
+export type DetachProjectInput = {
+  project_id?: string | null;
+  project_path?: string | null;
+  mode?: "live" | "sandbox";
+  dry_run?: boolean;
+  reason?: string | null;
+  actor_kind?: "user" | "agent" | "system";
+  actor_id?: string | null;
+  confirmation?: {
+    confirmed?: boolean;
+  };
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -217,6 +230,15 @@ type EmbeddingRoute = {
   dims: number;
   source: string;
   routingReason: string;
+};
+
+type ProjectLifecycle = {
+  status: "active" | "detached" | "sandbox_cleaned";
+  visibility: "active" | "hidden";
+  searchable: boolean;
+  detached_at?: string;
+  detach_mode?: "live" | "sandbox";
+  reason?: string | null;
 };
 
 const capturePolicies: Record<CaptureProfile, Omit<CapturePolicy, "profile" | "source">> = {
@@ -298,6 +320,34 @@ function readObjectSetting(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function readProjectLifecycle(value: unknown): ProjectLifecycle {
+  const object = readObjectSetting(value);
+  const status =
+    object?.status === "detached" || object?.status === "sandbox_cleaned"
+      ? object.status
+      : "active";
+  return {
+    status,
+    visibility: object?.visibility === "hidden" || status !== "active" ? "hidden" : "active",
+    searchable: object?.searchable === false ? false : status === "active",
+    detached_at: typeof object?.detached_at === "string" ? object.detached_at : undefined,
+    detach_mode:
+      object?.detach_mode === "live" || object?.detach_mode === "sandbox"
+        ? object.detach_mode
+        : undefined,
+    reason: typeof object?.reason === "string" ? object.reason : null
+  };
+}
+
+function projectLifecycleIsDetached(lifecycle: ProjectLifecycle) {
+  return (
+    lifecycle.status === "detached" ||
+    lifecycle.status === "sandbox_cleaned" ||
+    lifecycle.visibility === "hidden" ||
+    lifecycle.searchable === false
+  );
 }
 
 function vectorLiteral(values: readonly number[]) {
@@ -619,6 +669,23 @@ export class RecallantDb {
       await client.query(
         `
           INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+          VALUES ($1, 'project_lifecycle', $2, 'recallant project registration', 'recallant-cli')
+          ON CONFLICT (project_id, key) DO UPDATE
+          SET value = EXCLUDED.value, reason = EXCLUDED.reason, updated_by = EXCLUDED.updated_by, updated_at = now()
+        `,
+        [
+          input.projectId,
+          JSON.stringify({
+            status: "active",
+            visibility: "active",
+            searchable: true,
+            reactivated_at: new Date().toISOString()
+          })
+        ]
+      );
+      await client.query(
+        `
+          INSERT INTO project_settings (project_id, key, value, reason, updated_by)
           VALUES ($1, 'capture_profile', $2, 'recallant init', 'recallant-cli')
           ON CONFLICT (project_id, key) DO UPDATE
           SET value = EXCLUDED.value, reason = EXCLUDED.reason, updated_by = EXCLUDED.updated_by, updated_at = now()
@@ -633,6 +700,22 @@ export class RecallantDb {
           VALUES ('project', $1, 'capture_profile', NULL, $2, 'system', 'recallant-cli', 'recallant init')
         `,
         [input.projectId, JSON.stringify(input.captureProfile ?? "standard")]
+      );
+      await client.query(
+        `
+          INSERT INTO settings_audit_events (
+            scope_kind, scope_id, key, old_value, new_value, actor_kind, actor_id, reason
+          )
+          VALUES ('project', $1, 'project_lifecycle', NULL, $2, 'system', 'recallant-cli', 'recallant project registration')
+        `,
+        [
+          input.projectId,
+          JSON.stringify({
+            status: "active",
+            visibility: "active",
+            searchable: true
+          })
+        ]
       );
     });
     return { developerId, projectId: input.projectId };
@@ -808,6 +891,16 @@ export class RecallantDb {
     const context = input.session_id
       ? await this.contextForSession(input.session_id)
       : await this.ensureProject();
+    const lifecycle = await this.getProjectLifecycle(context.projectId);
+    if (projectLifecycleIsDetached(lifecycle)) {
+      return {
+        hits: [],
+        truncated: false,
+        route: null,
+        lifecycle,
+        warnings: ["Project is detached from active Recallant search."]
+      };
+    }
     const route = await this.resolveEmbeddingRoute(
       this.pool,
       context.projectId,
@@ -1731,6 +1824,16 @@ export class RecallantDb {
 
   async recallAgentMemories(input: RecallAgentMemoriesInput) {
     const context = await this.ensureProject();
+    const lifecycle = await this.getProjectLifecycle(context.projectId);
+    if (projectLifecycleIsDetached(lifecycle)) {
+      return {
+        trace_id: null,
+        memories: [],
+        truncated: false,
+        lifecycle,
+        warnings: ["Project is detached from active Recallant governed-memory recall."]
+      };
+    }
     const statuses = ["accepted"];
     if (input.include_candidates) statuses.push("candidate");
     if (input.include_needs_review) statuses.push("needs_review");
@@ -1819,6 +1922,184 @@ export class RecallantDb {
     return { ok: true, trace_id: input.trace_id };
   }
 
+  async detachProject(input: DetachProjectInput) {
+    const mode = input.mode ?? "live";
+    const project = await this.findProjectForManagement(input);
+    if (!project) {
+      return {
+        ok: false,
+        action: "project_detach",
+        status: "not_found",
+        dry_run: true,
+        writes_database: false,
+        project: null,
+        affected: {},
+        warnings: ["No matching managed project was found. No data was changed."]
+      };
+    }
+
+    const affected = await this.countProjectRecords(project.project_id);
+    const previousLifecycle = await this.getProjectLifecycle(project.project_id);
+    const dryRun = input.dry_run !== false || input.confirmation?.confirmed !== true;
+    const lifecycle: ProjectLifecycle = {
+      status: mode === "sandbox" ? "sandbox_cleaned" : "detached",
+      visibility: "hidden",
+      searchable: false,
+      detached_at: new Date().toISOString(),
+      detach_mode: mode,
+      reason: input.reason ?? null
+    };
+    const localCleanupPlan =
+      mode === "sandbox"
+        ? [
+            {
+              action: "optional_local_cleanup",
+              writes_files: false,
+              reason:
+                "After reviewing this dry-run, a separate explicit local cleanup may remove .recallant/config, bootstrap edits, or the sandbox copy."
+            }
+          ]
+        : [
+            {
+              action: "none",
+              writes_files: false,
+              reason: "Live project detach does not touch project files."
+            }
+          ];
+
+    if (dryRun) {
+      return {
+        ok: true,
+        action: "project_detach",
+        status: "pending_confirmation",
+        dry_run: true,
+        writes_database: false,
+        mode,
+        project,
+        previous_lifecycle: previousLifecycle,
+        planned_lifecycle: lifecycle,
+        affected,
+        local_cleanup_plan: localCleanupPlan,
+        warnings: [
+          "Dry run only. No Recallant records, project files, or local sandbox files were changed.",
+          "Ordinary detach is not permanent erasure. Use the separate forget-forever workflow for sensitive or wrong memory."
+        ]
+      };
+    }
+
+    let archivedChunks = 0;
+    let closedSessions = 0;
+    let cancelledPaidApprovals = 0;
+    await withTransaction(this.pool, async (client) => {
+      await client.query(
+        `
+          UPDATE projects
+          SET updated_at = now()
+          WHERE id = $1
+        `,
+        [project.project_id]
+      );
+      await client.query(
+        `
+          INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+          VALUES ($1, 'project_lifecycle', $2, $3, $4)
+          ON CONFLICT (project_id, key) DO UPDATE
+          SET value = EXCLUDED.value,
+              reason = EXCLUDED.reason,
+              updated_by = EXCLUDED.updated_by,
+              updated_at = now()
+        `,
+        [
+          project.project_id,
+          JSON.stringify(lifecycle),
+          input.reason ?? `recallant detach ${mode}`,
+          input.actor_id ?? "recallant-cli"
+        ]
+      );
+      await client.query(
+        `
+          INSERT INTO settings_audit_events (
+            scope_kind, scope_id, key, old_value, new_value, actor_kind, actor_id, reason
+          )
+          VALUES ('project', $1, 'project_lifecycle', $2, $3, $4, $5, $6)
+        `,
+        [
+          project.project_id,
+          JSON.stringify(previousLifecycle),
+          JSON.stringify(lifecycle),
+          input.actor_kind ?? "system",
+          input.actor_id ?? "recallant-cli",
+          input.reason ?? `recallant detach ${mode}`
+        ]
+      );
+      const sessionResult = await client.query(
+        `
+          UPDATE sessions
+          SET status = 'closed',
+              ended_reason = 'superseded',
+              ended_at = coalesce(ended_at, now()),
+              last_seen_at = now()
+          WHERE project_id = $1
+            AND status = 'active'
+            AND ended_at IS NULL
+        `,
+        [project.project_id]
+      );
+      closedSessions = sessionResult.rowCount ?? 0;
+      if (mode === "sandbox") {
+        const chunkResult = await client.query(
+          `
+            UPDATE chunks
+            SET archived_at = coalesce(archived_at, now())
+            WHERE project_id = $1
+              AND archived_at IS NULL
+          `,
+          [project.project_id]
+        );
+        archivedChunks = chunkResult.rowCount ?? 0;
+      }
+      const paidResult = await client.query(
+        `
+          UPDATE paid_api_approval_requests
+          SET status = 'cancelled',
+              decided_by = $2,
+              decision_note = 'Project detached before approval',
+              decided_at = now()
+          WHERE project_id = $1
+            AND status = 'pending'
+        `,
+        [project.project_id, input.actor_id ?? "recallant-cli"]
+      );
+      cancelledPaidApprovals = paidResult.rowCount ?? 0;
+    });
+
+    return {
+      ok: true,
+      action: "project_detach",
+      status: "detached",
+      dry_run: false,
+      writes_database: true,
+      mode,
+      project,
+      previous_lifecycle: previousLifecycle,
+      lifecycle,
+      affected,
+      changes: {
+        closed_active_sessions: closedSessions,
+        archived_chunks: archivedChunks,
+        cancelled_paid_approvals: cancelledPaidApprovals,
+        physically_deleted_records: 0,
+        files_changed: 0
+      },
+      local_cleanup_plan: localCleanupPlan,
+      warnings: [
+        "No project files were touched.",
+        "No physical records were deleted.",
+        "Sensitive or wrong memory still requires the separate confirmed forget-forever workflow."
+      ]
+    };
+  }
+
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
@@ -1839,7 +2120,12 @@ export class RecallantDb {
             (SELECT count(*)::int FROM events e WHERE e.project_id = p.id) AS event_count,
             (SELECT count(*)::int FROM agent_memories m WHERE m.project_id = p.id) AS memory_count
           FROM projects p
+          LEFT JOIN project_settings lifecycle
+            ON lifecycle.project_id = p.id
+           AND lifecycle.key = 'project_lifecycle'
           WHERE p.developer_id = $1
+            AND coalesce(lifecycle.value->>'visibility', 'active') <> 'hidden'
+            AND coalesce(lifecycle.value->>'status', 'active') NOT IN ('detached', 'sandbox_cleaned')
         ),
         ranked AS (
           SELECT *,
@@ -1969,6 +2255,12 @@ export class RecallantDb {
       rules: rules.memories,
       costs: costs.rows,
       settings: settings.rows,
+      project_cleanup: {
+        dry_run_first: true,
+        permanent_erasure_separate: true,
+        detach_command: `recallant detach --project-id ${dashboardProjectId} --dry-run`,
+        sandbox_cleanup_command: `recallant detach --project-id ${dashboardProjectId} --mode sandbox --dry-run`
+      },
       chat: {
         placeholder: "Ask Recallant about memory, context packs, cleanup, or settings.",
         destructive_actions_require_confirmation: true
@@ -2150,6 +2442,88 @@ export class RecallantDb {
         path: "graph",
         superseded_by: null
       }));
+  }
+
+  private async findProjectForManagement(input: DetachProjectInput) {
+    const developerId = this.config.developerId ?? this.fallbackDeveloperId;
+    const projectId = input.project_id ?? this.config.projectId ?? null;
+    const projectPath = input.project_path ?? this.config.projectPath ?? null;
+    if (!projectId && !projectPath) return null;
+    const values: unknown[] = [];
+    const clauses: string[] = [];
+    if (projectId) {
+      values.push(projectId);
+      clauses.push(`p.id = $${values.length}::uuid`);
+    } else if (projectPath) {
+      values.push(developerId);
+      clauses.push(`p.developer_id = $${values.length}::uuid`);
+      values.push(projectPath);
+      clauses.push(`p.primary_path IS NOT DISTINCT FROM $${values.length}`);
+    }
+    const result = await this.pool.query<{
+      project_id: string;
+      developer_id: string;
+      name: string;
+      primary_path: string | null;
+      project_kind: string;
+      memory_domain: string;
+      updated_at: string;
+    }>(
+      `
+        SELECT p.id AS project_id, p.developer_id, p.name, p.primary_path,
+               p.project_kind, p.memory_domain, p.updated_at
+        FROM projects p
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY (
+          (SELECT count(*) FROM sessions s WHERE s.project_id = p.id) +
+          (SELECT count(*) FROM events e WHERE e.project_id = p.id) +
+          (SELECT count(*) FROM agent_memories m WHERE m.project_id = p.id)
+        ) DESC,
+        p.updated_at DESC
+        LIMIT 1
+      `,
+      values
+    );
+    return result.rows[0] ?? null;
+  }
+
+  private async countProjectRecords(projectId: string) {
+    const result = await this.pool.query(
+      `
+        SELECT
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1) AS sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL) AS active_sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
+          (SELECT count(*)::int FROM events WHERE project_id = $1) AS events,
+          (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events,
+          (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1) AS raw_artifacts,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1) AS chunks,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL) AS active_chunks,
+          (SELECT count(*)::int FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE project_id = $1)) AS embeddings,
+          (SELECT count(*)::int FROM edges WHERE project_id = $1) AS edges,
+          (SELECT count(*)::int FROM checkpoints WHERE project_id = $1) AS checkpoints,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status NOT IN ('archived', 'rejected', 'superseded')) AS active_agent_memories,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_needed_memories,
+          (SELECT count(*)::int FROM agent_memory_source_refs r JOIN agent_memories m ON m.id = r.memory_id WHERE m.project_id = $1) AS agent_memory_source_refs,
+          (SELECT count(*)::int FROM recall_traces WHERE project_id = $1) AS recall_traces,
+          (SELECT count(*)::int FROM ingest_dedup_keys WHERE project_id = $1) AS ingest_dedup_keys,
+          (SELECT count(*)::int FROM project_settings WHERE project_id = $1) AS project_settings,
+          (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
+          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1) AS paid_api_approvals,
+          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals
+      `,
+      [projectId]
+    );
+    return result.rows[0] ?? {};
+  }
+
+  private async getProjectLifecycle(projectId: string) {
+    const result = await this.pool.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'project_lifecycle'",
+      [projectId]
+    );
+    return readProjectLifecycle(result.rows[0]?.value);
   }
 
   private async countForgetTarget(kind: string, targetId: string) {

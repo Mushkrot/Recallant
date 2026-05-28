@@ -218,6 +218,10 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   default `autopilot`; autopilot backs up discovered agent files locally, normalizes startup files,
   imports safe sources, creates starter/structured memories, runs startup/context-pack and Review
   visibility checks, and reports in owner-readable form.
+- First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
+  supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
+  detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search
+  blocking for detached projects, and hard-delete policy blocking.
 - Cross-project recall should let agents use examples from other projects when explicitly useful,
   without automatically mixing unrelated project memory.
 - The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and
@@ -275,9 +279,9 @@ attach and controlled cross-project recall:
 
 - document and implement `recallant attach --mode manual|guided|autopilot`;
 - keep manual/guided modes available for cautious production work;
+- keep governed project detach/delete available so sandbox and attached project cleanup is
+  reversible and visible before any broad live-project onboarding;
 - add explicit cross-project recall modes for source-linked examples from other projects;
-- add governed project detach/delete so sandbox and attached project cleanup is reversible and
-  visible before any broad live-project onboarding.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
 
@@ -286,7 +290,7 @@ Next session should start here:
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Read `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
    `docs/CROSS_PROJECT_RECALL.md`.
-3. Start with Phase 10: attach modes, governed detach/delete, and controlled cross-project recall.
+3. Start with Phase 10: controlled cross-project recall is the next unfinished product slice.
 4. Keep manual/guided modes available; do not make autopilot the only way to attach projects.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

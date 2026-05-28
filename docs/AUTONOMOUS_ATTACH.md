@@ -276,18 +276,22 @@ force the owner to read ids, source refs, counts, or internal policy fields.
 
 Autonomous attach requires a matching governed cleanup path:
 
-- dry-run detach report;
+- dry-run detach report with affected counts;
 - remove or archive project records from active UI/search according to policy;
-- optionally remove local `.recallant` pointer files from sandbox copies;
+- optionally offer local `.recallant` pointer/bootstrap/sandbox-copy cleanup after a dry-run;
 - never affect the original project when testing a copied sandbox;
 - preserve audit/provenance unless explicit erasure is confirmed.
 
-Full project delete/detach is a required follow-up before broad live-project attach.
+The first implementation slice is `recallant detach`. It records project lifecycle state in
+Recallant, hides detached projects from active Review UI project lists, and blocks active search for
+the detached project. It does not delete project files or physical database rows.
 
 Detach policy:
 
 - live project default: hide/archive/detach in Recallant only; do not delete physical records or
   touch project files by default.
-- sandbox/test cleanup: after dry-run and explicit confirmation, delete/archive Recallant records
-  for the sandbox and offer to remove `.recallant/config`, bootstrap changes, or the sandbox copy.
+- sandbox/test cleanup: after dry-run and explicit confirmation, hide the sandbox project from
+  active UI/search and archive active chunks so it no longer participates in normal retrieval. The
+  report offers separate local cleanup for `.recallant/config`, bootstrap changes, or the sandbox
+  copy, but this first slice does not remove local files automatically.
 - sensitive/wrong memory: use the separate `forget forever` erasure workflow, not ordinary detach.

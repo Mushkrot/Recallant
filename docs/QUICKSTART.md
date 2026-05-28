@@ -1,9 +1,9 @@
 # Quickstart - connect a project to Recallant
 
 Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md), the first copied-project
-pilot, and the first product-level attach slice are complete. `autopilot` is the default for
-ordinary projects, while production-sensitive projects downgrade to `guided` unless production-safe
-autopilot is explicitly approved.
+pilot, first product-level attach slice, and first governed detach slice are complete. `autopilot`
+is the default for ordinary projects, while production-sensitive projects downgrade to `guided`
+unless production-safe autopilot is explicitly approved.
 
 ## Prerequisite: server is running
 
@@ -105,8 +105,34 @@ Production-safe autopilot requires explicit approval and still keeps hard safety
 recallant attach /ai/buddhisthelp --target codex --mode autopilot --production-approved
 ```
 
-Until `attach` is fully implemented, use the lower-level `init`, `discover`, and `import` commands
-below.
+The lower-level `init`, `discover`, and `import` commands remain available for manual or diagnostic
+work.
+
+### Detach a copied sandbox or live project
+
+Always start with dry-run:
+
+```bash
+recallant detach --project-id <project-id> --mode sandbox --dry-run
+recallant detach --project-id <project-id> --mode live --dry-run
+```
+
+Confirmed sandbox detach hides the sandbox from active Review UI/search and archives active chunks,
+but does not delete database rows or local files:
+
+```bash
+recallant detach --project-id <project-id> --mode sandbox --confirm
+```
+
+Confirmed live detach hides the project in Recallant without touching files, physically deleting
+records, or archiving chunks:
+
+```bash
+recallant detach --project-id <project-id> --mode live --confirm
+```
+
+Ordinary detach is not permanent erasure. Sensitive or wrong memory must use the separate confirmed
+forget workflow.
 
 ### Lower-level new-project path
 

@@ -307,8 +307,9 @@ Follow-ups before attaching a live project:
 - Keep the production local embedding route healthy. Follow-up on 2026-05-28 installed
   `nomic-embed-text`, implemented the Ollama embedding adapter, and verified
   `memory_search mode=vector_only` on the GutenDocx sandbox.
-- Add a governed project-level delete/detach command so copied-project cleanup does not require
-  manual SQL.
+- Governed project-level detach is now available through `recallant detach` / `recallant
+  project-detach`; copied-project cleanup no longer requires manual SQL for Recallant-side hiding
+  and sandbox retrieval archiving.
 - Add autonomous project attach modes (`manual`, `guided`, `autopilot`) and controlled
   cross-project recall before broad live-project onboarding. See
   [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and

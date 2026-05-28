@@ -266,11 +266,11 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Production-sensitive detection uses explicit flags/settings and automatic hints such as deploy configs, production compose/systemd, public domains, billing, real env refs, Cloudflare/DNS/security/deploy references.
 - [x] Production-sensitive project with requested `--mode autopilot` downgrades to `guided` unless production-safe autopilot is explicitly approved.
 - [x] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts, firewall/security/public exposure/deploy changes, paid API enablement, erasure, and active connector/capability binding without separate confirmation.
-- [ ] Governed project detach/delete dry-run shows affected counts and does not modify active data.
-- [ ] Live project detach defaults to hiding/archiving in Recallant without touching files or physically deleting records.
-- [ ] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.
-- [ ] Confirmed sandbox cleanup may also offer removal of local `.recallant/config`, bootstrap changes, or sandbox copy after dry-run and confirmation.
-- [ ] Sensitive/wrong memory cleanup uses the separate `forget forever` workflow, not ordinary detach.
+- [x] Governed project detach/delete dry-run shows affected counts and does not modify active data.
+- [x] Live project detach defaults to hiding/archiving in Recallant without touching files or physically deleting records.
+- [x] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.
+- [x] Confirmed sandbox cleanup may also offer removal of local `.recallant/config`, bootstrap changes, or sandbox copy after dry-run and confirmation.
+- [x] Sensitive/wrong memory cleanup uses the separate `forget forever` workflow, not ordinary detach.
 - [ ] Default context pack for project A excludes ordinary memories from unrelated project B.
 - [ ] Explicit similar-project recall can return a source-linked result from project B with source project, source path/ref, scope kind, status, use policy, and applicability warning.
 - [ ] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern; Recallant does not add similar-project examples to ordinary startup context by default.

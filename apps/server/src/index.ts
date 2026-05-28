@@ -656,7 +656,10 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Cleanup / Forget</h2>
-        <div class="chat">Dry-run first. Permanent erasure requires explicit confirmation.</div>
+        <div class="chat">
+          Detach uses a dry-run first and hides the project from active Recallant views without deleting records.
+          Permanent erasure is separate.
+        </div>
       </section>
       <section class="panel">
         <h2>Settings</h2>
