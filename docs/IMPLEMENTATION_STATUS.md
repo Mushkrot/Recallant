@@ -22,6 +22,10 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
 - Pre-Pilot Review UI import readiness: dashboard/API include import candidates, selected detail with source refs/review history/provenance/status/use policy/scope/audience/confidence, conflict/duplicate candidates, available review actions, and cleanup/forget confirmation entrypoint.
 - Pre-Pilot sandbox pilot workflow: documented copied-project operator flow and smoke automation that copies a fixture into a sandbox, discovers/imports selected sources, exercises MCP startup/context/append/search/recall/closeout, verifies DB records, and leaves the original project untouched.
 - Pre-Pilot agent onboarding contract: documented exact startup/capture/checkpoint/closeout/file-ownership rules and corrected generated `AGENTS.md` Memory section to use real MCP tools instead of the old nonexistent `memory_promote` wording.
+- First copied-project pilot: GutenDocx was cloned into a Recallant sandbox, initialized, discovered,
+  imported, exercised through MCP startup/context/append/search/recall/closeout, checked through
+  Review Dashboard data, and verified against post-test production health checks without modifying
+  the original `/ai/gutendocx` project.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -107,9 +111,9 @@ structured settings as formatted JSON instead of `[object Object]`.
 
 ## Active Next Plan
 
-The active next checkpoint is [Pre-Pilot Readiness](PRE_PILOT_READINESS.md). The goal is to make
-Recallant ready for a first pilot on a duplicated project copy before connecting any real working
-project.
+The active next checkpoint is owner inspection and cleanup/readiness after the first copied-project
+pilot. The detailed pilot record is
+[PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md).
 
 Current work order:
 
@@ -118,7 +122,17 @@ Current work order:
 3. Review UI import candidate/action readiness. Complete for the first pre-pilot checkpoint.
 4. Pilot sandbox workflow. Complete for the first pre-pilot checkpoint.
 5. Agent onboarding contract. Complete for the first pre-pilot checkpoint.
-6. Operational readiness check. Next.
+6. Operational readiness check. Complete for the first pre-pilot checkpoint.
+7. GutenDocx copied-project pilot. Complete for the first real-project sandbox checkpoint.
+
+Next recommended work:
+
+1. Let the owner inspect the GutenDocx sandbox data without switching production service env.
+2. Add a Review UI project selector or a localhost-only sandbox UI runbook.
+3. Fix or explicitly defer the `ollama/nomic-embed-text` local embedding route before a live
+   project attachment.
+4. Add a governed project-level delete/detach command, then clean the GutenDocx sandbox after owner
+   confirmation.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -189,6 +203,23 @@ Latest Pre-Pilot R6 incident recovery validation:
   symlinked latest-manifest pointers and passed restore verification without production overwrite
 - Docker network execution of `npm run phase8:smoke:backup` passed against the isolated
   `recallant-dev` database and verifies symlinked latest-manifest backup/restore-plan handling
+
+Latest first copied-project pilot validation:
+
+- `git clone --no-hardlinks /ai/gutendocx /ai/recallant-pilots/gutendocx-20260528T161238Z`
+- `recallant init --target codex --capture-profile detailed --project-dir <sandbox>`
+- `recallant discover --dry-run --project-dir <sandbox>`
+- `recallant lint-context --project-dir <sandbox>`
+- `recallant import --dry-run` and confirmed `recallant import` for five selected GutenDocx
+  sources.
+- Local stdio MCP sandbox flow: `memory_start_session`, `memory_get_context_pack`,
+  `memory_append_event`, `memory_append_turn`, `memory_search`, `memory_recall_agent_memories`, and
+  `memory_closeout`.
+- Review Dashboard data path with sandbox env returned five import candidates, five inbox items,
+  zero interrupted sessions, and zero pending paid approvals.
+- Read-only delete dry-run counts were recorded for the sandbox project id.
+- Post-test production health checks confirmed GutenDocx and Recallant remained healthy.
+- Original `/ai/gutendocx` status remained limited to the pre-existing `config.yaml` diff.
 
 The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 

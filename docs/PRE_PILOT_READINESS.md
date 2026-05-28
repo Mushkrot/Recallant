@@ -278,6 +278,35 @@ Recovery checkpoint:
   Compose project name so `make db-down` and `make db-reset` cannot remove the production
   `recallant-postgres` container managed by the production compose target.
 
+## First Copied-Project Pilot - GutenDocx
+
+Status: complete for the first real-project sandbox checkpoint.
+
+Run note:
+
+- Report: [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md)
+- Sandbox copy: `/ai/recallant-pilots/gutendocx-20260528T161238Z`
+- Sandbox project id: `29bc4ee3-cac8-4c3f-9634-ef47d0401ae9`
+- Imported sources: `.cursor/SESSION_HANDOFF.md`, `AGENTS.md`, `Docs/README.md`,
+  `PROJECT_LOG.md`, and `README.md`
+- Review result: all five imports are `needs_review` / `evidence_only`; no instruction-grade
+  promotion occurred.
+- MCP result: session startup, context pack, append, search, recall, and closeout completed against
+  the sandbox project.
+- Safety result: original `/ai/gutendocx` remained untouched except for its pre-existing
+  `config.yaml` runtime diff; no `.recallant` or spool directory was created in the original.
+- Production result: GutenDocx and Recallant health checks passed after the pilot.
+
+Follow-ups before attaching a live project:
+
+- Add a safe way to inspect non-current projects in the Review UI, such as a project selector or a
+  localhost-only sandbox UI runbook.
+- Fix or explicitly defer the production local embedding route for `ollama/nomic-embed-text`; the
+  sandbox pilot verified lexical retrieval, while embedding attempts recorded `UNAVAILABLE` with
+  zero cost.
+- Add a governed project-level delete/detach command so copied-project cleanup does not require
+  manual SQL.
+
 ## Exit Gate
 
 Pre-Pilot Readiness is complete when all of the following are true:

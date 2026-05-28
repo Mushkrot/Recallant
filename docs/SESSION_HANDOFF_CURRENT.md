@@ -8,7 +8,10 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 Recallant is deployed on the owner server and the first production UI cleanup has been completed. The active plan is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
 
-Do not start by connecting a real project. Existing-project discovery/preflight, Durable Explicit Import write mode, Review UI import/action readiness, Pilot Sandbox Workflow, Agent Onboarding Contract, and Operational Readiness Check are complete for the first pre-pilot checkpoint. The next work is the first pilot on a duplicated project copy.
+The first copied-project pilot has been run on a GutenDocx sandbox copy. See
+[PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
+live `/ai/gutendocx` project yet. The next work is owner inspection of the sandbox data, then either
+confirmed sandbox cleanup or a small UI/project-switching improvement.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -29,7 +32,7 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 5. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
 6. Run `git status --short --branch`.
 7. Run `git log --oneline -8`.
-8. Begin with the copied-project pilot workflow in `docs/PILOT_SANDBOX_WORKFLOW.md`.
+8. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md`.
 
 ## Active Work Order
 
@@ -42,6 +45,17 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 
 R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, R5 agent onboarding contract, and R6 operational readiness are also complete for the first pre-pilot checkpoint.
 
+The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
+
+- Sandbox copy: `/ai/recallant-pilots/gutendocx-20260528T161238Z`
+- Sandbox Recallant project id: `29bc4ee3-cac8-4c3f-9634-ef47d0401ae9`
+- Imported sources: `.cursor/SESSION_HANDOFF.md`, `AGENTS.md`, `Docs/README.md`,
+  `PROJECT_LOG.md`, and `README.md`
+- All imports are `needs_review` / `evidence_only`; no instruction-grade promotion was performed.
+- Original `/ai/gutendocx` was not modified beyond its pre-existing `config.yaml` runtime diff.
+- Local embeddings failed with `ollama/nomic-embed-text` unavailable, so the real-project pilot
+  verified lexical retrieval but not vector retrieval.
+
 ## Boundaries
 
 - Conversation with the owner may be Russian; repo artifacts stay English.
@@ -50,8 +64,12 @@ R0 Documentation And Handoff Readiness is complete for the current checkpoint. R
 - Update docs whenever behavior, status, or decisions change.
 - Do not perform new public exposure, paid API enablement, destructive erasure, firewall changes, or secret disclosure without owner participation.
 - Consult `/ai/SECURITY` and `/ai/PORTS.yaml` before server/service/security changes.
-- Keep real working projects untouched until the Pre-Pilot Readiness exit gate is met and the owner chooses the first pilot candidate.
+- Keep real working projects untouched until the owner explicitly chooses to attach one. The
+  GutenDocx sandbox is a copied pilot and is safe to delete after backup/verify and explicit owner
+  confirmation.
 
 ## Success Condition For The Next Session
 
-The next session should run the first safe pilot on a duplicated project copy, then report what Recallant imported, missed, and should improve before any real working project is attached.
+The next session should help the owner inspect the GutenDocx sandbox data, then either delete the
+sandbox cleanly or implement the smallest UI/runbook improvement needed to inspect copied projects
+without changing production service env.
