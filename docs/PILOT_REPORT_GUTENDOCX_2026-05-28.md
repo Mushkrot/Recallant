@@ -89,6 +89,18 @@ six `UNAVAILABLE` local-model failures with estimated cost `0`. Therefore this p
 lexical retrieval on real imported project data, but not vector retrieval in the production
 sandbox environment.
 
+Follow-up on 2026-05-28:
+
+- `nomic-embed-text` was installed in Ollama.
+- The Recallant DB package now has a production Ollama embedding adapter.
+- A production sandbox MCP smoke confirmed `memory_append_turn` writes `embedded` chunks with
+  `ollama/nomic-embed-text` and `memory_search mode=vector_only` returns the appended chunk through
+  `path=vector`.
+- The pre-existing GutenDocx sandbox chunks were re-embedded, and vector-only search for
+  `config.yaml` runtime-state context returned imported document chunks through `path=vector`.
+
+See [LOCAL_MODEL_READINESS_2026-05-28.md](LOCAL_MODEL_READINESS_2026-05-28.md).
+
 ## Post-Test Health
 
 Post-test checks:
@@ -134,7 +146,7 @@ Recommended confirmed cleanup, only after owner approval and a fresh backup/veri
 
 - Add a first-class project switcher or temporary sandbox UI runbook so the owner can inspect a
   copied project without changing the production Review UI project env.
-- Either make `nomic-embed-text` reliably available in the production environment or document that
-  the first real pilot is lexical-only until embeddings are healthy.
+- Add a first-class `recallant reindex` command so future model-route repairs do not require a
+  one-time sandbox repair script.
 - Consider a built-in `recallant project-delete --dry-run/--confirm` command so sandbox deletion is
   a governed operation instead of manual SQL.

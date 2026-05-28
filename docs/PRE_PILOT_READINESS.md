@@ -301,9 +301,9 @@ Follow-ups before attaching a live project:
 
 - Add a safe way to inspect non-current projects in the Review UI, such as a project selector or a
   localhost-only sandbox UI runbook.
-- Fix or explicitly defer the production local embedding route for `ollama/nomic-embed-text`; the
-  sandbox pilot verified lexical retrieval, while embedding attempts recorded `UNAVAILABLE` with
-  zero cost.
+- Keep the production local embedding route healthy. Follow-up on 2026-05-28 installed
+  `nomic-embed-text`, implemented the Ollama embedding adapter, and verified
+  `memory_search mode=vector_only` on the GutenDocx sandbox.
 - Add a governed project-level delete/detach command so copied-project cleanup does not require
   manual SQL.
 

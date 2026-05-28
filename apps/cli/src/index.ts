@@ -438,7 +438,13 @@ async function checkOllama() {
       };
     }
     const payload = (await response.json()) as { models?: Array<{ name?: string }> };
-    const available = new Set((payload.models ?? []).map((model) => model.name).filter(Boolean));
+    const available = new Set<string>();
+    for (const model of payload.models ?? []) {
+      if (!model.name) continue;
+      available.add(model.name);
+      if (model.name.endsWith(":latest")) available.add(model.name.slice(0, -":latest".length));
+      else available.add(`${model.name}:latest`);
+    }
     return {
       provider: "ollama",
       url,

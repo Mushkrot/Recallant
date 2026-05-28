@@ -26,6 +26,9 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   imported, exercised through MCP startup/context/append/search/recall/closeout, checked through
   Review Dashboard data, and verified against post-test production health checks without modifying
   the original `/ai/gutendocx` project.
+- Local Ollama model readiness: `nomic-embed-text` is installed and wired into the Recallant DB
+  embedding path, `recallant doctor` accepts `model`/`model:latest` tag aliases, and production
+  sandbox vector search is verified through `memory_append_turn` plus `memory_search mode=vector_only`.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -129,9 +132,7 @@ Next recommended work:
 
 1. Let the owner inspect the GutenDocx sandbox data without switching production service env.
 2. Add a Review UI project selector or a localhost-only sandbox UI runbook.
-3. Fix or explicitly defer the `ollama/nomic-embed-text` local embedding route before a live
-   project attachment.
-4. Add a governed project-level delete/detach command, then clean the GutenDocx sandbox after owner
+3. Add a governed project-level delete/detach command, then clean the GutenDocx sandbox after owner
    confirmation.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
@@ -220,6 +221,22 @@ Latest first copied-project pilot validation:
 - Read-only delete dry-run counts were recorded for the sandbox project id.
 - Post-test production health checks confirmed GutenDocx and Recallant remained healthy.
 - Original `/ai/gutendocx` status remained limited to the pre-existing `config.yaml` diff.
+
+Latest local model readiness validation:
+
+- `ollama pull nomic-embed-text`
+- `ollama pull qwen2.5-coder:7b`
+- `ollama pull qwen2.5-coder:14b`
+- `ollama pull mistral-small:24b`
+- Direct Ollama `/api/embeddings` returned 768 dimensions for `nomic-embed-text`
+- Production sandbox MCP flow returned `status=embedded` for `ollama/nomic-embed-text`
+- Production sandbox `memory_search mode=vector_only` returned the appended test chunk through
+  `path=vector`
+- Existing GutenDocx sandbox chunks were re-embedded, and vector-only search returned imported
+  GutenDocx document chunks through `path=vector`
+- Generation smoke passed for `qwen2.5-coder:7b`, `qwen2.5-coder:14b`, and `mistral-small:24b`
+  with `keep_alive=0s`
+- `recallant doctor` reports no missing expected Ollama models
 
 The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 

@@ -53,8 +53,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `PROJECT_LOG.md`, and `README.md`
 - All imports are `needs_review` / `evidence_only`; no instruction-grade promotion was performed.
 - Original `/ai/gutendocx` was not modified beyond its pre-existing `config.yaml` runtime diff.
-- Local embeddings failed with `ollama/nomic-embed-text` unavailable, so the real-project pilot
-  verified lexical retrieval but not vector retrieval.
+- Local embeddings initially failed during the pilot because `nomic-embed-text` was absent and the
+  DB package did not yet call Ollama. Follow-up completed on 2026-05-28: `nomic-embed-text` is
+  installed, `recallant doctor` reports no missing local models, and a sandbox MCP smoke verified
+  `memory_append_turn` -> `embedded` -> `memory_search mode=vector_only`. Existing GutenDocx
+  sandbox chunks were also re-embedded, and vector-only search now returns imported document chunks.
 
 ## Boundaries
 

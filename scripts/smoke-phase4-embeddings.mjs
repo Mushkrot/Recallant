@@ -93,7 +93,7 @@ const defaultRouteAppend = await callTool(3, "memory_append_turn", {
   dedup_key: `phase4-default-${randomUUID()}`
 });
 if (
-  defaultRouteAppend.embedding?.status !== "pending" ||
+  !["pending", "embedded"].includes(defaultRouteAppend.embedding?.status) ||
   defaultRouteAppend.embedding?.provider !== "ollama" ||
   defaultRouteAppend.embedding?.model !== "nomic-embed-text"
 ) {
@@ -233,7 +233,7 @@ try {
       SELECT
         (SELECT count(*)::int FROM embeddings e JOIN chunks c ON c.id = e.chunk_id WHERE c.project_id = $1) AS embedding_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'deterministic' AND status = 'success') AS deterministic_calls,
-        (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'ollama' AND model = 'nomic-embed-text' AND status = 'failed') AS default_ollama_failures,
+        (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'ollama' AND model = 'nomic-embed-text') AS default_ollama_calls,
         (SELECT count(*)::int FROM system_settings WHERE key = 'embedding_fallback_candidates' AND value::text LIKE '%openai%' AND value::text LIKE '%gemini%') AS fallback_settings,
         (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $2 AND provider = 'openai' AND status = 'pending') AS paid_approval_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $2 AND provider = 'openai' AND confirmation_status = 'required_pending' AND status = 'cancelled') AS blocked_paid_calls,
@@ -245,7 +245,7 @@ try {
   if (
     row.embedding_count < 2 ||
     row.deterministic_calls < 2 ||
-    row.default_ollama_failures < 1 ||
+    row.default_ollama_calls < 1 ||
     row.fallback_settings !== 1 ||
     row.paid_approval_count !== 1 ||
     row.blocked_paid_calls !== 1 ||

@@ -325,6 +325,54 @@ function deterministicEmbedding(text: string, dims: number) {
   return values.map((value) => value / norm);
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function ollamaUrl(path: string) {
+  const base = process.env.RECALLANT_OLLAMA_URL ?? "http://localhost:11434";
+  return new URL(path, base.endsWith("/") ? base : `${base}/`);
+}
+
+function parseEmbedding(payload: unknown, dims: number) {
+  const object = readObjectSetting(payload);
+  const embedding = object?.embedding;
+  if (!Array.isArray(embedding)) {
+    throw new Error("Ollama response did not include an embedding array");
+  }
+  const values = embedding.map((value) => Number(value));
+  if (values.some((value) => !Number.isFinite(value))) {
+    throw new Error("Ollama embedding contained non-numeric values");
+  }
+  if (values.length !== dims) {
+    throw new Error(`Ollama embedding dimensions mismatch (${values.length} != ${dims})`);
+  }
+  return values;
+}
+
+async function fetchOllamaEmbedding(route: EmbeddingRoute, text: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    readPositiveIntEnv("RECALLANT_OLLAMA_EMBED_TIMEOUT_MS", 30_000)
+  );
+  try {
+    const response = await fetch(ollamaUrl("/api/embeddings"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: route.model, prompt: text }),
+      signal: controller.signal
+    });
+    const payload = (await response.json().catch(() => ({}))) as unknown;
+    if (!response.ok) {
+      throw new Error(`Ollama embedding request failed with HTTP ${response.status}`);
+    }
+    return parseEmbedding(payload, route.dims);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function capText(text: string | null | undefined, maxChars: number) {
   if (text === null || text === undefined) return null;
   if (text.length <= maxChars) return text;
@@ -789,25 +837,44 @@ export class RecallantDb {
       }
     >();
 
-    if ((mode === "hybrid" || mode === "vector_only") && route.provider === "deterministic") {
-      const queryVector = deterministicEmbedding(input.query, route.dims);
-      await this.recordModelCall(this.pool, {
-        developerId: context.developerId,
-        projectId: context.projectId,
-        sessionId: input.session_id ?? null,
-        route,
-        purpose: "query_embedding",
-        status: "success",
-        metadata: { text_count: 1 }
-      });
-      const vectorRows = await this.pool.query<{
-        id: string;
-        text: string;
-        source_event_id: string;
-        occurred_at: string;
-        distance: number;
-      }>(
-        `
+    if (mode === "hybrid" || mode === "vector_only") {
+      let queryVector: number[] | null = null;
+      if (route.provider === "deterministic") {
+        queryVector = deterministicEmbedding(input.query, route.dims);
+      } else if (route.provider === "ollama") {
+        try {
+          queryVector = await fetchOllamaEmbedding(route, input.query);
+        } catch (error) {
+          await this.recordModelCall(this.pool, {
+            developerId: context.developerId,
+            projectId: context.projectId,
+            sessionId: input.session_id ?? null,
+            route,
+            purpose: "query_embedding",
+            status: "failed",
+            errorCode: "UNAVAILABLE",
+            metadata: { text_count: 1, message: errorMessage(error) }
+          });
+        }
+      }
+      if (queryVector) {
+        await this.recordModelCall(this.pool, {
+          developerId: context.developerId,
+          projectId: context.projectId,
+          sessionId: input.session_id ?? null,
+          route,
+          purpose: "query_embedding",
+          status: "success",
+          metadata: { text_count: 1 }
+        });
+        const vectorRows = await this.pool.query<{
+          id: string;
+          text: string;
+          source_event_id: string;
+          occurred_at: string;
+          distance: number;
+        }>(
+          `
           SELECT c.id, c.text, c.source_event_id, ev.occurred_at, e.vector <=> $1::vector AS distance
           FROM chunks c
           JOIN events ev ON ev.id = c.source_event_id
@@ -816,18 +883,19 @@ export class RecallantDb {
           ORDER BY e.vector <=> $1::vector
           LIMIT $${filter.params.length + 2}::int
         `,
-        [vectorLiteral(queryVector), ...filter.params, candidateLimit]
-      );
-      for (const row of vectorRows.rows) {
-        candidates.set(row.id, {
-          id: row.id,
-          text: row.text,
-          source_event_id: row.source_event_id,
-          occurred_at: row.occurred_at,
-          vectorScore: Math.max(0, 1 - Number(row.distance)),
-          lexicalScore: 0,
-          paths: new Set(["vector"])
-        });
+          [vectorLiteral(queryVector), ...filter.params, candidateLimit]
+        );
+        for (const row of vectorRows.rows) {
+          candidates.set(row.id, {
+            id: row.id,
+            text: row.text,
+            source_event_id: row.source_event_id,
+            occurred_at: row.occurred_at,
+            vectorScore: Math.max(0, 1 - Number(row.distance)),
+            lexicalScore: 0,
+            paths: new Set(["vector"])
+          });
+        }
       }
     }
 
@@ -2507,6 +2575,68 @@ export class RecallantDb {
         model: route.model,
         approval_request_id: approval.id
       };
+    }
+
+    if (route.provider === "ollama") {
+      try {
+        const embeddings: number[][] = [];
+        for (const text of input.texts) {
+          embeddings.push(await fetchOllamaEmbedding(route, text));
+        }
+        for (const [index, chunkId] of input.chunkIds.entries()) {
+          const embedding = embeddings[index];
+          if (!embedding) throw new Error(`Missing Ollama embedding for chunk ${chunkId}`);
+          await client.query(
+            `
+              INSERT INTO embeddings (chunk_id, model, dims, vector)
+              VALUES ($1, $2, $3, $4::vector)
+              ON CONFLICT (chunk_id) DO UPDATE
+              SET model = EXCLUDED.model, dims = EXCLUDED.dims, vector = EXCLUDED.vector, created_at = now()
+            `,
+            [chunkId, route.model, route.dims, vectorLiteral(embedding)]
+          );
+        }
+        await client.query(
+          "UPDATE chunks SET embed_status = 'embedded', embed_model = $2 WHERE id = ANY($1::uuid[])",
+          [input.chunkIds, route.model]
+        );
+        await this.recordModelCall(client, {
+          developerId: input.developerId,
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          route,
+          purpose: "chunk_embedding",
+          status: "success",
+          metadata: { text_count: input.texts.length }
+        });
+        return {
+          status: "embedded",
+          provider: route.provider,
+          model: route.model,
+          dims: route.dims
+        };
+      } catch (error) {
+        await this.recordModelCall(client, {
+          developerId: input.developerId,
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          route,
+          purpose: "chunk_embedding",
+          status: "failed",
+          errorCode: "UNAVAILABLE",
+          metadata: { text_count: input.texts.length, message: errorMessage(error) }
+        });
+        await client.query(
+          "UPDATE chunks SET embed_status = 'pending' WHERE id = ANY($1::uuid[])",
+          [input.chunkIds]
+        );
+        return {
+          status: "pending",
+          provider: route.provider,
+          model: route.model,
+          error: "UNAVAILABLE"
+        };
+      }
     }
 
     if (route.provider !== "deterministic") {
