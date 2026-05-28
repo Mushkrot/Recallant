@@ -120,6 +120,20 @@ async function listSelectedProjectDocs(projectDir: string) {
   return selected;
 }
 
+async function listFilesIfPresent(projectDir: string, relativeDir: string) {
+  const selected: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(join(projectDir, relativeDir), { withFileTypes: true });
+  } catch {
+    return selected;
+  }
+  for (const entry of entries) {
+    if (entry.isFile()) selected.push(`${relativeDir}/${entry.name}`);
+  }
+  return selected;
+}
+
 async function discoverCandidatePaths(projectDir: string) {
   const paths = new Set([
     "AGENTS.md",
@@ -136,6 +150,19 @@ async function discoverCandidatePaths(projectDir: string) {
     ".env",
     ".env.local"
   ]);
+  try {
+    const rootEntries = await readdir(projectDir, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      if (entry.isFile() && /^PROJECT_LOG_.+\.md$/i.test(entry.name)) {
+        paths.add(entry.name);
+      }
+    }
+  } catch {
+    // Ignore project roots that disappear during a read-only preflight scan.
+  }
+  for (const cursorRule of await listFilesIfPresent(projectDir, ".cursor/rules")) {
+    paths.add(cursorRule);
+  }
   for (const docPath of await listSelectedProjectDocs(projectDir)) {
     paths.add(docPath);
   }
@@ -215,6 +242,10 @@ function lineWithRedactedSecrets(line: string) {
     .replaceAll(/gh[pousr]_[A-Za-z0-9_]{8,}/g, "<redacted-token>")
     .replaceAll(/xox[baprs]-[A-Za-z0-9-]{8,}/g, "<redacted-token>")
     .replaceAll(/:\/\/([^:\s/@]+):([^@\s]+)@/g, "://<redacted>:<redacted>@");
+}
+
+export function redactSecretValues(content: string) {
+  return content.split("\n").map(lineWithRedactedSecrets).join("\n");
 }
 
 function boundedExcerpt(content: string) {
@@ -583,7 +614,7 @@ export async function readImportTextForCandidate(
   }
   const content = await readOptional(join(projectDir, safeRelativePath(candidate.path)));
   if (content === null) return "";
-  return content.split("\n").map(lineWithRedactedSecrets).join("\n");
+  return redactSecretValues(content);
 }
 
 function discoverySummary(candidates: DiscoveryCandidate[]) {

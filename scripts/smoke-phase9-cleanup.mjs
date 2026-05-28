@@ -5,6 +5,7 @@ import pg from "pg";
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+const repoRoot = process.cwd();
 
 const developerId = randomUUID();
 const projectId = randomUUID();
@@ -126,7 +127,7 @@ try {
 
 function run(args) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
-    cwd: "/work",
+    cwd: repoRoot,
     env: { ...process.env, RECALLANT_DATABASE_URL: databaseUrl },
     encoding: "utf8"
   });
@@ -177,7 +178,7 @@ const blockedDelete = spawnSync(
   process.execPath,
   ["apps/cli/dist/index.js", "cleanup", "--delete-archived", "--confirm"],
   {
-    cwd: "/work",
+    cwd: repoRoot,
     env: { ...process.env, RECALLANT_DATABASE_URL: databaseUrl },
     encoding: "utf8"
   }

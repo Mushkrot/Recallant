@@ -8,6 +8,7 @@ import { RecallantDb } from "../packages/db/dist/index.js";
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+const repoRoot = process.cwd();
 
 const backupRoot = await mkdtemp(join(tmpdir(), "recallant-phase8-backup-"));
 const projectId = randomUUID();
@@ -73,7 +74,7 @@ try {
 
 function run(args) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
-    cwd: "/work",
+    cwd: repoRoot,
     env: {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl
@@ -126,7 +127,13 @@ if (
   throw new Error(`Backup manifest/tables failed: ${JSON.stringify({ manifest, tablesHash })}`);
 }
 
-const forbiddenFragments = ["OPENAI_API_KEY=", "ANTHROPIC_API_KEY=", "GEMINI_API_KEY="];
+const forbiddenFragments = [
+  "fixture-secret-value",
+  "fixture-password",
+  "sk-fixturetoken123456",
+  "ANTHROPIC_API_KEY=real",
+  "GEMINI_API_KEY=real"
+];
 const combined = `${JSON.stringify(manifest)}\n${tablesJson}`;
 for (const fragment of forbiddenFragments) {
   if (combined.includes(fragment)) {

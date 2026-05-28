@@ -10,6 +10,7 @@ const databaseUrl =
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
 
 const developerId = randomUUID();
+const defaultProjectId = randomUUID();
 const projectId = randomUUID();
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
@@ -85,8 +86,21 @@ const started = await callTool(2, "memory_start_session", {
   resume_policy: "normal"
 });
 
-const defaultRouteAppend = await callTool(3, "memory_append_turn", {
-  session_id: started.session_id,
+const defaultDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId: defaultProjectId,
+  projectPath: `/tmp/${defaultProjectId}`
+});
+const defaultSession = await defaultDb.startSession({
+  client_kind: "codex",
+  client_version: "smoke",
+  project_path: `/tmp/${defaultProjectId}`,
+  session_label: "phase4-default-route",
+  resume_policy: "normal"
+});
+const defaultRouteAppend = await defaultDb.appendTurn({
+  session_id: defaultSession.session_id,
   client_kind: "codex",
   role: "user",
   text: "Default route should resolve to local Ollama and remain pending if unavailable.",
@@ -99,6 +113,7 @@ if (
 ) {
   throw new Error(`Default embedding route failed: ${JSON.stringify(defaultRouteAppend)}`);
 }
+await defaultDb.close();
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
@@ -119,14 +134,14 @@ await client.query(
   ]
 );
 
-const banana = await callTool(4, "memory_append_turn", {
+const banana = await callTool(3, "memory_append_turn", {
   session_id: started.session_id,
   client_kind: "codex",
   role: "user",
   text: "banana banana yellow fruit smoothie marker_banana",
   dedup_key: `phase4-banana-${randomUUID()}`
 });
-const network = await callTool(5, "memory_append_turn", {
+const network = await callTool(4, "memory_append_turn", {
   session_id: started.session_id,
   client_kind: "codex",
   role: "user",
@@ -137,7 +152,7 @@ if (banana.embedding?.status !== "embedded" || network.embedding?.status !== "em
   throw new Error(`Deterministic embedding failed: ${JSON.stringify({ banana, network })}`);
 }
 
-const search = await callTool(6, "memory_search", {
+const search = await callTool(5, "memory_search", {
   session_id: started.session_id,
   query: "banana fruit",
   mode: "vector_only",
@@ -164,7 +179,7 @@ await client.query(
     })
   ]
 );
-const blockedSwitch = await callToolRaw(7, "memory_append_turn", {
+const blockedSwitch = await callToolRaw(6, "memory_append_turn", {
   session_id: started.session_id,
   client_kind: "codex",
   role: "user",
@@ -233,13 +248,13 @@ try {
       SELECT
         (SELECT count(*)::int FROM embeddings e JOIN chunks c ON c.id = e.chunk_id WHERE c.project_id = $1) AS embedding_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'deterministic' AND status = 'success') AS deterministic_calls,
-        (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'ollama' AND model = 'nomic-embed-text') AS default_ollama_calls,
+        (SELECT count(*)::int FROM model_calls WHERE project_id = $3 AND provider = 'ollama' AND model = 'nomic-embed-text') AS default_ollama_calls,
         (SELECT count(*)::int FROM system_settings WHERE key = 'embedding_fallback_candidates' AND value::text LIKE '%openai%' AND value::text LIKE '%gemini%') AS fallback_settings,
         (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $2 AND provider = 'openai' AND status = 'pending') AS paid_approval_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $2 AND provider = 'openai' AND confirmation_status = 'required_pending' AND status = 'cancelled') AS blocked_paid_calls,
         (SELECT count(*)::int FROM embeddings e JOIN chunks c ON c.id = e.chunk_id WHERE c.project_id = $2) AS paid_embedding_count
     `,
-    [projectId, paidProjectId]
+    [projectId, paidProjectId, defaultProjectId]
   );
   const row = checks.rows[0];
   if (

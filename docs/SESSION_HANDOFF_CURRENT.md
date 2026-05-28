@@ -50,7 +50,7 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 
 R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, R5 agent onboarding contract, and R6 operational readiness are also complete for the first pre-pilot checkpoint.
 
-The current implementation target is Phase 10:
+The current Phase 10 attach target is complete for the first implementation slice:
 
 - `recallant attach --mode manual|guided|autopilot`, with omitted mode defaulting to `autopilot` for
   ordinary projects;
@@ -61,6 +61,9 @@ The current implementation target is Phase 10:
   existing file changes;
 - compact `PROJECT_LOG.md` as agent-readable fallback/checkpoint;
 - owner-readable attach reports;
+
+The next Phase 10 targets are:
+
 - governed project detach/delete dry-run and confirmed cleanup;
 - explicit controlled cross-project recall modes for source-linked examples from other projects;
 - no automatic mixing of unrelated project memories into default context packs.
@@ -93,9 +96,6 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should implement the first Phase 10 slice: documented and tested `recallant attach`
-mode planning/execution for all three modes, with `autopilot` as default for ordinary projects,
-production-sensitive downgrade, agent-file backup/migration, safe import/extraction, short report,
-MCP smoke when possible, and Review UI/API visibility. A strong second slice is governed
-project detach/delete dry-run so the GutenDocx sandbox can be cleaned without manual SQL after owner
-confirmation.
+The next session should implement governed project detach/delete dry-run and confirmed cleanup so
+the GutenDocx sandbox can be removed without manual SQL after owner confirmation. After that, add
+controlled cross-project recall modes for source-linked examples from other projects.

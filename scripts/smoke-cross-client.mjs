@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+const repoRoot = process.cwd();
 
 const developerId = randomUUID();
 const projectId = randomUUID();
@@ -14,7 +15,7 @@ const token = `cross_client_token_${projectId.replaceAll("-", "_")}`;
 
 function createClient(name) {
   const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
-    cwd: "/work",
+    cwd: repoRoot,
     env: {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
@@ -64,7 +65,8 @@ function createClient(name) {
       arguments: args
     });
     const text = response.result?.content?.[0]?.text;
-    if (!text) throw new Error(`Missing ${name} tool response for ${toolName}: ${JSON.stringify(response)}`);
+    if (!text)
+      throw new Error(`Missing ${name} tool response for ${toolName}: ${JSON.stringify(response)}`);
     return JSON.parse(text);
   }
 

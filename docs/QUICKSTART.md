@@ -1,10 +1,9 @@
 # Quickstart - connect a project to Recallant
 
-Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md) and the first copied-project
-pilot are complete. The next implementation layer is the product-level attach workflow in
-[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md). `autopilot` is the default for ordinary projects, while
-production-sensitive projects downgrade to `guided` unless production-safe autopilot is explicitly
-approved.
+Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md), the first copied-project
+pilot, and the first product-level attach slice are complete. `autopilot` is the default for
+ordinary projects, while production-sensitive projects downgrade to `guided` unless production-safe
+autopilot is explicitly approved.
 
 ## Prerequisite: server is running
 

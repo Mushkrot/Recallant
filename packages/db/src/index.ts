@@ -81,6 +81,7 @@ export type AgentMemorySourceRefInput = {
 };
 
 export type CreateAgentMemoryInput = {
+  project_path?: string | null;
   memory_type: string;
   scope: "project" | "developer";
   scope_kind?: string | null;
@@ -1522,7 +1523,7 @@ export class RecallantDb {
     if (input.created_by === "agent" && (input.source_refs?.length ?? 0) === 0) {
       throw new Error("VALIDATION_ERROR: agent-created memories require source_refs");
     }
-    const context = await this.ensureProject();
+    const context = await this.ensureProject(input.project_path);
     return withTransaction(this.pool, async (client) => {
       const policy = this.classifyAgentMemory(input);
       const result = await client.query<{ id: string; status: string; use_policy: string }>(

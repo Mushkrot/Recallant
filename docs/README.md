@@ -8,9 +8,9 @@ Historical note: this project was originally drafted under the working name **Ag
 
 → [QUICKSTART.md](QUICKSTART.md) describes how to connect a project and start using Recallant.
 
-Current operator note: Pre-Pilot Readiness and the first copied-project pilot are complete. The next
-implementation layer is autonomous project attach with `manual`, `guided`, and `autopilot` modes,
-plus controlled cross-project recall.
+Current operator note: Pre-Pilot Readiness, the first copied-project pilot, and the first autonomous
+attach slice are complete. The next implementation layer is governed project detach/cleanup, then
+controlled cross-project recall.
 
 ## Required Reading Order For Implementers
 

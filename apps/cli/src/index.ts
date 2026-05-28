@@ -16,6 +16,7 @@ import {
   formatDiscoveryText,
   readImportTextForCandidate
 } from "./discovery.js";
+import { runAttach } from "./attach.js";
 
 const memorySection = `## Memory (Recallant)
 
@@ -25,7 +26,7 @@ const memorySection = `## Memory (Recallant)
 - Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
 - After meaningful progress: write meaningful events/memories through \`memory_append_event\` or \`memory_create_agent_memory\`, update checkpoint via \`memory_set_checkpoint\`, and update \`PROJECT_LOG.md\` to match fields \`current_focus\` and \`next_step\`.
 - On clear pause/exit/closeout intent: call \`memory_closeout\` and update \`PROJECT_LOG.md\` from the closeout payload.
-- To share a pattern across projects: create a governed memory proposal with source refs; instruction-grade promotion must go through review.
+- To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
 - Never paste secrets into memory tools.
 - If MCP is unavailable: update \`PROJECT_LOG.md\` and, when available, write local spool.
 `;
@@ -1166,6 +1167,7 @@ async function main(argv: readonly string[]) {
     return;
   }
   if (command === "doctor") return runDoctor(argv);
+  if (command === "attach") return runAttach(argv);
   if (command === "init") return runInit(argv);
   if (command === "discover") return runDiscover(argv);
   if (command === "import") return runImport(argv);
@@ -1181,7 +1183,7 @@ async function main(argv: readonly string[]) {
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

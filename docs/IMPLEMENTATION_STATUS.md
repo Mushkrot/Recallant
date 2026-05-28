@@ -39,6 +39,12 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   production-sensitive projects to guided unless production-safe autopilot is explicitly approved.
   Controlled cross-project recall is accepted so agents can use source-linked examples from other
   projects without automatic memory mixing.
+- Phase 10 attach first slice: `recallant attach <project-dir>` now defaults to `autopilot` for
+  ordinary projects and supports `manual`, `guided`, and `autopilot` modes. Planning modes are
+  read-only; production-sensitive autopilot downgrades to guided unless approved; autopilot writes
+  pointer config, MCP hints, `.gitignore`, `AGENTS.md`, compact `PROJECT_LOG.md`, local redacted
+  backups for agent files, safe imports, starter memory, structured low-risk source memories,
+  startup/context-pack smoke, Review UI/API visibility check, diagnostics, and a short owner report.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -137,17 +143,16 @@ Current work order:
 5. Agent onboarding contract. Complete for the first pre-pilot checkpoint.
 6. Operational readiness check. Complete for the first pre-pilot checkpoint.
 7. GutenDocx copied-project pilot. Complete for the first real-project sandbox checkpoint.
+8. Phase 10 attach first slice. Complete for copied-project fixtures and covered by
+   `scripts/smoke-phase10-attach.mjs`.
 
 Next recommended work:
 
-1. Implement `recallant attach --mode manual|guided|autopilot` as the product workflow over the
-   existing init/discover/import/lint/context/doctor/report building blocks. If mode is omitted,
-   default to `autopilot` for ordinary projects, and implement all three modes in the first slice.
-2. Add governed project-level detach/delete dry-run and confirmed cleanup so copied projects can be
+1. Add governed project-level detach/delete dry-run and confirmed cleanup so copied projects can be
    removed without manual SQL.
-3. Add explicit controlled cross-project recall modes that label results from other projects as
+2. Add explicit controlled cross-project recall modes that label results from other projects as
    examples/evidence unless already applicable by scope/use policy.
-4. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
+3. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
    reports, and review items rather than agent-oriented metadata.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
@@ -253,12 +258,14 @@ Latest local model readiness validation:
   with `keep_alive=0s`
 - `recallant doctor` reports no missing expected Ollama models
 
-The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
+Smoke scripts that previously assumed a Docker `/work` mount now use the current repository root, so
+the full local host `smoke:core` suite can run against the isolated `recallant-dev` database.
 
 ## Current Boundary
 
-The accepted production deployment profile and Pre-Pilot copied-project readiness have been
-implemented. Continue with Phase 10 autonomous attach and controlled cross-project recall.
+The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
+attach slice have been implemented. Continue with governed detach/cleanup, then controlled
+cross-project recall.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

@@ -8,6 +8,7 @@ import pg from "pg";
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+const repoRoot = process.cwd();
 
 const spoolDir = await mkdtemp(join(tmpdir(), "recallant-spool-"));
 const developerId = randomUUID();
@@ -18,7 +19,7 @@ const artifactSha = "3".repeat(64);
 
 function run(args, expectSuccess = true) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
-    cwd: "/work",
+    cwd: repoRoot,
     env: {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
@@ -29,7 +30,9 @@ function run(args, expectSuccess = true) {
     encoding: "utf8"
   });
   if (expectSuccess && result.status !== 0) {
-    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
   }
   if (!expectSuccess) return result;
   return JSON.parse(result.stdout);
@@ -92,11 +95,17 @@ const contextPack = run([
 ]);
 const packSpoolStatus = contextPack.sections?.local_spool_status;
 if (packSpoolStatus?.status !== "unsynced" || packSpoolStatus?.unsynced_count !== 2) {
-  throw new Error(`Context pack did not expose unsynced spool status: ${JSON.stringify(contextPack)}`);
+  throw new Error(
+    `Context pack did not expose unsynced spool status: ${JSON.stringify(contextPack)}`
+  );
 }
 
 const firstSync = run(["sync-spool", "--spool-dir", spoolDir]);
-if (firstSync.synced_count !== 2 || !firstSync.mappings[turn.local_id] || !firstSync.mappings[event.local_id]) {
+if (
+  firstSync.synced_count !== 2 ||
+  !firstSync.mappings[turn.local_id] ||
+  !firstSync.mappings[event.local_id]
+) {
   throw new Error(`sync-spool failed: ${JSON.stringify(firstSync)}`);
 }
 

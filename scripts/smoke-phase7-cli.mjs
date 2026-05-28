@@ -7,6 +7,7 @@ import pg from "pg";
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+const repoRoot = process.cwd();
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-"));
 await writeFile(join(projectDir, ".env.example"), "OPENAI_API_KEY=\nPUBLIC_FLAG=true\n");
@@ -14,7 +15,7 @@ await writeFile(join(projectDir, "CLAUDE.md"), "# Claude project notes\n");
 
 function run(args, extraEnv = {}) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
-    cwd: "/work",
+    cwd: repoRoot,
     env: {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
@@ -24,7 +25,9 @@ function run(args, extraEnv = {}) {
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
   }
   return JSON.parse(result.stdout);
 }
@@ -64,7 +67,9 @@ if (
   init.capture_profile !== "detailed" ||
   !JSON.stringify(init.mcp_config).includes("recallant")
 ) {
-  throw new Error(`Init output/files failed: ${JSON.stringify({ init, config, agents, projectLog })}`);
+  throw new Error(
+    `Init output/files failed: ${JSON.stringify({ init, config, agents, projectLog })}`
+  );
 }
 
 const discover = run(["discover", "--dry-run", "--project-dir", projectDir]);

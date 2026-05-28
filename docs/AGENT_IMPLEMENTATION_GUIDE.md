@@ -230,44 +230,44 @@ building blocks into the owner-facing workflow described in
 
 **Deliverables:**
 
-- [ ] `recallant attach <project-dir> --mode manual|guided|autopilot --target <client>` coordinates
+- [x] `recallant attach <project-dir> --mode manual|guided|autopilot --target <client>` coordinates
   init/discover/import/lint/context/doctor/report through one workflow.
-- [ ] If mode is omitted, attach defaults to `autopilot` for non-production-sensitive projects.
-- [ ] First implementation includes all three modes; do not defer `autopilot`.
-- [ ] `manual` mode preserves the explicit current workflow and writes only what the owner/agent
+- [x] If mode is omitted, attach defaults to `autopilot` for non-production-sensitive projects.
+- [x] First implementation includes all three modes; do not defer `autopilot`.
+- [x] `manual` mode preserves the explicit current workflow and writes only what the owner/agent
   explicitly requests.
-- [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
-- [ ] `autopilot` mode runs safe attach steps automatically: project registration, pointer config,
+- [x] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
+- [x] `autopilot` mode runs safe attach steps automatically: project registration, pointer config,
   agent-file migration, selected low-risk evidence imports, structured ordinary memory extraction,
   context lint, context-pack preview, MCP smoke when possible, Review UI/API visibility check,
   diagnostics, and short owner-readable report generation.
-- [ ] Attach detects existing connections and updates idempotently without creating duplicate
+- [x] Attach detects existing connections and updates idempotently without creating duplicate
   `project_id` rows or duplicate imports.
-- [ ] New empty projects get a starter project-local memory describing the attach and Recallant
+- [x] New empty projects get a starter project-local memory describing the attach and Recallant
   source-of-truth/fallback model.
-- [ ] Agent startup file migration analyzes `AGENTS.md`, compact/current `PROJECT_LOG.md`,
+- [x] Agent startup file migration analyzes `AGENTS.md`, compact/current `PROJECT_LOG.md`,
   client-specific files such as `CLAUDE.md` and `.cursor/rules`, current handoff files, and related
   agent docs.
-- [ ] Before changing existing agent files, attach creates a local gitignored backup of all
+- [x] Before changing existing agent files, attach creates a local gitignored backup of all
   discovered agent files under `.recallant/backups/attach-<timestamp>/`, with a manifest and
   redacted raw secrets.
-- [ ] Autopilot may normalize startup files after backup: keep important project rules, migrate
+- [x] Autopilot may normalize startup files after backup: keep important project rules, migrate
   project memory to Recallant, shrink history/handoff sections, and route future startup through
   `memory_start_session` and `memory_get_context_pack`.
-- [ ] `PROJECT_LOG.md` remains required as a compact agent-readable fallback/checkpoint, not as the
+- [x] `PROJECT_LOG.md` remains required as a compact agent-readable fallback/checkpoint, not as the
   full memory source.
-- [ ] Autopilot preserves hard safety gates: no raw secrets, no paid API enablement, no public
+- [x] Autopilot preserves hard safety gates: no raw secrets, no paid API enablement, no public
   exposure/service/firewall changes, no destructive cleanup, no broad/global instruction promotion,
   and no active connector/capability binding without policy review.
-- [ ] Attach imports `.env.example` and similar safe examples as variable names/purpose and
+- [x] Attach imports `.env.example` and similar safe examples as variable names/purpose and
   secret/capability references only, never values.
-- [ ] Production-sensitive projects are detected through explicit flags/settings and automatic
+- [x] Production-sensitive projects are detected through explicit flags/settings and automatic
   deployment/security/public-service hints. Requested autopilot downgrades to guided unless
   production-safe autopilot is explicitly approved.
-- [ ] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts,
+- [x] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts,
   public/security/firewall/deploy changes, paid API enablement, erasure, and active
   connector/capability binding without separate confirmation.
-- [ ] Attach reports are very short and owner-readable by default, with technical detail links/JSON
+- [x] Attach reports are very short and owner-readable by default, with technical detail links/JSON
   available for agents.
 - [ ] Governed project detach/delete supports dry-run, visible affected counts, reversible archive or
   policy-safe cleanup, and no impact on unrelated projects.

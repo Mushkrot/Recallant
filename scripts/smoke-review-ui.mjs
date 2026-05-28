@@ -137,7 +137,9 @@ try {
     !htmlText.includes("Recallant Review Command Center") ||
     !htmlText.includes("Import Candidates") ||
     !htmlText.includes("Selected Detail") ||
-    !htmlText.includes("Source Refs") ||
+    !htmlText.includes("Evidence excerpts") ||
+    !htmlText.includes("Recommended action") ||
+    !htmlText.includes("Technical details") ||
     !htmlText.includes("AGENTS.md") ||
     !htmlText.includes(importMemoryId) ||
     !htmlText.includes(candidate.memory_id) ||

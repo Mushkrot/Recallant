@@ -234,38 +234,38 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Phase 10 - Autonomous attach and controlled cross-project recall
 
-- [ ] `recallant attach <fixture> --target codex` defaults to `--mode autopilot` for non-production-sensitive projects.
-- [ ] The first attach implementation exposes `manual`, `guided`, and `autopilot` modes.
-- [ ] `recallant attach <fixture> --mode manual --dry-run` produces a plan and writes no project files or durable import rows.
-- [ ] `recallant attach <fixture> --mode guided` produces a complete attach plan and waits for confirmation before durable writes.
-- [ ] `recallant attach <fixture> --mode autopilot` creates/updates pointer config, agent instructions, `.gitignore`, local MCP/config hints, and compact `PROJECT_LOG.md` according to policy.
-- [ ] Autopilot imports low-risk source-linked evidence from existing `AGENTS.md`, `PROJECT_LOG.md`, `.cursor/SESSION_HANDOFF.md`, `CLAUDE.md`, selected docs, and historical archives without making them startup reads.
-- [ ] Autopilot imports old `PROJECT_LOG_*.md` and handoff archives as historical evidence-only, not rules or startup context.
-- [ ] Autopilot creates ordinary structured memories/project-local decisions from imported material when confidence is high and source refs exist; risky/broad/low-confidence/conflicting records go to Review or remain evidence-only.
-- [ ] Autopilot creates starter project-local memory for a new empty project.
-- [ ] Autopilot does not create `instruction_grade` memories from imported/inferred project material unless an explicit strong policy path is present.
-- [ ] `.env.example` imports store variable names/purpose and secret/capability references only, never raw values.
-- [ ] Raw secret values in agent/startup files are not imported into Recallant.
+- [x] `recallant attach <fixture> --target codex` defaults to `--mode autopilot` for non-production-sensitive projects.
+- [x] The first attach implementation exposes `manual`, `guided`, and `autopilot` modes.
+- [x] `recallant attach <fixture> --mode manual --dry-run` produces a plan and writes no project files or durable import rows.
+- [x] `recallant attach <fixture> --mode guided` produces a complete attach plan and waits for confirmation before durable writes.
+- [x] `recallant attach <fixture> --mode autopilot` creates/updates pointer config, agent instructions, `.gitignore`, local MCP/config hints, and compact `PROJECT_LOG.md` according to policy.
+- [x] Autopilot imports low-risk source-linked evidence from existing `AGENTS.md`, `PROJECT_LOG.md`, `.cursor/SESSION_HANDOFF.md`, `CLAUDE.md`, selected docs, and historical archives without making them startup reads.
+- [x] Autopilot imports old `PROJECT_LOG_*.md` and handoff archives as historical evidence-only, not rules or startup context.
+- [x] Autopilot creates ordinary structured memories/project-local decisions from imported material when confidence is high and source refs exist; risky/broad/low-confidence/conflicting records go to Review or remain evidence-only.
+- [x] Autopilot creates starter project-local memory for a new empty project.
+- [x] Autopilot does not create `instruction_grade` memories from imported/inferred project material unless an explicit strong policy path is present.
+- [x] `.env.example` imports store variable names/purpose and secret/capability references only, never raw values.
+- [x] Raw secret values in agent/startup files are not imported into Recallant.
 - [ ] Live/production-sensitive project raw secret findings create warning/review/cleanup plan without modifying the source file.
 - [ ] Sandbox/test raw secret findings may be masked automatically only after redacted local backup when policy permits.
-- [ ] Backup copies redact raw secrets and cannot restore the secret value.
-- [ ] Autopilot does not enable paid API, public exposure, connector/capability activation, or destructive cleanup without confirmation.
-- [ ] Re-running attach on the same project is idempotent for project registration, imported source hashes, bootstrap sections, and report metadata.
-- [ ] Attach report defaults to a very short owner-readable report: ready status, what was done, what needs attention, how to check, and next step.
-- [ ] Detailed attach report is available separately and lists changed files, imported sources, evidence-only records, review-needed records, diagnostics, and detach/cleanup instructions.
-- [ ] Attach runs an MCP startup/context-pack smoke when the configured environment allows it.
-- [ ] Review UI/API shows the attached project, imported items, pending review records, and detach/cleanup entrypoint.
-- [ ] Attach analyzes all discovered agent startup/config/handoff files and classifies project rules, client-specific rules, old startup flows, history/handoff text, environment facts, secret/capability hints, stale text, and conflicts.
-- [ ] Before changing any existing agent file, attach creates `.recallant/backups/attach-<timestamp>/` with all discovered agent files, not only changed files.
-- [ ] Backup manifest records attach mode, timestamp, detected sensitivity, discovered files, changed/unchanged files, hashes before/after where available, redaction notices, and rollback instructions.
-- [ ] Backups are local/gitignored and are not imported into Recallant as raw memory.
-- [ ] After backup, autopilot can normalize agent/startup files by replacing old local-history startup flows with Recallant startup flow and shrinking history/handoff sections when confidence is high.
-- [ ] Autopilot preserves important project rules in local startup files or migrates them to project-local memories/candidates; it does not silently delete them.
-- [ ] `PROJECT_LOG.md` after attach is compact agent-readable fallback/checkpoint, not a long history file.
+- [x] Backup copies redact raw secrets and cannot restore the secret value.
+- [x] Autopilot does not enable paid API, public exposure, connector/capability activation, or destructive cleanup without confirmation.
+- [x] Re-running attach on the same project is idempotent for project registration, imported source hashes, bootstrap sections, and report metadata.
+- [x] Attach report defaults to a very short owner-readable report: ready status, what was done, what needs attention, how to check, and next step.
+- [x] Detailed attach report is available separately and lists changed files, imported sources, evidence-only records, review-needed records, diagnostics, and detach/cleanup instructions.
+- [x] Attach runs an MCP startup/context-pack smoke when the configured environment allows it.
+- [x] Review UI/API shows the attached project, imported items, pending review records, and detach/cleanup entrypoint.
+- [x] Attach analyzes all discovered agent startup/config/handoff files and classifies project rules, client-specific rules, old startup flows, history/handoff text, environment facts, secret/capability hints, stale text, and conflicts.
+- [x] Before changing any existing agent file, attach creates `.recallant/backups/attach-<timestamp>/` with all discovered agent files, not only changed files.
+- [x] Backup manifest records attach mode, timestamp, detected sensitivity, discovered files, changed/unchanged files, hashes before/after where available, redaction notices, and rollback instructions.
+- [x] Backups are local/gitignored and are not imported into Recallant as raw memory.
+- [x] After backup, autopilot can normalize agent/startup files by replacing old local-history startup flows with Recallant startup flow and shrinking history/handoff sections when confidence is high.
+- [x] Autopilot preserves important project rules in local startup files or migrates them to project-local memories/candidates; it does not silently delete them.
+- [x] `PROJECT_LOG.md` after attach is compact agent-readable fallback/checkpoint, not a long history file.
 - [ ] `memory_set_checkpoint` and `memory_closeout` continue to update compact `PROJECT_LOG.md`.
-- [ ] Production-sensitive detection uses explicit flags/settings and automatic hints such as deploy configs, production compose/systemd, public domains, billing, real env refs, Cloudflare/DNS/security/deploy references.
-- [ ] Production-sensitive project with requested `--mode autopilot` downgrades to `guided` unless production-safe autopilot is explicitly approved.
-- [ ] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts, firewall/security/public exposure/deploy changes, paid API enablement, erasure, and active connector/capability binding without separate confirmation.
+- [x] Production-sensitive detection uses explicit flags/settings and automatic hints such as deploy configs, production compose/systemd, public domains, billing, real env refs, Cloudflare/DNS/security/deploy references.
+- [x] Production-sensitive project with requested `--mode autopilot` downgrades to `guided` unless production-safe autopilot is explicitly approved.
+- [x] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts, firewall/security/public exposure/deploy changes, paid API enablement, erasure, and active connector/capability binding without separate confirmation.
 - [ ] Governed project detach/delete dry-run shows affected counts and does not modify active data.
 - [ ] Live project detach defaults to hiding/archiving in Recallant without touching files or physically deleting records.
 - [ ] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.

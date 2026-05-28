@@ -214,6 +214,10 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   main source of truth.
 - Production-sensitive projects auto-downgrade requested autopilot to `guided` unless
   production-safe autopilot is explicitly approved.
+- First Phase 10 attach slice is implemented: `recallant attach` supports `manual`, `guided`, and
+  default `autopilot`; autopilot backs up discovered agent files locally, normalizes startup files,
+  imports safe sources, creates starter/structured memories, runs startup/context-pack and Review
+  visibility checks, and reports in owner-readable form.
 - Cross-project recall should let agents use examples from other projects when explicitly useful,
   without automatically mixing unrelated project memory.
 - The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and
