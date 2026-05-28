@@ -242,6 +242,109 @@ function formatDisplayValue(value: unknown) {
   return String(value);
 }
 
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function sourcePath(row: Record<string, unknown>) {
+  const title = String(row.title ?? "");
+  if (title.startsWith("Imported ")) return title.slice("Imported ".length);
+  const metadata = asRecord(row.metadata);
+  const sourcePathValue = metadata.source_path;
+  return typeof sourcePathValue === "string" ? sourcePathValue : title || "Memory";
+}
+
+function humanStatus(value: unknown) {
+  const status = String(value ?? "");
+  const labels: Record<string, string> = {
+    needs_review: "Needs review",
+    candidate: "Candidate",
+    accepted: "Accepted",
+    rejected: "Rejected",
+    archived: "Archived",
+    stale: "Stale",
+    superseded: "Superseded"
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
+function humanPolicy(value: unknown) {
+  const policy = String(value ?? "");
+  const labels: Record<string, string> = {
+    evidence_only: "Evidence only",
+    recall_allowed: "Usable memory",
+    instruction_grade: "Active rule",
+    do_not_use: "Do not use"
+  };
+  return labels[policy] ?? policy.replaceAll("_", " ");
+}
+
+function memoryKindLabel(value: unknown) {
+  const kind = String(value ?? "");
+  const labels: Record<string, string> = {
+    repo_contract: "Project rule candidate",
+    checkpoint_seed: "Handoff checkpoint",
+    environment_fact: "Environment fact",
+    import_candidate: "Imported note",
+    secret_reference: "Secret reference"
+  };
+  return labels[kind] ?? kind.replaceAll("_", " ");
+}
+
+function riskSummary(row: Record<string, unknown>) {
+  const metadata = asRecord(row.metadata);
+  const risks = asArray(metadata.risks);
+  const severity = String(metadata.risk ?? row.risk ?? "").replaceAll("_", " ");
+  const messages = risks
+    .map((risk) => asRecord(risk).message)
+    .filter((message): message is string => typeof message === "string" && message.length > 0);
+  if (messages.length > 0) return messages.slice(0, 2).join(" ");
+  if (severity) return `Marked ${severity} risk by the import scanner.`;
+  return "Review before trusting this as reusable memory.";
+}
+
+function currentEffect(row: Record<string, unknown>) {
+  const status = String(row.status ?? "");
+  const policy = String(row.use_policy ?? "");
+  if (policy === "evidence_only") {
+    return "It is stored as evidence only. Agents can inspect it, but it is not an active rule.";
+  }
+  if (policy === "instruction_grade") {
+    return "This is an active rule and can affect future agent behavior.";
+  }
+  if (status === "rejected" || policy === "do_not_use") {
+    return "This memory is rejected and should not be used.";
+  }
+  return "This can be recalled as working memory after review.";
+}
+
+function recommendedAction(row: Record<string, unknown>) {
+  const policy = String(row.use_policy ?? "");
+  const status = String(row.status ?? "");
+  if (status === "needs_review" && policy === "evidence_only") {
+    return "For this sandbox, keep it as evidence or reject it if it is not useful. Do not promote to a rule unless you explicitly want it to guide future work.";
+  }
+  if (status === "candidate") return "Accept if this is useful context; reject if it is noise.";
+  if (status === "accepted")
+    return "No action needed unless this should be archived or made stale.";
+  return "Review only if this still matters.";
+}
+
+function renderBadges(entries: Array<[string, unknown]>) {
+  return `<div class="badges">${entries
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(
+      ([label, value]) => `<span><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</span>`
+    )
+    .join("")}</div>`;
+}
+
 function renderMeta(entries: Array<[string, unknown]>) {
   const visible = entries.filter(
     ([, value]) => value !== null && value !== undefined && value !== ""
@@ -261,30 +364,45 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
   if (rows.length === 0) return `<p class="empty">${escapeHtml(emptyLabel)}</p>`;
   return rows
     .map((row) => {
-      const title =
-        row.title ??
-        row.name ??
-        row.provider ??
-        row.key ??
-        row.source_kind ??
-        row.action ??
-        row.project_id ??
-        row.id;
-      const body =
-        row.body ??
-        row.quote ??
-        row.source_id ??
-        row.primary_path ??
-        row.model ??
-        formatDisplayValue(row.value);
+      const isMemory = Boolean(row.memory_id);
+      const title = isMemory
+        ? sourcePath(row)
+        : (row.title ??
+          row.name ??
+          row.provider ??
+          row.key ??
+          row.source_kind ??
+          row.action ??
+          row.project_id ??
+          row.id);
+      const body = isMemory
+        ? currentEffect(row)
+        : (row.body ??
+          row.quote ??
+          row.source_id ??
+          row.primary_path ??
+          row.model ??
+          formatDisplayValue(row.value));
       const content = `<article class="item">
         <h3>${escapeHtml(title)}</h3>
-        <p>${escapeHtml(body)}</p>
-        ${renderMeta(
-          Object.entries(row)
-            .filter(([key]) => !["title", "body", "quote", "name", "primary_path"].includes(key))
-            .slice(0, 6)
-        )}
+        ${
+          isMemory
+            ? `${renderBadges([
+                ["Status", humanStatus(row.status)],
+                ["Use", humanPolicy(row.use_policy)],
+                ["Type", memoryKindLabel(row.memory_type)]
+              ])}
+              <p>${escapeHtml(body)}</p>
+              <p class="why">${escapeHtml(riskSummary(row))}</p>`
+            : `<p>${escapeHtml(body)}</p>
+              ${renderMeta(
+                Object.entries(row)
+                  .filter(
+                    ([key]) => !["title", "body", "quote", "name", "primary_path"].includes(key)
+                  )
+                  .slice(0, 6)
+              )}`
+        }
       </article>`;
       return row.memory_id && projectId
         ? `<a class="row-link" href="${escapeHtml(reviewPath(projectId, row.memory_id))}">${content}</a>`
@@ -295,7 +413,7 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
 
 function renderReviewActions(memory: Record<string, unknown>, projectId: unknown) {
   const safeActions = [
-    ["accept", "Accept"],
+    ["accept", "Keep as usable memory"],
     ["reject", "Reject"],
     ["archive", "Archive"],
     ["mark_stale", "Mark stale"]
@@ -325,32 +443,51 @@ function renderDetail(detail: unknown, availableActions: unknown, projectId: unk
   if (!memory) return `<p class="empty">No selected memory.</p>`;
   const actions = Array.isArray(availableActions) ? availableActions.map(String) : [];
   return `<article class="detail">
-    <h3>${escapeHtml(memory.title ?? memory.id)}</h3>
-    <p>${escapeHtml(memory.body ?? "")}</p>
-    ${renderMeta([
-      ["memory_id", memory.id],
-      ["status", memory.status],
-      ["use_policy", memory.use_policy],
-      ["memory_type", memory.memory_type],
-      ["scope", memory.scope],
-      ["scope_kind", memory.scope_kind],
-      ["scope_id", memory.scope_id],
-      ["audience", memory.audience],
-      ["confidence", memory.confidence],
-      ["created_by", memory.created_by],
-      ["metadata", memory.metadata]
+    <h3>${escapeHtml(sourcePath(memory))}</h3>
+    ${renderBadges([
+      ["Status", humanStatus(memory.status)],
+      ["Use", humanPolicy(memory.use_policy)],
+      ["Type", memoryKindLabel(memory.memory_type)]
     ])}
-    <h4>Source Refs</h4>
-    ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
-    <h4>Review History</h4>
-    ${renderRows(payload.review_actions ?? [], "No review actions yet.")}
+    <h4>What this is</h4>
+    <p>${escapeHtml(currentEffect(memory))}</p>
+    <h4>Why it needs review</h4>
+    <p>${escapeHtml(riskSummary(memory))}</p>
+    <h4>Recommended action</h4>
+    <p>${escapeHtml(recommendedAction(memory))}</p>
     <h4>Actions</h4>
     <div class="actions">${renderReviewActions(memory, projectId)}</div>
-    <h4>Advanced Actions</h4>
-    <div class="actions disabled">${actions
-      .filter((action) => !["accept", "reject", "archive", "mark_stale"].includes(action))
-      .map((action) => `<span>${escapeHtml(action)}</span>`)
-      .join("")}</div>
+    <details>
+      <summary>Evidence excerpts</summary>
+      ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
+    </details>
+    <details>
+      <summary>Review history</summary>
+      ${renderRows(payload.review_actions ?? [], "No review actions yet.")}
+    </details>
+    <details>
+      <summary>Technical details</summary>
+      ${renderMeta([
+        ["memory_id", memory.id],
+        ["status", memory.status],
+        ["use_policy", memory.use_policy],
+        ["memory_type", memory.memory_type],
+        ["scope", memory.scope],
+        ["scope_kind", memory.scope_kind],
+        ["scope_id", memory.scope_id],
+        ["audience", memory.audience],
+        ["confidence", memory.confidence],
+        ["created_by", memory.created_by],
+        ["metadata", memory.metadata]
+      ])}
+    </details>
+    <details>
+      <summary>Advanced actions</summary>
+      <div class="actions disabled">${actions
+        .filter((action) => !["accept", "reject", "archive", "mark_stale"].includes(action))
+        .map((action) => `<span>${escapeHtml(action)}</span>`)
+        .join("")}</div>
+    </details>
   </article>`;
 }
 
@@ -429,6 +566,10 @@ function renderDashboard(
     .item:first-child { border-top: 0; }
     .item h3 { font-size: 14px; margin: 0 0 5px; }
     .item p { margin: 0 0 8px; color: #565d6b; font-size: 13px; overflow-wrap: anywhere; }
+    .item .why { color: #7a4d18; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+    .badges span { display: inline-flex; gap: 5px; align-items: baseline; border: 1px solid #d6dde7; background: #f8fafc; border-radius: 999px; padding: 4px 7px; font-size: 11px; color: #445064; }
+    .badges strong { color: #6a7280; font-weight: 600; }
     dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; margin: 0; font-size: 12px; }
     dt { color: #6a7280; }
     dd { margin: 0; overflow-wrap: anywhere; }
@@ -443,6 +584,9 @@ function renderDashboard(
     .project-meta span, .metrics span { background: #f2f5f8; border: 1px solid #dce3ec; border-radius: 999px; padding: 3px 7px; color: #4f5867; font-size: 11px; }
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
+    .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+    details { border-top: 1px solid #e5e9f0; padding-top: 9px; margin-top: 10px; }
+    summary { cursor: pointer; color: #303845; font-weight: 650; font-size: 13px; }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .actions span { border: 1px solid #c9d2df; border-radius: 6px; padding: 4px 7px; font-size: 12px; background: #f7fafb; }
     .actions form { margin: 0; }
