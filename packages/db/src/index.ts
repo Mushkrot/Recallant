@@ -1818,8 +1818,12 @@ export class RecallantDb {
     return { ok: true, trace_id: input.trace_id };
   }
 
-  async getReviewDashboard() {
+  async getReviewDashboard(input?: {
+    project_id?: string | null;
+    selected_memory_id?: string | null;
+  }) {
     const context = await this.ensureProject();
+    const dashboardProjectId = input?.project_id ?? context.projectId;
     const projects = await this.pool.query(
       `
         WITH project_usage AS (
@@ -1853,8 +1857,16 @@ export class RecallantDb {
       `,
       [context.developerId]
     );
-    const inbox = await this.listAgentMemories({ view: "inbox", limit: 25 });
-    const rules = await this.listAgentMemories({ view: "rules", limit: 25 });
+    const inbox = await this.listAgentMemories({
+      view: "inbox",
+      project_id: dashboardProjectId,
+      limit: 25
+    });
+    const rules = await this.listAgentMemories({
+      view: "rules",
+      project_id: dashboardProjectId,
+      limit: 25
+    });
     const importCandidates = await this.pool.query(
       `
         SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
@@ -1867,7 +1879,7 @@ export class RecallantDb {
         ORDER BY updated_at DESC
         LIMIT 25
       `,
-      [context.developerId, context.projectId]
+      [context.developerId, dashboardProjectId]
     );
     const duplicateConflicts = await this.pool.query(
       `
@@ -1885,7 +1897,7 @@ export class RecallantDb {
         ORDER BY updated_at DESC
         LIMIT 25
       `,
-      [context.developerId, context.projectId]
+      [context.developerId, dashboardProjectId]
     );
     const critical = await this.pool.query(
       `
@@ -1894,7 +1906,7 @@ export class RecallantDb {
           (SELECT count(*)::int FROM agent_memories WHERE (project_id = $1 OR scope = 'developer') AND status IN ('candidate', 'needs_review')) AS pending_review,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals
       `,
-      [context.projectId]
+      [dashboardProjectId]
     );
     const costs = await this.pool.query(
       `
@@ -1909,7 +1921,7 @@ export class RecallantDb {
         ORDER BY estimated_usd DESC, call_count DESC
         LIMIT 20
       `,
-      [context.projectId]
+      [dashboardProjectId]
     );
     const settings = await this.pool.query(
       `
@@ -1922,15 +1934,19 @@ export class RecallantDb {
         WHERE key IN ('capture_profile', 'embedding_route', 'paid_api_mode')
         ORDER BY key, source
       `,
-      [context.projectId]
+      [dashboardProjectId]
     );
+    const currentProject =
+      projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
     const selectedMemoryId =
+      input?.selected_memory_id ??
       importCandidates.rows[0]?.memory_id ??
       inbox.memories[0]?.memory_id ??
       rules.memories[0]?.memory_id;
     const selectedDetail = selectedMemoryId ? await this.getAgentMemory(selectedMemoryId) : null;
     return {
-      current_project_id: context.projectId,
+      current_project_id: dashboardProjectId,
+      current_project: currentProject,
       projects: projects.rows,
       critical: critical.rows[0],
       inbox: inbox.memories,

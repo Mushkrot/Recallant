@@ -197,6 +197,21 @@ async function readJson(request: IncomingMessage) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function readForm(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  const params = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  return Object.fromEntries(params.entries());
+}
+
+function reviewPath(projectId: unknown, memoryId?: unknown) {
+  const params = new URLSearchParams();
+  if (projectId) params.set("project_id", String(projectId));
+  if (memoryId) params.set("memory_id", String(memoryId));
+  const query = params.toString();
+  return `/review${query ? `?${query}` : ""}`;
+}
+
 function shortId(value: unknown) {
   return String(value ?? "").slice(0, 8);
 }
@@ -242,24 +257,62 @@ function renderMeta(entries: Array<[string, unknown]>) {
   </dl>`;
 }
 
-function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string) {
+function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, projectId?: unknown) {
   if (rows.length === 0) return `<p class="empty">${escapeHtml(emptyLabel)}</p>`;
   return rows
-    .map(
-      (row) => `<article class="item">
-        <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.source_kind ?? row.action ?? row.project_id ?? row.id)}</h3>
-        <p>${escapeHtml(row.body ?? row.quote ?? row.source_id ?? row.primary_path ?? row.model ?? formatDisplayValue(row.value))}</p>
+    .map((row) => {
+      const title =
+        row.title ??
+        row.name ??
+        row.provider ??
+        row.key ??
+        row.source_kind ??
+        row.action ??
+        row.project_id ??
+        row.id;
+      const body =
+        row.body ??
+        row.quote ??
+        row.source_id ??
+        row.primary_path ??
+        row.model ??
+        formatDisplayValue(row.value);
+      const content = `<article class="item">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(body)}</p>
         ${renderMeta(
           Object.entries(row)
             .filter(([key]) => !["title", "body", "quote", "name", "primary_path"].includes(key))
             .slice(0, 6)
         )}
-      </article>`
+      </article>`;
+      return row.memory_id && projectId
+        ? `<a class="row-link" href="${escapeHtml(reviewPath(projectId, row.memory_id))}">${content}</a>`
+        : content;
+    })
+    .join("");
+}
+
+function renderReviewActions(memory: Record<string, unknown>, projectId: unknown) {
+  const safeActions = [
+    ["accept", "Accept"],
+    ["reject", "Reject"],
+    ["archive", "Archive"],
+    ["mark_stale", "Mark stale"]
+  ];
+  return safeActions
+    .map(
+      ([action, label]) => `<form method="post" action="/review-action">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+        <input type="hidden" name="action" value="${escapeHtml(action)}" />
+        <button type="submit">${escapeHtml(label)}</button>
+      </form>`
     )
     .join("");
 }
 
-function renderDetail(detail: unknown, availableActions: unknown) {
+function renderDetail(detail: unknown, availableActions: unknown, projectId: unknown) {
   if (!detail || typeof detail !== "object") {
     return `<p class="empty">No selected memory.</p>`;
   }
@@ -292,33 +345,40 @@ function renderDetail(detail: unknown, availableActions: unknown) {
     <h4>Review History</h4>
     ${renderRows(payload.review_actions ?? [], "No review actions yet.")}
     <h4>Actions</h4>
-    <div class="actions">${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join("")}</div>
+    <div class="actions">${renderReviewActions(memory, projectId)}</div>
+    <h4>Advanced Actions</h4>
+    <div class="actions disabled">${actions
+      .filter((action) => !["accept", "reject", "archive", "mark_stale"].includes(action))
+      .map((action) => `<span>${escapeHtml(action)}</span>`)
+      .join("")}</div>
   </article>`;
+}
+
+function renderProjectRow(row: Record<string, unknown>, currentProjectId: unknown) {
+  const active = row.project_id === currentProjectId;
+  return `<a class="project-link" href="${escapeHtml(reviewPath(row.project_id))}">
+    <article class="project ${active ? "active" : ""}">
+      <div>
+        <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.source_kind ?? row.action ?? row.project_id ?? row.id)}</h3>
+        <p>${escapeHtml(row.primary_path ?? "No path recorded")}</p>
+      </div>
+      <div class="project-meta">
+        <span>ID ${escapeHtml(shortId(row.project_id))}</span>
+        <span>${escapeHtml(row.memory_domain ?? "agent_work")}</span>
+        <span>${escapeHtml(formatDate(row.updated_at))}</span>
+      </div>
+      <div class="metrics">
+        <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+        <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+        <span>${escapeHtml(row.event_count ?? 0)} events</span>
+      </div>
+    </article>
+  </a>`;
 }
 
 function renderProjects(rows: Array<Record<string, unknown>>, currentProjectId: unknown) {
   if (rows.length === 0) return `<p class="empty">No managed projects yet.</p>`;
-  return rows
-    .map((row) => {
-      const active = row.project_id === currentProjectId;
-      return `<article class="project ${active ? "active" : ""}">
-        <div>
-          <h3>${escapeHtml(row.name ?? "project")}</h3>
-          <p>${escapeHtml(row.primary_path ?? "No path recorded")}</p>
-        </div>
-        <div class="project-meta">
-          <span>ID ${escapeHtml(shortId(row.project_id))}</span>
-          <span>${escapeHtml(row.memory_domain ?? "agent_work")}</span>
-          <span>${escapeHtml(formatDate(row.updated_at))}</span>
-        </div>
-        <div class="metrics">
-          <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
-          <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
-          <span>${escapeHtml(row.event_count ?? 0)} events</span>
-        </div>
-      </article>`;
-    })
-    .join("");
+  return rows.map((row) => renderProjectRow(row, currentProjectId)).join("");
 }
 
 function renderSettings(rows: Array<Record<string, unknown>>) {
@@ -361,7 +421,10 @@ function renderDashboard(
     main { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 380px); gap: 18px; padding: 18px; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
+    a { color: inherit; text-decoration: none; }
     .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .row-link, .project-link { display: block; border-radius: 6px; }
+    .row-link:hover .item, .project-link:hover .project { background: #f8fafc; }
     .item { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .item:first-child { border-top: 0; }
     .item h3 { font-size: 14px; margin: 0 0 5px; }
@@ -382,6 +445,10 @@ function renderDashboard(
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .actions span { border: 1px solid #c9d2df; border-radius: 6px; padding: 4px 7px; font-size: 12px; background: #f7fafb; }
+    .actions form { margin: 0; }
+    button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #f2f6fb; }
+    .actions.disabled span { color: #788292; background: #f9fafb; }
     .setting { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .setting:first-child { border-top: 0; }
     .setting-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -419,25 +486,25 @@ function renderDashboard(
     <section>
       <section class="panel">
         <h2>Import Candidates</h2>
-        ${renderRows(data.import_candidates, "No imported candidates require review.")}
+        ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Review Inbox</h2>
-        ${renderRows(data.inbox, "No candidate or high-risk memories require review.")}
+        ${renderRows(data.inbox, "No candidate or high-risk memories require review.", data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Conflicts / Duplicates</h2>
-        ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.")}
+        ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.", data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Active Rules</h2>
-        ${renderRows(data.rules, "No instruction-grade rules yet.")}
+        ${renderRows(data.rules, "No instruction-grade rules yet.", data.current_project_id)}
       </section>
     </section>
     <aside>
       <section class="panel">
         <h2>Selected Detail</h2>
-        ${renderDetail(data.selected_detail, data.available_review_actions)}
+        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Cost / Paid API</h2>
@@ -463,7 +530,8 @@ function renderDashboard(
 
 export function createRecallantHttpServer() {
   return createServer(async (request, response) => {
-    if (request.url === "/health") {
+    const requestUrl = new URL(request.url ?? "/", "http://localhost");
+    if (requestUrl.pathname === "/health") {
       write(
         response,
         200,
@@ -484,21 +552,30 @@ export function createRecallantHttpServer() {
       write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
       return;
     }
-    if (request.url === "/" || request.url === "/review") {
+    const dashboardInput = {
+      project_id: requestUrl.searchParams.get("project_id"),
+      selected_memory_id: requestUrl.searchParams.get("memory_id")
+    };
+    if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
       write(
         response,
         200,
-        renderDashboard(await database.getReviewDashboard()),
+        renderDashboard(await database.getReviewDashboard(dashboardInput)),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
       return;
     }
-    if (request.url === "/api/review-dashboard") {
-      write(response, 200, JSON.stringify(await database.getReviewDashboard()), "application/json");
+    if (requestUrl.pathname === "/api/review-dashboard") {
+      write(
+        response,
+        200,
+        JSON.stringify(await database.getReviewDashboard(dashboardInput)),
+        "application/json"
+      );
       return;
     }
-    if (request.method === "POST" && request.url === "/api/review-action") {
+    if (request.method === "POST" && requestUrl.pathname === "/api/review-action") {
       const body = (await readJson(request)) as ReviewAgentMemoryInput;
       write(
         response,
@@ -510,7 +587,18 @@ export function createRecallantHttpServer() {
       );
       return;
     }
-    if (request.method === "POST" && request.url === "/api/project-setting") {
+    if (request.method === "POST" && requestUrl.pathname === "/review-action") {
+      const body = await readForm(request);
+      const result = await database.reviewAgentMemory({
+        memory_id: String(body.memory_id ?? ""),
+        action: String(body.action ?? ""),
+        actor_kind: "user"
+      });
+      const location = reviewPath(body.project_id, result.memory_id);
+      write(response, 303, "See other", "text/plain", { location });
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/project-setting") {
       const body = (await readJson(request)) as ProjectSettingInput;
       const result = await database.setProjectSetting({
         ...body,
