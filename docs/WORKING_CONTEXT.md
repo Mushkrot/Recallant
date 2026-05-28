@@ -218,6 +218,10 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   default `autopilot`; autopilot backs up discovered agent files locally, normalizes startup files,
   imports safe sources, creates starter/structured memories, runs startup/context-pack and Review
   visibility checks, and reports in owner-readable form.
+- First Review/Management UI chat slice is implemented: the private Command Center now has a
+  functional natural-language management chat API/form, plain-language "What Needs Attention" and
+  project-action summaries, human-readable setting summaries, Russian answer coverage, and
+  confirmation-gated cleanup/destructive/sensitive proposals instead of direct chat execution.
 - First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search

@@ -9,7 +9,9 @@ This is the current handoff for the next Recallant session. Start here after rea
 Recallant is deployed on the owner server, the first production UI cleanup has been completed, and
 the GutenDocx copied-project sandbox pilot is complete. The active product direction is now Phase 10:
 autonomous project attach/detach plus controlled cross-project recall; the first implementation
-slices for all three are now complete.
+slices for all three are now complete. The next management-surface slice has also started: the
+Review Command Center now has functional plain-language management chat and a more owner-readable
+first screen.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
@@ -85,10 +87,20 @@ implementation slice:
 - environment/capability recall redacts secret-like values;
 - applying a pattern from project B requires creating project-A memory with source refs.
 
+The current Review/Management UI and chat target is complete for the first implementation slice:
+
+- the Command Center has a real management chat API/form instead of a placeholder;
+- chat answers read-only status/review/settings/cost/context-pack/cross-project questions in the
+  owner's language by default;
+- cleanup/destructive/sensitive requests return dry-run and confirmation-required proposals, not
+  direct execution;
+- the first screen includes "What Needs Attention", project action guidance, cross-project
+  isolation reminders, and human-readable settings summaries with technical details collapsed.
+
 The next useful targets are:
 
-- continue improving Review/Management UI and chat so operational choices are shown in plain
-  language;
+- deepen Review/Management UI action flows for settings, context-pack preview, and review
+  proposals;
 - optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
   confirmation.
 
@@ -121,5 +133,6 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 ## Success Condition For The Next Session
 
 The next session should continue from a completed first Phase 10 attach/detach/cross-project
-checkpoint. A practical next slice is owner-facing Management UI/chat quality or optional local
-sandbox cleanup after confirmed detach.
+checkpoint and a first functional Management UI/chat checkpoint. Practical next slices are richer
+owner-facing settings/review/context-pack action flows or optional local sandbox cleanup after
+confirmed detach.

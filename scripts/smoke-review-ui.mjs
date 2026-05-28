@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { URLSearchParams } from "node:url";
 import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
@@ -135,6 +136,8 @@ try {
   if (
     html.status !== 200 ||
     !htmlText.includes("Recallant Review Command Center") ||
+    !htmlText.includes("What Needs Attention") ||
+    !htmlText.includes("Project Actions") ||
     !htmlText.includes("Import Candidates") ||
     !htmlText.includes("Selected Detail") ||
     !htmlText.includes("Evidence excerpts") ||
@@ -146,7 +149,9 @@ try {
     !htmlText.includes(rule.memory_id) ||
     !htmlText.includes("Cost / Paid API") ||
     !htmlText.includes("Settings") ||
-    !htmlText.includes("Management Chat")
+    !htmlText.includes("Management Chat") ||
+    !htmlText.includes("Ask what to review next") ||
+    !htmlText.includes("Local embeddings")
   ) {
     throw new Error(`Review UI HTML smoke failed: ${html.status} ${htmlText.slice(0, 500)}`);
   }
@@ -166,6 +171,71 @@ try {
     json.critical.pending_review < 1
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
+  }
+
+  const russianChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Что дальше делать с этим проектом?"
+    })
+  });
+  const russianChatJson = await russianChat.json();
+  if (
+    russianChat.status !== 200 ||
+    russianChatJson.language !== "ru" ||
+    russianChatJson.intent !== "next_steps" ||
+    russianChatJson.confirmation_required !== false ||
+    !String(russianChatJson.answer).includes("Следующий")
+  ) {
+    throw new Error(`Russian management chat smoke failed: ${JSON.stringify(russianChatJson)}`);
+  }
+
+  const destructiveChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Удали этот проект навсегда"
+    })
+  });
+  const destructiveChatJson = await destructiveChat.json();
+  if (
+    destructiveChat.status !== 200 ||
+    destructiveChatJson.confirmation_required !== true ||
+    destructiveChatJson.proposed_actions.length < 1 ||
+    !String(destructiveChatJson.answer).includes("dry-run")
+  ) {
+    throw new Error(
+      `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
+    );
+  }
+
+  const chatForm = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      message: "Объясни context pack простым языком"
+    })
+  });
+  const chatFormHtml = await chatForm.text();
+  if (
+    chatForm.status !== 200 ||
+    !chatFormHtml.includes("Ответ Recallant") ||
+    !chatFormHtml.includes("Context Pack")
+  ) {
+    throw new Error(`Management chat form smoke failed: ${chatForm.status} ${chatFormHtml}`);
   }
 
   const accepted = await fetch(`${baseUrl}/api/review-action`, {

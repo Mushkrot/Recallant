@@ -170,6 +170,10 @@ Implemented checkpoint:
 - Imported candidates created by confirmed import appear in the dashboard/API with source refs and remain reviewable before any instruction-grade promotion.
 - Existing `/api/review-action` continues to route accept/reject/promote/demote/archive/stale/edit/merge/supersede actions through the same DB policy path.
 - `npm run review-ui:smoke` now creates an import candidate through the DB import path and verifies import listing, selected detail/source display, conflict lane, a normal review action, dangerous setting confirmation rejection, and auth/Cloudflare readiness.
+- Follow-up management UI/chat slice: the Review Command Center now includes a functional
+  natural-language management chat API/form, Russian-language answer coverage, confirmation-gated
+  destructive cleanup proposals, a plain-language attention summary, project action guidance, and
+  human-readable setting summaries.
 
 ## Workstream R4 - Pilot Sandbox Workflow
 

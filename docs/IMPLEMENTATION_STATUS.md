@@ -56,6 +56,14 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   source project/path/ref, status/use policy, applicability warning, and promotion policy. Default
   context packs still exclude unrelated project memory, and environment/capability output redacts
   secret-like values.
+- Review/Management UI chat first slice: the private Command Center now has a functional
+  management chat API and form instead of a placeholder. It answers read-only operational questions
+  in the owner's language, summarizes project status in plain language, explains review/settings/
+  cost/context-pack/cross-project recall topics, and converts cleanup/destructive/sensitive requests
+  into dry-run plus confirmation-required action proposals without executing them directly.
+- Review/Management UI readability pass: the first screen includes a plain-language "What Needs
+  Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
+  setting summaries with technical JSON hidden behind expandable details.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -163,8 +171,8 @@ Current work order:
 
 Next recommended work:
 
-1. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
-   reports, and review items rather than agent-oriented metadata.
+1. Continue deepening Review/Management UI action flows, especially richer settings edits, review
+   proposals, and context-pack previews from the same private management surface.
 2. Add optional local sandbox-file cleanup after confirmed detach, still gated by dry-run and
    confirmation.
 
@@ -200,6 +208,18 @@ Latest full local validation was run on a clean Docker Postgres database:
 - `make db-down`
 
 The core smoke suite includes MCP handshake, lifecycle, embeddings, retrieval, governed memory, graph/context/forget, Review UI, CLI onboarding, backup/restore planning, size limits, structured errors/rate limits, search p95, archive/decay/cleanup, repo contract sync, local spool, and cross-client smoke.
+
+Latest Review/Management UI chat validation:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- `npm run review-ui:smoke`
+- Docker network execution of `npm run smoke:core`
+
+The Review UI smoke now covers the authenticated management chat JSON API, browser form path,
+Russian-language answer fixture, destructive cleanup confirmation gating, and human-readable first
+screen additions.
 
 Latest Pre-Pilot R1 validation:
 

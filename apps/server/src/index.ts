@@ -9,6 +9,16 @@ import {
   type ReviewAgentMemoryInput
 } from "@recallant/db";
 import { recallantMcpServerName } from "@recallant/mcp";
+import { buildManagementChatResponse, type ManagementChatResponse } from "./management-chat.js";
+
+type ReviewDashboardData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof createRecallantDbFromEnv>>["getReviewDashboard"]>
+>;
+
+type ChatRenderState = {
+  question?: string;
+  response?: ManagementChatResponse;
+};
 
 export function describeServerBoundary() {
   return {
@@ -204,6 +214,11 @@ async function readForm(request: IncomingMessage) {
   return Object.fromEntries(params.entries());
 }
 
+function optionalInput(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized : null;
+}
+
 function reviewPath(projectId: unknown, memoryId?: unknown) {
   const params = new URLSearchParams();
   if (projectId) params.set("project_id", String(projectId));
@@ -240,6 +255,55 @@ function formatDisplayValue(value: unknown) {
     }
   }
   return String(value);
+}
+
+function parseSettingValue(value: unknown) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function settingLabel(key: unknown) {
+  const settingKey = String(key ?? "");
+  const labels: Record<string, string> = {
+    capture_profile: "Capture profile",
+    context_budget_profile: "Context budget",
+    embedding_route: "Local embeddings",
+    paid_api_mode: "Paid API mode",
+    review_sensitivity: "Review sensitivity"
+  };
+  return labels[settingKey] ?? settingKey.replaceAll("_", " ");
+}
+
+function settingSummary(row: Record<string, unknown>) {
+  const key = String(row.key ?? "");
+  const value = parseSettingValue(row.value);
+  const record = asRecord(value);
+  if (key === "embedding_route") {
+    const provider = record.provider ? String(record.provider) : "local provider";
+    const model = record.model ? String(record.model) : "configured model";
+    const dims = record.dims ? `, ${String(record.dims)} dims` : "";
+    return `Uses ${model} through ${provider}${dims}.`;
+  }
+  if (key === "paid_api_mode") {
+    if (value === "confirm_each") return "Paid model calls require explicit confirmation.";
+    if (value === "disabled") return "Paid model calls are disabled.";
+    return `Paid API policy: ${formatDisplayValue(value)}.`;
+  }
+  if (key === "capture_profile") {
+    return `Future capture profile: ${formatDisplayValue(value) || "not set"}.`;
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return formatDisplayValue(value) || "Not set.";
+  }
+  return "Configured centrally in Recallant.";
 }
 
 function asRecord(value: unknown) {
@@ -523,27 +587,130 @@ function renderSettings(rows: Array<Record<string, unknown>>) {
   return rows
     .map((row) => {
       const value = formatDisplayValue(row.value);
-      const structured = value.includes("\n") || value.length > 48;
       return `<article class="setting">
         <div class="setting-head">
-          <h3>${escapeHtml(row.key)}</h3>
+          <h3>${escapeHtml(settingLabel(row.key))}</h3>
           <span>${escapeHtml(row.source)}</span>
         </div>
-        ${
-          structured
-            ? `<pre>${escapeHtml(value)}</pre>`
-            : `<p class="setting-value">${escapeHtml(value || "Not set")}</p>`
-        }
+        <p class="setting-value">${escapeHtml(settingSummary(row))}</p>
+        <details>
+          <summary>Technical value</summary>
+          <pre>${escapeHtml(value || "Not set")}</pre>
+        </details>
       </article>`;
     })
     .join("");
 }
 
-function renderDashboard(
-  data: Awaited<
-    ReturnType<NonNullable<ReturnType<typeof createRecallantDbFromEnv>>["getReviewDashboard"]>
-  >
-) {
+function rowCount(rows: unknown) {
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+function criticalCount(data: ReviewDashboardData, key: string) {
+  return Number(asRecord(data.critical)[key] ?? 0);
+}
+
+function renderTextBlock(text: string) {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return "";
+  return paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("");
+}
+
+function renderAttention(data: ReviewDashboardData) {
+  const pendingReview = criticalCount(data, "pending_review");
+  const conflicts = rowCount(data.duplicate_conflicts);
+  const imports = rowCount(data.import_candidates);
+  const interrupted = criticalCount(data, "interrupted_sessions");
+  const paidApprovals = criticalCount(data, "pending_paid_approvals");
+  const urgent = pendingReview + conflicts + interrupted + paidApprovals;
+  if (urgent === 0) {
+    return `<p>No urgent owner decision is waiting. The useful check now is whether the next agent starts from Recallant context instead of reading old project logs by hand.</p>`;
+  }
+  const items = [
+    pendingReview > 0
+      ? `${pendingReview} memory item${pendingReview === 1 ? "" : "s"} need review.`
+      : "",
+    imports > 0
+      ? `${imports} imported source${imports === 1 ? "" : "s"} are still evidence-only.`
+      : "",
+    conflicts > 0
+      ? `${conflicts} possible conflict/duplicate item${conflicts === 1 ? "" : "s"} need attention.`
+      : "",
+    interrupted > 0
+      ? `${interrupted} interrupted session${interrupted === 1 ? "" : "s"} should be checked.`
+      : "",
+    paidApprovals > 0
+      ? `${paidApprovals} paid API approval${paidApprovals === 1 ? "" : "s"} are pending.`
+      : ""
+  ].filter(Boolean);
+  return `<ul class="attention-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderProjectActions(data: ReviewDashboardData) {
+  const cleanup = asRecord(data.project_cleanup);
+  return `<div class="action-plan">
+    <p>Project memory stays isolated by default. Agents can ask for cross-project examples, but unrelated memories are not mixed into this project automatically.</p>
+    <details>
+      <summary>Detach / cleanup commands</summary>
+      ${renderMeta([
+        ["detach dry-run", cleanup.detach_command],
+        ["sandbox cleanup dry-run", cleanup.sandbox_cleanup_command],
+        ["permanent erasure", cleanup.permanent_erasure_separate ? "Separate forget workflow" : ""]
+      ])}
+    </details>
+  </div>`;
+}
+
+function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState) {
+  const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
+  const selectedMemoryId = selectedMemory.id;
+  return `<form class="chat-form" method="post" action="/management-chat">
+    <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+    ${
+      selectedMemoryId
+        ? `<input type="hidden" name="memory_id" value="${escapeHtml(selectedMemoryId)}" />`
+        : ""
+    }
+    <textarea name="message" rows="4" placeholder="Ask what to review next, explain settings, or propose cleanup.">${escapeHtml(chat?.question ?? "")}</textarea>
+    <button type="submit">Ask</button>
+  </form>
+  ${
+    chat?.response
+      ? `<article class="chat-answer">
+          <h3>${chat.response.language === "ru" ? "Ответ Recallant" : "Recallant Answer"}</h3>
+          ${renderTextBlock(chat.response.answer)}
+          ${
+            chat.response.confirmation_required
+              ? `<p class="warning">Confirmation required before any risky action can run.</p>`
+              : ""
+          }
+          ${renderChatActions(chat.response.proposed_actions)}
+        </article>`
+      : `<p class="empty">Ask in normal language. Recallant will answer read-only questions directly and turn risky requests into a dry-run/confirmation plan.</p>`
+  }`;
+}
+
+function renderChatActions(actions: ManagementChatResponse["proposed_actions"]) {
+  if (actions.length === 0) return "";
+  return `<div class="chat-actions">
+    <h4>Proposed next step</h4>
+    ${actions
+      .map(
+        (action) => `<article>
+          <strong>${escapeHtml(action.label)}</strong>
+          <span>${escapeHtml(action.kind.replaceAll("_", " "))}</span>
+          <p>${escapeHtml(action.reason)}</p>
+          ${action.command ? `<code>${escapeHtml(action.command)}</code>` : ""}
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -575,6 +742,8 @@ function renderDashboard(
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
+    .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
+    .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .project { border-top: 1px solid #e5e9f0; padding: 11px 0; }
     .project:first-child { border-top: 0; }
     .project.active h3::after { content: " active"; color: #246b5a; font-size: 11px; font-weight: 600; }
@@ -597,9 +766,23 @@ function renderDashboard(
     .setting:first-child { border-top: 0; }
     .setting-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
     .setting-head span { color: #6a7280; font-size: 12px; }
-    .setting-value { margin: 0; color: #303845; font-size: 13px; overflow-wrap: anywhere; }
+    .setting-value { margin: 0; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
+    .chat-form { display: grid; gap: 8px; }
+    .chat-form textarea { resize: vertical; min-height: 92px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px; font: inherit; font-size: 13px; color: #20242c; background: #fff; }
+    .chat-form button { justify-self: start; }
+    .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; }
+    .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
+    .chat-answer p { margin: 0 0 9px; color: #303845; font-size: 13px; line-height: 1.45; }
+    .chat-answer .warning { color: #8a3c15; font-weight: 650; }
+    .chat-actions { display: grid; gap: 8px; margin-top: 10px; }
+    .chat-actions h4 { font-size: 12px; margin: 0; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
+    .chat-actions article { border: 1px solid #d9dee7; border-radius: 7px; padding: 9px; background: #fbfcfe; }
+    .chat-actions strong { display: block; font-size: 13px; }
+    .chat-actions span { display: inline-block; margin-top: 5px; color: #6a7280; font-size: 12px; }
+    .chat-actions p { margin: 6px 0; color: #4f5867; }
+    .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
     @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
   </style>
@@ -626,8 +809,16 @@ function renderDashboard(
           <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
         </div>
       </section>
+      <section class="panel">
+        <h2>Project Actions</h2>
+        ${renderProjectActions(data)}
+      </section>
     </aside>
     <section>
+      <section class="panel">
+        <h2>What Needs Attention</h2>
+        ${renderAttention(data)}
+      </section>
       <section class="panel">
         <h2>Import Candidates</h2>
         ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
@@ -667,7 +858,7 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Management Chat</h2>
-        <div class="chat">${escapeHtml(data.chat.placeholder)} Destructive actions require confirmation.</div>
+        ${renderManagementChat(data, chat)}
       </section>
     </aside>
   </main>
@@ -719,6 +910,44 @@ export function createRecallantHttpServer() {
         200,
         JSON.stringify(await database.getReviewDashboard(dashboardInput)),
         "application/json"
+      );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/management-chat") {
+      const body = (await readJson(request)) as {
+        project_id?: string | null;
+        selected_memory_id?: string | null;
+        memory_id?: string | null;
+        message?: string;
+      };
+      const chatDashboard = await database.getReviewDashboard({
+        project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+        selected_memory_id:
+          optionalInput(body.selected_memory_id) ??
+          optionalInput(body.memory_id) ??
+          dashboardInput.selected_memory_id
+      });
+      const result = buildManagementChatResponse({
+        message: String(body.message ?? ""),
+        dashboard: chatDashboard
+      });
+      write(response, 200, JSON.stringify(result), "application/json");
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/management-chat") {
+      const body = await readForm(request);
+      const chatDashboard = await database.getReviewDashboard({
+        project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+        selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
+      });
+      const question = String(body.message ?? "");
+      const result = buildManagementChatResponse({ message: question, dashboard: chatDashboard });
+      write(
+        response,
+        200,
+        renderDashboard(chatDashboard, { question, response: result }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
       return;
     }

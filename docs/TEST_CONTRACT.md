@@ -102,6 +102,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] First screen is Review Inbox / Command Center, not a raw memory list or metrics dashboard.
 - [ ] v1 UI is a compact workbench, not an approval-only table: it includes project navigation, Review Inbox, Rules, detail panel, action controls, Cost / Paid API, and Settings entrypoint.
 - [ ] Management UI includes a natural-language chat/command surface for memory questions, context-pack explanation, cleanup requests, and action proposals.
+- [ ] Management chat has both an authenticated JSON API and a browser form path, and both use the same confirmation-gated policy response model.
 - [ ] Chat answers in the user's language by default in a fixture where the user asks in Russian.
 - [ ] Chat-driven destructive, cost-affecting, security, global-scope, connector/account, or public-exposure actions require explicit confirmation and execute through the same server policy path as UI/CLI actions.
 - [ ] First screen shows current project/scope/domain/capture profile.
