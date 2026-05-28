@@ -274,15 +274,15 @@ building blocks into the owner-facing workflow described in
 - [x] Live project detach defaults to hide/archive in Recallant without touching files or physically
   deleting records; sandbox cleanup can remove Recallant records and local Recallant artifacts after
   dry-run and confirmation; sensitive/wrong memory uses `forget forever`.
-- [ ] Cross-project recall supports explicit modes for same-project recall, developer rules,
+- [x] Cross-project recall supports explicit modes for same-project recall, developer rules,
   environment facts, similar-project examples, and broad review/debug search.
-- [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and
+- [x] Cross-project results show source project, source path/ref, scope kind, status, use policy, and
   applicability warning.
-- [ ] Agents may initiate cross-project recall when the task clearly needs a prior pattern, but
+- [x] Agents may initiate cross-project recall when the task clearly needs a prior pattern, but
   ordinary context packs do not include similar-project examples by default.
-- [ ] If a prior pattern from another project is actually applied, the agent creates current-project
+- [x] If a prior pattern from another project is actually applied, the agent creates current-project
   memory with source refs; otherwise the result remains example/evidence only.
-- [ ] Context Pack Builder excludes unrelated project memory by default while still including
+- [x] Context Pack Builder excludes unrelated project memory by default while still including
   applicable developer/environment/capability/connector-account records.
 
 **Gate:** Phase 10 checks in [TEST_CONTRACT.md](TEST_CONTRACT.md) pass, and a copied-project sandbox

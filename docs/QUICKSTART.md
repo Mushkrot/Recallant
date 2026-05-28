@@ -134,6 +134,24 @@ recallant detach --project-id <project-id> --mode live --confirm
 Ordinary detach is not permanent erasure. Sensitive or wrong memory must use the separate confirmed
 forget workflow.
 
+### Ask for examples from other projects
+
+Agents use normal context packs for the current project. When a task needs a known pattern from
+another project, call the explicit MCP tool:
+
+```json
+{
+  "tool": "memory_cross_project_recall",
+  "arguments": {
+    "query": "Google Drive connector setup",
+    "mode": "similar_projects"
+  }
+}
+```
+
+Returned items are source-linked examples, not current-project rules. If the pattern is applied,
+write a current-project memory with source refs.
+
 ### Lower-level new-project path
 
 ```bash

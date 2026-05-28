@@ -222,8 +222,11 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search
   blocking for detached projects, and hard-delete policy blocking.
-- Cross-project recall should let agents use examples from other projects when explicitly useful,
-  without automatically mixing unrelated project memory.
+- First Phase 10 controlled cross-project recall slice is implemented: MCP tool
+  `memory_cross_project_recall` exposes explicit `same_project`, `developer_rules`, `environment`,
+  `similar_projects`, and `all_projects_review` modes; results are source-linked and labeled with
+  source project/path/ref, status/use policy, applicability warning, and promotion policy; ordinary
+  context packs still exclude unrelated project memory.
 - The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and
   `docs/CROSS_PROJECT_RECALL.md`.
 - The current handoff for new sessions is `docs/SESSION_HANDOFF_CURRENT.md`.
@@ -281,7 +284,8 @@ attach and controlled cross-project recall:
 - keep manual/guided modes available for cautious production work;
 - keep governed project detach/delete available so sandbox and attached project cleanup is
   reversible and visible before any broad live-project onboarding;
-- add explicit cross-project recall modes for source-linked examples from other projects;
+- keep explicit cross-project recall modes available for source-linked examples from other
+  projects;
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
 
@@ -290,7 +294,8 @@ Next session should start here:
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Read `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
    `docs/CROSS_PROJECT_RECALL.md`.
-3. Start with Phase 10: controlled cross-project recall is the next unfinished product slice.
+3. Start from the completed first Phase 10 attach/detach/cross-project checkpoint; the next useful
+   slice is owner-facing Management UI/chat quality or optional local sandbox cleanup.
 4. Keep manual/guided modes available; do not make autopilot the only way to attach projects.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

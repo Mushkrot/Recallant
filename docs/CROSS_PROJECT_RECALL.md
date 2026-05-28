@@ -76,6 +76,18 @@ Suggested logical modes:
 | `similar_projects` | examples from other projects |
 | `all_projects_review` | broad owner/debug search |
 
+First implementation slice:
+
+- MCP tool: `memory_cross_project_recall`.
+- Default mode: `similar_projects`.
+- `similar_projects` excludes the current project and detached/hidden projects by default.
+- `developer_rules` returns accepted developer-scope `instruction_grade` memories.
+- `environment` returns environment/capability/connector-account/domain records and redacts
+  secret-like values in returned bodies and source quotes.
+- Results include source project, source path when available, source refs, status, use policy,
+  scope kind, applicability, applicability warning, and promotion policy.
+- Ordinary `memory_get_context_pack` does not include similar-project examples by default.
+
 ## Applying a prior pattern
 
 When an agent finds useful memory from another project, it should:

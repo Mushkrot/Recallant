@@ -271,12 +271,12 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.
 - [x] Confirmed sandbox cleanup may also offer removal of local `.recallant/config`, bootstrap changes, or sandbox copy after dry-run and confirmation.
 - [x] Sensitive/wrong memory cleanup uses the separate `forget forever` workflow, not ordinary detach.
-- [ ] Default context pack for project A excludes ordinary memories from unrelated project B.
-- [ ] Explicit similar-project recall can return a source-linked result from project B with source project, source path/ref, scope kind, status, use policy, and applicability warning.
-- [ ] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern; Recallant does not add similar-project examples to ordinary startup context by default.
-- [ ] If a project-B pattern is actually applied in project A, the agent creates project-A memory with source refs.
-- [ ] A project-B result does not become a project-A rule until the agent creates project-A memory after application or review promotes a general rule.
-- [ ] Environment/capability/connector-account records are included only when applicable to the current task/project and are not exposed as raw secrets.
+- [x] Default context pack for project A excludes ordinary memories from unrelated project B.
+- [x] Explicit similar-project recall can return a source-linked result from project B with source project, source path/ref, scope kind, status, use policy, and applicability warning.
+- [x] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern; Recallant does not add similar-project examples to ordinary startup context by default.
+- [x] If a project-B pattern is actually applied in project A, the agent creates project-A memory with source refs.
+- [x] A project-B result does not become a project-A rule until the agent creates project-A memory after application or review promotes a general rule.
+- [x] Environment/capability/connector-account records are included only when applicable to the current task/project and are not exposed as raw secrets.
 
 ## Cross-client smoke
 

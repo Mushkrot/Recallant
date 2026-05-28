@@ -598,6 +598,75 @@ Returns bounded governed memories relevant to the current task. This complements
 }
 ```
 
+### 3.11.1 `memory_cross_project_recall`
+
+Explicitly retrieves source-linked governed-memory examples from the current project, other
+projects, developer rules, or environment/capability records. This tool is intentionally separate
+from `memory_get_context_pack`; ordinary startup context must not include similar-project examples
+by default.
+
+**Input JSON:**
+
+```json
+{
+  "query": "string",
+  "mode": "same_project|developer_rules|environment|similar_projects|all_projects_review",
+  "session_id": "uuid|null",
+  "scope_kind": "string|null",
+  "memory_types": ["decision", "procedure"],
+  "include_candidates": false,
+  "include_stale": false,
+  "include_needs_review": false,
+  "include_detached": false,
+  "top_k": 8,
+  "max_chars_total": 12000
+}
+```
+
+**Policy:**
+
+- `similar_projects` returns examples from other active projects, not binding current-project rules.
+- `developer_rules` returns intentionally reusable accepted `instruction_grade` developer memories.
+- `environment` can return environment/capability/connector-account records, with raw secret values
+  redacted.
+- Detached projects are excluded unless `include_detached=true`.
+- If an agent applies a returned pattern, it must create current-project memory with source refs.
+
+**Output JSON:**
+
+```json
+{
+  "trace_id": "uuid",
+  "mode": "similar_projects",
+  "current_project_id": "uuid",
+  "results": [
+    {
+      "memory_id": "uuid",
+      "title": "string",
+      "body": "bounded excerpt",
+      "status": "accepted",
+      "use_policy": "recall_allowed",
+      "scope_kind": "project",
+      "source_project": {
+        "project_id": "uuid",
+        "name": "string",
+        "primary_path": "/path"
+      },
+      "source_path": "docs/example.md",
+      "source_refs": [],
+      "applicability": "example_only|verify_before_applying|directly_applicable",
+      "applicability_warning": "string",
+      "promotion_policy": "string"
+    }
+  ],
+  "truncated": false,
+  "policy": {
+    "default_context_pack_includes_cross_project_examples": false,
+    "cross_project_results_are_binding_rules": false
+  }
+}
+```
+
 ### 3.12 `memory_report_recall_usage`
 
 Lets an agent report which recalled items were actually used, ignored, or unsafe for the task.

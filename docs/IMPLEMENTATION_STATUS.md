@@ -50,6 +50,12 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   sandbox hide plus active-chunk archiving, Review UI project-list hiding, active-search blocking
   for detached projects, and hard-delete policy blocking that points sensitive/wrong memory to the
   separate forget workflow.
+- Phase 10 controlled cross-project recall first slice: MCP exposes
+  `memory_cross_project_recall` with explicit modes for same-project, developer rules, environment,
+  similar projects, and all-project review. Similar-project results are source-linked examples with
+  source project/path/ref, status/use policy, applicability warning, and promotion policy. Default
+  context packs still exclude unrelated project memory, and environment/capability output redacts
+  secret-like values.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -152,13 +158,15 @@ Current work order:
    `scripts/smoke-phase10-attach.mjs`.
 9. Phase 10 detach first slice. Complete for copied-project fixtures and covered by
    `scripts/smoke-phase10-detach.mjs`.
+10. Phase 10 controlled cross-project recall first slice. Complete for copied-project fixtures and
+    covered by `scripts/smoke-phase10-cross-project.mjs`.
 
 Next recommended work:
 
-1. Add explicit controlled cross-project recall modes that label results from other projects as
-   examples/evidence unless already applicable by scope/use policy.
-2. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
+1. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
    reports, and review items rather than agent-oriented metadata.
+2. Add optional local sandbox-file cleanup after confirmed detach, still gated by dry-run and
+   confirmation.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -263,7 +271,7 @@ Latest local model readiness validation:
   with `keep_alive=0s`
 - `recallant doctor` reports no missing expected Ollama models
 
-Latest Phase 10 attach/detach validation:
+Latest Phase 10 attach/detach/cross-project validation:
 
 - Docker network execution of `npm run phase10:smoke` passed against the isolated
   `recallant-dev` database.
@@ -274,6 +282,12 @@ Latest Phase 10 attach/detach validation:
   confirmed sandbox detach hiding the project and archiving active chunks, local config left intact,
   live detach hiding without archiving chunks or touching files, active search blocked for detached
   projects, dashboard project-list hiding, and unrelated active project search unaffected.
+- Cross-project recall smoke verifies default context-pack isolation, explicit similar-project
+  recall with source project/path/ref/status/use policy/applicability warning, developer-rule mode,
+  environment/capability secret redaction, no current-project memory creation until application,
+  and current-project memory creation with source refs after applying a prior pattern.
+- Full Docker network execution of `npm run smoke:core` passed on the same isolated dev profile
+  after adding `memory_cross_project_recall` to the MCP tool list.
 
 Smoke scripts that previously assumed a Docker `/work` mount now use the current repository root, so
 the full local host `smoke:core` suite can run against the isolated `recallant-dev` database.
@@ -281,7 +295,8 @@ the full local host `smoke:core` suite can run against the isolated `recallant-d
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
-attach/detach slices have been implemented. Continue with controlled cross-project recall.
+attach/detach/cross-project recall slices have been implemented. Continue with management UI/chat
+quality and optional sandbox local-cleanup hardening.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

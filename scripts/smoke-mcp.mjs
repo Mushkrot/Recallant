@@ -21,6 +21,7 @@ const expectedTools = [
   "memory_list_agent_memories",
   "memory_get_agent_memory",
   "memory_recall_agent_memories",
+  "memory_cross_project_recall",
   "memory_report_recall_usage",
   "memory_closeout"
 ];

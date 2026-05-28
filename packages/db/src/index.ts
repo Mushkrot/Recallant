@@ -138,6 +138,27 @@ export type RecallAgentMemoriesInput = {
   max_chars_total?: number;
 };
 
+export type CrossProjectRecallMode =
+  | "same_project"
+  | "developer_rules"
+  | "environment"
+  | "similar_projects"
+  | "all_projects_review";
+
+export type CrossProjectRecallInput = {
+  query: string;
+  mode?: CrossProjectRecallMode;
+  session_id?: string | null;
+  scope_kind?: string | null;
+  memory_types?: string[];
+  include_candidates?: boolean;
+  include_stale?: boolean;
+  include_needs_review?: boolean;
+  include_detached?: boolean;
+  top_k?: number;
+  max_chars_total?: number;
+};
+
 export type ReportRecallUsageInput = {
   trace_id: string;
   used_memory_ids?: string[];
@@ -348,6 +369,26 @@ function projectLifecycleIsDetached(lifecycle: ProjectLifecycle) {
     lifecycle.visibility === "hidden" ||
     lifecycle.searchable === false
   );
+}
+
+function redactSecretValues(content: string) {
+  return content
+    .split("\n")
+    .map((line) => {
+      if (
+        /^\s*[A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|DSN|DATABASE_URL)[A-Z0-9_]*\s*=.+/i.test(
+          line
+        )
+      ) {
+        return line.replace(/=.*/, "=<redacted>");
+      }
+      return line
+        .replaceAll(/sk-[A-Za-z0-9_-]{8,}/g, "<redacted-token>")
+        .replaceAll(/gh[pousr]_[A-Za-z0-9_]{8,}/g, "<redacted-token>")
+        .replaceAll(/xox[baprs]-[A-Za-z0-9-]{8,}/g, "<redacted-token>")
+        .replaceAll(/:\/\/([^:\s/@]+):([^@\s]+)@/g, "://<redacted>:<redacted>@");
+    })
+    .join("\n");
 }
 
 function vectorLiteral(values: readonly number[]) {
@@ -1903,6 +1944,196 @@ export class RecallantDb {
     };
   }
 
+  async crossProjectRecall(input: CrossProjectRecallInput) {
+    const context = input.session_id
+      ? await this.contextForSession(input.session_id)
+      : await this.ensureProject();
+    const mode = input.mode ?? "similar_projects";
+    const statuses = ["accepted"];
+    if (mode === "all_projects_review") statuses.push("candidate", "needs_review", "stale");
+    if (input.include_candidates) statuses.push("candidate");
+    if (input.include_needs_review) statuses.push("needs_review");
+    if (input.include_stale) statuses.push("stale");
+    const uniqueStatuses = Array.from(new Set(statuses));
+    const values: unknown[] = [context.developerId, context.projectId, input.query, uniqueStatuses];
+    const clauses = [
+      "m.developer_id = $1::uuid",
+      "m.status = ANY($4::text[])",
+      "m.use_policy <> 'do_not_use'",
+      "(m.title ILIKE '%' || $3 || '%' OR m.body ILIKE '%' || $3 || '%' OR m.memory_type ILIKE '%' || $3 || '%' OR coalesce(m.scope_kind, '') ILIKE '%' || $3 || '%')"
+    ];
+
+    if (input.include_detached !== true) {
+      clauses.push(
+        "(m.project_id IS NULL OR (coalesce(lifecycle.value->>'visibility', 'active') <> 'hidden' AND coalesce(lifecycle.value->>'status', 'active') NOT IN ('detached', 'sandbox_cleaned')))"
+      );
+    }
+
+    if (mode === "same_project") {
+      clauses.push("(m.project_id = $2::uuid OR m.scope = 'developer')");
+    } else if (mode === "developer_rules") {
+      clauses.push("m.scope = 'developer'");
+      clauses.push("m.status = 'accepted'");
+      clauses.push("m.use_policy = 'instruction_grade'");
+    } else if (mode === "environment") {
+      clauses.push(
+        "m.scope_kind = ANY(ARRAY['environment', 'capability', 'connector_account', 'domain'])"
+      );
+    } else if (mode === "similar_projects") {
+      clauses.push("m.project_id IS NOT NULL");
+      clauses.push("m.project_id <> $2::uuid");
+    }
+
+    if (input.scope_kind) {
+      values.push(input.scope_kind);
+      clauses.push(`m.scope_kind = $${values.length}`);
+    }
+    if (input.memory_types && input.memory_types.length > 0) {
+      values.push(input.memory_types);
+      clauses.push(`m.memory_type = ANY($${values.length}::text[])`);
+    }
+    values.push(input.top_k ?? 8);
+    const rows = await this.pool.query<{
+      memory_id: string;
+      memory_type: string;
+      title: string;
+      body: string;
+      status: string;
+      use_policy: string;
+      scope: string;
+      scope_kind: string | null;
+      scope_id: string | null;
+      audience: unknown;
+      confidence: number | null;
+      updated_at: string;
+      project_id: string | null;
+      project_name: string | null;
+      primary_path: string | null;
+      source_refs: unknown;
+    }>(
+      `
+        SELECT
+          m.id AS memory_id,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.audience,
+          m.confidence,
+          m.updated_at,
+          m.project_id,
+          p.name AS project_name,
+          p.primary_path,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN projects p ON p.id = m.project_id
+        LEFT JOIN project_settings lifecycle
+          ON lifecycle.project_id = p.id
+         AND lifecycle.key = 'project_lifecycle'
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE ${clauses.join(" AND ")}
+        GROUP BY m.id, p.id
+        ORDER BY
+          CASE m.use_policy WHEN 'instruction_grade' THEN 0 WHEN 'recall_allowed' THEN 1 ELSE 2 END,
+          CASE WHEN m.project_id = $2::uuid THEN 0 ELSE 1 END,
+          m.updated_at DESC
+        LIMIT $${values.length}::int
+      `,
+      values
+    );
+
+    let usedChars = 0;
+    const maxChars = input.max_chars_total ?? 12_000;
+    const results = [];
+    for (const row of rows.rows) {
+      if (usedChars >= maxChars) break;
+      const body = redactSecretValues(String(row.body ?? ""));
+      const remaining = maxChars - usedChars;
+      const bodyExcerpt = body.slice(0, remaining);
+      usedChars += bodyExcerpt.length;
+      const sourceRefs = Array.isArray(row.source_refs)
+        ? row.source_refs.map((sourceRef) => this.redactSourceRef(sourceRef))
+        : [];
+      const sourcePath = this.sourcePathFromRefs(sourceRefs);
+      const sourceProject = {
+        project_id: row.project_id,
+        name: row.project_name,
+        primary_path: row.primary_path
+      };
+      const sameProject = row.project_id === context.projectId || row.scope === "developer";
+      results.push({
+        memory_id: row.memory_id,
+        memory_type: row.memory_type,
+        title: redactSecretValues(row.title),
+        body: bodyExcerpt,
+        status: row.status,
+        use_policy: row.use_policy,
+        scope: row.scope,
+        scope_kind: row.scope_kind,
+        scope_id: row.scope_id,
+        audience: row.audience,
+        confidence: row.confidence,
+        updated_at: row.updated_at,
+        source_project: sourceProject,
+        source_path: sourcePath,
+        source_refs: sourceRefs,
+        why: `${mode}: matched query text in governed memory`,
+        applicability: sameProject
+          ? "directly_applicable"
+          : mode === "environment"
+            ? "verify_before_applying"
+            : "example_only",
+        applicability_warning: sameProject
+          ? "This record already applies to the current project or developer scope."
+          : "This is source-linked evidence from another project. Do not treat it as a current-project rule unless you apply it locally and create current-project memory or promote a general rule through review.",
+        promotion_policy:
+          "Cross-project results remain evidence/examples. Applying a pattern requires current-project memory with source refs; broad rules require review."
+      });
+    }
+
+    const trace = await this.pool.query<{ id: string }>(
+      `
+        INSERT INTO recall_traces (
+          developer_id, project_id, tool_name, query, returned_memory_ids, metadata
+        )
+        VALUES ($1, $2, 'memory_cross_project_recall', $3, $4, $5)
+        RETURNING id
+      `,
+      [
+        context.developerId,
+        context.projectId,
+        input.query,
+        JSON.stringify(results.map((result) => result.memory_id)),
+        JSON.stringify({
+          mode,
+          include_detached: input.include_detached === true,
+          truncated: rows.rows.length > results.length
+        })
+      ]
+    );
+
+    return {
+      trace_id: trace.rows[0]?.id,
+      mode,
+      current_project_id: context.projectId,
+      results,
+      truncated: rows.rows.length > results.length,
+      policy: {
+        default_context_pack_includes_cross_project_examples: false,
+        cross_project_results_are_binding_rules: false,
+        source_linked_examples_only: mode === "similar_projects" || mode === "all_projects_review"
+      }
+    };
+  }
+
   async reportRecallUsage(input: ReportRecallUsageInput) {
     await this.pool.query(
       `
@@ -2442,6 +2673,26 @@ export class RecallantDb {
         path: "graph",
         superseded_by: null
       }));
+  }
+
+  private redactSourceRef(sourceRef: unknown) {
+    if (!sourceRef || typeof sourceRef !== "object") return sourceRef;
+    const record = sourceRef as Record<string, unknown>;
+    return {
+      ...record,
+      quote: typeof record.quote === "string" ? redactSecretValues(record.quote) : record.quote
+    };
+  }
+
+  private sourcePathFromRefs(sourceRefs: unknown[]) {
+    for (const sourceRef of sourceRefs) {
+      if (!sourceRef || typeof sourceRef !== "object") continue;
+      const metadata = (sourceRef as { metadata?: unknown }).metadata;
+      if (!metadata || typeof metadata !== "object") continue;
+      const sourcePath = (metadata as { source_path?: unknown }).source_path;
+      if (typeof sourcePath === "string" && sourcePath.length > 0) return sourcePath;
+    }
+    return null;
   }
 
   private async findProjectForManagement(input: DetachProjectInput) {

@@ -310,8 +310,8 @@ Follow-ups before attaching a live project:
 - Governed project-level detach is now available through `recallant detach` / `recallant
   project-detach`; copied-project cleanup no longer requires manual SQL for Recallant-side hiding
   and sandbox retrieval archiving.
-- Add autonomous project attach modes (`manual`, `guided`, `autopilot`) and controlled
-  cross-project recall before broad live-project onboarding. See
+- Autonomous project attach modes (`manual`, `guided`, `autopilot`) and controlled
+  cross-project recall now have first implementation slices before broad live-project onboarding. See
   [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and
   [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 

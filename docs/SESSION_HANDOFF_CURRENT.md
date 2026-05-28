@@ -8,12 +8,14 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 Recallant is deployed on the owner server, the first production UI cleanup has been completed, and
 the GutenDocx copied-project sandbox pilot is complete. The active product direction is now Phase 10:
-autonomous project attach/detach plus controlled cross-project recall.
+autonomous project attach/detach plus controlled cross-project recall; the first implementation
+slices for all three are now complete.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet. The next work is to implement the product-level workflow that can
-attach/detach projects safely, then add controlled cross-project recall.
+attach/detach projects safely and reuse cross-project examples explicitly, then continue improving
+the owner-facing management surface.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -72,10 +74,23 @@ The current Phase 10 detach target is complete for the first implementation slic
 - hard delete / permanent erasure is policy-blocked from ordinary detach and must use the separate
   forget workflow.
 
-The next Phase 10 targets are:
+The current Phase 10 controlled cross-project recall target is complete for the first
+implementation slice:
 
-- explicit controlled cross-project recall modes for source-linked examples from other projects;
-- no automatic mixing of unrelated project memories into default context packs.
+- MCP tool `memory_cross_project_recall` exposes explicit `same_project`, `developer_rules`,
+  `environment`, `similar_projects`, and `all_projects_review` modes;
+- similar-project results include source project/path/ref, status, use policy, scope kind,
+  applicability warning, and promotion policy;
+- ordinary context packs do not include unrelated project memory by default;
+- environment/capability recall redacts secret-like values;
+- applying a pattern from project B requires creating project-A memory with source refs.
+
+The next useful targets are:
+
+- continue improving Review/Management UI and chat so operational choices are shown in plain
+  language;
+- optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
+  confirmation.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -105,5 +120,6 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should add controlled cross-project recall modes for source-linked examples from
-other projects. Do not make similar-project examples part of ordinary startup context by default.
+The next session should continue from a completed first Phase 10 attach/detach/cross-project
+checkpoint. A practical next slice is owner-facing Management UI/chat quality or optional local
+sandbox cleanup after confirmed detach.

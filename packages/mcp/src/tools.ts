@@ -6,6 +6,7 @@ import {
   type AgentMemorySourceRefInput,
   type ArchiveInput,
   type ContextPackInput,
+  type CrossProjectRecallInput,
   type CreateAgentMemoryInput,
   type ForgetInput,
   type AppendEventInput,
@@ -59,6 +60,7 @@ export type RecallantToolName =
   | "memory_list_agent_memories"
   | "memory_get_agent_memory"
   | "memory_recall_agent_memories"
+  | "memory_cross_project_recall"
   | "memory_report_recall_usage"
   | "memory_closeout";
 
@@ -707,6 +709,47 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         trace_id: randomUUID(),
         memories: [],
         truncated: false
+      });
+    }
+  },
+  {
+    name: "memory_cross_project_recall",
+    title: "Cross-Project Recall",
+    description:
+      "Explicitly retrieve source-linked governed-memory examples from this project, other projects, developer rules, or environment/capability records without adding them to default context.",
+    inputSchema: z.object({
+      query: z.string().min(1),
+      mode: z
+        .enum([
+          "same_project",
+          "developer_rules",
+          "environment",
+          "similar_projects",
+          "all_projects_review"
+        ])
+        .default("similar_projects"),
+      session_id: uuidString.nullable().optional(),
+      scope_kind: nullableString,
+      memory_types: z.array(z.string().min(1)).default([]),
+      include_candidates: z.boolean().default(false),
+      include_stale: z.boolean().default(false),
+      include_needs_review: z.boolean().default(false),
+      include_detached: z.boolean().default(false),
+      top_k: z.number().int().positive().default(8),
+      max_chars_total: z.number().int().positive().default(12_000)
+    }),
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.crossProjectRecall(args as CrossProjectRecallInput);
+      return stubResponse("memory_cross_project_recall", {
+        trace_id: randomUUID(),
+        mode: args.mode ?? "similar_projects",
+        results: [],
+        truncated: false,
+        policy: {
+          default_context_pack_includes_cross_project_examples: false,
+          cross_project_results_are_binding_rules: false
+        }
       });
     }
   },
