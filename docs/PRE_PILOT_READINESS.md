@@ -51,7 +51,7 @@ Gate:
 
 ## Workstream R1 - Existing Project Discovery And Preflight
 
-Status: not started.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -90,6 +90,15 @@ Gate:
 
 - A dry-run discovery on a fixture project writes nothing and reports candidates with source paths, result classes, provisional scope/audience, risk, and import suggestions.
 - A fixture containing duplicated old logs or secrets is reported as risky without leaking secret values.
+
+Implemented checkpoint:
+
+- `recallant discover --project-dir <path>` now emits a read-only preflight JSON report by default and a human summary with `--format text`.
+- Discovery scans common manual memory surfaces, selected runbook/doc surfaces, and root secret-reference example files.
+- Findings include source refs, hashes, result classes, provisional scope/audience, bounded redacted excerpts, risk flags, context-budget warnings, and explicit import suggestions.
+- Secret-like values are redacted from discovery/import preview output; `.env.example` and related files expose variable names/status only.
+- `recallant import --dry-run <path>` reuses the discovery candidate model so R2 can add confirmed writes without changing preview semantics.
+- `npm run prepilot:smoke:discovery` covers the fixture project gate.
 
 ## Workstream R2 - Durable Explicit Import
 

@@ -17,6 +17,7 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
 - Governed memory workflow with provenance requirements, candidate/needs-review policy, instruction-grade promotion through review, recall traces, usage reporting, archive/supersede/stale/reject/edit/merge paths, and cleanup candidate reporting.
 - Private Review Command Center with auth, project list, critical status, inbox, active rules, settings, paid API/cost view, review actions, and confirmation-gated dangerous setting changes.
 - CLI onboarding and diagnostics: `init`, `discover`, `import --dry-run`, `lint-context`, `context`, `doctor`, backup/verify, restore-plan, analyze/cleanup, local spool append/sync/prune.
+- Pre-Pilot discovery/preflight for existing projects: read-only candidate scanning for manual memory surfaces, selected runbooks/docs, secret-reference examples, source hashes, scope/audience previews, context-budget warnings, duplicate/conflict/stale-history risks, redacted secret handling, JSON and text output, and import dry-run parity.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -101,8 +102,8 @@ project.
 
 Current work order:
 
-1. Existing-project discovery and preflight.
-2. Durable explicit import write mode.
+1. Existing-project discovery and preflight. Complete for the first pre-pilot checkpoint.
+2. Durable explicit import write mode. Next.
 3. Review UI import candidate/action readiness.
 4. Pilot sandbox workflow.
 5. Agent onboarding contract.
@@ -140,6 +141,15 @@ Latest full local validation was run on a clean Docker Postgres database:
 - `make db-down`
 
 The core smoke suite includes MCP handshake, lifecycle, embeddings, retrieval, governed memory, graph/context/forget, Review UI, CLI onboarding, backup/restore planning, size limits, structured errors/rate limits, search p95, archive/decay/cleanup, repo contract sync, local spool, and cross-client smoke.
+
+Latest Pre-Pilot R1 validation:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- `npm run prepilot:smoke:discovery`
+
+The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 
 ## Current Boundary
 

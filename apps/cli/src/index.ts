@@ -9,6 +9,12 @@ import { createRecallantDbFromEnv } from "@recallant/db";
 import type { RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
+import {
+  detectImportCandidates,
+  discoveryCandidateForImport,
+  discoveryResult,
+  formatDiscoveryText
+} from "./discovery.js";
 
 const memorySection = `## Memory (Recallant)
 
@@ -41,6 +47,41 @@ export function describeCliBoundary() {
 function parseFlag(argv: readonly string[], name: string) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function positionalArgs(argv: readonly string[]) {
+  const flagsWithValues = new Set([
+    "--project-dir",
+    "--server-url",
+    "--target",
+    "--capture-profile",
+    "--task-hint",
+    "--manifest",
+    "--remap",
+    "--target",
+    "--spool-dir",
+    "--kind",
+    "--role",
+    "--text",
+    "--event-kind",
+    "--raw-artifact-json",
+    "--dedup-key",
+    "--not-accessed",
+    "--older-than",
+    "--limit",
+    "--format"
+  ]);
+  const args: string[] = [];
+  for (let index = 3; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (flagsWithValues.has(arg)) index += 1;
+      continue;
+    }
+    args.push(arg);
+  }
+  return args;
 }
 
 function spoolDir(argv: readonly string[]) {
@@ -159,22 +200,6 @@ Next step: start a Recallant-backed agent session.
 `;
 }
 
-async function detectImportCandidates(projectDir: string) {
-  const candidates = [];
-  for (const file of ["PROJECT_LOG.md", "AGENTS.md", "CLAUDE.md", ".env.example"]) {
-    const path = join(projectDir, file);
-    const content = await readOptional(path);
-    if (content !== null) {
-      candidates.push({
-        path: file,
-        sha256: createHash("sha256").update(content).digest("hex"),
-        suggested_command: `recallant import --dry-run ${file}`
-      });
-    }
-  }
-  return candidates;
-}
-
 async function runInit(argv: readonly string[]) {
   const options = parseInitOptions(argv);
   const projectId = randomUUID();
@@ -233,34 +258,52 @@ async function runInit(argv: readonly string[]) {
 
 async function runDiscover(argv: readonly string[]) {
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
-  const result = {
-    action: "discover",
-    dry_run: argv.includes("--dry-run"),
-    project_dir: projectDir,
-    candidates: await detectImportCandidates(projectDir),
-    writes_memory: false,
-    promotes_instruction_grade: false
-  };
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  const result = discoveryResult(projectDir, await detectImportCandidates(projectDir));
+  const format = parseFlag(argv, "--format") ?? (argv.includes("--text") ? "text" : "json");
+  process.stdout.write(
+    format === "text" ? formatDiscoveryText(result) : `${JSON.stringify(result, null, 2)}\n`
+  );
 }
 
 async function runImport(argv: readonly string[]) {
-  const target = argv.find((arg, index) => index > 2 && !arg.startsWith("--"));
+  const target = positionalArgs(argv)[0];
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
-  const path = target ? join(projectDir, target) : null;
-  const content = path ? await readOptional(path) : null;
-  const isEnvExample = target?.endsWith(".env.example") ?? false;
+  const candidate = target ? await discoveryCandidateForImport(projectDir, target) : null;
   const result = {
     action: "import",
     dry_run: argv.includes("--dry-run"),
     target,
     writes_memory: false,
-    result_class: isEnvExample ? "secret_reference_names_only" : "source_preview",
-    provisional_scope: "project",
-    provisional_audience: target === "CLAUDE.md" ? "specific_client:claude_code" : "all_agents",
-    source_ref: content
-      ? { path: target, sha256: createHash("sha256").update(content).digest("hex") }
-      : null,
+    result_class: candidate?.result_class ?? "import_source",
+    result_classes: candidate?.result_classes ?? ["import_source"],
+    provisional_scope: candidate?.provisional_scope ?? "project",
+    scope: candidate?.scope ?? { scope_kind: "project", scope_id: null },
+    provisional_audience: candidate?.provisional_audience ?? "all_agents",
+    source_ref: candidate?.source_ref ?? null,
+    source_refs: candidate?.source_ref ? [candidate.source_ref] : [],
+    risks: candidate?.risks ?? [],
+    risk: candidate?.risk ?? "low",
+    bounded_excerpt: candidate?.bounded_excerpt ?? null,
+    secret_references: candidate?.secret_references ?? [],
+    planned_changes: argv.includes("--dry-run")
+      ? [
+          {
+            action: "none",
+            writes_database: false,
+            writes_memory: false,
+            promotes_instruction_grade: false,
+            reason: "Dry run only."
+          }
+        ]
+      : [
+          {
+            action: "blocked",
+            writes_database: false,
+            writes_memory: false,
+            promotes_instruction_grade: false,
+            reason: "Confirmed import writes start in the next Pre-Pilot workstream."
+          }
+        ],
     warning: argv.includes("--dry-run")
       ? "Preview only. No import_batch events, active memories, or instruction-grade records were created."
       : "Write imports are not enabled in this implementation slice."
