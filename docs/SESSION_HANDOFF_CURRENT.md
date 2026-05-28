@@ -6,15 +6,17 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current State
 
-Recallant is deployed on the owner server and the first production UI cleanup has been completed. The active next plan is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+Recallant is deployed on the owner server and the first production UI cleanup has been completed. The active plan is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
 
-Do not start by connecting a real project. Existing-project discovery/preflight, Durable Explicit Import write mode, Review UI import/action readiness, Pilot Sandbox Workflow, and Agent Onboarding Contract are complete for the first pre-pilot checkpoint; the next implementation work is Operational Readiness Check.
+Do not start by connecting a real project. Existing-project discovery/preflight, Durable Explicit Import write mode, Review UI import/action readiness, Pilot Sandbox Workflow, Agent Onboarding Contract, and Operational Readiness Check are complete for the first pre-pilot checkpoint. The next work is the first pilot on a duplicated project copy.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
 with `make prod-db-up`; public unauthenticated access returned Cloudflare Access `302` again. Dev
 database Make targets now use `recallant-dev` as their Docker Compose project name so local
 `make db-down` / `make db-reset` cannot remove the production `recallant-postgres` container.
+The owner then confirmed in a real browser that authenticated Cloudflare Access loads the Recallant
+Review Command Center for project `84eda3bf`.
 
 Historical handoff material from 2026-05-21 has been archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`. It is useful for provenance, but it is no longer the current starting point.
 
@@ -27,7 +29,7 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 5. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
 6. Run `git status --short --branch`.
 7. Run `git log --oneline -8`.
-8. Begin with Workstream R6 from `docs/PRE_PILOT_READINESS.md`.
+8. Begin with the copied-project pilot workflow in `docs/PILOT_SANDBOX_WORKFLOW.md`.
 
 ## Active Work Order
 
@@ -36,9 +38,9 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 3. R3 Review UI Import And Action Readiness. Complete for the first pre-pilot checkpoint.
 4. R4 Pilot Sandbox Workflow. Complete for the first pre-pilot checkpoint.
 5. R5 Agent Onboarding Contract. Complete for the first pre-pilot checkpoint.
-6. R6 Operational Readiness Check. Continue here next.
+6. R6 Operational Readiness Check. Complete for the first pre-pilot checkpoint.
 
-R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, and R5 agent onboarding contract are also complete for the first pre-pilot checkpoint.
+R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, R5 agent onboarding contract, and R6 operational readiness are also complete for the first pre-pilot checkpoint.
 
 ## Boundaries
 
@@ -52,4 +54,4 @@ R0 Documentation And Handoff Readiness is complete for the current checkpoint. R
 
 ## Success Condition For The Next Session
 
-The next session should leave Recallant able to run a safe pilot on a duplicated project copy, with discovery/import/review/closeout documented and verified.
+The next session should run the first safe pilot on a duplicated project copy, then report what Recallant imported, missed, and should improve before any real working project is attached.

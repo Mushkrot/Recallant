@@ -170,6 +170,9 @@ Operational recovery as of 2026-05-28:
 - `recallant-postgres` is healthy on `127.0.0.1:15432`, `recallant.service` is active on
   `127.0.0.1:3005`, and public unauthenticated access returns the expected Cloudflare Access
   redirect;
+- the owner confirmed from a real browser session that authenticated Cloudflare Access loads the
+  Recallant Review Command Center for project `84eda3bf`;
+- production `recallant doctor`, local stdio MCP smoke, and backup restore verification pass;
 - dev database Make targets now use the separate Docker Compose project name `recallant-dev` so
   local smoke cleanup cannot remove the production database container again.
 

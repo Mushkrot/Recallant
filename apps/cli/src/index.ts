@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
@@ -604,7 +604,7 @@ async function runBackupVerify(argv: readonly string[]) {
   if (!manifestPath) throw new Error("--manifest is required");
   const databaseUrl = process.env.RECALLANT_DATABASE_URL;
   if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup verification");
-  const resolvedManifest = resolve(manifestPath);
+  const resolvedManifest = await realpath(resolve(manifestPath));
   const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
     files: Array<{ path: string; sha256: string }>;
     schema_version: string;
@@ -689,7 +689,7 @@ async function runRestorePlan(argv: readonly string[]) {
   const manifestPath = parseFlag(argv, "--manifest");
   if (!manifestPath) throw new Error("--manifest is required");
   const remapPath = parseFlag(argv, "--remap");
-  const resolvedManifest = resolve(manifestPath);
+  const resolvedManifest = await realpath(resolve(manifestPath));
   const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
     files: Array<{ path: string; sha256: string }>;
     schema_version: string;

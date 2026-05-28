@@ -52,7 +52,8 @@ npm run server:start
 
 Production local backups are automated by `recallant-backup.timer`. Each run creates a backup under
 `/ai/recallant-data/backups`, verifies it with `recallant backup-verify`, and updates
-`/ai/recallant-data/backups/latest-manifest.json`.
+`/ai/recallant-data/backups/latest-manifest.json`. The `backup-verify --manifest` command accepts
+that latest-manifest symlink directly.
 
 On the owner's server, any long-running port-bound service must be registered in `/ai/PORTS.yaml` before start, and security/exposure changes must consult `/ai/SECURITY`.
 

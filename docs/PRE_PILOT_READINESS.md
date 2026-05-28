@@ -236,7 +236,7 @@ Implemented checkpoint:
 
 ## Workstream R6 - Operational Readiness Check
 
-Status: in progress.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -270,11 +270,13 @@ Recovery checkpoint:
 - Post-recovery DB checks found one `/ai/recallant` project row, zero pending paid API approvals,
   zero paid-provider model calls in the last 30 days, and a current `latest-manifest.json` backup
   pointer from 2026-05-28.
+- The owner refreshed the real browser session after recovery and confirmed the authenticated
+  Cloudflare Access path loads the Recallant Review Command Center for project `84eda3bf`.
+- Production `recallant doctor`, local stdio MCP smoke, and backup restore verification passed with
+  production env. `backup-verify` now supports the `latest-manifest.json` symlink directly.
 - Root cause prevention: dev database Make targets now use an explicit `recallant-dev` Docker
   Compose project name so `make db-down` and `make db-reset` cannot remove the production
   `recallant-postgres` container managed by the production compose target.
-- Full authenticated browser UI verification still requires a real Cloudflare Access session in
-  the owner's browser; agents should not forge Cloudflare identity headers against production.
 
 ## Exit Gate
 

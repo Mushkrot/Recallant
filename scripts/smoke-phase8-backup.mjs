@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecallantDb } from "../packages/db/dist/index.js";
@@ -134,7 +134,10 @@ for (const fragment of forbiddenFragments) {
   }
 }
 
-const verify = run(["backup-verify", "--manifest", backup.manifest_path, "--query", searchNeedle]);
+const latestManifestPath = join(backupRoot, "latest-manifest.json");
+await symlink(backup.manifest_path, latestManifestPath);
+
+const verify = run(["backup-verify", "--manifest", latestManifestPath, "--query", searchNeedle]);
 if (
   verify.ok !== true ||
   verify.restore_verification !== "passed" ||
@@ -167,7 +170,7 @@ await writeFile(
     2
   )}\n`
 );
-const restorePlan = run(["restore-plan", "--manifest", backup.manifest_path, "--remap", remapPath]);
+const restorePlan = run(["restore-plan", "--manifest", latestManifestPath, "--remap", remapPath]);
 if (
   restorePlan.ok !== true ||
   restorePlan.writes_database !== false ||

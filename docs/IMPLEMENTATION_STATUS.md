@@ -179,6 +179,16 @@ Latest Pre-Pilot R6 incident recovery validation:
 - `/ai/recallant-data/backups/latest-manifest.json` points to the 2026-05-28 13:45 UTC manifest
 - `make db-up && make db-down && make prod-db-status` verified dev compose cleanup no longer
   removes the production `recallant-postgres` container
+- Owner browser verification confirmed the authenticated Cloudflare Access path loads the Recallant
+  Review Command Center for project `84eda3bf`
+- Production `recallant doctor` passed with Postgres reachable, project config present, Ollama
+  reachable, no missing expected local models, paid API mode `confirm_each`, and hidden API routes
+  disabled
+- Production local stdio MCP smoke passed
+- `backup-verify --manifest /ai/recallant-data/backups/latest-manifest.json` is now supported for
+  symlinked latest-manifest pointers and passed restore verification without production overwrite
+- Docker network execution of `npm run phase8:smoke:backup` passed against the isolated
+  `recallant-dev` database and verifies symlinked latest-manifest backup/restore-plan handling
 
 The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 
