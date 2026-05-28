@@ -23,7 +23,7 @@
     "format:check": "prettier --check \"{apps,packages}/**/*.{ts,json}\" \"*.{js,json}\" \".github/**/*.yml\"",
     "lint": "eslint .",
     "server:start": "node apps/server/dist/index.js",
-    "smoke:core": "npm run mcp:smoke && npm run phase3:smoke && npm run phase4:smoke && npm run phase5:smoke && npm run phase6:smoke:governed && npm run phase6:smoke:graph && npm run review-ui:smoke && npm run phase7:smoke && npm run prepilot:smoke:discovery && npm run phase8:smoke:backup && npm run phase8:smoke:limits && npm run phase8:smoke:errors && npm run phase8:smoke:search-p95 && npm run phase9:smoke:archive && npm run phase9:smoke:decay && npm run phase9:smoke:cleanup && npm run repo-contract:smoke && npm run spool:smoke && npm run cross-client:smoke",
+    "smoke:core": "npm run mcp:smoke && npm run phase3:smoke && npm run phase4:smoke && npm run phase5:smoke && npm run phase6:smoke:governed && npm run phase6:smoke:graph && npm run review-ui:smoke && npm run phase7:smoke && npm run prepilot:smoke:discovery && npm run prepilot:smoke:import && npm run phase8:smoke:backup && npm run phase8:smoke:limits && npm run phase8:smoke:errors && npm run phase8:smoke:search-p95 && npm run phase9:smoke:archive && npm run phase9:smoke:decay && npm run phase9:smoke:cleanup && npm run repo-contract:smoke && npm run spool:smoke && npm run cross-client:smoke",
     "mcp:smoke": "node scripts/smoke-mcp.mjs",
     "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",
     "phase5:smoke": "node scripts/smoke-phase5-retrieval.mjs",
@@ -41,6 +41,7 @@
     "spool:smoke": "node scripts/smoke-spool.mjs",
     "cross-client:smoke": "node scripts/smoke-cross-client.mjs",
     "prepilot:smoke:discovery": "node scripts/smoke-pre-pilot-discovery.mjs",
+    "prepilot:smoke:import": "node scripts/smoke-pre-pilot-import.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test": "npm run build"

@@ -565,6 +565,27 @@ export async function discoveryCandidateForImport(projectDir: string, target: st
   return readDiscoveryCandidate(projectDir, safeTarget);
 }
 
+export async function readImportTextForCandidate(
+  projectDir: string,
+  candidate: DiscoveryCandidate
+) {
+  if (candidate.result_classes.includes("secret_reference_names_only")) {
+    return candidate.secret_references
+      .map((ref) =>
+        [
+          `secret_reference ${ref.name}`,
+          `sensitive=${ref.sensitive}`,
+          `has_example_value=${ref.has_example_value}`,
+          "value=<redacted>"
+        ].join(" ")
+      )
+      .join("\n");
+  }
+  const content = await readOptional(join(projectDir, safeRelativePath(candidate.path)));
+  if (content === null) return "";
+  return content.split("\n").map(lineWithRedactedSecrets).join("\n");
+}
+
 function discoverySummary(candidates: DiscoveryCandidate[]) {
   const byRisk = { low: 0, medium: 0, high: 0 };
   const byClass: Record<string, number> = {};

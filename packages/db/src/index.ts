@@ -51,6 +51,28 @@ export type AppendEventInput = {
   dedup_key?: string | null;
 };
 
+export type ImportSourceInput = {
+  client_kind?: string;
+  project_path?: string | null;
+  source_path: string;
+  source_type: string;
+  source_sha256: string;
+  source_size_bytes?: number | null;
+  content_type?: string | null;
+  import_text: string;
+  bounded_excerpt?: string | null;
+  result_class: string;
+  result_classes?: string[];
+  scope_kind?: string | null;
+  scope_id?: string | null;
+  audience?: unknown[];
+  risk?: string | null;
+  risks?: JsonObject[];
+  secret_references?: JsonObject[];
+  metadata?: JsonObject;
+  dedup_key?: string | null;
+};
+
 export type AgentMemorySourceRefInput = {
   source_kind: string;
   source_id: string;
@@ -330,6 +352,41 @@ function hasHighRiskSignal(value: string) {
   return /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
     value
   );
+}
+
+function importMemoryType(resultClasses: readonly string[]) {
+  if (resultClasses.includes("secret_reference_names_only")) return "secret_reference";
+  if (resultClasses.includes("handoff_checkpoint")) return "checkpoint_seed";
+  if (resultClasses.includes("repo_contract") || resultClasses.includes("startup_instruction")) {
+    return "repo_contract";
+  }
+  if (
+    resultClasses.includes("environment_fact") ||
+    resultClasses.includes("capability_binding") ||
+    resultClasses.includes("connector_account_binding")
+  ) {
+    return "environment_fact";
+  }
+  return "import_candidate";
+}
+
+function importMemoryBody(input: ImportSourceInput, resultClasses: readonly string[]) {
+  const riskSummary = input.risks?.length
+    ? input.risks.map((risk) => `${risk.code}:${risk.severity}`).join(", ")
+    : "none";
+  const secretSummary = input.secret_references?.length
+    ? ` Secret references: ${input.secret_references
+        .map((ref) => String(ref.name ?? "unknown"))
+        .join(", ")}. Values are redacted.`
+    : "";
+  return [
+    `Imported source ${input.source_path} as ${resultClasses.join(", ")}.`,
+    `Risk: ${input.risk ?? "low"} (${riskSummary}).`,
+    secretSummary,
+    "This imported record is reviewable evidence and must not become instruction_grade without explicit review promotion."
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function isDangerousSetting(key: string, value: unknown) {
@@ -1193,6 +1250,206 @@ export class RecallantDb {
     });
   }
 
+  async importSource(input: ImportSourceInput) {
+    assertMaxChars(
+      "recallant_import.import_text",
+      input.import_text,
+      readPositiveIntEnv("RECALLANT_IMPORT_TEXT_MAX_CHARS", 250_000)
+    );
+    const context = await this.ensureProject(input.project_path);
+    const resultClasses = input.result_classes?.length
+      ? input.result_classes
+      : [input.result_class];
+    const dedupKey =
+      input.dedup_key ??
+      `import:${input.source_path}:${input.source_sha256}:${resultClasses.sort().join(",")}`;
+    return withTransaction(this.pool, async (client) => {
+      const existing = await this.findDedup(client, context.projectId, dedupKey);
+      if (existing) {
+        const counts = await client.query<{
+          chunk_count: number;
+          raw_artifact_count: number;
+          memory_ids: string[];
+        }>(
+          `
+            SELECT
+              (SELECT count(*)::int FROM chunks WHERE source_event_id = $1) AS chunk_count,
+              (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = $1) AS raw_artifact_count,
+              coalesce(
+                (SELECT array_agg(id::text)
+                 FROM agent_memories
+                 WHERE metadata->>'import_dedup_key' = $2),
+                ARRAY[]::text[]
+              ) AS memory_ids
+          `,
+          [existing, dedupKey]
+        );
+        const row = counts.rows[0];
+        return {
+          status: "duplicate",
+          event_id: existing,
+          chunk_count: row?.chunk_count ?? 0,
+          raw_artifact_count: row?.raw_artifact_count ?? 0,
+          memory_ids: row?.memory_ids ?? [],
+          dedup_key: dedupKey
+        };
+      }
+
+      const event = await this.insertEvent(client, {
+        projectId: context.projectId,
+        sessionId: null,
+        ingestSource: "cli_import",
+        kind: "import_batch",
+        occurredAt: new Date(),
+        payload: {
+          schema_version: 1,
+          source_ref: {
+            path: input.source_path,
+            sha256: input.source_sha256,
+            size_bytes: input.source_size_bytes ?? null,
+            content_type: input.content_type ?? null
+          },
+          source_type: input.source_type,
+          result_class: input.result_class,
+          result_classes: resultClasses,
+          scope_kind: input.scope_kind ?? "project",
+          scope_id: input.scope_id ?? null,
+          audience: input.audience ?? [{ kind: "all_agents", id: null }],
+          risk: input.risk ?? "low",
+          risks: input.risks ?? [],
+          secret_references: input.secret_references ?? [],
+          text_excerpt: input.bounded_excerpt ?? input.import_text.slice(0, 500),
+          metadata: input.metadata ?? {}
+        }
+      });
+      await this.insertDedup(client, context.projectId, dedupKey, event.id);
+
+      const rawArtifact = await client.query<{ id: string }>(
+        `
+          INSERT INTO raw_artifacts (
+            project_id, session_id, source_event_id, artifact_kind, storage_backend,
+            uri, sha256, size_bytes, content_type, excerpt, metadata
+          )
+          VALUES ($1, NULL, $2, 'transcript_export', 'postgres_inline', $3, $4, $5, $6, $7, $8)
+          RETURNING id
+        `,
+        [
+          context.projectId,
+          event.id,
+          `import://${input.source_path}`,
+          input.source_sha256,
+          input.source_size_bytes ?? null,
+          input.content_type ?? "text/markdown",
+          input.bounded_excerpt ?? input.import_text.slice(0, 500),
+          JSON.stringify({
+            source_type: input.source_type,
+            result_classes: resultClasses,
+            secret_policy: "secret values redacted before import"
+          })
+        ]
+      );
+      const rawArtifactId = rawArtifact.rows[0]?.id;
+
+      const audience = input.audience ?? [{ kind: "all_agents", id: null }];
+      const scopeKind = input.scope_kind ?? "project";
+      const chunkIds = await this.insertChunks(client, {
+        projectId: context.projectId,
+        developerId: context.developerId,
+        eventId: event.id,
+        text: input.import_text,
+        scope: "project",
+        scopeKind,
+        scopeId:
+          input.scope_id ?? (scopeKind === "project" ? context.projectId : input.source_path),
+        audience
+      });
+      const embedding = await this.embedChunks(client, {
+        developerId: context.developerId,
+        projectId: context.projectId,
+        sessionId: null,
+        chunkIds,
+        texts: chunkText(input.import_text)
+      });
+
+      const isHighRisk =
+        input.risk === "high" ||
+        (input.risks ?? []).some((risk) => risk.severity === "high") ||
+        resultClasses.some((resultClass) =>
+          [
+            "secret_reference_names_only",
+            "capability_binding",
+            "connector_account_binding",
+            "possible_conflict"
+          ].includes(resultClass)
+        );
+      const memory = await client.query<{ id: string; status: string; use_policy: string }>(
+        `
+          INSERT INTO agent_memories (
+            developer_id, project_id, scope, scope_kind, scope_id, audience,
+            memory_type, title, body, status, use_policy, confidence, created_by, metadata
+          )
+          VALUES ($1, $2, 'project', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'import', $12)
+          RETURNING id, status, use_policy
+        `,
+        [
+          context.developerId,
+          context.projectId,
+          scopeKind,
+          input.scope_id ?? (scopeKind === "project" ? context.projectId : input.source_path),
+          JSON.stringify(audience),
+          importMemoryType(resultClasses),
+          `Imported ${input.source_path}`,
+          importMemoryBody(input, resultClasses),
+          isHighRisk ? "needs_review" : "candidate",
+          isHighRisk ? "evidence_only" : "recall_allowed",
+          isHighRisk ? 0.6 : 0.75,
+          JSON.stringify({
+            import_dedup_key: dedupKey,
+            import_event_id: event.id,
+            raw_artifact_id: rawArtifactId ?? null,
+            result_class: input.result_class,
+            result_classes: resultClasses,
+            risk: input.risk ?? "low",
+            risks: input.risks ?? [],
+            policy_reason: isHighRisk
+              ? "import_high_risk_review_required"
+              : "import_candidate_review_required"
+          })
+        ]
+      );
+      const memoryId = memory.rows[0]?.id;
+      if (!memoryId) throw new Error("Failed to create import candidate memory");
+      await client.query(
+        `
+          INSERT INTO agent_memory_source_refs (memory_id, source_kind, source_id, quote, metadata)
+          VALUES ($1, 'event', $2, $3, $4)
+        `,
+        [
+          memoryId,
+          event.id,
+          input.bounded_excerpt ?? input.import_text.slice(0, 500),
+          JSON.stringify({
+            source_path: input.source_path,
+            source_sha256: input.source_sha256,
+            raw_artifact_id: rawArtifactId ?? null
+          })
+        ]
+      );
+
+      return {
+        status: "created",
+        event_id: event.id,
+        raw_artifact_ids: rawArtifactId ? [rawArtifactId] : [],
+        chunk_ids: chunkIds,
+        memory_ids: [memoryId],
+        memory_status: memory.rows[0]?.status,
+        memory_use_policy: memory.rows[0]?.use_policy,
+        embedding,
+        dedup_key: dedupKey
+      };
+    });
+  }
+
   async createAgentMemory(input: CreateAgentMemoryInput) {
     if (input.created_by === "agent" && (input.source_refs?.length ?? 0) === 0) {
       throw new Error("VALIDATION_ERROR: agent-created memories require source_refs");
@@ -2000,7 +2257,16 @@ export class RecallantDb {
 
   private async insertChunks(
     client: PoolClient,
-    input: { projectId: string; developerId: string; eventId: string; text: string }
+    input: {
+      projectId: string;
+      developerId: string;
+      eventId: string;
+      text: string;
+      scope?: "project" | "developer";
+      scopeKind?: string | null;
+      scopeId?: string | null;
+      audience?: unknown[];
+    }
   ) {
     const ids: string[] = [];
     for (const [index, text] of chunkText(input.text).entries()) {
@@ -2010,7 +2276,7 @@ export class RecallantDb {
             project_id, developer_id, source_event_id, text, chunk_index,
             token_count_est, scope, scope_kind, scope_id, audience
           )
-          VALUES ($1, $2, $3, $4, $5, $6, 'project', 'project', $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING id
         `,
         [
@@ -2020,8 +2286,10 @@ export class RecallantDb {
           text,
           index,
           estimateTokens(text),
-          input.projectId,
-          JSON.stringify([{ kind: "all_agents", id: null }])
+          input.scope ?? "project",
+          input.scopeKind ?? "project",
+          input.scopeId ?? input.projectId,
+          JSON.stringify(input.audience ?? [{ kind: "all_agents", id: null }])
         ]
       );
       const id = result.rows[0]?.id;

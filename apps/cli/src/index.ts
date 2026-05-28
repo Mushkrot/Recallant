@@ -13,7 +13,8 @@ import {
   detectImportCandidates,
   discoveryCandidateForImport,
   discoveryResult,
-  formatDiscoveryText
+  formatDiscoveryText,
+  readImportTextForCandidate
 } from "./discovery.js";
 
 const memorySection = `## Memory (Recallant)
@@ -200,6 +201,25 @@ Next step: start a Recallant-backed agent session.
 `;
 }
 
+function audiencePreviewToJson(audience: string) {
+  if (audience.startsWith("specific_client:")) {
+    return [{ kind: "specific_client", id: audience.split(":")[1] ?? null }];
+  }
+  if (audience === "import_pipeline") {
+    return [
+      { kind: "import_pipeline", id: null },
+      { kind: "review_ui", id: null }
+    ];
+  }
+  return [{ kind: "all_agents", id: null }];
+}
+
+function contentTypeForPath(path: string) {
+  if (path.endsWith(".md")) return "text/markdown";
+  if (path.includes(".env") || path.endsWith(".example")) return "text/plain";
+  return "text/plain";
+}
+
 async function runInit(argv: readonly string[]) {
   const options = parseInitOptions(argv);
   const projectId = randomUUID();
@@ -269,11 +289,48 @@ async function runImport(argv: readonly string[]) {
   const target = positionalArgs(argv)[0];
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const candidate = target ? await discoveryCandidateForImport(projectDir, target) : null;
+  const dryRun = argv.includes("--dry-run");
+  let writeResult = null;
+  if (!dryRun) {
+    if (!target || !candidate) {
+      throw new Error("recallant import requires an existing source path");
+    }
+    const database = createRecallantDbFromEnv();
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for confirmed import");
+    try {
+      writeResult = await database.importSource({
+        project_path: projectDir,
+        client_kind: "recallant-cli",
+        source_path: candidate.path,
+        source_type: candidate.source_type,
+        source_sha256: candidate.source_ref.sha256,
+        source_size_bytes: candidate.source_ref.size_bytes,
+        content_type: contentTypeForPath(candidate.path),
+        import_text: await readImportTextForCandidate(projectDir, candidate),
+        bounded_excerpt: candidate.bounded_excerpt,
+        result_class: candidate.result_class,
+        result_classes: candidate.result_classes,
+        scope_kind: candidate.scope.scope_kind,
+        scope_id: candidate.scope.scope_id,
+        audience: audiencePreviewToJson(candidate.provisional_audience),
+        risk: candidate.risk,
+        risks: candidate.risks,
+        secret_references: candidate.secret_references,
+        metadata: {
+          import_command: "recallant import",
+          import_preview_version: 1,
+          promotes_instruction_grade: false
+        }
+      });
+    } finally {
+      await database.close();
+    }
+  }
   const result = {
     action: "import",
-    dry_run: argv.includes("--dry-run"),
+    dry_run: dryRun,
     target,
-    writes_memory: false,
+    writes_memory: !dryRun,
     result_class: candidate?.result_class ?? "import_source",
     result_classes: candidate?.result_classes ?? ["import_source"],
     provisional_scope: candidate?.provisional_scope ?? "project",
@@ -285,7 +342,7 @@ async function runImport(argv: readonly string[]) {
     risk: candidate?.risk ?? "low",
     bounded_excerpt: candidate?.bounded_excerpt ?? null,
     secret_references: candidate?.secret_references ?? [],
-    planned_changes: argv.includes("--dry-run")
+    planned_changes: dryRun
       ? [
           {
             action: "none",
@@ -297,16 +354,18 @@ async function runImport(argv: readonly string[]) {
         ]
       : [
           {
-            action: "blocked",
-            writes_database: false,
-            writes_memory: false,
+            action: "confirmed_import",
+            writes_database: true,
+            writes_memory: true,
             promotes_instruction_grade: false,
-            reason: "Confirmed import writes start in the next Pre-Pilot workstream."
+            reason:
+              "Creates import_batch event, raw artifact pointer, chunks, and reviewable import candidate memory."
           }
         ],
-    warning: argv.includes("--dry-run")
+    write_result: writeResult,
+    warning: dryRun
       ? "Preview only. No import_batch events, active memories, or instruction-grade records were created."
-      : "Write imports are not enabled in this implementation slice."
+      : "Confirmed import wrote reviewable source-linked records without instruction-grade promotion."
   };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }

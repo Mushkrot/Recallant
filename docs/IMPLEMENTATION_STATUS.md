@@ -18,6 +18,7 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
 - Private Review Command Center with auth, project list, critical status, inbox, active rules, settings, paid API/cost view, review actions, and confirmation-gated dangerous setting changes.
 - CLI onboarding and diagnostics: `init`, `discover`, `import --dry-run`, `lint-context`, `context`, `doctor`, backup/verify, restore-plan, analyze/cleanup, local spool append/sync/prune.
 - Pre-Pilot discovery/preflight for existing projects: read-only candidate scanning for manual memory surfaces, selected runbooks/docs, secret-reference examples, source hashes, scope/audience previews, context-budget warnings, duplicate/conflict/stale-history risks, redacted secret handling, JSON and text output, and import dry-run parity.
+- Pre-Pilot explicit import write mode: confirmed `recallant import <path>` writes source-linked `import_batch` events, raw artifact pointers, chunks, embeddings where available, and governed memory candidates/needs-review records with idempotent source-path/hash/result-class deduplication and redacted secret-reference handling.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -103,8 +104,8 @@ project.
 Current work order:
 
 1. Existing-project discovery and preflight. Complete for the first pre-pilot checkpoint.
-2. Durable explicit import write mode. Next.
-3. Review UI import candidate/action readiness.
+2. Durable explicit import write mode. Complete for the first pre-pilot checkpoint.
+3. Review UI import candidate/action readiness. Next.
 4. Pilot sandbox workflow.
 5. Agent onboarding contract.
 6. Operational readiness check.
@@ -148,6 +149,8 @@ Latest Pre-Pilot R1 validation:
 - `npm run lint`
 - `npm run format:check`
 - `npm run prepilot:smoke:discovery`
+- Docker network execution of `npm run prepilot:smoke:import`
+- Docker network execution of `npm run phase7:smoke`
 
 The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 

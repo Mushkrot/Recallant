@@ -102,7 +102,7 @@ Implemented checkpoint:
 
 ## Workstream R2 - Durable Explicit Import
 
-Status: not started.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -128,6 +128,15 @@ Gate:
 - Imported candidates appear in Review UI/API with source refs.
 - Secret fixtures store names/references only.
 - Broad or high-risk candidates require review.
+
+Implemented checkpoint:
+
+- `recallant import <path> --project-dir <path>` now requires `RECALLANT_DATABASE_URL` and writes through a dedicated DB transaction.
+- Confirmed import creates an `import_batch` event, raw artifact pointer, scoped searchable chunks, embeddings when the active route supports them, and one source-linked governed memory candidate.
+- Import deduplication is based on project, source path, content hash, and result classes.
+- Imported governed memories are `candidate` or `needs_review`; they never become `instruction_grade` without review promotion.
+- Secret-reference imports store variable names/status only and use redacted text for chunks, source quotes, and output.
+- `npm run prepilot:smoke:import` covers confirmed import, duplicate re-run, source refs, chunks, raw artifact pointer, no secret leakage, and reviewable candidate policy.
 
 ## Workstream R3 - Review UI Import And Action Readiness
 
