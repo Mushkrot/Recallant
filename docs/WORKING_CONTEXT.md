@@ -207,6 +207,7 @@ Latest implementation checkpoints:
 - Core smoke suite aggregation is available through `npm run smoke:core`; run it after `npm run build` and a clean `make db-reset` when validating the full local DB-backed implementation surface.
 - Pre-Pilot R1 existing-project discovery/preflight is implemented. `recallant discover --project-dir <path>` is read-only and returns source-linked candidates with result classes, provisional scope/audience, risk flags, context-budget warnings, import suggestions, and redacted secret-reference previews; `--format text` prints a human summary. `recallant import --dry-run <path>` reuses the same preview model without writes. It is verified by `scripts/smoke-pre-pilot-discovery.mjs`.
 - Pre-Pilot R2 explicit import write mode is implemented. Confirmed `recallant import <path> --project-dir <path>` writes a source-linked `import_batch` event, raw artifact pointer, scoped chunks, embeddings when available, and a governed memory candidate/needs-review record; repeated import of the same project/source/hash/result-class is idempotent. Secret-reference imports store variable names/status only and redacted text. It is verified by `scripts/smoke-pre-pilot-import.mjs`.
+- Pre-Pilot R3 Review UI import/action readiness is implemented. The dashboard/API expose import candidates, selected detail with source refs/review history/provenance/status/use policy/scope/audience/confidence, conflict/duplicate candidates, available review actions, and a cleanup/forget confirmation entrypoint. It is verified by `scripts/smoke-review-ui.mjs`.
 
 Production deployment and the first UI cleanup are complete. The owner asked to preserve the next-step plan before closing the session. The active next plan is `docs/PRE_PILOT_READINESS.md`.
 
@@ -216,7 +217,7 @@ Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Read `docs/PRE_PILOT_READINESS.md` and `docs/SESSION_HANDOFF_CURRENT.md`.
-3. Start with Workstream R3: Review UI Import And Action Readiness.
+3. Start with Workstream R4: Pilot Sandbox Workflow.
 4. Do not connect a real working project until the Pre-Pilot Readiness exit gate is met.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

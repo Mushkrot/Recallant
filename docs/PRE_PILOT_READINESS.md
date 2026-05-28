@@ -140,7 +140,7 @@ Implemented checkpoint:
 
 ## Workstream R3 - Review UI Import And Action Readiness
 
-Status: not started.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -160,6 +160,14 @@ Implement or harden:
 Gate:
 
 - Review UI smoke covers imported candidate listing, detail/source display, at least one normal review action, and confirmation rejection for a dangerous action.
+
+Implemented checkpoint:
+
+- Review dashboard/API now exposes `import_candidates`, `selected_detail`, `duplicate_conflicts`, and `available_review_actions`.
+- The private Review UI shows an Import Candidates lane, selected memory detail with source refs/review history/provenance/status/use policy/scope/audience/confidence, a conflicts/duplicates lane, and a cleanup/forget confirmation entrypoint.
+- Imported candidates created by confirmed import appear in the dashboard/API with source refs and remain reviewable before any instruction-grade promotion.
+- Existing `/api/review-action` continues to route accept/reject/promote/demote/archive/stale/edit/merge/supersede actions through the same DB policy path.
+- `npm run review-ui:smoke` now creates an import candidate through the DB import path and verifies import listing, selected detail/source display, conflict lane, a normal review action, dangerous setting confirmation rejection, and auth/Cloudflare readiness.
 
 ## Workstream R4 - Pilot Sandbox Workflow
 

@@ -8,7 +8,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 Recallant is deployed on the owner server and the first production UI cleanup has been completed. The active next plan is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
 
-Do not start by connecting a real project. Existing-project discovery/preflight and Durable Explicit Import write mode are complete for the first pre-pilot checkpoint; the next implementation work is Review UI import handling, followed by sandbox pilot workflow.
+Do not start by connecting a real project. Existing-project discovery/preflight, Durable Explicit Import write mode, and Review UI import/action readiness are complete for the first pre-pilot checkpoint; the next implementation work is Pilot Sandbox Workflow.
 
 Historical handoff material from 2026-05-21 has been archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`. It is useful for provenance, but it is no longer the current starting point.
 
@@ -21,18 +21,18 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 5. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
 6. Run `git status --short --branch`.
 7. Run `git log --oneline -8`.
-8. Begin with Workstream R3 from `docs/PRE_PILOT_READINESS.md`.
+8. Begin with Workstream R4 from `docs/PRE_PILOT_READINESS.md`.
 
 ## Active Work Order
 
 1. R1 Existing Project Discovery And Preflight. Complete for the first pre-pilot checkpoint.
 2. R2 Durable Explicit Import. Complete for the first pre-pilot checkpoint.
-3. R3 Review UI Import And Action Readiness. Start here next.
-4. R4 Pilot Sandbox Workflow.
+3. R3 Review UI Import And Action Readiness. Complete for the first pre-pilot checkpoint.
+4. R4 Pilot Sandbox Workflow. Start here next.
 5. R5 Agent Onboarding Contract.
 6. R6 Operational Readiness Check.
 
-R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight and R2 explicit import write mode are also complete for the first pre-pilot checkpoint.
+R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, and R3 Review UI import/action readiness are also complete for the first pre-pilot checkpoint.
 
 ## Boundaries
 

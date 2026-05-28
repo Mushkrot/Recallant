@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
@@ -69,6 +69,29 @@ const event = await db.appendTurn({
   text: "Review UI smoke source event.",
   dedup_key: `review-ui-${randomUUID()}`
 });
+const importText =
+  "Imported AGENTS.md says the pilot sandbox should review source refs before promotion.";
+const importSource = await db.importSource({
+  client_kind: "recallant-review-smoke",
+  project_path: process.cwd(),
+  source_path: "AGENTS.md",
+  source_type: "agent_instructions",
+  source_sha256: createHash("sha256").update(importText).digest("hex"),
+  source_size_bytes: importText.length,
+  content_type: "text/markdown",
+  import_text: importText,
+  bounded_excerpt: importText,
+  result_class: "repo_contract",
+  result_classes: ["repo_contract", "startup_instruction", "possible_conflict"],
+  scope_kind: "project",
+  scope_id: projectId,
+  audience: [{ kind: "all_agents", id: null }],
+  risk: "medium",
+  risks: [{ code: "possible_conflict", severity: "warning", message: "smoke conflict" }]
+});
+const importMemoryId = importSource.memory_ids[0];
+if (!importMemoryId)
+  throw new Error(`Import source did not create memory: ${JSON.stringify(importSource)}`);
 const candidate = await db.createAgentMemory({
   memory_type: "procedure",
   scope: "developer",
@@ -112,6 +135,11 @@ try {
   if (
     html.status !== 200 ||
     !htmlText.includes("Recallant Review Command Center") ||
+    !htmlText.includes("Import Candidates") ||
+    !htmlText.includes("Selected Detail") ||
+    !htmlText.includes("Source Refs") ||
+    !htmlText.includes("AGENTS.md") ||
+    !htmlText.includes(importMemoryId) ||
     !htmlText.includes(candidate.memory_id) ||
     !htmlText.includes(rule.memory_id) ||
     !htmlText.includes("Cost / Paid API") ||
@@ -127,6 +155,10 @@ try {
   const json = await api.json();
   if (
     api.status !== 200 ||
+    !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
+    json.selected_detail?.memory?.id !== importMemoryId ||
+    !json.selected_detail?.source_refs?.some((ref) => ref.source_id === importSource.event_id) ||
+    !json.duplicate_conflicts.some((memory) => memory.memory_id === importMemoryId) ||
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     json.critical.pending_review < 1
@@ -218,7 +250,9 @@ try {
   }
   const browserMissingEdgeAuth = await fetch(`${baseUrl}/review`);
   if (browserMissingEdgeAuth.status !== 401) {
-    throw new Error(`Cloudflare mode allowed browser without edge auth: ${browserMissingEdgeAuth.status}`);
+    throw new Error(
+      `Cloudflare mode allowed browser without edge auth: ${browserMissingEdgeAuth.status}`
+    );
   }
   const wrongEdgeIdentity = await fetch(`${baseUrl}/review`, {
     headers: {

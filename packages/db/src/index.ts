@@ -1787,6 +1787,38 @@ export class RecallantDb {
     );
     const inbox = await this.listAgentMemories({ view: "inbox", limit: 25 });
     const rules = await this.listAgentMemories({ view: "rules", limit: 25 });
+    const importCandidates = await this.pool.query(
+      `
+        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
+               scope_id, audience, confidence, created_by, metadata, updated_at
+        FROM agent_memories
+        WHERE developer_id = $1
+          AND (project_id = $2 OR scope = 'developer')
+          AND created_by = 'import'
+          AND status IN ('candidate', 'needs_review')
+        ORDER BY updated_at DESC
+        LIMIT 25
+      `,
+      [context.developerId, context.projectId]
+    );
+    const duplicateConflicts = await this.pool.query(
+      `
+        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
+               scope_id, audience, confidence, created_by, metadata, updated_at
+        FROM agent_memories
+        WHERE developer_id = $1
+          AND (project_id = $2 OR scope = 'developer')
+          AND (
+            metadata::text ILIKE '%possible_duplicate%'
+            OR metadata::text ILIKE '%possible_conflict%'
+            OR metadata::text ILIKE '%duplicate%'
+            OR metadata::text ILIKE '%conflict%'
+          )
+        ORDER BY updated_at DESC
+        LIMIT 25
+      `,
+      [context.developerId, context.projectId]
+    );
     const critical = await this.pool.query(
       `
         SELECT
@@ -1824,11 +1856,31 @@ export class RecallantDb {
       `,
       [context.projectId]
     );
+    const selectedMemoryId =
+      importCandidates.rows[0]?.memory_id ??
+      inbox.memories[0]?.memory_id ??
+      rules.memories[0]?.memory_id;
+    const selectedDetail = selectedMemoryId ? await this.getAgentMemory(selectedMemoryId) : null;
     return {
       current_project_id: context.projectId,
       projects: projects.rows,
       critical: critical.rows[0],
       inbox: inbox.memories,
+      import_candidates: importCandidates.rows,
+      duplicate_conflicts: duplicateConflicts.rows,
+      selected_detail: selectedDetail,
+      available_review_actions: [
+        "accept",
+        "reject",
+        "promote_instruction",
+        "demote_instruction",
+        "archive",
+        "unarchive",
+        "mark_stale",
+        "edit",
+        "merge",
+        "supersede"
+      ],
       rules: rules.memories,
       costs: costs.rows,
       settings: settings.rows,

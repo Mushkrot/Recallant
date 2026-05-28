@@ -247,16 +247,53 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string) {
   return rows
     .map(
       (row) => `<article class="item">
-        <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.project_id)}</h3>
-        <p>${escapeHtml(row.body ?? row.primary_path ?? row.model ?? formatDisplayValue(row.value))}</p>
+        <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.source_kind ?? row.action ?? row.project_id ?? row.id)}</h3>
+        <p>${escapeHtml(row.body ?? row.quote ?? row.source_id ?? row.primary_path ?? row.model ?? formatDisplayValue(row.value))}</p>
         ${renderMeta(
           Object.entries(row)
-            .filter(([key]) => !["title", "body", "name", "primary_path"].includes(key))
+            .filter(([key]) => !["title", "body", "quote", "name", "primary_path"].includes(key))
             .slice(0, 6)
         )}
       </article>`
     )
     .join("");
+}
+
+function renderDetail(detail: unknown, availableActions: unknown) {
+  if (!detail || typeof detail !== "object") {
+    return `<p class="empty">No selected memory.</p>`;
+  }
+  const payload = detail as {
+    memory?: Record<string, unknown> | null;
+    source_refs?: Array<Record<string, unknown>>;
+    review_actions?: Array<Record<string, unknown>>;
+  };
+  const memory = payload.memory;
+  if (!memory) return `<p class="empty">No selected memory.</p>`;
+  const actions = Array.isArray(availableActions) ? availableActions.map(String) : [];
+  return `<article class="detail">
+    <h3>${escapeHtml(memory.title ?? memory.id)}</h3>
+    <p>${escapeHtml(memory.body ?? "")}</p>
+    ${renderMeta([
+      ["memory_id", memory.id],
+      ["status", memory.status],
+      ["use_policy", memory.use_policy],
+      ["memory_type", memory.memory_type],
+      ["scope", memory.scope],
+      ["scope_kind", memory.scope_kind],
+      ["scope_id", memory.scope_id],
+      ["audience", memory.audience],
+      ["confidence", memory.confidence],
+      ["created_by", memory.created_by],
+      ["metadata", memory.metadata]
+    ])}
+    <h4>Source Refs</h4>
+    ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
+    <h4>Review History</h4>
+    ${renderRows(payload.review_actions ?? [], "No review actions yet.")}
+    <h4>Actions</h4>
+    <div class="actions">${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join("")}</div>
+  </article>`;
 }
 
 function renderProjects(rows: Array<Record<string, unknown>>, currentProjectId: unknown) {
@@ -341,6 +378,10 @@ function renderDashboard(
     .project p { margin: 0; color: #4f5867; font-size: 13px; overflow-wrap: anywhere; }
     .project-meta, .metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .project-meta span, .metrics span { background: #f2f5f8; border: 1px solid #dce3ec; border-radius: 999px; padding: 3px 7px; color: #4f5867; font-size: 11px; }
+    .detail h3 { font-size: 15px; margin: 0 0 7px; }
+    .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .actions span { border: 1px solid #c9d2df; border-radius: 6px; padding: 4px 7px; font-size: 12px; background: #f7fafb; }
     .setting { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .setting:first-child { border-top: 0; }
     .setting-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
@@ -377,8 +418,16 @@ function renderDashboard(
     </aside>
     <section>
       <section class="panel">
+        <h2>Import Candidates</h2>
+        ${renderRows(data.import_candidates, "No imported candidates require review.")}
+      </section>
+      <section class="panel">
         <h2>Review Inbox</h2>
         ${renderRows(data.inbox, "No candidate or high-risk memories require review.")}
+      </section>
+      <section class="panel">
+        <h2>Conflicts / Duplicates</h2>
+        ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.")}
       </section>
       <section class="panel">
         <h2>Active Rules</h2>
@@ -387,8 +436,16 @@ function renderDashboard(
     </section>
     <aside>
       <section class="panel">
+        <h2>Selected Detail</h2>
+        ${renderDetail(data.selected_detail, data.available_review_actions)}
+      </section>
+      <section class="panel">
         <h2>Cost / Paid API</h2>
         ${renderRows(data.costs, "No model cost records in the last 30 days.")}
+      </section>
+      <section class="panel">
+        <h2>Cleanup / Forget</h2>
+        <div class="chat">Dry-run first. Permanent erasure requires explicit confirmation.</div>
       </section>
       <section class="panel">
         <h2>Settings</h2>
