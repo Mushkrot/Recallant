@@ -2,7 +2,14 @@
 
 Explicit imports extend v1 memory beyond live agent sessions without turning Recallant into "ingest everything automatically."
 
+Autonomous attach refines this rule. In `autopilot` mode, Recallant may import low-risk
+source-linked evidence and create ordinary recallable memories according to policy, but it still must
+not silently trust stale documents as binding instructions. Manual and guided modes remain available
+for cautious operation.
+
 Decision status: v1 import workflow accepted. See [ADR-0013-closeout-intent-and-explicit-imports.md](ADR-0013-closeout-intent-and-explicit-imports.md), [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md), and historical context in [ADR-0037-import-workflow-and-memory-scope-archive.md](ADR-0037-import-workflow-and-memory-scope-archive.md).
+
+Attach modes are accepted in [ADR-0043-autonomous-project-attach-modes.md](ADR-0043-autonomous-project-attach-modes.md).
 
 Current implementation note: before attaching the first real working project, complete the import-related workstreams in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md). Existing projects should be tested through a duplicated sandbox copy first.
 
@@ -15,6 +22,7 @@ Core rule:
 - `recallant import ...` is the explicit path for historical/external material.
 - `recallant import ...` must support preview/dry-run before writing durable import results.
 - Scope/audience assignment follows [ADR-0040](ADR-0040-memory-scope-and-audience-model.md).
+- `recallant attach --mode manual|guided|autopilot` composes init/discover/import/lint/context/doctor/report according to the selected workflow mode. It does not bypass the promotion policy below.
 
 ## 1. v1 import categories
 
@@ -78,11 +86,14 @@ Do not automatically import:
 
 These may become future targeted imports or connector features after separate consent/review policy.
 
-## 3. Import commands
+## 3. Import and attach commands
 
 Candidate commands:
 
 ```bash
+recallant attach <project-dir> --mode autopilot
+recallant attach <project-dir> --mode guided
+recallant attach <project-dir> --mode manual
 recallant discover
 recallant import project-log PROJECT_LOG.md
 recallant import docs docs/architecture/*.md
@@ -91,6 +102,11 @@ recallant import jsonl export.jsonl
 ```
 
 `recallant init` should not automatically import large historical material unless the user asks. It may detect candidates and suggest commands.
+
+`recallant attach --mode autopilot` may import selected low-risk evidence automatically, but the same
+high-risk and promotion rules apply. It is not permission for whole-repo import, whole-git-history
+import, raw secret import, broad developer/global rule promotion, connector/account binding
+activation, or paid API enablement.
 
 Example `recallant init` output:
 

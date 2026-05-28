@@ -176,7 +176,13 @@ v1 supports explicit imports for important project context that is not captured 
 
 Explicit import is different from automatic full-repo ingestion. It should preserve provenance, source path/URL, import timestamp, and project/developer scope.
 
-`recallant init` must not create `import_batch` events by itself. It may only detect candidates and suggest explicit `recallant import ...` commands. Natural-language closeout also must not import historical material automatically; it preserves current session state.
+`recallant init` must not create `import_batch` events by itself. It may only detect candidates and
+suggest explicit `recallant import ...` commands. Natural-language closeout also must not import
+historical material automatically; it preserves current session state.
+
+`recallant attach --mode autopilot` is the exception that may coordinate safe low-risk imports as
+part of project attach. It still uses the import pipeline, provenance, result classes, and promotion
+policy; it is not automatic full-repo ingestion.
 
 ## 3. Chunking policy (L1)
 

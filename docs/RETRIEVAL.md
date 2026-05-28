@@ -25,7 +25,11 @@ Raw workflow artifacts are not normal recall payloads. Search may return bounded
 - `scope`: `project` (default), `developer`, or `all`.
   - `project`: chunks from the current project plus applicable developer-scope chunks.
   - `developer`: only developer-scope chunks across projects.
-  - `all`: all chunks for the current developer.
+  - `all`: all chunks for the current developer, intended for explicit cross-project review or
+    source-linked example search, not default startup context.
+- `recall_intent`: logical intent such as `same_project`, `developer_rules`, `environment`,
+  `similar_projects`, or `all_projects_review`. Early implementations may map this to `scope` plus
+  filters, but responses must still label cross-project results clearly.
 - `scope_kind` / `audience` filters may further narrow results according to ADR-0040. The simple `scope=project|developer|all` API is a convenience layer; server-side policy must still respect environment, connector_account, capability, client_adapter, and audience constraints.
 - `top_k`: policy default, bounded by configured server cap.
 - `max_chars_total`: policy default, bounded by configured server cap.
@@ -97,7 +101,22 @@ When retrieved memories conflict, the caller and Context Pack Builder must apply
 - prefer later accepted decisions when authority/scope match;
 - surface high-risk or equal-authority conflicts instead of silently choosing.
 
-## 2.2 Access tracking
+## 2.2 Controlled cross-project recall
+
+Ordinary retrieval should not mix all project memory into the current session. Cross-project recall
+is an explicit source-linked mode for finding examples and prior patterns.
+
+When `recall_intent="similar_projects"` or an equivalent explicit mode is used:
+
+- return hits from other projects only as examples/evidence unless their scope/use policy is already
+  applicable;
+- include source project id/name, source path/ref, status, use policy, scope kind, and applicability
+  warning in the response metadata;
+- do not let a hit from project B become a rule for project A without a new project-A governed memory
+  proposal or owner/review promotion;
+- never expose raw secret values from another project.
+
+## 2.3 Access tracking
 
 After the final hit list is formed, update access metadata asynchronously so the response is not blocked:
 

@@ -2,7 +2,9 @@
 
 Last updated: 2026-05-28.
 
-Use this workflow for the first Recallant pilot. The pilot target must be a copied project, not the original working project.
+Use this workflow for copied-project pilots. The first GutenDocx copied-project pilot has completed.
+This manual workflow remains useful for cautious testing; Phase 10 should wrap the same safety checks
+inside `recallant attach --mode manual|guided|autopilot`.
 
 ## Recommended Sandbox Root
 

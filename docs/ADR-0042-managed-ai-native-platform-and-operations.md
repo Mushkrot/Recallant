@@ -35,7 +35,7 @@ Recallant must include cleanup analysis that identifies stale, duplicate, confli
 
 ### Natural-language management
 
-The Review UI/management platform must include a natural-language command/chat surface. The owner can ask questions, inspect memory, request cleanup, change scope, and trigger review workflows in plain language. Recallant should respond in the user's language by default.
+The Review UI/management platform must include a natural-language command/chat surface. The owner can ask questions, inspect memory, request cleanup, change scope, trigger review workflows, attach projects, and ask for cross-project examples in plain language. Recallant should respond in the user's language by default.
 
 Actions that affect deletion, secrets, public exposure, model cost, global rules, or long-term behavior still require policy checks and confirmation.
 

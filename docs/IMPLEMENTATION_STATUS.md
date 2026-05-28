@@ -29,6 +29,13 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
 - Local Ollama model readiness: `nomic-embed-text` is installed and wired into the Recallant DB
   embedding path, `recallant doctor` accepts `model`/`model:latest` tag aliases, and production
   sandbox vector search is verified through `memory_append_turn` plus `memory_search mode=vector_only`.
+- Review UI human-readability pass: project rows and memory rows are clickable, imported candidates
+  are summarized in owner-readable language with status/use/type badges, recommended actions, and
+  technical details hidden behind expandable sections.
+- Product direction update: autonomous project attach is the target everyday workflow, with
+  `manual`, `guided`, and `autopilot` modes preserved for cautious operation; controlled
+  cross-project recall is accepted so agents can use source-linked examples from other projects
+  without automatic memory mixing.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -114,8 +121,8 @@ structured settings as formatted JSON instead of `[object Object]`.
 
 ## Active Next Plan
 
-The active next checkpoint is owner inspection and cleanup/readiness after the first copied-project
-pilot. The detailed pilot record is
+The active next checkpoint is Phase 10: autonomous attach and controlled cross-project recall. The
+detailed pilot record remains
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md).
 
 Current work order:
@@ -130,10 +137,14 @@ Current work order:
 
 Next recommended work:
 
-1. Let the owner inspect the GutenDocx sandbox data without switching production service env.
-2. Add a Review UI project selector or a localhost-only sandbox UI runbook.
-3. Add a governed project-level delete/detach command, then clean the GutenDocx sandbox after owner
-   confirmation.
+1. Implement `recallant attach --mode manual|guided|autopilot` as the product workflow over the
+   existing init/discover/import/lint/context/doctor/report building blocks.
+2. Add governed project-level detach/delete dry-run and confirmed cleanup so copied projects can be
+   removed without manual SQL.
+3. Add explicit controlled cross-project recall modes that label results from other projects as
+   examples/evidence unless already applicable by scope/use policy.
+4. Continue improving the Review/Management UI and chat so the owner sees plain-language decisions,
+   reports, and review items rather than agent-oriented metadata.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 

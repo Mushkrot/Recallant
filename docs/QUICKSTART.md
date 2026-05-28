@@ -1,6 +1,9 @@
-# Quickstart - connect a new project to Recallant
+# Quickstart - connect a project to Recallant
 
-Current operator note: before connecting an existing real working project, complete [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md) and run the first pilot against a duplicated project copy. This quickstart remains the target user flow, but the first real migration should not skip the pre-pilot gate.
+Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md) and the first copied-project
+pilot are complete. The next implementation layer is the safer product-level attach workflow in
+[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md), with manual/guided modes available before trusting
+autopilot on important live projects.
 
 ## Prerequisite: server is running
 
@@ -70,7 +73,24 @@ For the first production deployment, do not expose remote MCP through Cloudflare
 hostname is for the human Review/Management UI and same-origin admin API. Agents use the local
 stdio MCP command printed by `recallant init`.
 
-## Step 1 - Create and register a new project
+## Step 1 - Attach or register a project
+
+Target product workflow:
+
+```bash
+recallant attach . --target codex --mode autopilot
+```
+
+Attach modes:
+
+- `manual`: cautious mode; only explicit commands write durable data.
+- `guided`: Recallant creates a complete plan and waits for confirmation.
+- `autopilot`: Recallant runs safe setup/import/check steps and produces a report.
+
+Until `attach` is fully implemented, use the lower-level `init`, `discover`, and `import` commands
+below.
+
+### Lower-level new-project path
 
 ```bash
 mkdir ~/projects/my-new-project
@@ -172,21 +192,31 @@ agent sets checkpoint           agent calls memory_start_session
 
 The owner should not need to re-explain context to the new agent.
 
-## Cross-project search
+## Cross-project recall
 
 If an agent needs to find a solution already used in another project:
 
 ```text
-memory_search(query="how did I implement JWT authorization", scope="all")
+memory_search(query="how did I connect Google Drive in another project", scope="all")
 ```
 
-To save a pattern as reusable across projects:
+Cross-project hits are examples/evidence unless their scope/use policy says they are already an
+applicable developer/environment/capability record. They should show source project, source path/ref,
+scope, status, and whether the result is directly applicable.
+
+To save a pattern as reusable for the current project, create a governed memory proposal with source
+refs:
 
 ```text
-memory_promote(chunk_id="...", note="standard JWT approach")
+memory_create_agent_memory(
+  memory_type="procedure",
+  body="This project uses the Google Drive connector pattern adapted from <source project>.",
+  source_refs=[...]
+)
 ```
 
-After promotion, applicable agents in other projects can find it by default through developer scope.
+To make a pattern reusable across projects, promote it through review/owner-confirmed policy instead
+of silently treating one project's memory as a global rule.
 
 ## Natural-language management
 

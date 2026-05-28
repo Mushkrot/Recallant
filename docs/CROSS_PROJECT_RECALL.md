@@ -1,0 +1,92 @@
+# Controlled Cross-Project Recall
+
+This document defines how agents may use memory from other projects without mixing everything
+together.
+
+## Principle
+
+Recallant is a shared memory system, but not an undifferentiated memory pool.
+
+Project memory is isolated by default. Cross-project knowledge is available when the agent or owner
+asks for it, when a developer/environment/capability record is intentionally applicable, or when the
+Context Pack Builder has a specific policy reason to include it.
+
+Short version:
+
+```text
+Default: current project + applicable owner/server/capability facts.
+Explicit request: similar examples from other projects, always source-linked.
+Promotion: only through governed review or explicit owner/user-confirmed policy.
+```
+
+## Common use cases
+
+- "Find how another project connected Google Drive."
+- "Show prior Cloudflare Access setup."
+- "Where do agents usually find server secret references?"
+- "What project has a working example of this connector?"
+- "How did we solve this deployment error before?"
+
+In these cases, Recallant should return examples and references, not silently change the current
+project's rules.
+
+## Default Context Pack behavior
+
+For a normal project session, `memory_get_context_pack` should include:
+
+- current project checkpoint and working memories;
+- current project active rules;
+- applicable developer preferences and rules;
+- current environment/server facts;
+- relevant capability/secret/connector-account references;
+- client-adapter rules for the active client.
+
+It should exclude unrelated project memories unless:
+
+- the task hint asks for cross-project examples;
+- a record has been intentionally promoted to developer/environment/capability scope;
+- a resolver hint or policy explicitly says a known project is a reference for this task;
+- the owner is in review/debug mode.
+
+## Cross-project query behavior
+
+Cross-project retrieval must be explicit and labeled. A result from another project should include:
+
+- source project;
+- source file/path/ref;
+- memory status and use policy;
+- scope kind;
+- why it matched;
+- whether it is directly applicable or only an example.
+
+Suggested logical modes:
+
+| Mode | Meaning |
+|------|---------|
+| `same_project` | ordinary project recall |
+| `developer_rules` | intentionally reusable owner-level guidance |
+| `environment` | server/runtime/capability facts for the current instance |
+| `similar_projects` | examples from other projects |
+| `all_projects_review` | broad owner/debug search |
+
+## Applying a prior pattern
+
+When an agent finds useful memory from another project, it should:
+
+1. inspect the source enough to understand applicability;
+2. implement or adapt the pattern in the current project;
+3. write project-local evidence and checkpoint updates;
+4. create a current-project governed memory proposal if the pattern should be remembered here;
+5. request promotion only when the pattern is truly general.
+
+The source project remains the source project. The new project gets its own memory once the pattern
+is actually applied or accepted there.
+
+## Secret and capability handling
+
+Cross-project recall may reveal that a secret reference or capability exists, for example "Google
+Drive personal account is configured through this connector binding" or "Cloudflare tokens live in
+the secure config store." It must not reveal raw secret values.
+
+Capability and connector-account records are high-risk enough to require review/confirmation before
+they become active long-term behavior for another project.

@@ -14,6 +14,10 @@ Recallant must:
 
 - remember project context, decisions, rules, files, environment facts, and session handoffs;
 - share that context across Codex, Claude Code, Cursor, Windsurf, and future MCP-compatible agents;
+- attach projects through manual, guided, or autopilot workflows so the owner can choose between
+  cautious control and autonomous setup;
+- let agents reuse source-linked examples from other projects without automatically mixing unrelated
+  project memory into the current project;
 - preserve important owner explanations as governed memory;
 - retrieve only the relevant context for the current task instead of reading all memory or all docs;
 - model secret locations, connector/account bindings, GitHub/GDrive choices, and other capability facts without storing raw secrets;
@@ -22,6 +26,23 @@ Recallant must:
 - expose a private management UI and natural-language management chat for review, correction, cleanup, and diagnosis;
 - support backup/export/restore/remapping so an accumulated memory corpus can move to another server;
 - remain universal: the owner's `/ai` server layout is the first real deployment profile, not a hard-coded product assumption.
+
+## 2.1 Project attach and cross-project recall
+
+Autonomous attach is the target everyday experience, but not the only mode.
+
+- `manual`: the owner/agent explicitly chooses each command and import.
+- `guided`: Recallant creates a complete attach plan and waits for confirmation before durable writes.
+- `autopilot`: Recallant safely attaches the project, imports low-risk source-linked evidence, prepares
+  agent bootstrap files, runs diagnostics, and reports what it did.
+
+Autopilot does not weaken safety policy. It must not silently import raw secrets, enable paid APIs,
+change public exposure, perform destructive actions, or promote broad/risky rules to
+`instruction_grade`.
+
+Cross-project recall is a library, not a memory soup. Agents may ask for examples from other
+projects, but those examples remain source-linked evidence until applied to the current project or
+promoted through governed policy.
 
 ## 3. Managed memory
 

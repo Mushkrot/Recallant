@@ -31,6 +31,9 @@ Normal startup flow:
 
 The agent should not read large historical docs at startup unless a resolver hint or current task requires it.
 
+The agent should also not load unrelated project memories at startup. Cross-project examples are a
+targeted retrieval mode for a specific need, not part of the default context pack.
+
 Startup is not "understand the whole project". Startup is "recover enough state to choose the next correct action".
 
 Recommended startup target:
@@ -115,6 +118,8 @@ Recallant should support context routing through:
 - task-specific governed memories,
 - retrieval filters by `memory_type`, `scope`, `project_id`, and optional subproject,
 - ADR-0040 scope/audience filters such as environment, connector_account, capability, and client_adapter,
+- explicit cross-project recall modes for source-linked examples from other projects when the task
+  asks for a prior pattern,
 - resolver hints inspired by Journey kit manifests,
 - source refs that let agents fetch exact evidence only when needed.
 

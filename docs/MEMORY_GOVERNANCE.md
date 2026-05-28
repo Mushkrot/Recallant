@@ -14,6 +14,11 @@ Decision refinement: lifecycle statuses are `candidate`, `accepted`, `rejected`,
 
 Scope/audience refinement: governed memory authority is multi-axis. A memory must be interpreted through `scope_kind`, `scope_id`, `audience`, status, and `use_policy`. See [ADR-0040](ADR-0040-memory-scope-and-audience-model.md). A correct `use_policy` does not make a memory universal; it only applies within its scope and audience.
 
+Cross-project refinement: memory from another project can be recalled as source-linked evidence or
+an example when explicitly requested, but it does not become a current-project rule unless the agent
+creates a current-project governed memory proposal or the owner/review policy promotes a general
+developer/environment/capability rule. See [ADR-0044](ADR-0044-controlled-cross-project-recall.md).
+
 ## 1. Policy levels
 
 | Level | Meaning | Example |
@@ -225,5 +230,4 @@ Only `accepted` memories can act as durable behavioral guidance according to the
 ## 7. Open decisions
 
 - Should low-confidence extraction always produce `needs_review` by default, or only for candidate rules?
-- Should cross-project/developer-level promotion require explicit user confirmation unless the source is a direct user instruction?
 - Should there be a daily/weekly `recallant review --important` summary rather than interrupting during work?

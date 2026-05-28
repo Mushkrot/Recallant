@@ -19,7 +19,28 @@ This contract describes how a coding agent should use Recallant after a project 
 
 ## Existing Project Onboarding
 
-Use this only on a copied sandbox until Pre-Pilot Readiness is complete:
+Use this only on a copied sandbox until the owner explicitly chooses to attach a live project.
+
+Target attach workflow:
+
+```bash
+recallant attach <project> --target codex --mode manual
+recallant attach <project> --target codex --mode guided
+recallant attach <project> --target codex --mode autopilot
+```
+
+Mode expectations:
+
+- `manual`: run only explicit requested commands.
+- `guided`: build a complete plan and wait for confirmation before durable writes.
+- `autopilot`: attach the project, import safe source-linked evidence, run checks, and report without
+  asking for every low-risk step.
+
+Autopilot still must not import raw secrets, enable paid APIs, perform public exposure/service
+changes, erase/delete data, or promote broad/risky records to instruction-grade without policy
+review.
+
+Lower-level manual commands remain:
 
 ```bash
 recallant discover --dry-run --project-dir <sandbox>
@@ -38,6 +59,22 @@ recallant context --project-dir <project> --task-hint "initial work"
 ```
 
 `recallant init` may show import candidates but does not import historical material.
+
+## Cross-Project Recall Contract
+
+Agents may use other projects as source-linked examples when the current task needs a prior pattern,
+for example connector setup, Google Drive access, Cloudflare deployment, server inventory, or secret
+reference locations.
+
+Rules:
+
+- ordinary startup context uses the current project plus applicable developer/environment/capability
+  facts;
+- unrelated project memories are not loaded by default;
+- cross-project search must be explicit and labeled as examples/evidence;
+- a result from another project does not become a rule for the current project unless a governed
+  memory is created for the current project or the owner/review policy promotes a general rule;
+- never expose raw secret values from another project.
 
 ## File Ownership
 

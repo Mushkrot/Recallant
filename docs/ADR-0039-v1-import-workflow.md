@@ -20,7 +20,10 @@ ADR-0038 accepted environment discovery and portability. This ADR accepts the v1
 
 ## Decision
 
-Recallant v1 will use a **discovery-first, import-by-confirmation** workflow.
+Recallant v1 will use a **discovery-first, import-by-confirmation** workflow as the safe foundation.
+ADR-0043 adds product-level attach modes on top of this foundation: `manual` keeps this exact
+workflow, `guided` previews a complete plan before confirmation, and `autopilot` may execute
+low-risk attach/import steps while preserving the promotion and safety rules below.
 
 ### Commands and responsibilities
 
@@ -37,6 +40,12 @@ Recallant v1 will use a **discovery-first, import-by-confirmation** workflow.
 - Creates or updates repo-native adapter surfaces such as `.recallant/config` and thin agent instructions.
 - May suggest import candidates.
 - Must not perform broad historical import automatically.
+
+`recallant attach`
+
+- Product-level workflow that may coordinate `init`, `discover`, `import`, `lint-context`,
+  `context`, `doctor`, and report generation according to `manual`, `guided`, or `autopilot` mode.
+- Must not bypass the import result classes or promotion policy in this ADR.
 
 `recallant import`
 

@@ -44,6 +44,11 @@ v1 must include the full core needed for real use:
 - managed hybrid capture with per-project/session policy profiles,
 - context-budget discipline so startup files do not flood the model window,
 - one-action project onboarding through `recallant init` and potentially a Journey-style kit/skill.
+- autonomous project attach as the target everyday workflow, with `manual`, `guided`, and
+  `autopilot` modes so cautious operation remains available.
+- controlled cross-project recall: agents can ask for examples/patterns from other projects, but
+  unrelated project memory is not included by default and cannot silently become a current-project
+  rule.
 - offline/local-spool operation with later server sync and local cleanup.
 - portable backup/export/restore with remapping so a Recallant instance can move to another server without losing accumulated memory, provenance, artifacts, settings, review state, or project bindings.
 - universal session lifecycle: `memory_start_session`, incremental capture, `memory_closeout`, and recovery from unclosed/interrupted sessions.
@@ -77,6 +82,10 @@ Additional settled points:
 - The current server layout (`/ai/*` project directories, `/ai/SECURITY`, `/opt/secure-configs/.env`) is the first real deployment profile and should be supported well, but it is a particular owner environment, not an architecture invariant. Recallant must model such paths as configurable environment/project/server facts, secret references, and capability bindings rather than hard-coded assumptions.
 - Recallant setup should discover its environment safely, then discuss findings and goals with the user, then persist accepted facts/rules/settings. It should not require the user to re-explain stable environment facts every session, and agents should consult memory/capability bindings automatically when blocked.
 - Projects do not need secrecy-style isolation from each other, but project context must not accidentally mix or degrade another project. Cross-project reuse is allowed when explicitly requested or when developer-level memories are intentionally promoted.
+- The accepted cross-project refinement is "library, not soup": a project session normally receives
+  current-project memory plus applicable developer/environment/capability facts. Source-linked
+  examples from other projects are available when the agent/owner asks for them, but they remain
+  evidence unless applied locally or promoted through governed policy.
 - Local/offline work must be supported through a spool/sync/offload path.
 - First success criteria are both old-project resume in a new Codex session and one-command onboarding for a new project.
 - v1 memory scope is agent working memory plus explicit imports of broader project artifacts.
@@ -122,6 +131,14 @@ Additional settled points:
 - Memory scope/audience Q12 is accepted as a multi-axis model: `scope_kind`/`scope_id` say where a memory applies, `audience` says who may consume it, and `use_policy` says how authoritative it is. Accepted scope kinds include domain, developer, environment, project, repo, subproject, session, connector_account, capability, and client_adapter. See `ADR-0040-memory-scope-and-audience-model.md`.
 - Conflict-resolution priority Q13 is accepted: resolve by applicability first, then authority, then scope specificity, then recency; high-risk or equal-authority conflicts go to Review UI / owner confirmation. See `ADR-0041-conflict-resolution-priority.md`.
 - Managed AI-native platform decision is accepted: Recallant must be controllable through natural-language management chat, use AI heavily for extraction/cleanup/conflict/context planning, keep deterministic policy for safety/destructive operations, and support explicit permanent erasure. See `ADR-0042-managed-ai-native-platform-and-operations.md` and `OPERATING_PRINCIPLES.md`.
+- Autonomous attach modes are accepted: `manual` preserves the cautious explicit workflow,
+  `guided` produces a plan and waits for confirmation, and `autopilot` may execute low-risk attach
+  steps and report the result while preserving safety gates. See
+  `ADR-0043-autonomous-project-attach-modes.md` and `AUTONOMOUS_ATTACH.md`.
+- Controlled cross-project recall is accepted: project memory is isolated by default, while agents
+  can explicitly retrieve source-linked examples from other projects and applicable
+  developer/environment/capability records. See `ADR-0044-controlled-cross-project-recall.md` and
+  `CROSS_PROJECT_RECALL.md`.
 - The owner confirmed engineering-quality rules: code/docs/comments/API text/commit messages are English; conversation with the owner can stay Russian; implementation should be modular, low-coupling, testable, and publicly presentable; use meaningful scoped commits.
 - Existing services must be reused through capability bindings where practical. On the owner server,
   use the single existing Ollama service rather than starting a duplicate stack. As of 2026-05-27 it
@@ -176,12 +193,17 @@ Operational recovery as of 2026-05-28:
 - dev database Make targets now use the separate Docker Compose project name `recallant-dev` so
   local smoke cleanup cannot remove the production database container again.
 
-Pre-pilot decision as of 2026-05-28:
+Pre-pilot and Phase 10 decision as of 2026-05-28:
 
-- Do not connect a real working project as the immediate next step.
-- The owner wants Recallant brought as close as practical to a finished working product before the first real project connection.
-- The first pilot should use a duplicated project copy, not the original working project.
-- The active next plan is `docs/PRE_PILOT_READINESS.md`.
+- The first pilot used a duplicated GutenDocx project copy, not the original working project.
+- The owner confirmed that Recallant should move toward autonomous operation: given a request, it
+  should analyze, choose safe optimal actions, execute them, and report.
+- Autonomous project attach is desired, but more cautious `manual` and `guided` modes must remain
+  available.
+- Cross-project recall should let agents use examples from other projects when explicitly useful,
+  without automatically mixing unrelated project memory.
+- The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and
+  `docs/CROSS_PROJECT_RECALL.md`.
 - The current handoff for new sessions is `docs/SESSION_HANDOFF_CURRENT.md`.
 - The old dated handoff from 2026-05-21 is archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`.
 
@@ -227,16 +249,27 @@ Latest implementation checkpoints:
 - Pre-Pilot R4 pilot sandbox workflow is implemented and documented in `docs/PILOT_SANDBOX_WORKFLOW.md`. `scripts/smoke-pre-pilot-sandbox.mjs` copies a fixture into a temporary sandbox, runs discover/import dry-run/confirmed import, exercises MCP start/context/append/search/recall/closeout, verifies DB records, and checks that the original fixture was not modified.
 - Pre-Pilot R5 agent onboarding contract is implemented and documented in `docs/AGENT_ONBOARDING_CONTRACT.md`. `recallant init --target codex` generates a thin Memory section with real MCP tool names and no longer references the nonexistent `memory_promote` tool. It is covered by `scripts/smoke-phase7-cli.mjs`.
 
-Production deployment and the first UI cleanup are complete. The owner asked to preserve the next-step plan before closing the session. The active next plan is `docs/PRE_PILOT_READINESS.md`.
+Production deployment, the first UI cleanup, the GutenDocx sandbox pilot, local Ollama embedding
+readiness, and the first human-readable Review UI cleanup are complete.
+
+The active next product plan is to move from pre-pilot safety infrastructure into autonomous project
+attach and controlled cross-project recall:
+
+- document and implement `recallant attach --mode manual|guided|autopilot`;
+- keep manual/guided modes available for cautious production work;
+- add explicit cross-project recall modes for source-linked examples from other projects;
+- add governed project detach/delete so sandbox and attached project cleanup is reversible and
+  visible before any broad live-project onboarding.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
 
 Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
-2. Read `docs/PRE_PILOT_READINESS.md` and `docs/SESSION_HANDOFF_CURRENT.md`.
-3. Start with Workstream R6: Operational Readiness Check.
-4. Do not connect a real working project until the Pre-Pilot Readiness exit gate is met.
+2. Read `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
+   `docs/CROSS_PROJECT_RECALL.md`.
+3. Start with Phase 10: attach modes, governed detach/delete, and controlled cross-project recall.
+4. Keep manual/guided modes available; do not make autopilot the only way to attach projects.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material
    deployment or security change.

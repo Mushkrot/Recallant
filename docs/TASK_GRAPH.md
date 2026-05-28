@@ -16,12 +16,13 @@ flowchart TD
   P8[Phase 8 hardening and backup/restore]
   P9[Phase 9 cleanup, analysis, erasure]
   PPR[Pre-Pilot Readiness]
+  P10[Phase 10 autonomous attach and controlled cross-project recall]
 
   P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P65 --> P7 --> P8 --> P9
-  P9 --> PPR
+  P9 --> PPR --> P10
 ```
 
-Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 6.5 -> 7 -> 8 -> 9`. All phases are required for the v1 core.
+Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 6.5 -> 7 -> 8 -> 9 -> Pre-Pilot -> 10`. All phases are required for the v1 core and first product-grade attach workflow.
 
 Phase 3 includes universal session lifecycle, hybrid heartbeat, interruption recovery metadata, L0 append, and raw workflow evidence/artifact pointers.
 
@@ -33,4 +34,12 @@ Phase 8 includes security hardening plus practical backup/restore verification.
 
 Phase 9 depends on Phase 5 for retrieval decay/scoring and Phase 8 for hardened destructive/erasure paths.
 
-Pre-Pilot Readiness is the active launch-readiness plan after the deployed implementation slice. It prepares existing-project discovery, explicit import, Review UI import/action handling, sandbox pilot workflow, agent onboarding contract, and operational checks before any real working project is attached. See [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+Pre-Pilot Readiness was the launch-readiness plan after the deployed implementation slice. It
+prepared existing-project discovery, explicit import, Review UI import/action handling, sandbox pilot
+workflow, agent onboarding contract, and operational checks before any real working project is
+attached. See [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+
+Phase 10 is the next product-readiness layer after the first copied-project pilot. It composes the
+safe lower-level workflow into `recallant attach --mode manual|guided|autopilot`, adds governed
+detach/delete, and makes controlled cross-project recall explicit. See
+[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).

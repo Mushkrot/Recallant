@@ -320,9 +320,16 @@ Example standard-profile input:
 
 **Output:** `{ "edge_id": "uuid" }`
 
-### 3.5 `memory_promote`
+### 3.5 `memory_promote` (compatibility helper)
 
-Compatibility helper for promoting a chunk/memory into a broader governed scope. In the simple v1 path this may promote from project to developer visibility. Broader ADR-0040 scope changes must go through validation/review policy, especially for environment, capability, connector_account, or client_adapter scopes.
+Compatibility helper for promoting a chunk/memory into a broader governed scope. It is not the
+primary generated agent contract. New adapters should prefer `memory_create_agent_memory` plus
+`memory_review_agent_memory` because promotion needs source refs, status, use policy, and review
+history.
+
+In the simple v1 path this may promote from project to developer visibility. Broader ADR-0040 scope
+changes must go through validation/review policy, especially for environment, capability,
+connector_account, or client_adapter scopes.
 
 **Input:**
 ```json

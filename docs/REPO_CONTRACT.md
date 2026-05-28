@@ -42,7 +42,9 @@ The implementing agent inserts the following block into each target repository. 
 - Use specific queries in `memory_search`, not broad ones. One call per session start is usually enough.
 - After meaningful progress: update checkpoint via `memory_set_checkpoint` and update `PROJECT_LOG.md` to match fields `current_focus` and `next_step`.
 - On clear pause/exit/closeout intent: call `memory_closeout` and update `PROJECT_LOG.md` from the closeout payload.
-- To share a pattern across projects: call `memory_promote` on the relevant chunk or create a governed memory proposal.
+- To reuse a pattern from another project: search explicitly for source-linked examples, adapt the
+  pattern locally, and create a governed memory proposal with source refs. Broad developer/global
+  promotion requires owner/review policy.
 - Never paste secrets into memory tools.
 - If MCP is unavailable: update `PROJECT_LOG.md` and, when available, write local spool.
 ```

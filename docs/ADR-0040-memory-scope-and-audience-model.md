@@ -94,6 +94,10 @@ It must not include:
 - connector/account bindings unrelated to the project/task,
 - candidate or needs-review records as binding rules.
 
+ADR-0044 refines the cross-project case: agents may explicitly request source-linked examples from
+other projects, but those records are evidence/examples unless their scope, status, and use policy
+already make them applicable. They must be labeled with source project and applicability metadata.
+
 ## Import behavior
 
 ADR-0039 import preview must assign provisional `scope_kind`, `scope_id`, and `audience` for each import result. The preview must show high-risk or broad-scope assignments before write.

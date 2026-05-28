@@ -30,6 +30,8 @@ Terms and stable identifiers. Code and APIs should use the same names defined he
 | **ContextBudget** | Limit on how much repo-native instruction and recalled memory an agent loads into the active model window. See `CONTEXT_BUDGET.md`. |
 | **ContextPack** | Bounded server-built startup context for an agent session: checkpoint, relevant governed memories/rules, recovery warnings, optional evidence excerpts, and suggested next fetches. |
 | **ContextPackBuilder** | Server-side policy engine that constructs ContextPack. CLI/UI previews must call this same logic rather than reimplementing context selection. |
+| **AttachMode** | Workflow mode for connecting a project: `manual`, `guided`, or `autopilot`. See ADR-0043. |
+| **ControlledCrossProjectRecall** | Explicit source-linked retrieval of examples/rules/facts from other projects or shared scopes without mixing unrelated project memory by default. See ADR-0044. |
 | **ResolverHint** | Declarative hint indicating which doc/skill/memory to load for a task type. Inspired by Journey kit manifests. |
 | **ErasureRequest** | Owner-confirmed permanent deletion/redaction workflow for content that must be forgotten. Produces only a redacted receipt and removes derived material. |
 
@@ -96,6 +98,12 @@ Terms and stable identifiers. Code and APIs should use the same names defined he
 - `workspace`: umbrella workspace grouping multiple repos/projects.
 - `personal_domain`: future non-coding personal memory domain.
 - `other`: explicit extension point.
+
+### `attach_mode`
+
+- `manual`: cautious mode; run only explicitly requested attach/import steps.
+- `guided`: build a complete attach plan and wait for confirmation before durable writes.
+- `autopilot`: run safe attach/import/check/report steps automatically while preserving safety gates.
 
 ### `scope_kind`
 

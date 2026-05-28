@@ -2,7 +2,9 @@
 
 Last updated: 2026-05-28.
 
-This is the active plan for preparing Recallant for its first real project pilot.
+This was the active plan for preparing Recallant for its first real project pilot. The first copied
+project pilot has now completed; the next active product-readiness layer is Phase 10 autonomous
+attach and controlled cross-project recall.
 
 The owner wants Recallant to be as close as practical to a finished working product before attaching it to an existing working project. Do not connect a live project as the next step. First complete this readiness plan, then run a pilot on a duplicated project copy, then decide whether to onboard a real project.
 
@@ -300,12 +302,17 @@ Run note:
 Follow-ups before attaching a live project:
 
 - Add a safe way to inspect non-current projects in the Review UI, such as a project selector or a
-  localhost-only sandbox UI runbook.
+  localhost-only sandbox UI runbook. First project-row selection is now available in the Review UI;
+  keep improving it toward a human-first management surface.
 - Keep the production local embedding route healthy. Follow-up on 2026-05-28 installed
   `nomic-embed-text`, implemented the Ollama embedding adapter, and verified
   `memory_search mode=vector_only` on the GutenDocx sandbox.
 - Add a governed project-level delete/detach command so copied-project cleanup does not require
   manual SQL.
+- Add autonomous project attach modes (`manual`, `guided`, `autopilot`) and controlled
+  cross-project recall before broad live-project onboarding. See
+  [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and
+  [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 
 ## Exit Gate
 
@@ -320,6 +327,10 @@ Pre-Pilot Readiness is complete when all of the following are true:
 - The repo is committed, pushed, and clean.
 
 Only after this exit gate should Recallant be connected to an existing real working project.
+
+The first copied-project pilot has now completed. The next product-readiness layer is not another
+manual import pilot; it is Phase 10 autonomous attach and controlled cross-project recall, with
+manual/guided modes preserved for cautious operation.
 
 ## Explicitly Postponed Until After First Pilot
 

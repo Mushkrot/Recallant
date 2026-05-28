@@ -29,7 +29,19 @@ Environment discovery and portability are first-class architecture requirements.
 
 Import workflow is discovery-first and import-by-confirmation. `recallant discover` finds candidates, `recallant init` registers/configures projects and suggests imports, and `recallant import` performs explicit preview/dry-run/write flows. See [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md) and [IMPORT_POLICY.md](IMPORT_POLICY.md).
 
+Project attach is the product-level workflow above init/discover/import. It supports `manual`,
+`guided`, and `autopilot` modes so the owner can choose cautious control or autonomous setup without
+changing the underlying governance model. See
+[ADR-0043-autonomous-project-attach-modes.md](ADR-0043-autonomous-project-attach-modes.md) and
+[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md).
+
 Memory applicability uses a multi-axis scope/audience model: `scope_kind`/`scope_id` define where a memory applies, `audience` defines who may consume it, and `use_policy` defines authority. Conflict resolution applies applicability, authority, scope specificity, and recency in that order. See [ADR-0040-memory-scope-and-audience-model.md](ADR-0040-memory-scope-and-audience-model.md) and [ADR-0041-conflict-resolution-priority.md](ADR-0041-conflict-resolution-priority.md).
+
+Cross-project recall is controlled explicitly: ordinary context packs stay scoped to the current
+project plus applicable developer/environment/capability facts, while agents can request
+source-linked examples from other projects when the task calls for them. See
+[ADR-0044-controlled-cross-project-recall.md](ADR-0044-controlled-cross-project-recall.md) and
+[CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 
 Recallant is a managed AI-native platform. The owner-facing management surface includes Review UI, controlled settings, Cost / Paid API, health/doctor status, cleanup, and natural-language chat. AI can propose extraction, cleanup, conflict explanations, and context plans, but deterministic server policy owns auth, storage, caps, audit, confirmation, and destructive operations. See [ADR-0042-managed-ai-native-platform-and-operations.md](ADR-0042-managed-ai-native-platform-and-operations.md) and [OPERATING_PRINCIPLES.md](OPERATING_PRINCIPLES.md).
 
@@ -37,7 +49,11 @@ Managed memory includes explicit erasure. Archive/reject/supersede are normal go
 
 Scope boundary is explicit: v1 is the full working coding-agent memory core; broader personal-life capture, external connectors, specialized storage systems, and public packaging are future expansion paths. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 
-Implementation is authorized, the main local v1 implementation slices exist, and the first owner-server production deployment is running. The active next architecture/implementation checkpoint is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md), which prepares safe existing-project discovery, explicit import, Review UI import handling, and sandbox pilot workflow before any real working project is attached. The earlier documentation-first pause is retained as historical context in [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
+Implementation is authorized, the main local v1 implementation slices exist, the first owner-server
+production deployment is running, and the first copied-project sandbox pilot is complete. The active
+next architecture/implementation checkpoint is Phase 10: autonomous attach and controlled
+cross-project recall. The earlier documentation-first pause is retained as historical context in
+[ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
 
 ## 1. System context
 
@@ -81,6 +97,7 @@ flowchart TB
 | **Index/embed worker** | Async processing: chunking, embedding, rerank when not inline, and reindex. It may run inside MCP for the simplest v1 path or as a separate process when load justifies it. |
 | **Management UI + admin API** | Required owner-facing v1 surface for governed-memory review, inbox, rules, detail/source refs, duplicates, conflicts, Cost / Paid API, settings, health, cleanup, and natural-language management chat. It must use the same policy path as MCP/CLI actions. |
 | **Management UI path** | Starts as a compact Recallant private workbench; can later expand into management surfaces for projects, capture profiles, sessions/recovery, sync/spool state, model routing, cleanup, backup status, and other admin functions. |
+| **Attach orchestrator** | Product-level CLI/UI/chat workflow that coordinates init, discover, import, lint, context preview, doctor checks, and report generation according to manual/guided/autopilot policy. |
 | **Auth/access layer** | Private-by-default access control for Review UI/admin API/remote MCP: localhost/Tailnet bind by default, Recallant auth/session/token, secret isolation, and Cloudflare-ready routing without public exposure by default. |
 | **Settings service** | Resolves effective settings from session overrides, project settings, developer/global defaults, server settings, and built-in defaults; exposes inspected effective settings to UI/CLI/MCP policy paths. |
 | **Context Pack Builder** | Server-side startup context builder used by agents automatically after `memory_start_session`; composes checkpoint, rules, governed memories, recovery state, optional evidence, and next-fetch hints under context policy. |
@@ -181,6 +198,8 @@ This is the normal startup path. CLI/UI may preview the same pack, but they must
 - `projects.parent_project_id` supports nested projects/workspaces, but default search stays scoped to the current project unless explicitly widened.
 - `memory_domain` keeps future personal-memory expansion from mixing into coding-agent memory by accident.
 - Project boundaries are not secrecy boundaries for the owner's current workflow. They are relevance boundaries: cross-project search is allowed when explicitly requested, but default recall should not pollute the active project context.
+- Cross-project hits must be labeled with source project, source ref, scope kind, status, use policy,
+  and whether they are examples/evidence or binding guidance.
 
 ## 5.1 Deployment posture
 

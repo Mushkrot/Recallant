@@ -232,6 +232,23 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] A sandbox copied project can complete discover, import dry-run, selected import, MCP startup/context-pack smoke, append/search smoke, closeout, and detach/rollback without touching the original project.
 - [ ] Production readiness check covers `recallant doctor`, local stdio MCP smoke, Review UI access through Cloudflare Access, localhost-only origin, enabled backup timer, latest backup verification, no duplicate `/ai/recallant` project rows, and no unintended paid API use.
 
+## Phase 10 - Autonomous attach and controlled cross-project recall
+
+- [ ] `recallant attach <fixture> --mode manual --dry-run` produces a plan and writes no project files or durable import rows.
+- [ ] `recallant attach <fixture> --mode guided` produces a complete attach plan and waits for confirmation before durable writes.
+- [ ] `recallant attach <fixture> --mode autopilot` creates/updates pointer config and thin agent instructions, imports low-risk source-linked evidence, runs lint/context/doctor checks, and writes an owner-readable report.
+- [ ] Autopilot does not create `instruction_grade` memories from imported/inferred project material unless an explicit strong policy path is present.
+- [ ] Autopilot redacts secret-like values and stores only secret references/names/status.
+- [ ] Autopilot does not enable paid API, public exposure, connector/capability activation, or destructive cleanup without confirmation.
+- [ ] Re-running attach on the same project is idempotent for project registration, imported source hashes, bootstrap sections, and report metadata.
+- [ ] Attach report lists changed files, imported sources, evidence-only records, review-needed records, diagnostics, and detach/cleanup instructions.
+- [ ] Governed project detach/delete dry-run shows affected counts and does not modify active data.
+- [ ] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.
+- [ ] Default context pack for project A excludes ordinary memories from unrelated project B.
+- [ ] Explicit similar-project recall can return a source-linked result from project B with source project, source path/ref, scope kind, status, use policy, and applicability warning.
+- [ ] A project-B result does not become a project-A rule until the agent creates a project-A governed memory proposal or review promotes a general rule.
+- [ ] Environment/capability/connector-account records are included only when applicable to the current task/project and are not exposed as raw secrets.
+
 ## Cross-client smoke
 
 - [ ] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.

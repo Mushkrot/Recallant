@@ -6,12 +6,15 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current State
 
-Recallant is deployed on the owner server and the first production UI cleanup has been completed. The active plan is [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+Recallant is deployed on the owner server, the first production UI cleanup has been completed, and
+the GutenDocx copied-project sandbox pilot is complete. The active product direction is now Phase 10:
+autonomous project attach plus controlled cross-project recall.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
-live `/ai/gutendocx` project yet. The next work is owner inspection of the sandbox data, then either
-confirmed sandbox cleanup or a small UI/project-switching improvement.
+live `/ai/gutendocx` project yet. The next work is to implement the product-level workflow that can
+attach projects in `manual`, `guided`, or `autopilot` mode, then add governed detach/cleanup and
+controlled cross-project recall.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -28,11 +31,13 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 1. Read `AGENTS.md`.
 2. Read `docs/WORKING_CONTEXT.md`.
 3. Read `docs/PRE_PILOT_READINESS.md`.
-4. Read `docs/IMPLEMENTATION_STATUS.md`.
-5. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
-6. Run `git status --short --branch`.
-7. Run `git log --oneline -8`.
-8. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md`.
+4. Read `docs/AUTONOMOUS_ATTACH.md`.
+5. Read `docs/CROSS_PROJECT_RECALL.md`.
+6. Read `docs/IMPLEMENTATION_STATUS.md`.
+7. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
+8. Run `git status --short --branch`.
+9. Run `git log --oneline -8`.
+10. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md`.
 
 ## Active Work Order
 
@@ -44,6 +49,14 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 6. R6 Operational Readiness Check. Complete for the first pre-pilot checkpoint.
 
 R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, R5 agent onboarding contract, and R6 operational readiness are also complete for the first pre-pilot checkpoint.
+
+The current implementation target is Phase 10:
+
+- `recallant attach --mode manual|guided|autopilot`;
+- owner-readable attach reports;
+- governed project detach/delete dry-run and confirmed cleanup;
+- explicit controlled cross-project recall modes for source-linked examples from other projects;
+- no automatic mixing of unrelated project memories into default context packs.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -73,6 +86,7 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should help the owner inspect the GutenDocx sandbox data, then either delete the
-sandbox cleanly or implement the smallest UI/runbook improvement needed to inspect copied projects
-without changing production service env.
+The next session should implement the first Phase 10 slice: documented and tested `recallant attach`
+mode planning, starting with `manual`/`guided` behavior and the safety policy that `autopilot` will
+enforce. A strong second slice is governed project detach/delete dry-run so the GutenDocx sandbox can
+be cleaned without manual SQL after owner confirmation.

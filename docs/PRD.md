@@ -27,6 +27,8 @@ Current architectural bias:
 - Settings UI is controlled in v1: project workflow settings are editable; sensitive/global/server settings are read-only or confirmation-gated.
 - Memory must be managed, correctable, self-cleaning, and erasable through explicit owner workflows. Archive/reject/supersede are normal governance actions; "forget forever" is a separate owner-confirmed erasure workflow that removes content and derived material from active memory.
 - The management experience should be natural-language first. The Review UI remains important for inspection and control, but the owner should be able to query and direct the system in plain language and have Recallant respond in the user's language.
+- Project attach should become autonomous for everyday use, with explicit `manual`, `guided`, and `autopilot` modes so the owner can choose more cautious workflows for production-sensitive projects.
+- Project memories are isolated by default but can be reused through controlled cross-project recall. Agents may ask for source-linked examples from other projects, but unrelated project memory must not silently become current-project rules.
 - Recallant should use AI/LLM capabilities heavily for extraction, cleanup suggestions, conflict explanation, context-pack planning, and intent detection, while deterministic server policy remains authoritative for safety, storage, auth, audit, cost, and destructive operations.
 - Model routing is configurable and provider-switchable. Local models are the default for core recall; stronger reasoning is subscription-first/API-last; paid API requires explicit confirmation by default; OpenAI is the baseline paid API profile only when paid API is approved; Gemini and Claude cheap models are optional paid API routes by task, project, and budget.
 - v1 is a full working core for coding-agent memory, not a throwaway MVP. Broader personal-life memory, passive capture, large blob/object storage, specialized vector/graph databases, and public product packaging are designed for as future expansion, not first implementation scope. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
@@ -44,6 +46,8 @@ During AI-assisted coding, the same project directory may be opened in different
 - a single client loses long context after compaction or window limits;
 - rules, preferences, account bindings, and repeated explanations disappear between sessions;
 - every new project requires manually rebuilding config/handoff structure;
+- existing projects require too much manual discovery/import work before agents can use prior context safely;
+- agents often need examples from other projects, such as Google Drive, Cloudflare, deployment, or secret-reference patterns, but today the owner must manually point them to the right folder;
 - long repo-native instructions and logs can flood the context window before useful work begins;
 - trying to put everything in the prompt is impossible because of cost and context limits;
 - if wrong or sensitive information enters memory, the owner needs a clear way to correct or remove it;
@@ -112,14 +116,19 @@ The system stores not only raw events/chunks, but also structured agent memories
 - [ ] Recall returns a bounded set of governed memories with review/use metadata.
 - [ ] Recall trace or usage report shows which governed memories were returned and which the agent marked as used.
 
-### G7 — One-action project onboarding
+### G7 — One-action project onboarding and attach
 
-A new project must connect to Recallant without manually copying rule/log/handoff structure.
+A new or existing project must connect to Recallant without manually copying rule/log/handoff structure. The target product workflow is `recallant attach`, with cautious modes available when the owner wants manual control.
 
 **Acceptance:**
 
 - [ ] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, and the required MCP/config output for Codex.
 - [ ] `recallant init --dry-run` shows a plan without making changes.
+- [ ] `recallant attach <project-dir> --mode manual|guided|autopilot` is the product-level workflow that can coordinate init, discovery, import, lint, context preview, diagnostics, and reporting.
+- [ ] `manual` mode preserves the old cautious workflow: discovery is read-only, dry-run writes nothing, and durable imports require explicit selected commands.
+- [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
+- [ ] `autopilot` mode may import low-risk source-linked evidence, create ordinary recallable memories, prepare bootstrap files, run checks, and produce a report without asking for each safe step.
+- [ ] `autopilot` does not silently promote broad/risky memories to `instruction_grade`, import raw secrets, enable paid API, change public exposure, perform destructive cleanup, or bind connector/capability records as active behavior without policy review.
 - [ ] Project bootstrap does not copy large historical documents into the new project.
 - [ ] The architecture allows Journey-style kit/skill distribution as an alternate installation path.
 
@@ -132,6 +141,18 @@ Codex must work first, but Recallant must not become Codex-specific.
 - [ ] The same MCP tool contracts support `client_kind=codex`, `cursor`, `claude_code`, `windsurf`, and `other`.
 - [ ] Client-specific code is limited to bootstrap/config/adapter generation and smoke tests.
 - [ ] Core storage, policies, session lifecycle, closeout, recovery, and Review UI do not branch on Codex-specific behavior except for metadata/ergonomics.
+
+### G7.2 — Controlled cross-project recall
+
+Agents must be able to find useful patterns from other projects without mixing project memory by default.
+
+**Acceptance:**
+
+- [ ] The default context pack includes the current project plus applicable developer/environment/capability records, but excludes unrelated project memories.
+- [ ] An explicit cross-project query can return source-linked examples from other projects.
+- [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and whether the result is an example or a binding rule.
+- [ ] A memory from project B does not become a project-A rule unless the agent creates a project-A governed memory proposal or the owner/review policy promotes a general rule.
+- [ ] Connector/account and capability-binding results from other projects require review/confirmation before becoming active long-term behavior for the current project.
 
 ### G8 — Context-budget discipline
 
@@ -271,6 +292,8 @@ Recallant should be suitable for public release and professional review.
 5. **As an agent**, I want to create proposed `agent_memory` records from evidence so important decisions and lessons can be reviewed and reused safely.
 6. **As an agent**, I want to recall accepted governed memories separately from raw chunks so I can distinguish stable instructions from evidence.
 7. **As an agent**, I want a thin repo bootstrap so a new project can inherit global memory conventions without copying old logs.
+7a. **As an agent**, I want to attach an existing project through manual, guided, or autopilot mode so Recallant can safely analyze and import useful context without forcing the owner to run every step.
+7b. **As an agent**, I want to ask Recallant for examples from other projects when I do not know how to set up a resource such as Google Drive, while keeping those examples separate from binding rules.
 8. **As an agent**, I want to load only relevant context so I do not waste the model window on unnecessary startup files.
 8a. **As an agent**, I want to call one startup context-pack tool after session start so I do not manually guess which checkpoint/memories/searches to combine.
 9. **As an agent**, I want to keep working during server/network outages and sync captured context later.
@@ -299,6 +322,8 @@ Recallant should be suitable for public release and professional review.
 - Retrieval latency p95 for `memory_search` on local Postgres is defined in `TEST_CONTRACT.md`, not as hard-coded PRD numbers.
 - Zero data loss for L0 under normal shutdown (ACID commit before ACK to client).
 - A new Codex project can be bootstrapped without manually copying existing project configuration history.
+- An existing project can be attached in guided/autopilot mode with a readable report and without silent instruction-grade promotion.
+- Cross-project recall returns labeled, source-linked examples without mixing unrelated project memories into the default context pack.
 - Agent startup context remains bounded and task-relevant.
 - A new Codex session in an old project restores the current task without the owner re-explaining context.
 - Local captured work can be synced to the server after an outage.
@@ -336,6 +361,8 @@ v1 is the full working core for **coding-agent memory**. It includes:
 - decisions, constraints, lessons, failures, procedures, work logs,
 - file/commit/doc/external references as source-linked artifacts,
 - explicit imports of important project docs, git history, issues, PRs, or external links when requested.
+- autonomous/guided project attach workflows that compose safe discovery, import, context preview, diagnostics, and owner-readable reporting.
+- controlled cross-project recall for prior solution examples, developer rules, environment facts, and capability/connector references.
 
 v1 does not automatically ingest every file, issue tracker, browser event, email, calendar item, or personal-life source. It does not require object storage, a separate vector DB, or a graph DB. Those are future expansion paths through explicit connectors/domains/ADRs.
 

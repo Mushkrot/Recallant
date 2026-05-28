@@ -2,7 +2,11 @@
 
 This document defines the implementation order for an AI agent building Recallant.
 
-**Current status:** implementation is authorized, the main local v1 implementation slices are present, and the first owner-server production deployment is running. The active next plan is [Pre-Pilot Readiness](PRE_PILOT_READINESS.md), which must be completed before attaching a real working project.
+**Current status:** implementation is authorized, the main local v1 implementation slices are present,
+the first owner-server production deployment is running, and the first copied-project pilot is
+complete. The active next plan is Phase 10: autonomous attach and controlled cross-project recall.
+See [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md), [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md),
+and [TASK_GRAPH.md](TASK_GRAPH.md).
 
 This guide implements the v1 full coding-agent memory core defined in [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md). Do not add future expansion work such as personal-life capture, external productivity connectors, object storage, dedicated vector/graph DBs, public packaging, or multi-user/SaaS features unless the owner explicitly reopens scope.
 
@@ -213,7 +217,42 @@ This is not a broad new product phase and does not reopen future-scope items. It
 - agent onboarding contract,
 - production health and backup verification.
 
-Do not connect a real working project until the Pre-Pilot Readiness exit gate passes.
+Pre-Pilot Readiness has completed for the first copied-project pilot. Do not broadly connect real
+working projects through autopilot until Phase 10 attach/detach/cross-project gates pass; use manual
+or guided mode when the owner explicitly chooses a live project earlier.
+
+## Phase 10 - Autonomous attach and controlled cross-project recall
+
+This is the next product-readiness layer after the copied-project pilot. It turns the safe lower-level
+building blocks into the owner-facing workflow described in
+[AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
+
+**Deliverables:**
+
+- [ ] `recallant attach <project-dir> --mode manual|guided|autopilot --target <client>` coordinates
+  init/discover/import/lint/context/doctor/report through one workflow.
+- [ ] `manual` mode preserves the explicit current workflow and writes only what the owner/agent
+  explicitly requests.
+- [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
+- [ ] `autopilot` mode runs safe attach steps automatically: project registration, pointer config,
+  thin agent instructions, selected low-risk evidence imports, context lint, context-pack preview,
+  diagnostics, and report generation.
+- [ ] Autopilot preserves hard safety gates: no raw secrets, no paid API enablement, no public
+  exposure/service/firewall changes, no destructive cleanup, no broad/global instruction promotion,
+  and no active connector/capability binding without policy review.
+- [ ] Attach reports are owner-readable first and include technical detail links/JSON for agents.
+- [ ] Governed project detach/delete supports dry-run, visible affected counts, reversible archive or
+  policy-safe cleanup, and no impact on unrelated projects.
+- [ ] Cross-project recall supports explicit modes for same-project recall, developer rules,
+  environment facts, similar-project examples, and broad review/debug search.
+- [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and
+  applicability warning.
+- [ ] Context Pack Builder excludes unrelated project memory by default while still including
+  applicable developer/environment/capability/connector-account records.
+
+**Gate:** Phase 10 checks in [TEST_CONTRACT.md](TEST_CONTRACT.md) pass, and a copied-project sandbox
+can be attached in `guided` and `autopilot` modes without modifying or polluting the original
+project.
 
 ## Parallelization rules
 
