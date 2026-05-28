@@ -171,7 +171,7 @@ Implemented checkpoint:
 
 ## Workstream R4 - Pilot Sandbox Workflow
 
-Status: not started.
+Status: complete for the first pre-pilot checkpoint.
 
 Purpose:
 
@@ -194,6 +194,12 @@ Implement or document:
 Gate:
 
 - A fixture or local sandbox pilot can complete the workflow without touching a real working project.
+
+Implemented checkpoint:
+
+- [PILOT_SANDBOX_WORKFLOW.md](PILOT_SANDBOX_WORKFLOW.md) documents the copied-project pilot workflow, recommended sandbox root, detach/rollback notes, and pilot report template.
+- `npm run prepilot:smoke:sandbox` copies the fixture project into a temporary sandbox, runs discovery, import dry-run, confirmed import, MCP `memory_start_session`, `memory_get_context_pack`, append/search/recall, closeout, and DB verification.
+- The sandbox smoke verifies the original fixture project is not modified.
 
 ## Workstream R5 - Agent Onboarding Contract
 
