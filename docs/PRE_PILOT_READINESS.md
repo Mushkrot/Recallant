@@ -236,7 +236,7 @@ Implemented checkpoint:
 
 ## Workstream R6 - Operational Readiness Check
 
-Status: not started.
+Status: in progress.
 
 Purpose:
 
@@ -257,6 +257,24 @@ Check:
 Gate:
 
 - Operational checks are documented in `docs/IMPLEMENTATION_STATUS.md` or a dated run note.
+
+Recovery checkpoint:
+
+- On 2026-05-28, `https://recallant.unicloud.ca` returned Cloudflare `502` because the
+  production Postgres container was absent and `127.0.0.1:15432` refused connections. The HTTP
+  service crashed on the first DB-backed Review UI request, then systemd restarted it.
+- Production Postgres was restored with `make prod-db-up`; `recallant-postgres` returned healthy
+  on `127.0.0.1:15432`, the HTTP service remained active on `127.0.0.1:3005`, local `/health`
+  returned `200`, unauthenticated `/review` returned `401`, and public unauthenticated
+  `https://recallant.unicloud.ca/` returned a Cloudflare Access `302`.
+- Post-recovery DB checks found one `/ai/recallant` project row, zero pending paid API approvals,
+  zero paid-provider model calls in the last 30 days, and a current `latest-manifest.json` backup
+  pointer from 2026-05-28.
+- Root cause prevention: dev database Make targets now use an explicit `recallant-dev` Docker
+  Compose project name so `make db-down` and `make db-reset` cannot remove the production
+  `recallant-postgres` container managed by the production compose target.
+- Full authenticated browser UI verification still requires a real Cloudflare Access session in
+  the owner's browser; agents should not forge Cloudflare identity headers against production.
 
 ## Exit Gate
 

@@ -10,6 +10,12 @@ Recallant is deployed on the owner server and the first production UI cleanup ha
 
 Do not start by connecting a real project. Existing-project discovery/preflight, Durable Explicit Import write mode, Review UI import/action readiness, Pilot Sandbox Workflow, and Agent Onboarding Contract are complete for the first pre-pilot checkpoint; the next implementation work is Operational Readiness Check.
 
+Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
+the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
+with `make prod-db-up`; public unauthenticated access returned Cloudflare Access `302` again. Dev
+database Make targets now use `recallant-dev` as their Docker Compose project name so local
+`make db-down` / `make db-reset` cannot remove the production `recallant-postgres` container.
+
 Historical handoff material from 2026-05-21 has been archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`. It is useful for provenance, but it is no longer the current starting point.
 
 ## Start Sequence For The Next Agent
@@ -30,7 +36,7 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 3. R3 Review UI Import And Action Readiness. Complete for the first pre-pilot checkpoint.
 4. R4 Pilot Sandbox Workflow. Complete for the first pre-pilot checkpoint.
 5. R5 Agent Onboarding Contract. Complete for the first pre-pilot checkpoint.
-6. R6 Operational Readiness Check. Start here next.
+6. R6 Operational Readiness Check. Continue here next.
 
 R0 Documentation And Handoff Readiness is complete for the current checkpoint. R1 discovery/preflight, R2 explicit import write mode, R3 Review UI import/action readiness, R4 pilot sandbox workflow, and R5 agent onboarding contract are also complete for the first pre-pilot checkpoint.
 

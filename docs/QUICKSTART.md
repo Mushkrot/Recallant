@@ -61,6 +61,10 @@ Postgres service. These targets call `scripts/recallant-prod-compose.sh`, which 
 `/opt/secure-configs/recallant.env` without printing it and passes only the database variables to
 the Postgres container. Do not inspect production compose with resolved real secrets.
 
+The development database targets (`make db-up`, `make db-reset`, `make db-down`) use the separate
+Docker Compose project name `recallant-dev`. They are for local smoke-test databases only and must
+not be used as production lifecycle commands.
+
 For the first production deployment, do not expose remote MCP through Cloudflare. The Cloudflare
 hostname is for the human Review/Management UI and same-origin admin API. Agents use the local
 stdio MCP command printed by `recallant init`.

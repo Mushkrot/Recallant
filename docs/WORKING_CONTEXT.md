@@ -160,6 +160,19 @@ Production deployment progress as of 2026-05-27:
 - the Review UI project/settings panels have been compacted for the first production workbench;
 - `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
+Operational recovery as of 2026-05-28:
+
+- a live `recallant.unicloud.ca` Cloudflare `502` was traced to the production
+  `recallant-postgres` container being absent, so DB-backed Review UI requests hit
+  `ECONNREFUSED 127.0.0.1:15432` and crashed the HTTP process;
+- `make prod-db-up` restored the production Postgres container with existing data under
+  `/ai/recallant-data/postgres`;
+- `recallant-postgres` is healthy on `127.0.0.1:15432`, `recallant.service` is active on
+  `127.0.0.1:3005`, and public unauthenticated access returns the expected Cloudflare Access
+  redirect;
+- dev database Make targets now use the separate Docker Compose project name `recallant-dev` so
+  local smoke cleanup cannot remove the production database container again.
+
 Pre-pilot decision as of 2026-05-28:
 
 - Do not connect a real working project as the immediate next step.

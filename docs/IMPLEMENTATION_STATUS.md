@@ -65,6 +65,13 @@ The production Postgres/pgvector prerequisite has also been completed on the own
 `/ai/recallant-data/postgres`, migrated with `0001_initial.sql`, and verified with `pgcrypto` and
 `vector` installed. Local backup storage exists at `/ai/recallant-data/backups`.
 
+Operational recovery note from 2026-05-28: a live Cloudflare `502` was traced to
+`recallant-postgres` being absent, leaving `127.0.0.1:15432` unavailable. The first DB-backed Review
+UI request crashed the HTTP process with `ECONNREFUSED`; systemd restarted the HTTP service, but the
+database stayed down until `make prod-db-up` restored the production container. To prevent recurrence,
+development database Make targets now use an explicit `recallant-dev` Docker Compose project name;
+production database lifecycle stays behind `scripts/recallant-prod-compose.sh`.
+
 The HTTP auth implementation now supports both accepted auth paths: bearer token auth for
 agents/API and Cloudflare Access identity plus signed Recallant session cookie for the browser UI.
 The production secret file includes `RECALLANT_ADMIN_EMAILS=highmac@gmail.com`.
@@ -156,6 +163,22 @@ Latest Pre-Pilot R1 validation:
 - Docker network execution of `npm run phase7:smoke`
 - Docker network execution of `npm run review-ui:smoke`
 - Docker network execution of `npm run prepilot:smoke:sandbox`
+
+Latest Pre-Pilot R6 incident recovery validation:
+
+- `make prod-db-up`
+- `make prod-db-status`
+- `ss -ltnp` confirmed `127.0.0.1:3005`, `127.0.0.1:15432`, and `127.0.0.1:11434`
+- Local `/health` returned `200`
+- Local unauthenticated `/review` returned `401`
+- Public unauthenticated `https://recallant.unicloud.ca/` returned Cloudflare Access `302`
+- `recallant-backup.timer` remained active
+- `pg_isready` reported `recallant_agent_work` accepting connections
+- SQL checks returned one `/ai/recallant` project row, zero pending paid API approvals, and zero
+  paid-provider model calls in the last 30 days
+- `/ai/recallant-data/backups/latest-manifest.json` points to the 2026-05-28 13:45 UTC manifest
+- `make db-up && make db-down && make prod-db-status` verified dev compose cleanup no longer
+  removes the production `recallant-postgres` container
 
 The existing `scripts/smoke-phase7-cli.mjs` still assumes the Docker `/work` mount profile for its child CLI process; running it directly on the host without that mount fails before exercising Recallant code.
 
