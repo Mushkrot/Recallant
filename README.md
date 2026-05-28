@@ -12,7 +12,7 @@ Start with [docs/README.md](docs/README.md); it defines the canonical reading or
 
 ## Status
 
-Implementation has started. The repository now contains the documentation pack plus the Phase 0 TypeScript monorepo skeleton described in [docs/AGENT_IMPLEMENTATION_GUIDE.md](docs/AGENT_IMPLEMENTATION_GUIDE.md).
+Recallant has a working local v1 implementation slice and an owner-server production deployment for the private Review UI, Postgres/pgvector, local Ollama, and automated local backups. The active next checkpoint is [Pre-Pilot Readiness](docs/PRE_PILOT_READINESS.md): prepare safe existing-project discovery, explicit import, Review UI review flow, and sandbox pilot workflow before connecting any real working project.
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 

@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-05-27.
+Last updated: 2026-05-28.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
@@ -93,8 +93,32 @@ with sessions, events, chunks, memories, settings, model calls, approvals, or ad
 The Review UI project list now collapses projects by path, shows counts compactly, and renders
 structured settings as formatted JSON instead of `[object Object]`.
 
+## Active Next Plan
+
+The active next checkpoint is [Pre-Pilot Readiness](PRE_PILOT_READINESS.md). The goal is to make
+Recallant ready for a first pilot on a duplicated project copy before connecting any real working
+project.
+
+Current work order:
+
+1. Existing-project discovery and preflight.
+2. Durable explicit import write mode.
+3. Review UI import candidate/action readiness.
+4. Pilot sandbox workflow.
+5. Agent onboarding contract.
+6. Operational readiness check.
+
+The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
+
 ## Recent Commit Checkpoints
 
+- `fd23a0b Clean up production review dashboard`
+- `f676468 Add production backup runner`
+- `77509b8 Document Cloudflare deployment`
+- `330d994 Add Cloudflare session auth for server`
+- `cf2ca5f Add production Postgres compose`
+- `d397f11 Document production deployment plan`
+- `eae8851 Document implementation status`
 - `77ca937 Add local spool sync CLI`
 - `6ed6515 Expose local spool status in context`
 - `eca8dee Automate cross-client MCP smoke`
@@ -119,11 +143,10 @@ The core smoke suite includes MCP handshake, lifecycle, embeddings, retrieval, g
 
 ## Current Boundary
 
-The owner has answered the deployment-profile questions above and authorized autonomous
-implementation of ordinary deployment steps with scoped commits and verification after each
-checkpoint.
+The accepted production deployment profile has been implemented. Continue with Pre-Pilot Readiness.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare
-Access, paid API enablement, destructive erasure, firewall rule changes that risk lockout, or a real
-specification contradiction.
+Access, paid API enablement, destructive erasure, firewall rule changes that risk lockout, a real
+specification contradiction, or attaching a real working project before the Pre-Pilot Readiness exit
+gate.

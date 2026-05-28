@@ -2,7 +2,7 @@
 
 This document defines the implementation order for an AI agent building Recallant.
 
-**Current status:** implementation is authorized and Phase 0 has started. The earlier documentation-first pause from [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md) was lifted by the owner on 2026-05-22.
+**Current status:** implementation is authorized, the main local v1 implementation slices are present, and the first owner-server production deployment is running. The active next plan is [Pre-Pilot Readiness](PRE_PILOT_READINESS.md), which must be completed before attaching a real working project.
 
 This guide implements the v1 full coding-agent memory core defined in [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md). Do not add future expansion work such as personal-life capture, external productivity connectors, object storage, dedicated vector/graph DBs, public packaging, or multi-user/SaaS features unless the owner explicitly reopens scope.
 
@@ -199,6 +199,21 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [ ] Batch cleanup does not perform permanent erasure silently.
 
 **Gate:** `TEST_CONTRACT.md` Phase 9 checks pass.
+
+## Pre-Pilot Readiness - Launch preparation before first real project
+
+The current active work order is defined in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
+
+This is not a broad new product phase and does not reopen future-scope items. It is the readiness layer needed before the first real project pilot:
+
+- safe existing-project discovery/preflight,
+- explicit import write mode with reviewable candidates,
+- Review UI import/detail/action readiness,
+- sandbox pilot workflow on a duplicated project copy,
+- agent onboarding contract,
+- production health and backup verification.
+
+Do not connect a real working project until the Pre-Pilot Readiness exit gate passes.
 
 ## Parallelization rules
 

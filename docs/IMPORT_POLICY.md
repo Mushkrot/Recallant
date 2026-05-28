@@ -4,6 +4,8 @@ Explicit imports extend v1 memory beyond live agent sessions without turning Rec
 
 Decision status: v1 import workflow accepted. See [ADR-0013-closeout-intent-and-explicit-imports.md](ADR-0013-closeout-intent-and-explicit-imports.md), [ADR-0039-v1-import-workflow.md](ADR-0039-v1-import-workflow.md), and historical context in [ADR-0037-import-workflow-and-memory-scope-archive.md](ADR-0037-import-workflow-and-memory-scope-archive.md).
 
+Current implementation note: before attaching the first real working project, complete the import-related workstreams in [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md). Existing projects should be tested through a duplicated sandbox copy first.
+
 Core rule:
 
 - `recallant discover` scans the environment for setup/import candidates, but does not import historical material as active memory.

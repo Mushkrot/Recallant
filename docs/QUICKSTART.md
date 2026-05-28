@@ -1,5 +1,7 @@
 # Quickstart - connect a new project to Recallant
 
+Current operator note: before connecting an existing real working project, complete [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md) and run the first pilot against a duplicated project copy. This quickstart remains the target user flow, but the first real migration should not skip the pre-pilot gate.
+
 ## Prerequisite: server is running
 
 On a Linux server, Recallant needs Postgres/pgvector and the Recallant server. A local model provider such as Ollama is used when configured and reachable; use an existing installation instead of starting a duplicate stack by default.

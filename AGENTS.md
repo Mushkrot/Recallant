@@ -13,10 +13,12 @@ Stop only when the next step genuinely requires the owner: security/public expos
 Start with:
 
 1. `docs/WORKING_CONTEXT.md`
-2. `docs/README.md`
-3. `docs/AGENT_IMPLEMENTATION_GUIDE.md`
-4. `docs/TASK_GRAPH.md`
-5. `docs/TEST_CONTRACT.md`
+2. `docs/PRE_PILOT_READINESS.md`
+3. `docs/SESSION_HANDOFF_CURRENT.md`
+4. `docs/README.md`
+5. `docs/AGENT_IMPLEMENTATION_GUIDE.md`
+6. `docs/TASK_GRAPH.md`
+7. `docs/TEST_CONTRACT.md`
 
 The repository artifacts are English. Conversation with the owner may be Russian.
 

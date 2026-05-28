@@ -1,6 +1,6 @@
 # Working context snapshot
 
-Last updated: 2026-05-27.
+Last updated: 2026-05-28.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
@@ -160,6 +160,15 @@ Production deployment progress as of 2026-05-27:
 - the Review UI project/settings panels have been compacted for the first production workbench;
 - `/ai/PORTS.yaml` and `/ai/SECURITY` have been updated for these services.
 
+Pre-pilot decision as of 2026-05-28:
+
+- Do not connect a real working project as the immediate next step.
+- The owner wants Recallant brought as close as practical to a finished working product before the first real project connection.
+- The first pilot should use a duplicated project copy, not the original working project.
+- The active next plan is `docs/PRE_PILOT_READINESS.md`.
+- The current handoff for new sessions is `docs/SESSION_HANDOFF_CURRENT.md`.
+- The old dated handoff from 2026-05-21 is archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`.
+
 ## Expansion stance
 
 Recallant v1 is for coding-agent memory, but the architecture must leave a path toward broader human external memory in the OB1 spirit. That future path should use explicit domains/scopes, provenance, review/use policies, and bounded retrieval instead of mixing all personal data into project memory.
@@ -197,20 +206,19 @@ Latest implementation checkpoints:
 - Cross-client smoke automation is implemented: `scripts/smoke-cross-client.mjs` starts two independent MCP processes with the same project/developer context, writes a fact through one client kind, and verifies another client kind can retrieve it through `memory_search`.
 - Core smoke suite aggregation is available through `npm run smoke:core`; run it after `npm run build` and a clean `make db-reset` when validating the full local DB-backed implementation surface.
 
-Architecture cleanup and implementation-shaping decisions are now sufficiently documented to move toward implementation planning. The owner asked to preserve the next-step plan before closing the session.
+Production deployment and the first UI cleanup are complete. The owner asked to preserve the next-step plan before closing the session. The active next plan is `docs/PRE_PILOT_READINESS.md`.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
 
 Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
-2. Follow `AGENT_IMPLEMENTATION_GUIDE.md`, `TASK_GRAPH.md`, and `TEST_CONTRACT.md`.
-3. Implement the accepted production deployment plan. Production service changes for the accepted
-   Recallant/Ollama/Postgres/Cloudflare Access profile are authorized; do not perform additional
-   public exposure, paid API calls, or destructive erasure without owner participation.
-4. Commit autonomously at coherent verified checkpoints so rollback remains easy.
-5. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material
-   deployment change.
+2. Read `docs/PRE_PILOT_READINESS.md` and `docs/SESSION_HANDOFF_CURRENT.md`.
+3. Start with Workstream R1: Existing Project Discovery And Preflight.
+4. Do not connect a real working project until the Pre-Pilot Readiness exit gate is met.
+5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
+6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material
+   deployment or security change.
 
 Do not reopen the product name, v1 scope, OB1/MF0 synthesis, managed memory decision, natural-language management direction, owner-server security/ports constraints, or Recallant/AMP rename unless the owner explicitly requests it.
 

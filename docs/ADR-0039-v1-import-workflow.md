@@ -107,6 +107,8 @@ An import result is not just "a memory." Import should classify findings into st
 
 ## Open follow-ups
 
+These follow-ups are now tracked by the active [Pre-Pilot Readiness](PRE_PILOT_READINESS.md) plan:
+
 - Exact CLI flags and preview output format.
 - Exact dedup strategy for repeated imports.
 - Default scope/audience inference details for import preview, within ADR-0040's accepted model.

@@ -216,6 +216,22 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Self-cleaning reports can identify duplicate/stale/superseded/low-value/poor-provenance/conflicting-connector candidates without auto-deleting them.
 - [ ] `recallant cleanup` does not execute permanent erasure without routing through `memory_forget` confirmation.
 
+## Pre-Pilot Readiness
+
+- [ ] `recallant discover --project-dir <fixture>` reports existing manual memory surfaces without writing durable import records.
+- [ ] Discovery classifies `AGENTS.md`, `PROJECT_LOG.md`, `.cursor/SESSION_HANDOFF.md`, `CLAUDE.md`, selected docs, and `.env.example` into source-linked candidate classes.
+- [ ] Discovery reports source path, content hash, provisional scope/audience, risk, and suggested import command for each candidate.
+- [ ] Discovery warns on duplicated history dumps, stale handoff material, oversized context files, possible conflicts, possible duplicates, and raw secret values without leaking secret contents.
+- [ ] `recallant import --dry-run` shows the same source refs, result classes, scope/audience, risks, and conflicts without writing.
+- [ ] Confirmed `recallant import` writes an `import_batch` event plus source-linked evidence/chunks/candidates/facts according to import type.
+- [ ] Re-running the same import is idempotent by source path, hash, project, and result class.
+- [ ] Imported client-specific docs default to client-specific audience, not universal all-agent behavior.
+- [ ] Imported candidate rules and high-risk facts appear in Review UI/API and do not become `instruction_grade` without review/promotion.
+- [ ] Review UI can show imported candidate detail with source path, bounded quote, hash/provenance, status, use policy, scope, audience, confidence, and review history.
+- [ ] Review UI can apply at least accept, reject, promote instruction, archive, edit, merge, and supersede actions through the same server policy path as MCP/CLI.
+- [ ] A sandbox copied project can complete discover, import dry-run, selected import, MCP startup/context-pack smoke, append/search smoke, closeout, and detach/rollback without touching the original project.
+- [ ] Production readiness check covers `recallant doctor`, local stdio MCP smoke, Review UI access through Cloudflare Access, localhost-only origin, enabled backup timer, latest backup verification, no duplicate `/ai/recallant` project rows, and no unintended paid API use.
+
 ## Cross-client smoke
 
 - [ ] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.
