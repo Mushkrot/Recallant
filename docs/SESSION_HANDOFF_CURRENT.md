@@ -96,6 +96,8 @@ The current Review/Management UI and chat target is complete for the first imple
   direct execution;
 - the first screen includes "What Needs Attention", project action guidance, cross-project
   isolation reminders, and human-readable settings summaries with technical details collapsed.
+- the chat panel now lives in the left rail, uses its own capped scroll area for long answers, and
+  Russian risky-action responses keep the warning/action labels in Russian.
 
 The next useful targets are:
 

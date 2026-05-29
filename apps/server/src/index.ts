@@ -602,6 +602,25 @@ function renderSettings(rows: Array<Record<string, unknown>>) {
     .join("");
 }
 
+function renderCosts(rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return `<p class="empty">No model cost records in the last 30 days.</p>`;
+  const actualUsd = rows.reduce((sum, row) => sum + Number(row.actual_usd ?? 0), 0);
+  const estimatedUsd = rows.reduce((sum, row) => sum + Number(row.estimated_usd ?? 0), 0);
+  const callCount = rows.reduce((sum, row) => sum + Number(row.call_count ?? 0), 0);
+  return `<div class="cost-summary">
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(rows.length)}</strong> records</span>
+      <span><strong>${escapeHtml(callCount)}</strong> calls</span>
+      <span><strong>$${escapeHtml(actualUsd.toFixed(4))}</strong> actual</span>
+      <span><strong>$${escapeHtml(estimatedUsd.toFixed(4))}</strong> estimated</span>
+    </div>
+    <details>
+      <summary>Model call details</summary>
+      ${renderRows(rows, "No model cost records in the last 30 days.")}
+    </details>
+  </div>`;
+}
+
 function rowCount(rows: unknown) {
   return Array.isArray(rows) ? rows.length : 0;
 }
@@ -667,7 +686,7 @@ function renderProjectActions(data: ReviewDashboardData) {
 function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState) {
   const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
   const selectedMemoryId = selectedMemory.id;
-  return `<form class="chat-form" method="post" action="/management-chat">
+  return `<form class="chat-form" method="post" action="/management-chat#management-chat">
     <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
     ${
       selectedMemoryId
@@ -684,30 +703,47 @@ function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState)
           ${renderTextBlock(chat.response.answer)}
           ${
             chat.response.confirmation_required
-              ? `<p class="warning">Confirmation required before any risky action can run.</p>`
+              ? `<p class="warning">${escapeHtml(chat.response.language === "ru" ? "Перед рискованным действием требуется подтверждение." : "Confirmation required before any risky action can run.")}</p>`
               : ""
           }
-          ${renderChatActions(chat.response.proposed_actions)}
+          ${renderChatActions(chat.response.proposed_actions, chat.response.language)}
         </article>`
       : `<p class="empty">Ask in normal language. Recallant will answer read-only questions directly and turn risky requests into a dry-run/confirmation plan.</p>`
   }`;
 }
 
-function renderChatActions(actions: ManagementChatResponse["proposed_actions"]) {
+function renderChatActions(
+  actions: ManagementChatResponse["proposed_actions"],
+  language: ManagementChatResponse["language"]
+) {
   if (actions.length === 0) return "";
+  const title = language === "ru" ? "Предложенный следующий шаг" : "Proposed next step";
   return `<div class="chat-actions">
-    <h4>Proposed next step</h4>
+    <h4>${escapeHtml(title)}</h4>
     ${actions
       .map(
         (action) => `<article>
           <strong>${escapeHtml(action.label)}</strong>
-          <span>${escapeHtml(action.kind.replaceAll("_", " "))}</span>
+          <span>${escapeHtml(actionKindLabel(action.kind, language))}</span>
           <p>${escapeHtml(action.reason)}</p>
           ${action.command ? `<code>${escapeHtml(action.command)}</code>` : ""}
         </article>`
       )
       .join("")}
   </div>`;
+}
+
+function actionKindLabel(
+  kind: ManagementChatResponse["proposed_actions"][number]["kind"],
+  language: ManagementChatResponse["language"]
+) {
+  if (language !== "ru") return kind.replaceAll("_", " ");
+  const labels: Record<typeof kind, string> = {
+    read_only: "безопасная проверка",
+    dry_run: "dry-run без изменений",
+    confirmation_required: "требуется подтверждение"
+  };
+  return labels[kind];
 }
 
 function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
@@ -722,7 +758,7 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     body { margin: 0; }
     header { padding: 20px 28px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 380px); gap: 18px; padding: 18px; }
+    main { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(280px, 380px); gap: 18px; padding: 18px; align-items: start; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     a { color: inherit; text-decoration: none; }
@@ -742,8 +778,13 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
+    .left-rail, .right-rail { align-self: start; }
+    .chat-panel { position: sticky; top: 12px; z-index: 1; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .summary-grid span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; color: #4f5867; font-size: 12px; background: #f8fafc; }
+    .summary-grid strong { display: block; color: #20242c; font-size: 13px; }
     .project { border-top: 1px solid #e5e9f0; padding: 11px 0; }
     .project:first-child { border-top: 0; }
     .project.active h3::after { content: " active"; color: #246b5a; font-size: 11px; font-weight: 600; }
@@ -770,9 +811,9 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
     .chat-form { display: grid; gap: 8px; }
-    .chat-form textarea { resize: vertical; min-height: 92px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px; font: inherit; font-size: 13px; color: #20242c; background: #fff; }
+    .chat-form textarea { resize: vertical; min-height: 76px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px; font: inherit; font-size: 13px; color: #20242c; background: #fff; }
     .chat-form button { justify-self: start; }
-    .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; }
+    .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 420px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
     .chat-answer p { margin: 0 0 9px; color: #303845; font-size: 13px; line-height: 1.45; }
     .chat-answer .warning { color: #8a3c15; font-weight: 650; }
@@ -784,7 +825,7 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     .chat-actions p { margin: 6px 0; color: #4f5867; }
     .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } .chat-panel { position: static; } }
   </style>
 </head>
 <body>
@@ -796,7 +837,7 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     </div>
   </header>
   <main>
-    <aside>
+    <aside class="left-rail">
       <section class="panel">
         <h2>Projects</h2>
         ${renderProjects(data.projects, data.current_project_id)}
@@ -808,6 +849,10 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
           <span class="pill">Review ${escapeHtml(data.critical?.pending_review ?? 0)}</span>
           <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
         </div>
+      </section>
+      <section class="panel chat-panel" id="management-chat">
+        <h2>Management Chat</h2>
+        ${renderManagementChat(data, chat)}
       </section>
       <section class="panel">
         <h2>Project Actions</h2>
@@ -836,14 +881,14 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
         ${renderRows(data.rules, "No instruction-grade rules yet.", data.current_project_id)}
       </section>
     </section>
-    <aside>
+    <aside class="right-rail">
       <section class="panel">
         <h2>Selected Detail</h2>
         ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id)}
       </section>
       <section class="panel">
         <h2>Cost / Paid API</h2>
-        ${renderRows(data.costs, "No model cost records in the last 30 days.")}
+        ${renderCosts(data.costs)}
       </section>
       <section class="panel">
         <h2>Cleanup / Forget</h2>
@@ -855,10 +900,6 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
       <section class="panel">
         <h2>Settings</h2>
         ${renderSettings(data.settings)}
-      </section>
-      <section class="panel">
-        <h2>Management Chat</h2>
-        ${renderManagementChat(data, chat)}
       </section>
     </aside>
   </main>

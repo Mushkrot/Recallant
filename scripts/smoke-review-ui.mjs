@@ -150,6 +150,7 @@ try {
     !htmlText.includes("Cost / Paid API") ||
     !htmlText.includes("Settings") ||
     !htmlText.includes("Management Chat") ||
+    !htmlText.includes('id="management-chat"') ||
     !htmlText.includes("Ask what to review next") ||
     !htmlText.includes("Local embeddings")
   ) {
@@ -211,10 +212,33 @@ try {
     destructiveChat.status !== 200 ||
     destructiveChatJson.confirmation_required !== true ||
     destructiveChatJson.proposed_actions.length < 1 ||
-    !String(destructiveChatJson.answer).includes("dry-run")
+    !String(destructiveChatJson.answer).includes("предварительная проверка")
   ) {
     throw new Error(
       `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
+    );
+  }
+
+  const destructiveChatForm = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      message: "Удали этот проект навсегда"
+    })
+  });
+  const destructiveChatFormHtml = await destructiveChatForm.text();
+  if (
+    destructiveChatForm.status !== 200 ||
+    !destructiveChatFormHtml.includes("Перед рискованным действием требуется подтверждение.") ||
+    !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
+    destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")
+  ) {
+    throw new Error(
+      `Management chat destructive form smoke failed: ${destructiveChatForm.status} ${destructiveChatFormHtml}`
     );
   }
 

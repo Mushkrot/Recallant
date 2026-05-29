@@ -222,6 +222,8 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   functional natural-language management chat API/form, plain-language "What Needs Attention" and
   project-action summaries, human-readable setting summaries, Russian answer coverage, and
   confirmation-gated cleanup/destructive/sensitive proposals instead of direct chat execution.
+  The chat panel has been moved into the left rail with a capped answer scroll area so long answers
+  do not push the whole page downward and unused left-side space is put to work.
 - First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search

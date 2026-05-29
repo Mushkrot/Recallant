@@ -209,7 +209,7 @@ function answerRu(
 ) {
   const baseline = `Проект: ${facts.project_name}. На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
   if (destructiveOrSensitive) {
-    return `${baseline}\n\nЭто похоже на действие, которое может удалить, отцепить, открыть доступ, затронуть секреты или расходы. Я не выполняю это из chat сразу. Сначала нужен dry-run, затем явное подтверждение через обычный безопасный путь Recallant.`;
+    return `${baseline}\n\nЭто похоже на действие, которое может удалить, отцепить проект, открыть доступ, затронуть секреты или расходы. Я не выполняю такие действия прямо из чата. Сначала нужна предварительная проверка без изменений, затем явное подтверждение через обычный безопасный путь Recallant.`;
   }
   switch (intent) {
     case "next_steps":
@@ -218,7 +218,7 @@ function answerRu(
       }
       return `${baseline}\n\nСрочных решений нет. Следующий полезный шаг: запустить обычную рабочую сессию агента и проверить, что он берет стартовый контекст из Recallant без ручного чтения старых логов.`;
     case "cleanup":
-      return `${baseline}\n\nДля cleanup безопасный порядок такой: сначала dry-run, потом подтверждение. Обычный detach не удаляет память навсегда; sensitive/wrong memory надо отправлять в отдельный forget forever workflow.`;
+      return `${baseline}\n\nДля очистки безопасный порядок такой: сначала предварительная проверка без изменений, потом подтверждение. Обычное отцепление проекта не удаляет память навсегда; чувствительную или ошибочную память нужно отправлять в отдельный workflow полного удаления.`;
     case "settings":
       return `${baseline}\n\nНастройки проекта управляются на стороне Recallant. Опасные изменения, например paid API auto mode или сильное расширение capture/context, должны идти через подтверждение и audit.`;
     case "cost":
@@ -285,7 +285,10 @@ function actionsForIntent(
     const cleanup = dashboard.project_cleanup ?? {};
     return [
       {
-        label: language === "ru" ? "Сначала dry-run detach" : "Run detach dry-run first",
+        label:
+          language === "ru"
+            ? "Сначала предварительная проверка detach"
+            : "Run detach dry-run first",
         kind: "dry_run",
         command: stringValue(cleanup.detach_command),
         reason:
@@ -295,11 +298,11 @@ function actionsForIntent(
       },
       {
         label:
-          language === "ru" ? "Forget forever только отдельно" : "Use forget forever separately",
+          language === "ru" ? "Полное удаление только отдельно" : "Use forget forever separately",
         kind: "confirmation_required",
         reason:
           language === "ru"
-            ? "Постоянное удаление sensitive/wrong memory требует отдельного подтверждения."
+            ? "Постоянное удаление чувствительной или ошибочной памяти требует отдельного подтверждения."
             : "Permanent erasure of sensitive or wrong memory requires a separate confirmation."
       }
     ];
