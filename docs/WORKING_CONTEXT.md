@@ -1,6 +1,6 @@
 # Working context snapshot
 
-Last updated: 2026-05-28.
+Last updated: 2026-05-30.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
@@ -235,6 +235,10 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   installs the server profile, `scripts/install-recallant-cli.sh` installs a global `recallant`
   wrapper, CLI commands auto-load `/opt/secure-configs/recallant.env` when present, and ordinary
   onboarding is `cd <project> && recallant attach .`.
+- Closeout checkpoint as of 2026-05-30: commit `e562a7e Improve Recallant onboarding and AI chat`
+  is pushed to `origin/main`; `/usr/local/bin/recallant` is installed; production `recallant doctor`,
+  `/health`, Cloudflare Access redirect, and live AI-backed Management Chat all passed; the
+  `recallant-dev` Docker environment was stopped after smoke validation.
 - First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search
@@ -309,10 +313,11 @@ Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `
 Next session should start here:
 
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
-2. Read `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
+2. Read `PROJECT_LOG.md`, `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
    `docs/CROSS_PROJECT_RECALL.md`.
 3. Start from the completed first Phase 10 attach/detach/cross-project checkpoint; the next useful
-   slice is owner-facing Management UI/chat quality or optional local sandbox cleanup.
+   slice is owner-facing Management UI action quality, optional local sandbox cleanup, or an
+   owner-driven new sandbox attach test through `recallant attach . --sandbox`.
 4. Keep manual/guided modes available; do not make autopilot the only way to attach projects.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

@@ -337,11 +337,27 @@ Latest product-UX readiness checkpoint:
 - Explicit owner requests to save a low-risk rule for all projects create a developer-scope
   `instruction_grade` memory so future context packs include it as binding guidance.
 
+Latest closeout checkpoint:
+
+- Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
+- `/usr/local/bin/recallant` is installed and `recallant doctor` passed through that wrapper.
+- Production `recallant.service` was restarted and verified active on `127.0.0.1:3005`.
+- Local production `/health` passed after restart.
+- Public unauthenticated `https://recallant.unicloud.ca/` returned the expected Cloudflare Access
+  redirect.
+- Live Management Chat API used local AI interpretation through `mistral-small:24b`.
+- Targeted validations passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  `npm run review-ui:smoke`, `npm run phase10:smoke`, one-command attach through the installed
+  wrapper against the isolated dev database, and production `recallant doctor`.
+- `make db-down` stopped the isolated `recallant-dev` Docker environment after validation.
+- `PROJECT_LOG.md` now exists as the compact repo-native fallback/checkpoint for `/ai/recallant`.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
-attach/detach/cross-project recall slices have been implemented. Continue with management UI/chat
-quality and optional sandbox local-cleanup hardening.
+attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
+path and AI-backed Management Chat baseline are also implemented. Continue with richer Management UI
+actions, optional sandbox local-cleanup hardening, or an owner-driven new sandbox attach test.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

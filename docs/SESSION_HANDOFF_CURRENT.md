@@ -1,23 +1,21 @@
 # Current Session Handoff
 
-Last updated: 2026-05-28.
+Last updated: 2026-05-30.
 
 This is the current handoff for the next Recallant session. Start here after reading `AGENTS.md`.
 
 ## Current State
 
-Recallant is deployed on the owner server, the first production UI cleanup has been completed, and
-the GutenDocx copied-project sandbox pilot is complete. The active product direction is now Phase 10:
-autonomous project attach/detach plus controlled cross-project recall; the first implementation
-slices for all three are now complete. The next management-surface slice has also started: the
-Review Command Center now has functional plain-language management chat and a more owner-readable
-first screen.
+Recallant is deployed on the owner server, the GutenDocx copied-project sandbox pilot is complete,
+and the first product-UX readiness pass is deployed. Phase 10 now has working first slices for
+autonomous project attach/detach, controlled cross-project recall, one-command project onboarding,
+AI-backed Management Chat, and owner-confirmed developer-wide rules.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
-live `/ai/gutendocx` project yet. The next work is to implement the product-level workflow that can
-attach/detach projects safely and reuse cross-project examples explicitly, then continue improving
-the owner-facing management surface.
+live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
+work is to deepen owner-facing Management UI action flows or add optional local sandbox-file cleanup
+after confirmed detach.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -32,15 +30,16 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 ## Start Sequence For The Next Agent
 
 1. Read `AGENTS.md`.
-2. Read `docs/WORKING_CONTEXT.md`.
-3. Read `docs/PRE_PILOT_READINESS.md`.
-4. Read `docs/AUTONOMOUS_ATTACH.md`.
-5. Read `docs/CROSS_PROJECT_RECALL.md`.
-6. Read `docs/IMPLEMENTATION_STATUS.md`.
-7. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
-8. Run `git status --short --branch`.
-9. Run `git log --oneline -8`.
-10. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md`.
+2. Read `PROJECT_LOG.md`.
+3. Read `docs/WORKING_CONTEXT.md`.
+4. Read `docs/PRE_PILOT_READINESS.md`.
+5. Read `docs/AUTONOMOUS_ATTACH.md`.
+6. Read `docs/CROSS_PROJECT_RECALL.md`.
+7. Read `docs/IMPLEMENTATION_STATUS.md`.
+8. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
+9. Run `git status --short --branch`.
+10. Run `git log --oneline -8`.
+11. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
 
 ## Active Work Order
 
@@ -114,12 +113,28 @@ The current install/onboarding UX target is implemented for the owner-server pro
 - ordinary project onboarding is `cd <project> && recallant attach .`, with `--sandbox`,
   `--mode guided`, and `--mode manual` available when needed.
 
+Latest deployed checkpoint:
+
+- Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
+- `/usr/local/bin/recallant` is installed on the owner server.
+- `recallant doctor` passed through the installed CLI with Postgres reachable, Ollama reachable,
+  expected local models present, and paid API mode `confirm_each`.
+- `recallant.service` was restarted after deploy and is active on `127.0.0.1:3005`.
+- Local `/health` passed after restart.
+- Public unauthenticated `https://recallant.unicloud.ca/` still returns the expected Cloudflare
+  Access redirect.
+- Live Management Chat API answered through local AI interpretation:
+  `source=local_ai`, `model=mistral-small:24b`, `intent=next_steps`, `language=ru`.
+- Dev `recallant-dev` Docker environment was stopped after smoke tests.
+
 The next useful targets are:
 
 - deepen Review/Management UI action flows for settings, context-pack preview, and review
   proposals;
 - optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
   confirmation.
+- optionally test a brand-new sandbox project from the owner-facing path:
+  `mkdir /ai/recallant-pilots/<name> && cd /ai/recallant-pilots/<name> && recallant attach . --sandbox`.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -149,7 +164,7 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should continue from a completed first Phase 10 attach/detach/cross-project
-checkpoint and a first functional Management UI/chat checkpoint. Practical next slices are richer
-owner-facing settings/review/context-pack action flows or optional local sandbox cleanup after
-confirmed detach.
+The next session should start clean from this handoff, `PROJECT_LOG.md`, and current git state. The
+most practical next slices are richer owner-facing settings/review/context-pack action flows,
+optional local sandbox cleanup after confirmed detach, or a user-driven test of a brand-new sandbox
+project through `recallant attach . --sandbox`.
