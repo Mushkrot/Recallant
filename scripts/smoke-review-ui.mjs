@@ -49,13 +49,22 @@ try {
 
 const developerId = randomUUID();
 const projectId = randomUUID();
+const sandboxProjectId = randomUUID();
+const sandboxPath = `/ai/recallant-pilots/review-ui-sandbox-${randomUUID()}`;
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
 process.env.RECALLANT_PROJECT_ID = projectId;
 process.env.RECALLANT_PROJECT_PATH = process.cwd();
 
 const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath: process.cwd() });
+const sandboxDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId: sandboxProjectId,
+  projectPath: sandboxPath
+});
 await db.ensureProject(process.cwd());
+await sandboxDb.ensureProject(sandboxPath);
 const session = await db.startSession({
   client_kind: "codex",
   client_version: "smoke",
@@ -212,10 +221,37 @@ try {
     destructiveChat.status !== 200 ||
     destructiveChatJson.confirmation_required !== true ||
     destructiveChatJson.proposed_actions.length < 1 ||
+    destructiveChatJson.facts.target_project_id !== projectId ||
+    !String(destructiveChatJson.proposed_actions[0]?.command).includes(projectId) ||
     !String(destructiveChatJson.answer).includes("предварительная проверка")
   ) {
     throw new Error(
       `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
+    );
+  }
+
+  const sandboxDestructiveChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Удали этот sandbox проект"
+    })
+  });
+  const sandboxDestructiveChatJson = await sandboxDestructiveChat.json();
+  if (
+    sandboxDestructiveChat.status !== 200 ||
+    sandboxDestructiveChatJson.confirmation_required !== true ||
+    sandboxDestructiveChatJson.facts.target_project_id !== sandboxProjectId ||
+    sandboxDestructiveChatJson.proposed_actions.length < 1 ||
+    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(sandboxProjectId) ||
+    String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(projectId)
+  ) {
+    throw new Error(
+      `Sandbox management chat targeted the wrong project: ${JSON.stringify(sandboxDestructiveChatJson)}`
     );
   }
 
@@ -227,7 +263,7 @@ try {
     },
     body: new URLSearchParams({
       project_id: projectId,
-      message: "Удали этот проект навсегда"
+      message: "Удали этот sandbox проект"
     })
   });
   const destructiveChatFormHtml = await destructiveChatForm.text();
@@ -235,6 +271,7 @@ try {
     destructiveChatForm.status !== 200 ||
     !destructiveChatFormHtml.includes("Перед рискованным действием требуется подтверждение.") ||
     !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
+    !destructiveChatFormHtml.includes(sandboxProjectId) ||
     destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")
   ) {
     throw new Error(
@@ -383,6 +420,7 @@ try {
   delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
   delete process.env.RECALLANT_ADMIN_EMAILS;
   server.close();
+  await sandboxDb.close();
   await db.close();
 }
 

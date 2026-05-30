@@ -98,6 +98,9 @@ The current Review/Management UI and chat target is complete for the first imple
   isolation reminders, and human-readable settings summaries with technical details collapsed.
 - the chat panel now lives in the left rail, uses its own capped scroll area for long answers, and
   Russian risky-action responses keep the warning/action labels in Russian.
+- sandbox cleanup wording is target-aware: if the open project is not the sandbox and exactly one
+  sandbox/pilot project is visible, the chat dry-run proposal targets that sandbox project; if the
+  target is ambiguous, chat asks for clarification instead of using the open project.
 
 The next useful targets are:
 

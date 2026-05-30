@@ -14,6 +14,16 @@ type DashboardLike = {
   project_cleanup?: DashboardRow | null;
 };
 
+type ChatTargetProject = {
+  project_id: string;
+  project_name: string;
+  current_project_id: string;
+  current_project_name: string;
+  reason: string;
+  switched: boolean;
+  ambiguous: boolean;
+};
+
 export type ManagementChatLanguage = "en" | "ru";
 
 export type ManagementChatIntent =
@@ -43,6 +53,13 @@ export type ManagementChatResponse = {
   facts: {
     project_id: string;
     project_name: string;
+    current_project_id: string;
+    current_project_name: string;
+    target_project_id: string;
+    target_project_name: string;
+    target_project_reason: string;
+    target_project_switched: boolean;
+    target_project_ambiguous: boolean;
     pending_review: number;
     import_candidates: number;
     conflicts_or_duplicates: number;
@@ -61,12 +78,14 @@ export function buildManagementChatResponse(input: {
   const dashboard = input.dashboard;
   const language = detectLanguage(message);
   const intent = detectIntent(message);
-  const facts = dashboardFacts(dashboard);
+  const targetProject = resolveTargetProject(message, dashboard);
+  const facts = dashboardFacts(dashboard, targetProject);
   const destructiveOrSensitive = isDestructiveOrSensitive(message, intent);
   const proposedActions = actionsForIntent(
     intent,
     dashboard,
     facts,
+    targetProject,
     language,
     destructiveOrSensitive
   );
@@ -165,16 +184,90 @@ function asRows(value: unknown) {
   return Array.isArray(value) ? (value as DashboardRow[]) : [];
 }
 
-function dashboardFacts(dashboard: DashboardLike): ManagementChatResponse["facts"] {
+function projectId(row: DashboardRow | null | undefined, fallback: unknown) {
+  return String(row?.project_id ?? row?.id ?? fallback ?? "");
+}
+
+function projectName(row: DashboardRow | null | undefined, fallback: unknown) {
+  return (
+    stringValue(row?.name) ||
+    stringValue(row?.title) ||
+    stringValue(row?.primary_path) ||
+    shortId(row?.project_id ?? row?.id ?? fallback)
+  );
+}
+
+function messageWantsSandbox(message: string) {
+  return includesAny(message, ["sandbox", "песочн", "тестов", "test project", "pilot"]);
+}
+
+function isSandboxProject(row: DashboardRow) {
+  const name = projectName(row, row.project_id).toLowerCase();
+  const path = stringValue(row.primary_path).toLowerCase();
+  const kind = stringValue(row.project_kind).toLowerCase();
+  return (
+    name.includes("sandbox") ||
+    name.includes("pilot") ||
+    path.includes("/recallant-pilots/") ||
+    path.includes("sandbox") ||
+    kind.includes("sandbox")
+  );
+}
+
+function resolveTargetProject(message: string, dashboard: DashboardLike): ChatTargetProject {
+  const projects = asRows(dashboard.projects);
+  const currentProject = dashboard.current_project ?? {};
+  const currentProjectId = projectId(currentProject, dashboard.current_project_id);
+  const currentProjectName = projectName(currentProject, dashboard.current_project_id);
+  const currentTarget = {
+    project_id: currentProjectId,
+    project_name: currentProjectName || "current project",
+    current_project_id: currentProjectId,
+    current_project_name: currentProjectName || "current project",
+    reason: "current_project",
+    switched: false,
+    ambiguous: false
+  };
+
+  if (!messageWantsSandbox(message) || isSandboxProject(currentProject)) return currentTarget;
+
+  const sandboxProjects = projects.filter(isSandboxProject);
+  if (sandboxProjects.length === 1) {
+    const target = sandboxProjects[0] ?? {};
+    return {
+      project_id: projectId(target, currentProjectId),
+      project_name: projectName(target, currentProjectId) || "sandbox project",
+      current_project_id: currentProjectId,
+      current_project_name: currentProjectName || "current project",
+      reason: "message_asked_for_sandbox",
+      switched: true,
+      ambiguous: false
+    };
+  }
+
+  return {
+    ...currentTarget,
+    reason: sandboxProjects.length > 1 ? "multiple_sandbox_projects" : "sandbox_project_not_found",
+    ambiguous: true
+  };
+}
+
+function dashboardFacts(
+  dashboard: DashboardLike,
+  targetProject: ChatTargetProject
+): ManagementChatResponse["facts"] {
   const currentProject = dashboard.current_project ?? {};
   const critical = dashboard.critical ?? {};
-  const projectName =
-    stringValue(currentProject.name) ||
-    stringValue(currentProject.primary_path) ||
-    shortId(dashboard.current_project_id);
   return {
-    project_id: String(dashboard.current_project_id ?? ""),
-    project_name: projectName || "current project",
+    project_id: targetProject.project_id,
+    project_name: targetProject.project_name,
+    current_project_id: projectId(currentProject, dashboard.current_project_id),
+    current_project_name: projectName(currentProject, dashboard.current_project_id),
+    target_project_id: targetProject.project_id,
+    target_project_name: targetProject.project_name,
+    target_project_reason: targetProject.reason,
+    target_project_switched: targetProject.switched,
+    target_project_ambiguous: targetProject.ambiguous,
     pending_review: asNumber(critical.pending_review),
     import_candidates: asRows(dashboard.import_candidates).length,
     conflicts_or_duplicates: asRows(dashboard.duplicate_conflicts).length,
@@ -202,14 +295,40 @@ function answerForIntent(
   return answerEn(intent, facts, destructiveOrSensitive);
 }
 
+function targetLineRu(facts: ManagementChatResponse["facts"]) {
+  if (facts.target_project_ambiguous) {
+    return `Открытый проект: ${facts.current_project_name}. Запрос похож на sandbox, но целевой sandbox-проект не определен однозначно.`;
+  }
+  if (facts.target_project_switched) {
+    return `Открытый проект: ${facts.current_project_name}. Целевой проект для этого запроса: ${facts.target_project_name}.`;
+  }
+  return `Проект: ${facts.project_name}.`;
+}
+
+function targetLineEn(facts: ManagementChatResponse["facts"]) {
+  if (facts.target_project_ambiguous) {
+    return `Open project: ${facts.current_project_name}. The request looks sandbox-related, but the target sandbox project is not unambiguous.`;
+  }
+  if (facts.target_project_switched) {
+    return `Open project: ${facts.current_project_name}. Target project for this request: ${facts.target_project_name}.`;
+  }
+  return `Project: ${facts.project_name}.`;
+}
+
 function answerRu(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
   destructiveOrSensitive: boolean
 ) {
-  const baseline = `Проект: ${facts.project_name}. На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
+  const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
+  if (facts.target_project_ambiguous && destructiveOrSensitive) {
+    return `${baseline}\n\nЯ не буду подставлять открытый проект в опасную команду, потому что запрос похож на sandbox cleanup, а целевой sandbox-проект не выбран однозначно. Сначала выбери нужный проект слева или уточни название.`;
+  }
   if (destructiveOrSensitive) {
-    return `${baseline}\n\nЭто похоже на действие, которое может удалить, отцепить проект, открыть доступ, затронуть секреты или расходы. Я не выполняю такие действия прямо из чата. Сначала нужна предварительная проверка без изменений, затем явное подтверждение через обычный безопасный путь Recallant.`;
+    const switchNote = facts.target_project_switched
+      ? " Я не подставляю открытый проект в команду, потому что запрос явно похож на sandbox cleanup."
+      : "";
+    return `${baseline}\n\nЭто похоже на действие, которое может удалить, отцепить проект, открыть доступ, затронуть секреты или расходы.${switchNote} Я не выполняю такие действия прямо из чата. Сначала нужна предварительная проверка без изменений, затем явное подтверждение через обычный безопасный путь Recallant.`;
   }
   switch (intent) {
     case "next_steps":
@@ -243,9 +362,15 @@ function answerEn(
   facts: ManagementChatResponse["facts"],
   destructiveOrSensitive: boolean
 ) {
-  const baseline = `Project: ${facts.project_name}. Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
+  const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
+  if (facts.target_project_ambiguous && destructiveOrSensitive) {
+    return `${baseline}\n\nI will not substitute the open project into a risky command because the request looks sandbox-related and the target sandbox project is not unambiguous. Select the target project on the left or name it explicitly first.`;
+  }
   if (destructiveOrSensitive) {
-    return `${baseline}\n\nThis looks like an operation that can delete, detach, expose access, touch secrets, or affect cost. I will not execute it directly from chat. Run a dry-run first, then confirm through the normal Recallant policy path.`;
+    const switchNote = facts.target_project_switched
+      ? " I am not using the open project for the command because the request explicitly looks sandbox-related."
+      : "";
+    return `${baseline}\n\nThis looks like an operation that can delete, detach, expose access, touch secrets, or affect cost.${switchNote} I will not execute it directly from chat. Run a dry-run first, then confirm through the normal Recallant policy path.`;
   }
   switch (intent) {
     case "next_steps":
@@ -278,11 +403,28 @@ function actionsForIntent(
   intent: ManagementChatIntent,
   dashboard: DashboardLike,
   facts: ManagementChatResponse["facts"],
+  targetProject: ChatTargetProject,
   language: ManagementChatLanguage,
   destructiveOrSensitive: boolean
 ): ManagementChatAction[] {
   if (destructiveOrSensitive || intent === "cleanup") {
+    if (targetProject.ambiguous) {
+      return [
+        {
+          label: language === "ru" ? "Уточнить целевой проект" : "Clarify target project",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? "Запрос похож на sandbox cleanup, но Recallant не должен подставлять открытый проект в опасную команду."
+              : "The request looks sandbox-related, and Recallant should not put the open project into a risky command."
+        }
+      ];
+    }
     const cleanup = dashboard.project_cleanup ?? {};
+    const detachCommand =
+      targetProject.project_id === facts.current_project_id
+        ? stringValue(cleanup.detach_command)
+        : `recallant detach --project-id ${targetProject.project_id} --dry-run`;
     return [
       {
         label:
@@ -290,11 +432,11 @@ function actionsForIntent(
             ? "Сначала предварительная проверка detach"
             : "Run detach dry-run first",
         kind: "dry_run",
-        command: stringValue(cleanup.detach_command),
+        command: detachCommand,
         reason:
           language === "ru"
-            ? "Показывает, что будет затронуто, без изменения данных."
-            : "Shows what would be affected without changing data."
+            ? `Показывает, что будет затронуто в проекте ${targetProject.project_name}, без изменения данных.`
+            : `Shows what would be affected in ${targetProject.project_name} without changing data.`
       },
       {
         label:

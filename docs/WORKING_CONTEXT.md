@@ -224,6 +224,8 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   confirmation-gated cleanup/destructive/sensitive proposals instead of direct chat execution.
   The chat panel has been moved into the left rail with a capped answer scroll area so long answers
   do not push the whole page downward and unused left-side space is put to work.
+  Sandbox cleanup wording is target-aware so chat does not blindly propose a dry-run against the
+  open project when the owner clearly asked for a sandbox project.
 - First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search

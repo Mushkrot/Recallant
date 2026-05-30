@@ -68,6 +68,11 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   becomes useful, chat answers are capped in their own scroll area instead of pushing the whole
   page down, cost records are summarized with technical rows collapsed, and Russian risky-action
   chat responses no longer show English confirmation/action labels.
+- Management chat target-safety pass: sandbox cleanup wording is now treated as a target-selection
+  signal. If the open project is not the sandbox and exactly one sandbox/pilot project is visible,
+  chat builds the dry-run command for that sandbox project instead of blindly using the open
+  project. If the sandbox target is missing or ambiguous, chat refuses to build a risky command and
+  asks the owner to clarify the target.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
@@ -223,8 +228,9 @@ Latest Review/Management UI chat validation:
 
 The Review UI smoke now covers the authenticated management chat JSON API, browser form path,
 Russian-language answer fixture, destructive cleanup confirmation gating, and human-readable first
-screen additions. It also covers the left-rail chat anchor and Russian destructive-action form
-labels.
+screen additions. It also covers the left-rail chat anchor, Russian destructive-action form labels,
+and sandbox-target dry-run selection so sandbox cleanup requests do not accidentally target the
+open Recallant project.
 
 Latest Pre-Pilot R1 validation:
 
