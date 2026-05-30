@@ -30,6 +30,8 @@ temporary scaffolding; they are permanent safety controls.
 ## Target commands
 
 ```bash
+recallant attach .
+recallant attach . --sandbox
 recallant attach <project-dir> --target codex --mode autopilot
 recallant attach <project-dir> --target codex --mode guided
 recallant attach <project-dir> --target codex --mode manual
@@ -38,6 +40,10 @@ recallant attach <project-dir> --target codex
 
 `recallant init`, `discover`, `import`, `lint-context`, `context`, and `doctor` remain lower-level
 commands. `attach` coordinates them.
+
+The operator-facing product path must not require manually invoking `node apps/cli/dist/index.js` or
+sourcing the server env file. On an installed server, `recallant` is a global command and the CLI
+auto-loads the configured env file when present.
 
 ## Autopilot pipeline
 

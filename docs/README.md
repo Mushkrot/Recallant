@@ -9,9 +9,10 @@ Historical note: this project was originally drafted under the working name **Ag
 → [QUICKSTART.md](QUICKSTART.md) describes how to connect a project and start using Recallant.
 
 Current operator note: Pre-Pilot Readiness, the first copied-project pilot, first autonomous
-attach/detach slices, first controlled cross-project recall slice, and first functional
-Management UI/chat slice are complete. The next useful implementation layer is richer
-owner-facing management actions and optional local sandbox cleanup.
+attach/detach slices, first controlled cross-project recall slice, one-command owner-server CLI
+install/attach UX, and AI-backed Management UI/chat with deterministic safety gates are complete.
+The next useful implementation layer is richer owner-facing management actions and optional local
+sandbox cleanup.
 
 ## Required Reading Order For Implementers
 

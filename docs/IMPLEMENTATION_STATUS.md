@@ -323,6 +323,20 @@ Latest Phase 10 attach/detach/cross-project validation:
 Smoke scripts that previously assumed a Docker `/work` mount now use the current repository root, so
 the full local host `smoke:core` suite can run against the isolated `recallant-dev` database.
 
+Latest product-UX readiness checkpoint:
+
+- `scripts/install-recallant.sh` provides the intended server install entrypoint:
+  clone, run one installer, get Postgres, the HTTP service, and the global `recallant` CLI.
+- `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
+- The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
+  longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.
+- The operator attach path is now `cd <project> && recallant attach .`; `--sandbox`, `--mode
+  guided`, and `--mode manual` remain available for cautious/test workflows.
+- Management Chat now attempts local Ollama AI interpretation for natural-language intent, target
+  hints, and global-rule extraction, then applies deterministic policy gates for risky actions.
+- Explicit owner requests to save a low-risk rule for all projects create a developer-scope
+  `instruction_grade` memory so future context packs include it as binding guidance.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10

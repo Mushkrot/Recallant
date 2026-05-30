@@ -32,6 +32,35 @@ const memorySection = `## Memory (Recallant)
 - If MCP is unavailable: update \`PROJECT_LOG.md\` and, when available, write local spool.
 `;
 
+function parseEnvValue(raw: string) {
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+async function loadDefaultEnv() {
+  const envFile = process.env.RECALLANT_ENV_FILE ?? "/opt/secure-configs/recallant.env";
+  if (!process.env.RECALLANT_ENV_FILE && process.env.RECALLANT_DATABASE_URL) return;
+  try {
+    const content = await readFile(envFile, "utf8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+      const [rawKey, ...rawValueParts] = trimmed.split("=");
+      const key = rawKey?.trim();
+      if (!key || process.env[key] !== undefined) continue;
+      process.env[key] = parseEnvValue(rawValueParts.join("="));
+    }
+  } catch {
+    // Fresh checkouts may not have a server env file yet.
+  }
+}
+
 type InitOptions = {
   target: string;
   dryRun: boolean;
@@ -1190,4 +1219,5 @@ async function main(argv: readonly string[]) {
   process.exitCode = 1;
 }
 
+await loadDefaultEnv();
 await main(process.argv);

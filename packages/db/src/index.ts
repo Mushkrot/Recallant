@@ -483,14 +483,19 @@ function truncationMetadata(text: string | null | undefined, captured: string | 
 }
 
 function hasInstructionSignal(value: string) {
-  return /\b(always|never|default|from now on|every project|all projects|instruction|rule)\b/i.test(
-    value
+  return (
+    /\b(always|never|default|from now on|every project|all projects|instruction|rule)\b/i.test(
+      value
+    ) || /(всех проектах|для всех проектов|везде|правило|всегда|никогда|по умолчанию)/i.test(value)
   );
 }
 
 function hasHighRiskSignal(value: string) {
-  return /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
-    value
+  return (
+    /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
+      value
+    ) ||
+    /(секрет|безопасност|деплой|публич|платн|стоимост|удал|разруш|провайдер|модель)/i.test(value)
   );
 }
 
@@ -2561,6 +2566,24 @@ export class RecallantDb {
 
   private classifyAgentMemory(input: CreateAgentMemoryInput) {
     const combined = `${input.title}\n${input.body}`;
+    if (
+      input.created_by === "user" &&
+      input.scope === "developer" &&
+      input.metadata?.owner_confirmed_global_rule === true
+    ) {
+      if (hasHighRiskSignal(combined)) {
+        return {
+          status: "needs_review",
+          usePolicy: "evidence_only",
+          reason: "owner_global_rule_high_risk_review_required"
+        };
+      }
+      return {
+        status: "accepted",
+        usePolicy: "instruction_grade",
+        reason: "owner_confirmed_developer_instruction"
+      };
+    }
     if (
       input.created_by === "agent" &&
       (hasHighRiskSignal(combined) || (input.confidence ?? 1) < 0.5)

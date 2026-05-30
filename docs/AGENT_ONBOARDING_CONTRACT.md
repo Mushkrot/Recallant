@@ -24,11 +24,15 @@ Use this only on a copied sandbox until the owner explicitly chooses to attach a
 Target attach workflow:
 
 ```bash
+recallant attach .
 recallant attach <project> --target codex
 recallant attach <project> --target codex --mode manual
 recallant attach <project> --target codex --mode guided
 recallant attach <project> --target codex --mode autopilot
 ```
+
+On an installed server, `recallant attach .` is the normal path. The CLI auto-loads the configured
+server env file when present; operators should not need to source it manually.
 
 Mode expectations:
 

@@ -10,9 +10,32 @@ The implementation-oriented specification lives in **[docs/](docs/README.md)**.
 
 Start with [docs/README.md](docs/README.md); it defines the canonical reading order.
 
+## Quick Start
+
+Install on a server:
+
+```bash
+git clone <recallant-repo-url> recallant
+cd recallant
+sudo ./scripts/install-recallant.sh
+```
+
+Attach a project:
+
+```bash
+cd /path/to/project
+recallant attach .
+```
+
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for cautious modes, sandbox attach, and production
+notes.
+
 ## Status
 
-Recallant has a working local v1 implementation slice and an owner-server production deployment for the private Review UI, Postgres/pgvector, local Ollama, and automated local backups. The active next checkpoint is [Pre-Pilot Readiness](docs/PRE_PILOT_READINESS.md): prepare safe existing-project discovery, explicit import, Review UI review flow, and sandbox pilot workflow before connecting any real working project.
+Recallant has a working local v1 implementation slice and an owner-server production deployment for
+the private Review UI, Postgres/pgvector, local Ollama, automated local backups, autonomous project
+attach/detach, controlled cross-project recall, and AI-backed management chat with deterministic
+safety gates.
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 

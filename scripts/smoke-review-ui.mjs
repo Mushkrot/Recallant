@@ -11,6 +11,7 @@ const databaseUrl =
 const token = `review-smoke-${randomUUID()}`;
 process.env.RECALLANT_AUTH_TOKEN = token;
 process.env.RECALLANT_SESSION_SECRET = `review-session-${randomUUID()}`;
+process.env.RECALLANT_MANAGEMENT_CHAT_AI = "off";
 delete process.env.RECALLANT_CLOUDFLARE_MODE;
 delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
 delete process.env.RECALLANT_ADMIN_EMAILS;
@@ -199,10 +200,42 @@ try {
     russianChat.status !== 200 ||
     russianChatJson.language !== "ru" ||
     russianChatJson.intent !== "next_steps" ||
+    russianChatJson.understanding.source !== "rules" ||
     russianChatJson.confirmation_required !== false ||
     !String(russianChatJson.answer).includes("Следующий")
   ) {
     throw new Error(`Russian management chat smoke failed: ${JSON.stringify(russianChatJson)}`);
+  }
+
+  const globalRuleChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message:
+        "Зафиксируй правило для всех проектов: агенты должны объяснять владельцу сложные решения простым языком."
+    })
+  });
+  const globalRuleChatJson = await globalRuleChat.json();
+  if (
+    globalRuleChat.status !== 200 ||
+    globalRuleChatJson.intent !== "global_rule" ||
+    globalRuleChatJson.confirmation_required !== false ||
+    globalRuleChatJson.global_rule_result?.status !== "created" ||
+    globalRuleChatJson.global_rule_result?.scope !== "developer"
+  ) {
+    throw new Error(`Global rule chat smoke failed: ${JSON.stringify(globalRuleChatJson)}`);
+  }
+  const globalRuleMemory = await db.getAgentMemory(globalRuleChatJson.global_rule_result.memory_id);
+  if (
+    globalRuleMemory.memory?.scope !== "developer" ||
+    globalRuleMemory.memory?.use_policy !== "instruction_grade" ||
+    globalRuleMemory.memory?.status !== "accepted"
+  ) {
+    throw new Error(`Global rule was not binding: ${JSON.stringify(globalRuleMemory)}`);
   }
 
   const destructiveChat = await fetch(`${baseUrl}/api/management-chat`, {

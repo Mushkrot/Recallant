@@ -1,3 +1,5 @@
+import type { RecallantDb } from "@recallant/db";
+
 type DashboardRow = Record<string, unknown>;
 
 type DashboardLike = {
@@ -35,6 +37,7 @@ export type ManagementChatIntent =
   | "context_pack"
   | "cross_project"
   | "review"
+  | "global_rule"
   | "general";
 
 export type ManagementChatAction = {
@@ -47,9 +50,24 @@ export type ManagementChatAction = {
 export type ManagementChatResponse = {
   language: ManagementChatLanguage;
   intent: ManagementChatIntent;
+  understanding: {
+    source: "local_ai" | "rules";
+    model?: string;
+    confidence: number;
+    summary: string;
+    error?: string;
+  };
   answer: string;
   confirmation_required: boolean;
   destructive_or_sensitive: boolean;
+  global_rule_result?: {
+    status: "created" | "needs_review" | "skipped";
+    memory_id?: string;
+    rule_text?: string;
+    scope?: "developer";
+    use_policy?: string;
+    reason: string;
+  };
   facts: {
     project_id: string;
     project_name: string;
@@ -70,32 +88,78 @@ export type ManagementChatResponse = {
   proposed_actions: ManagementChatAction[];
 };
 
-export function buildManagementChatResponse(input: {
+type ChatInterpretation = {
+  source: "local_ai" | "rules";
+  model?: string;
+  language: ManagementChatLanguage;
+  intent: ManagementChatIntent;
+  confidence: number;
+  summary: string;
+  target_hint: "current" | "sandbox" | "none" | "ambiguous";
+  destructive_or_sensitive: boolean;
+  global_rule_request: boolean;
+  rule_text?: string;
+  answer?: string;
+  error?: string;
+};
+
+export async function buildManagementChatResponse(input: {
   message: string;
   dashboard: DashboardLike;
-}): ManagementChatResponse {
+  database?: RecallantDb;
+}): Promise<ManagementChatResponse> {
   const message = input.message.trim();
   const dashboard = input.dashboard;
-  const language = detectLanguage(message);
-  const intent = detectIntent(message);
-  const targetProject = resolveTargetProject(message, dashboard);
+  const interpretation = await interpretMessage(message, dashboard);
+  const language = interpretation.language;
+  const intent = interpretation.intent;
+  const targetProject = resolveTargetProject(message, dashboard, interpretation);
   const facts = dashboardFacts(dashboard, targetProject);
-  const destructiveOrSensitive = isDestructiveOrSensitive(message, intent);
+  const destructiveOrSensitive =
+    isDestructiveOrSensitive(message, intent) || interpretation.destructive_or_sensitive;
+  const globalRuleResult =
+    intent === "global_rule"
+      ? await maybeCreateGlobalRule({
+          message,
+          dashboard,
+          facts,
+          interpretation,
+          database: input.database
+        })
+      : undefined;
+  const confirmationRequired =
+    destructiveOrSensitive || globalRuleResult?.status === "needs_review";
   const proposedActions = actionsForIntent(
     intent,
     dashboard,
     facts,
     targetProject,
     language,
-    destructiveOrSensitive
+    destructiveOrSensitive,
+    globalRuleResult
   );
-  const answer = answerForIntent(intent, facts, language, destructiveOrSensitive);
+  const answer = answerForIntent(
+    intent,
+    facts,
+    language,
+    destructiveOrSensitive,
+    interpretation,
+    globalRuleResult
+  );
   return {
     language,
     intent,
+    understanding: {
+      source: interpretation.source,
+      model: interpretation.model,
+      confidence: interpretation.confidence,
+      summary: interpretation.summary,
+      error: interpretation.error
+    },
     answer,
-    confirmation_required: destructiveOrSensitive,
+    confirmation_required: confirmationRequired,
     destructive_or_sensitive: destructiveOrSensitive,
+    global_rule_result: globalRuleResult,
     facts,
     proposed_actions: proposedActions
   };
@@ -112,6 +176,7 @@ function includesAny(message: string, words: string[]) {
 
 function detectIntent(message: string): ManagementChatIntent {
   if (!message) return "general";
+  if (detectGlobalRuleRequest(message)) return "global_rule";
   if (
     includesAny(message, [
       "удал",
@@ -158,6 +223,205 @@ function detectIntent(message: string): ManagementChatIntent {
   return "general";
 }
 
+function detectGlobalRuleRequest(message: string) {
+  const normalized = message.toLowerCase();
+  const wantsRule = includesAny(normalized, [
+    "зафикс",
+    "сохрани",
+    "запомни",
+    "правило",
+    "rule",
+    "remember",
+    "save"
+  ]);
+  const wantsGlobal = includesAny(normalized, [
+    "для всех проектов",
+    "во всех проектах",
+    "всех проектов",
+    "везде",
+    "global",
+    "all projects",
+    "every project",
+    "developer-wide"
+  ]);
+  return wantsRule && wantsGlobal;
+}
+
+function fallbackInterpretation(message: string): ChatInterpretation {
+  const language = detectLanguage(message);
+  const intent = detectIntent(message);
+  return {
+    source: "rules",
+    language,
+    intent,
+    confidence: message ? 0.55 : 0.3,
+    summary:
+      language === "ru"
+        ? "Понято локальными правилами без AI-модели."
+        : "Understood by local rules without an AI model.",
+    target_hint: messageWantsSandbox(message) ? "sandbox" : "current",
+    destructive_or_sensitive: isDestructiveOrSensitive(message, intent),
+    global_rule_request: intent === "global_rule",
+    rule_text: intent === "global_rule" ? extractRuleText(message) : undefined
+  };
+}
+
+function aiEnabled() {
+  return !["0", "false", "off", "disabled"].includes(
+    String(process.env.RECALLANT_MANAGEMENT_CHAT_AI ?? "on").toLowerCase()
+  );
+}
+
+function parseJsonObject(text: string) {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("AI response did not contain JSON");
+    return JSON.parse(match[0]) as Record<string, unknown>;
+  }
+}
+
+function normalizeIntent(value: unknown, fallback: ManagementChatIntent): ManagementChatIntent {
+  const candidate = String(value ?? "");
+  const allowed: ManagementChatIntent[] = [
+    "status",
+    "next_steps",
+    "cleanup",
+    "settings",
+    "cost",
+    "context_pack",
+    "cross_project",
+    "review",
+    "global_rule",
+    "general"
+  ];
+  return allowed.includes(candidate as ManagementChatIntent)
+    ? (candidate as ManagementChatIntent)
+    : fallback;
+}
+
+function normalizeLanguage(value: unknown, fallback: ManagementChatLanguage) {
+  return value === "ru" || value === "en" ? value : fallback;
+}
+
+function normalizeTargetHint(value: unknown, fallback: ChatInterpretation["target_hint"]) {
+  return value === "current" || value === "sandbox" || value === "none" || value === "ambiguous"
+    ? value
+    : fallback;
+}
+
+async function interpretMessage(
+  message: string,
+  dashboard: DashboardLike
+): Promise<ChatInterpretation> {
+  const fallback = fallbackInterpretation(message);
+  if (!message || !aiEnabled()) return fallback;
+
+  const configuredModel =
+    process.env.RECALLANT_MANAGEMENT_CHAT_MODEL ?? process.env.RECALLANT_CHAT_MODEL;
+  const models = Array.from(
+    new Set(
+      [configuredModel, "mistral-small:24b", "qwen2.5-coder:14b", "qwen2.5-coder:7b"].filter(
+        (item): item is string => Boolean(item)
+      )
+    )
+  );
+  const url = process.env.RECALLANT_OLLAMA_URL ?? "http://127.0.0.1:11434";
+  const timeoutMs = Number(process.env.RECALLANT_MANAGEMENT_CHAT_AI_TIMEOUT_MS ?? 65_000);
+  let lastError: string | undefined;
+  try {
+    const projects = asRows(dashboard.projects)
+      .slice(0, 20)
+      .map((project) => ({
+        project_id: projectId(project, ""),
+        name: projectName(project, ""),
+        primary_path: stringValue(project.primary_path)
+      }));
+    for (const model of models) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(new URL("/api/chat", url), {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model,
+            stream: false,
+            format: "json",
+            keep_alive: process.env.RECALLANT_MANAGEMENT_CHAT_KEEP_ALIVE ?? "10m",
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "You are Recallant's local intent interpreter for a private memory-management UI.",
+                  "Return strict JSON only.",
+                  "Do not execute actions.",
+                  "Classify the owner's message by meaning, including Russian text and typos.",
+                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,review,global_rule,general.",
+                  "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
+                  "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
+                  "target_hint should be current,sandbox,none,or ambiguous.",
+                  "If this is a global rule request, extract rule_text as the instruction that should apply across projects.",
+                  "Keep answer short and factual. Safety policy will be enforced by deterministic code."
+                ].join(" ")
+              },
+              {
+                role: "user",
+                content: JSON.stringify({
+                  message,
+                  current_project: dashboard.current_project ?? null,
+                  projects
+                })
+              }
+            ]
+          })
+        });
+        if (!response.ok) throw new Error(`Ollama ${model} HTTP ${response.status}`);
+        const payload = (await response.json()) as { message?: { content?: string } };
+        const parsed = parseJsonObject(String(payload.message?.content ?? ""));
+        const intent = normalizeIntent(parsed.intent, fallback.intent);
+        const language = normalizeLanguage(parsed.language, fallback.language);
+        const confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.7)));
+        return {
+          source: "local_ai",
+          model,
+          language,
+          intent,
+          confidence,
+          summary:
+            stringValue(parsed.summary) ||
+            (language === "ru"
+              ? "Понято локальной AI-моделью."
+              : "Understood by the local AI model."),
+          target_hint: normalizeTargetHint(parsed.target_hint, fallback.target_hint),
+          destructive_or_sensitive: Boolean(parsed.destructive_or_sensitive),
+          global_rule_request: Boolean(parsed.global_rule_request) || intent === "global_rule",
+          rule_text:
+            typeof parsed.rule_text === "string" && parsed.rule_text.trim()
+              ? parsed.rule_text.trim()
+              : fallback.rule_text,
+          answer:
+            typeof parsed.answer === "string" && parsed.answer.trim()
+              ? parsed.answer.trim()
+              : undefined
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    throw new Error(lastError ?? "No local chat model succeeded");
+  } catch (error) {
+    return {
+      ...fallback,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent) {
   if (intent === "cleanup") return true;
   return includesAny(message, [
@@ -169,9 +433,7 @@ function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent)
     "public",
     "firewall",
     "paid api",
-    "auto_with_caps",
-    "global",
-    "developer-wide"
+    "auto_with_caps"
   ]);
 }
 
@@ -197,8 +459,11 @@ function projectName(row: DashboardRow | null | undefined, fallback: unknown) {
   );
 }
 
-function messageWantsSandbox(message: string) {
-  return includesAny(message, ["sandbox", "песочн", "тестов", "test project", "pilot"]);
+function messageWantsSandbox(message: string, interpretation?: ChatInterpretation) {
+  return (
+    interpretation?.target_hint === "sandbox" ||
+    includesAny(message, ["sandbox", "песочн", "тестов", "test project", "pilot"])
+  );
 }
 
 function isSandboxProject(row: DashboardRow) {
@@ -214,7 +479,11 @@ function isSandboxProject(row: DashboardRow) {
   );
 }
 
-function resolveTargetProject(message: string, dashboard: DashboardLike): ChatTargetProject {
+function resolveTargetProject(
+  message: string,
+  dashboard: DashboardLike,
+  interpretation?: ChatInterpretation
+): ChatTargetProject {
   const projects = asRows(dashboard.projects);
   const currentProject = dashboard.current_project ?? {};
   const currentProjectId = projectId(currentProject, dashboard.current_project_id);
@@ -229,7 +498,9 @@ function resolveTargetProject(message: string, dashboard: DashboardLike): ChatTa
     ambiguous: false
   };
 
-  if (!messageWantsSandbox(message) || isSandboxProject(currentProject)) return currentTarget;
+  if (!messageWantsSandbox(message, interpretation) || isSandboxProject(currentProject)) {
+    return currentTarget;
+  }
 
   const sandboxProjects = projects.filter(isSandboxProject);
   if (sandboxProjects.length === 1) {
@@ -285,14 +556,109 @@ function shortId(value: unknown) {
   return String(value ?? "").slice(0, 8);
 }
 
+function extractRuleText(message: string) {
+  return message
+    .replace(/зафиксируй/giu, "")
+    .replace(/сохрани/giu, "")
+    .replace(/запомни/giu, "")
+    .replace(/правило/giu, "")
+    .replace(/для всех проектов/giu, "")
+    .replace(/во всех проектах/giu, "")
+    .replace(/всех проектов/giu, "")
+    .replace(/from now on/giu, "")
+    .replace(/save this rule/giu, "")
+    .replace(/remember this rule/giu, "")
+    .replace(/for all projects/giu, "")
+    .replace(/all projects/giu, "")
+    .replace(/developer-wide/giu, "")
+    .replace(/[:：-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ruleTitle(ruleText: string, language: ManagementChatLanguage) {
+  const compact = ruleText.replace(/\s+/g, " ").trim();
+  const prefix = language === "ru" ? "Правило для всех проектов" : "Rule for all projects";
+  return `${prefix}: ${compact.slice(0, 80) || "owner guidance"}`;
+}
+
+function currentProjectPath(dashboard: DashboardLike) {
+  return (
+    stringValue(dashboard.current_project?.primary_path) ||
+    stringValue(dashboard.current_project?.path) ||
+    process.env.RECALLANT_PROJECT_PATH ||
+    "/ai/recallant"
+  );
+}
+
+async function maybeCreateGlobalRule(input: {
+  message: string;
+  dashboard: DashboardLike;
+  facts: ManagementChatResponse["facts"];
+  interpretation: ChatInterpretation;
+  database?: RecallantDb;
+}): Promise<ManagementChatResponse["global_rule_result"]> {
+  const ruleText = (
+    input.interpretation.rule_text?.trim() || extractRuleText(input.message)
+  ).trim();
+  if (!ruleText) {
+    return {
+      status: "skipped",
+      scope: "developer",
+      reason: "No usable rule text was found in the owner message."
+    };
+  }
+  if (!input.database) {
+    return {
+      status: "skipped",
+      scope: "developer",
+      rule_text: ruleText,
+      reason: "Database is unavailable, so the rule was not saved."
+    };
+  }
+  const created = await input.database.createAgentMemory({
+    project_path: currentProjectPath(input.dashboard),
+    memory_type: "procedure",
+    scope: "developer",
+    scope_kind: "developer",
+    scope_id: null,
+    audience: [{ kind: "all_agents", id: null }],
+    title: ruleTitle(ruleText, input.interpretation.language),
+    body: ruleText,
+    confidence: 1,
+    created_by: "user",
+    metadata: {
+      management_chat: true,
+      owner_confirmed_global_rule: true,
+      source_project_id: input.facts.current_project_id,
+      source_project_name: input.facts.current_project_name,
+      source_message: input.message
+    }
+  });
+  return {
+    status: created.use_policy === "instruction_grade" ? "created" : "needs_review",
+    memory_id: created.memory_id,
+    rule_text: ruleText,
+    scope: "developer",
+    use_policy: created.use_policy,
+    reason:
+      created.use_policy === "instruction_grade"
+        ? "Owner explicitly requested a developer-wide rule; it is active for future context packs."
+        : "The rule was saved but still needs review before becoming binding."
+  };
+}
+
 function answerForIntent(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
   language: ManagementChatLanguage,
-  destructiveOrSensitive: boolean
+  destructiveOrSensitive: boolean,
+  interpretation: ChatInterpretation,
+  globalRuleResult?: ManagementChatResponse["global_rule_result"]
 ) {
-  if (language === "ru") return answerRu(intent, facts, destructiveOrSensitive);
-  return answerEn(intent, facts, destructiveOrSensitive);
+  if (language === "ru")
+    return answerRu(intent, facts, destructiveOrSensitive, interpretation, globalRuleResult);
+  return answerEn(intent, facts, destructiveOrSensitive, interpretation, globalRuleResult);
 }
 
 function targetLineRu(facts: ManagementChatResponse["facts"]) {
@@ -318,9 +684,20 @@ function targetLineEn(facts: ManagementChatResponse["facts"]) {
 function answerRu(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
-  destructiveOrSensitive: boolean
+  destructiveOrSensitive: boolean,
+  interpretation: ChatInterpretation,
+  globalRuleResult?: ManagementChatResponse["global_rule_result"]
 ) {
   const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
+  if (intent === "global_rule") {
+    if (globalRuleResult?.status === "created") {
+      return `${baseline}\n\nЯ понял это как правило для всех проектов и сохранил его как активное developer-wide правило. Новые агентские сессии в подключенных проектах будут получать его в стартовом Context Pack как обязательное правило.\n\nПравило: ${globalRuleResult.rule_text}`;
+    }
+    if (globalRuleResult?.status === "needs_review") {
+      return `${baseline}\n\nЯ понял это как правило для всех проектов, но оно затрагивает рискованную область. Я сохранил его для review, но не сделал обязательным для всех агентов до подтверждения.\n\nПравило: ${globalRuleResult.rule_text}`;
+    }
+    return `${baseline}\n\nЯ понял запрос как правило для всех проектов, но не смог сохранить его автоматически: ${globalRuleResult?.reason ?? "нет текста правила"}.`;
+  }
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nЯ не буду подставлять открытый проект в опасную команду, потому что запрос похож на sandbox cleanup, а целевой sandbox-проект не выбран однозначно. Сначала выбери нужный проект слева или уточни название.`;
   }
@@ -353,6 +730,9 @@ function answerRu(
       return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
     case "status":
     case "general":
+      if (interpretation.source === "local_ai" && interpretation.answer) {
+        return `${baseline}\n\n${interpretation.answer}`;
+      }
       return `${baseline}\n\nСистема готова для управляемой проверки этого проекта. Если хочешь действовать безопасно, сначала разбираем review/конфликты, потом проверяем старт агента через context pack.`;
   }
 }
@@ -360,9 +740,20 @@ function answerRu(
 function answerEn(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
-  destructiveOrSensitive: boolean
+  destructiveOrSensitive: boolean,
+  interpretation: ChatInterpretation,
+  globalRuleResult?: ManagementChatResponse["global_rule_result"]
 ) {
   const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
+  if (intent === "global_rule") {
+    if (globalRuleResult?.status === "created") {
+      return `${baseline}\n\nI understood this as a rule for all projects and saved it as an active developer-wide rule. New agent sessions in connected projects will receive it in the startup Context Pack as binding guidance.\n\nRule: ${globalRuleResult.rule_text}`;
+    }
+    if (globalRuleResult?.status === "needs_review") {
+      return `${baseline}\n\nI understood this as a rule for all projects, but it touches a risky area. I saved it for review and did not make it binding for all agents yet.\n\nRule: ${globalRuleResult.rule_text}`;
+    }
+    return `${baseline}\n\nI understood this as a rule for all projects, but could not save it automatically: ${globalRuleResult?.reason ?? "no usable rule text"}.`;
+  }
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nI will not substitute the open project into a risky command because the request looks sandbox-related and the target sandbox project is not unambiguous. Select the target project on the left or name it explicitly first.`;
   }
@@ -395,6 +786,9 @@ function answerEn(
       return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
     case "status":
     case "general":
+      if (interpretation.source === "local_ai" && interpretation.answer) {
+        return `${baseline}\n\n${interpretation.answer}`;
+      }
       return `${baseline}\n\nThis project is ready for managed review. The safe order is review/conflicts first, then verify agent startup through the context pack.`;
   }
 }
@@ -405,8 +799,32 @@ function actionsForIntent(
   facts: ManagementChatResponse["facts"],
   targetProject: ChatTargetProject,
   language: ManagementChatLanguage,
-  destructiveOrSensitive: boolean
+  destructiveOrSensitive: boolean,
+  globalRuleResult?: ManagementChatResponse["global_rule_result"]
 ): ManagementChatAction[] {
+  if (intent === "global_rule") {
+    return [
+      {
+        label:
+          language === "ru"
+            ? globalRuleResult?.status === "created"
+              ? "Правило активно для всех проектов"
+              : "Проверить правило перед активацией"
+            : globalRuleResult?.status === "created"
+              ? "Rule active for all projects"
+              : "Review rule before activation",
+        kind: globalRuleResult?.status === "created" ? "read_only" : "confirmation_required",
+        reason:
+          language === "ru"
+            ? globalRuleResult?.status === "created"
+              ? "Правило сохранено в developer-scope как instruction_grade и попадет в будущие Context Packs."
+              : "Широкое или рискованное правило не становится обязательным без review."
+            : globalRuleResult?.status === "created"
+              ? "The rule is saved in developer scope as instruction_grade and will appear in future Context Packs."
+              : "Broad or risky rules do not become binding without review."
+      }
+    ];
+  }
   if (destructiveOrSensitive || intent === "cleanup") {
     if (targetProject.ambiguous) {
       return [

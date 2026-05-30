@@ -1,9 +1,33 @@
-# Quickstart - connect a project to Recallant
+# Quickstart - install Recallant and connect a project
 
 Current operator note: [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md), the first copied-project
 pilot, first product-level attach slice, and first governed detach slice are complete. `autopilot`
 is the default for ordinary projects, while production-sensitive projects downgrade to `guided`
 unless production-safe autopilot is explicitly approved.
+
+## Install on a server
+
+The intended operator path is short:
+
+```bash
+git clone <recallant-repo-url> recallant
+cd recallant
+sudo ./scripts/install-recallant.sh
+```
+
+The installer builds Recallant, creates a private env file if one does not exist, starts the
+localhost-only Postgres service, installs the `recallant` command, and starts
+`recallant.service` when systemd is available.
+
+For an already configured server where only the CLI wrapper is missing:
+
+```bash
+cd /ai/recallant
+sudo ./scripts/install-recallant-cli.sh
+```
+
+After that, operators should not need to run `node apps/cli/dist/index.js` or manually source
+`/opt/secure-configs/recallant.env`. The CLI auto-loads the server env file when present.
 
 ## Prerequisite: server is running
 
@@ -75,11 +99,19 @@ stdio MCP command printed by `recallant init`.
 
 ## Step 1 - Attach or register a project
 
-Target product workflow:
+Target product workflow from inside any project folder:
 
 ```bash
-recallant attach . --target codex
-recallant attach . --target codex --mode autopilot
+recallant attach .
+```
+
+`--target codex` and `--mode autopilot` are the defaults for the current v1 operator workflow. A
+normal new project should not require additional flags.
+
+For a disposable test/sandbox project:
+
+```bash
+recallant attach . --sandbox
 ```
 
 Attach modes:

@@ -96,6 +96,15 @@ Recallant should understand the user's language and answer in that language by d
 
 The chat interface must understand context, not only keywords. It may use LLM reasoning heavily, but all write/delete/security/cost-affecting operations still go through server-side policy, provenance, and confirmation gates.
 
+Implementation baseline:
+
+- management chat should try the configured local LLM first for intent/language/rule extraction;
+- if the local LLM is unavailable, it may fall back to conservative deterministic rules and clearly
+  label that fallback;
+- deterministic policy remains authoritative for risky actions;
+- explicit owner requests such as "save this rule for all projects" may create developer-scope
+  `instruction_grade` rules when low-risk, while risky/global changes go to Review.
+
 ## 6. AI-native, policy-governed
 
 Recallant should use AI capabilities wherever they materially improve the product:

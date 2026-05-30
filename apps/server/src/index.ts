@@ -700,6 +700,15 @@ function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState)
     chat?.response
       ? `<article class="chat-answer">
           <h3>${chat.response.language === "ru" ? "Ответ Recallant" : "Recallant Answer"}</h3>
+          <p class="chat-understanding">${escapeHtml(
+            chat.response.language === "ru"
+              ? chat.response.understanding.source === "local_ai"
+                ? `Понято локальной AI-моделью${chat.response.understanding.model ? `: ${chat.response.understanding.model}` : ""}.`
+                : "Понято безопасными локальными правилами; AI-модель недоступна."
+              : chat.response.understanding.source === "local_ai"
+                ? `Understood by local AI${chat.response.understanding.model ? `: ${chat.response.understanding.model}` : ""}.`
+                : "Understood by safe local rules; AI model unavailable."
+          )}</p>
           ${renderTextBlock(chat.response.answer)}
           ${
             chat.response.confirmation_required
@@ -824,6 +833,7 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     .chat-actions span { display: inline-block; margin-top: 5px; color: #6a7280; font-size: 12px; }
     .chat-actions p { margin: 6px 0; color: #4f5867; }
     .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
+    .chat-understanding { margin: 0 0 8px; color: #667085; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
     @media (max-width: 980px) { main { grid-template-columns: 1fr; } .chat-panel { position: static; } }
   </style>
@@ -968,9 +978,10 @@ export function createRecallantHttpServer() {
           optionalInput(body.memory_id) ??
           dashboardInput.selected_memory_id
       });
-      const result = buildManagementChatResponse({
+      const result = await buildManagementChatResponse({
         message: String(body.message ?? ""),
-        dashboard: chatDashboard
+        dashboard: chatDashboard,
+        database
       });
       write(response, 200, JSON.stringify(result), "application/json");
       return;
@@ -982,7 +993,11 @@ export function createRecallantHttpServer() {
         selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
       });
       const question = String(body.message ?? "");
-      const result = buildManagementChatResponse({ message: question, dashboard: chatDashboard });
+      const result = await buildManagementChatResponse({
+        message: question,
+        dashboard: chatDashboard,
+        database
+      });
       write(
         response,
         200,

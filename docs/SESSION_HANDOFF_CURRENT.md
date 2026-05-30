@@ -101,6 +101,18 @@ The current Review/Management UI and chat target is complete for the first imple
 - sandbox cleanup wording is target-aware: if the open project is not the sandbox and exactly one
   sandbox/pilot project is visible, the chat dry-run proposal targets that sandbox project; if the
   target is ambiguous, chat asks for clarification instead of using the open project.
+- chat now attempts local Ollama AI interpretation first and labels deterministic fallback when the
+  model is unavailable;
+- explicit owner requests to save a low-risk rule for all projects create developer-scope
+  `instruction_grade` memories that future context packs include as binding rules.
+
+The current install/onboarding UX target is implemented for the owner-server profile:
+
+- `scripts/install-recallant.sh` is the server install entrypoint;
+- `scripts/install-recallant-cli.sh` installs the global `recallant` wrapper on configured servers;
+- CLI commands auto-load `/opt/secure-configs/recallant.env` when present;
+- ordinary project onboarding is `cd <project> && recallant attach .`, with `--sandbox`,
+  `--mode guided`, and `--mode manual` available when needed.
 
 The next useful targets are:
 

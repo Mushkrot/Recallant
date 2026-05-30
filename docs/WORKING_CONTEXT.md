@@ -226,6 +226,15 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   do not push the whole page downward and unused left-side space is put to work.
   Sandbox cleanup wording is target-aware so chat does not blindly propose a dry-run against the
   open project when the owner clearly asked for a sandbox project.
+  The chat now uses the configured local Ollama model for intent/language/target/global-rule
+  extraction when available and visibly falls back to deterministic rules when the model is
+  unavailable. Deterministic policy still owns risky actions. Owner-explicit low-risk "save this
+  rule for all projects" requests now create developer-scope `instruction_grade` memories so future
+  context packs include them across projects.
+- Product install/onboarding UX now has an owner-server baseline: `scripts/install-recallant.sh`
+  installs the server profile, `scripts/install-recallant-cli.sh` installs a global `recallant`
+  wrapper, CLI commands auto-load `/opt/secure-configs/recallant.env` when present, and ordinary
+  onboarding is `cd <project> && recallant attach .`.
 - First Phase 10 detach slice is implemented: `recallant detach` / `recallant project-detach`
   supports dry-run affected counts, confirmation-gated Recallant-side cleanup, live hide-only
   detach, sandbox hide plus active-chunk archiving, Review UI active-list hiding, active-search
