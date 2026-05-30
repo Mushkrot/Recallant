@@ -112,6 +112,11 @@ The current install/onboarding UX target is implemented for the owner-server pro
 - CLI commands auto-load `/opt/secure-configs/recallant.env` when present;
 - ordinary project onboarding is `cd <project> && recallant attach .`, with `--sandbox`,
   `--mode guided`, and `--mode manual` available when needed.
+- QA correction: installed CLI attach must not reuse the Recallant host project id from the loaded
+  server env when the operator attaches another explicit project path. The fix is in
+  `packages/db/src/index.ts`; the Phase 10 attach smoke now simulates a configured host
+  `RECALLANT_PROJECT_ID`/`RECALLANT_PROJECT_PATH` and asserts that a new sandbox receives its own
+  project id.
 
 Latest deployed checkpoint:
 
@@ -127,14 +132,27 @@ Latest deployed checkpoint:
   `source=local_ai`, `model=mistral-small:24b`, `intent=next_steps`, `language=ru`.
 - Dev `recallant-dev` Docker environment was stopped after smoke tests.
 
+Latest QA correction checkpoint:
+
+- Owner-tested `/ai/test_project_1` exposed a bug: `recallant attach . --sandbox` reported the
+  existing `/ai/recallant` project id `84eda3bf-cb72-4bcf-aeec-2f2b84ebd6ce`.
+- Fixed project resolution so explicit attach paths ignore configured `RECALLANT_PROJECT_ID` unless
+  they match configured `RECALLANT_PROJECT_PATH`.
+- Verified with `npm run build`, `npm run lint`, `npm run format:check`, `npm run phase10:smoke`
+  against isolated dev Postgres, and a real installed-wrapper attach in
+  `/tmp/recallant-new-project-smoke` with production-like env binding. The wrapper produced a new
+  project id, not the host id.
+- Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
+  independently.
+
 The next useful targets are:
 
 - deepen Review/Management UI action flows for settings, context-pack preview, and review
   proposals;
 - optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
   confirmation.
-- optionally test a brand-new sandbox project from the owner-facing path:
-  `mkdir /ai/recallant-pilots/<name> && cd /ai/recallant-pilots/<name> && recallant attach . --sandbox`.
+- optionally repair or detach any sandbox project records created before the attach identity fix;
+  this must start with a dry-run and must not delete owner files without explicit confirmation.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

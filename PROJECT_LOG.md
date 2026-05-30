@@ -2,11 +2,11 @@
 
 ## Current Session
 
-Status: Recallant product-UX checkpoint deployed and closeout handoff refreshed.
-Current focus: preserve a clean resume point after one-command onboarding, AI-backed Management
-Chat, and developer-wide global-rule workflow.
-Next step: start the next session from `docs/SESSION_HANDOFF_CURRENT.md`, verify `git status`, then
-continue with richer owner-facing Management UI actions or optional sandbox local cleanup.
+Status: QA-found attach identity bug fixed and verified.
+Current focus: make the one-command project onboarding path trustworthy without using the owner as
+manual QA.
+Next step: commit/push this fix, then continue with either safe repair/detach of the bad
+`/ai/test_project_1` attachment record or richer owner-facing Management UI actions.
 
 ## Active Constraints
 
@@ -26,6 +26,10 @@ continue with richer owner-facing Management UI actions or optional sandbox loca
   while deterministic policy remains authoritative for risky actions.
 - Explicit owner requests to save low-risk rules for all projects create developer-scope
   `instruction_grade` memories that future Context Packs include across projects.
+- Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
+  server's configured `RECALLANT_PROJECT_ID` for `/ai/recallant` when attaching another project.
+- Do not ask the owner to perform basic attach validation before the agent has independently run an
+  equivalent real command path.
 
 ## Verification
 
@@ -34,12 +38,16 @@ continue with richer owner-facing Management UI actions or optional sandbox loca
 - `npm run format:check`
 - `npm run review-ui:smoke`
 - `npm run phase10:smoke`
+- real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
+  Postgres with production-like host project env binding
 - production `recallant doctor`
 - production `/health`
 - live Management Chat API using local `mistral-small:24b`
 
 ## Open Questions
 
+- Whether to repair or detach the incorrect `/ai/test_project_1` sandbox record created before this
+  fix.
 - Whether to implement local sandbox file cleanup after confirmed detach next.
 - How far to deepen Management UI action flows before attaching a live production-sensitive project.
 

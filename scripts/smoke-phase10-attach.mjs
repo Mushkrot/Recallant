@@ -10,6 +10,7 @@ const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
 const developerId = randomUUID();
+const hostProjectId = randomUUID();
 
 function runJson(args) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
@@ -18,6 +19,8 @@ function runJson(args) {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: hostProjectId,
+      RECALLANT_PROJECT_PATH: repoRoot,
       RECALLANT_EMBEDDING_PROVIDER: "deterministic",
       RECALLANT_EMBEDDING_DIMS: "8",
       RECALLANT_SERVER_URL: "http://127.0.0.1:3005"
@@ -153,6 +156,7 @@ if (
   attach.requested_mode !== "autopilot" ||
   attach.effective_mode !== "autopilot" ||
   attach.status !== "attached" ||
+  attach.project_id === hostProjectId ||
   attach.writes_files !== true ||
   attach.writes_database !== true ||
   attach.imported.length < 5 ||

@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-05-28.
+Last updated: 2026-05-30.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
@@ -45,6 +45,11 @@ Recallant now has a working local v1 implementation slice for coding-agent memor
   pointer config, MCP hints, `.gitignore`, `AGENTS.md`, compact `PROJECT_LOG.md`, local redacted
   backups for agent files, safe imports, starter memory, structured low-risk source memories,
   startup/context-pack smoke, Review UI/API visibility check, diagnostics, and a short owner report.
+- Phase 10 attach production-env binding fix: installed CLI commands may auto-load the Recallant
+  server env, including the host `/ai/recallant` project id. `recallant attach <other-project>` now
+  treats an explicit project path as authoritative and must not reuse the host `RECALLANT_PROJECT_ID`
+  unless that path is the configured Recallant project path. The Phase 10 attach smoke now simulates
+  this production-like env binding and fails if a new sandbox receives the host project id.
 - Phase 10 detach first slice: `recallant detach` and `recallant project-detach` provide governed
   project cleanup with dry-run affected counts, confirmation-required writes, live hide-only detach,
   sandbox hide plus active-chunk archiving, Review UI project-list hiding, active-search blocking
@@ -352,12 +357,28 @@ Latest closeout checkpoint:
 - `make db-down` stopped the isolated `recallant-dev` Docker environment after validation.
 - `PROJECT_LOG.md` now exists as the compact repo-native fallback/checkpoint for `/ai/recallant`.
 
+Latest QA correction checkpoint:
+
+- Owner QA found that `cd /ai/test_project_1 && recallant attach . --sandbox` returned the existing
+  Recallant project id `84eda3bf-cb72-4bcf-aeec-2f2b84ebd6ce` instead of a new project id. The
+  root cause was `ensureProject(projectPath)` honoring `RECALLANT_PROJECT_ID` from the installed
+  server env even when the CLI explicitly attached a different path.
+- The database project-resolution logic now ignores configured `RECALLANT_PROJECT_ID` for explicit
+  paths that do not match configured `RECALLANT_PROJECT_PATH`, and only caches the configured
+  project context for the configured binding.
+- Verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  `npm run phase10:smoke` against isolated dev Postgres, and a real installed-wrapper check from
+  `/tmp/recallant-new-project-smoke` using production-like env binding. The installed-wrapper check
+  created project id `874b7379-50a7-4b34-91b1-cee30d09130e`, not the host id.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
 attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
-path and AI-backed Management Chat baseline are also implemented. Continue with richer Management UI
-actions, optional sandbox local-cleanup hardening, or an owner-driven new sandbox attach test.
+path and AI-backed Management Chat baseline are also implemented. The attach path has now been
+regression-tested against the production-env host-project-id binding that exists on the owner
+server. Continue with richer Management UI actions, optional sandbox local-cleanup hardening, or a
+server-side cleanup/repair flow for any sandbox that was attached before this fix.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

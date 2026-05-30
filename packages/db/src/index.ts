@@ -623,10 +623,12 @@ export class RecallantDb {
   async ensureProject(projectPath?: string | null): Promise<ProjectContext> {
     const developerId = this.config.developerId ?? this.fallbackDeveloperId;
     const primaryPath = projectPath ?? this.config.projectPath ?? process.cwd();
+    const usesConfiguredProjectBinding =
+      !projectPath || (Boolean(this.config.projectPath) && primaryPath === this.config.projectPath);
     if (
       this.projectContext &&
       this.projectContext.developerId === developerId &&
-      (this.config.projectId || !projectPath || primaryPath === this.config.projectPath)
+      (usesConfiguredProjectBinding || primaryPath === this.config.projectPath)
     ) {
       return this.projectContext;
     }
@@ -640,7 +642,7 @@ export class RecallantDb {
         [developerId, "Recallant Developer"]
       );
 
-      let projectId = this.config.projectId;
+      let projectId = usesConfiguredProjectBinding ? this.config.projectId : undefined;
       const projectName = primaryPath.split("/").filter(Boolean).at(-1) ?? "recallant-project";
       if (!projectId) {
         const existing = await client.query<{ id: string }>(
@@ -674,7 +676,7 @@ export class RecallantDb {
       await this.ensureDefaultModelSettings(client);
 
       const context = { developerId, projectId };
-      if (this.config.projectId || !projectPath || primaryPath === this.config.projectPath) {
+      if (usesConfiguredProjectBinding) {
         this.projectContext = context;
       }
       return context;
