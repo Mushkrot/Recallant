@@ -587,6 +587,34 @@ function retrievalDecay(occurredAt: string) {
   return Math.max(minDecay, 0.5 ** (ageDays / halflifeDays));
 }
 
+function broadStartupQueryWarning(query: string) {
+  const normalized = query
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё\s_-]+/gi, " ")
+    .trim();
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const broadTerms = new Set([
+    "all",
+    "everything",
+    "project",
+    "context",
+    "memory",
+    "memories",
+    "history",
+    "logs",
+    "все",
+    "проект",
+    "контекст",
+    "память",
+    "история"
+  ]);
+  if (tokens.length === 0) return null;
+  if (tokens.length <= 2 && tokens.every((token) => broadTerms.has(token))) {
+    return `Broad startup query "${query}" was rejected. Start with memory_get_context_pack, then use a specific evidence query if more detail is needed.`;
+  }
+  return null;
+}
+
 function chunkText(text: string, maxChars = 4_000) {
   const chunks: string[] = [];
   for (let index = 0; index < text.length; index += maxChars) {
@@ -968,6 +996,21 @@ export class RecallantDb {
         route: null,
         lifecycle,
         warnings: ["Project is detached from active Recallant search."]
+      };
+    }
+    const broadQueryWarning = broadStartupQueryWarning(input.query);
+    if (input.session_id && broadQueryWarning) {
+      return {
+        hits: [],
+        truncated: false,
+        route: null,
+        rejected: true,
+        error_code: "BROAD_STARTUP_QUERY",
+        warnings: [broadQueryWarning],
+        policy: {
+          start_with_context_pack: true,
+          use_specific_evidence_queries: true
+        }
       };
     }
     const route = await this.resolveEmbeddingRoute(

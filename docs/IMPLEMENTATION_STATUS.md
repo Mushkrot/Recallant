@@ -544,6 +544,8 @@ Latest product-UX readiness checkpoint:
 - Phase 7 smoke now explicitly covers init dry-run/no-write behavior, pointer-only project config,
   valid project ids, default and overridden capture profiles, discovery/import preview safety, `.env`
   secret redaction on confirmed import, and client-specific import audience.
+- `memory_search` rejects session-scoped broad startup queries such as `project` with
+  `BROAD_STARTUP_QUERY` and directs agents to start with `memory_get_context_pack`.
 - `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
 - The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
   longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.

@@ -167,6 +167,8 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
 - Phase 7 init/discover/import contract rows for dry-run, pointer-only config, capture profiles,
   preview safety, `.env` secret redaction, and client-specific audience are now checked in
   `TEST_CONTRACT.md` and covered by smoke automation.
+- `memory_search(query="project")` and similar session-scoped broad startup queries are rejected with
+  `BROAD_STARTUP_QUERY`; agents should start with `memory_get_context_pack`.
 
 The current Review action follow-up is complete for the governed-memory action set:
 

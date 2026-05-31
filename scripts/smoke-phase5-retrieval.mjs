@@ -210,6 +210,22 @@ if (excluded.hits.some((hit) => hit.source_event_id === unrelated.event_id)) {
   throw new Error(`Project-scoped retrieval leaked unrelated project: ${JSON.stringify(excluded)}`);
 }
 
+const broad = await callTool(10, "memory_search", {
+  session_id: started.session_id,
+  query: "project",
+  mode: "hybrid",
+  top_k: 8,
+  max_chars_total: 2000
+});
+if (
+  broad.rejected !== true ||
+  broad.error_code !== "BROAD_STARTUP_QUERY" ||
+  !broad.warnings?.some((warning) => warning.includes("memory_get_context_pack")) ||
+  broad.hits.length !== 0
+) {
+  throw new Error(`Broad startup query was not rejected: ${JSON.stringify(broad)}`);
+}
+
 try {
   const checks = await client.query(
     `
