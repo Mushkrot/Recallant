@@ -98,7 +98,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Implement the pipeline from [RETRIEVAL.md](RETRIEVAL.md).
+- [x] Implement the pipeline from [RETRIEVAL.md](RETRIEVAL.md).
 - [ ] Configurable retrieval policy for `N_lex`, `N_vec`, default `top_k`, `max_chars_total`, graph budgets, and related caps.
 - [ ] Retrieval and governed-memory recall enforce ADR-0040 scope/audience filtering before ranking.
 - [ ] Context Pack and retrieval conflict handling follow [ADR-0041](ADR-0041-conflict-resolution-priority.md).
@@ -109,16 +109,16 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] `memory_create_agent_memory`, `memory_review_agent_memory`, `memory_recall_agent_memories`, `memory_report_recall_usage`.
-- [ ] `memory_list_agent_memories` and `memory_get_agent_memory` for inbox/rules/source inspection.
-- [ ] Policy enforcement: valid agent-created memories can be auto-created for recall, while instruction-grade requires direct explicit user instruction, review/import/user-confirmed path.
-- [ ] Recall traces are written for governed memory recall.
-- [ ] `memory_link` and graph expansion branch.
-- [ ] `memory_get_checkpoint` / `memory_set_checkpoint`.
-- [ ] `memory_get_context_pack` from [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md): server-side composition of checkpoint, recovery warnings, governed memories/rules, optional bounded evidence, and suggested next fetches.
+- [x] `memory_create_agent_memory`, `memory_review_agent_memory`, `memory_recall_agent_memories`, `memory_report_recall_usage`.
+- [x] `memory_list_agent_memories` and `memory_get_agent_memory` for inbox/rules/source inspection.
+- [x] Policy enforcement: valid agent-created memories can be auto-created for recall, while instruction-grade requires direct explicit user instruction, review/import/user-confirmed path.
+- [x] Recall traces are written for governed memory recall.
+- [x] `memory_link` and graph expansion branch.
+- [x] `memory_get_checkpoint` / `memory_set_checkpoint`.
+- [x] `memory_get_context_pack` from [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md): server-side composition of checkpoint, recovery warnings, governed memories/rules, optional bounded evidence, and suggested next fetches.
 - [ ] Rule management workflow from [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md): promote/demote/reject/archive/supersede, duplicate/conflict reports, and closeout proposals.
-- [ ] Conflict reports explain applicability, authority, scope specificity, and recency per ADR-0041.
-- [ ] Erasure workflow from [ADR-0042](ADR-0042-managed-ai-native-platform-and-operations.md) and [MCP_SPEC.md](MCP_SPEC.md): dry-run, confirmation, redacted receipt, and removal/redaction of derived material.
+- [x] Conflict reports explain applicability, authority, scope specificity, and recency per ADR-0041.
+- [x] Erasure workflow from [ADR-0042](ADR-0042-managed-ai-native-platform-and-operations.md) and [MCP_SPEC.md](MCP_SPEC.md): dry-run, confirmation, redacted receipt, and removal/redaction of derived material.
 
 **Gate:** governed memory policy tests pass; graph expansion stays within configured budgets on a synthetic graph.
 

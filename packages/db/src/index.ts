@@ -1347,7 +1347,9 @@ export class RecallantDb {
         checkpoint,
         recovery: input.include_recovery === false ? [] : recovery.rows,
         binding_rules: rules.rows,
-        working_memories: working.memories,
+        working_memories: working.memories.filter(
+          (memory: { use_policy?: string }) => memory.use_policy !== "instruction_grade"
+        ),
         operational_bindings: [],
         local_spool_status: input.local_spool_status ?? { status: "unknown" },
         evidence_excerpts: evidence.hits,
@@ -1916,8 +1918,124 @@ export class RecallantDb {
 
   async listAgentMemories(input: ListAgentMemoriesInput) {
     const context = await this.ensureProject();
+    if (input.view === "duplicates") {
+      const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
+      const clauses = [
+        "developer_id = $2::uuid",
+        "(project_id = $1::uuid OR scope = 'developer')",
+        "status IN ('candidate', 'needs_review', 'accepted')",
+        "use_policy <> 'do_not_use'"
+      ];
+      if (input.scope_kind) {
+        values.push(input.scope_kind);
+        clauses.push(`scope_kind = $${values.length}`);
+      }
+      values.push(input.limit ?? 50);
+      const result = await this.pool.query(
+        `
+          WITH scoped AS (
+            SELECT *,
+              lower(regexp_replace(trim(title), '[^a-z0-9]+', ' ', 'gi')) AS duplicate_key
+            FROM agent_memories
+            WHERE ${clauses.join(" AND ")}
+          ),
+          duplicate_groups AS (
+            SELECT duplicate_key, array_agg(id::text ORDER BY updated_at DESC) AS peer_ids
+            FROM scoped
+            WHERE duplicate_key <> ''
+            GROUP BY duplicate_key
+            HAVING count(*) > 1
+          )
+          SELECT
+            s.id AS memory_id, s.memory_type, s.title, s.body, s.status, s.use_policy,
+            s.scope, s.scope_kind, s.scope_id, s.audience, s.confidence, s.created_by,
+            s.updated_at, true AS possible_duplicate, g.peer_ids AS duplicate_peer_ids,
+            jsonb_build_object(
+              'reason', 'same normalized title in overlapping project/developer scope',
+              'auto_deleted', false,
+              'recommended_actions', jsonb_build_array('merge', 'archive', 'supersede')
+            ) AS duplicate_report
+          FROM scoped s
+          JOIN duplicate_groups g ON g.duplicate_key = s.duplicate_key
+          ORDER BY s.updated_at DESC
+          LIMIT $${values.length}::int
+        `,
+        values
+      );
+      return { memories: result.rows };
+    }
+
+    if (input.view === "conflicts") {
+      const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
+      const clauses = [
+        "developer_id = $2::uuid",
+        "(project_id = $1::uuid OR scope = 'developer')",
+        "status = 'accepted'",
+        "use_policy <> 'do_not_use'"
+      ];
+      if (input.scope_kind) {
+        values.push(input.scope_kind);
+        clauses.push(`scope_kind = $${values.length}`);
+      }
+      values.push(input.limit ?? 50);
+      const result = await this.pool.query(
+        `
+          WITH scoped AS (
+            SELECT *,
+              lower(regexp_replace(trim(title), '[^a-z0-9]+', ' ', 'gi')) AS conflict_key,
+              coalesce(scope_kind, scope) AS normalized_scope_kind,
+              coalesce(scope_id, '') AS normalized_scope_id,
+              coalesce(audience, '[]'::jsonb) AS normalized_audience
+            FROM agent_memories
+            WHERE ${clauses.join(" AND ")}
+          ),
+          conflict_groups AS (
+            SELECT
+              conflict_key,
+              normalized_scope_kind,
+              normalized_scope_id,
+              normalized_audience,
+              array_agg(id::text ORDER BY updated_at DESC) AS peer_ids,
+              count(DISTINCT body) AS distinct_bodies,
+              count(DISTINCT use_policy) AS distinct_authorities,
+              bool_or(
+                (title || ' ' || body) ~* '(secret|deploy|deployment|production|destructive|delete|erase|paid|billing|api|provider|model|server|account|connector)'
+              ) AS high_risk
+            FROM scoped
+            WHERE conflict_key <> ''
+            GROUP BY conflict_key, normalized_scope_kind, normalized_scope_id, normalized_audience
+            HAVING count(*) > 1 AND count(DISTINCT body) > 1
+          )
+          SELECT
+            s.id AS memory_id, s.memory_type, s.title, s.body, s.status, s.use_policy,
+            s.scope, s.scope_kind, s.scope_id, s.audience, s.confidence, s.created_by,
+            s.updated_at, true AS possible_conflict, g.peer_ids AS conflict_peer_ids,
+            CASE WHEN g.high_risk OR g.distinct_authorities = 1 THEN 'needs_review' ELSE 'suggest_supersede' END AS review_status,
+            jsonb_build_object(
+              'adr', 'ADR-0041',
+              'applicability', 'overlapping scope and audience',
+              'authority', CASE WHEN g.distinct_authorities = 1 THEN 'equal authority tier' ELSE 'different authority tiers' END,
+              'scope_specificity', 'same scope_kind and scope_id',
+              'recency', 'newer accepted records are candidates to supersede older equal-scope records',
+              'resolution', CASE WHEN g.high_risk OR g.distinct_authorities = 1 THEN 'needs owner review; do not silently resolve' ELSE 'suggest supersede with audit edge' END
+            ) AS conflict_report
+          FROM scoped s
+          JOIN conflict_groups g
+            ON g.conflict_key = s.conflict_key
+           AND g.normalized_scope_kind = s.normalized_scope_kind
+           AND g.normalized_scope_id = s.normalized_scope_id
+           AND g.normalized_audience = s.normalized_audience
+          ORDER BY s.updated_at DESC
+          LIMIT $${values.length}::int
+        `,
+        values
+      );
+      return { memories: result.rows };
+    }
+
     const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
     const clauses = ["developer_id = $2::uuid"];
+    if (input.view === "all") clauses.push("$1::uuid IS NOT NULL");
     if (input.view !== "all") clauses.push("(project_id = $1::uuid OR scope = 'developer')");
     if (input.view === "inbox") {
       clauses.push(

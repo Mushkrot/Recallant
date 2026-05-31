@@ -677,6 +677,13 @@ Latest contract hardening checkpoint:
   ADR-0040-style operational binding isolation. Default project raw search now excludes
   environment, client-adapter, and connector-account chunks unless the caller requests the matching
   `scope_kind`/`audience`.
+- Phase 6 governed-memory smoke now covers the full core review contract: source-ref validation,
+  accept/approve, direct owner-confirmed instruction-grade rules, candidate/needs-review inbox
+  routing, duplicate reports, ADR-0041 conflict reports, non-overlapping client-adapter audiences,
+  edit metadata, merge/supersede, non-recallable lifecycle exclusions, and recall-trace usage.
+- Phase 6 graph/context/forget smoke now covers checkpoint semantic equality, context-pack
+  composition with recovery/binding/working/evidence sections, no historical-file import, no full
+  raw-artifact leakage, and confirmed redaction of both chunks and governed memories.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

@@ -66,34 +66,34 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Phase 6
 
-- [ ] `memory_create_agent_memory(created_by="agent")` with valid source refs creates a governed memory without requiring user confirmation for that write.
-- [ ] Ordinary valid agent-created memories become recallable (`accepted` + `recall_allowed`) or explicitly marked `candidate` / `needs_review` by deterministic risk/confidence policy.
-- [ ] Agent-created memory without `source_refs` returns `VALIDATION_ERROR`.
-- [ ] `memory_review_agent_memory(action="accept")` changes status to `accepted` and ordinary policy to `recall_allowed`; `approve` may work as a compatibility alias.
-- [ ] `instruction_grade` is allowed only for direct explicit user instruction or user/import/review-approved flow and does not silently pass for raw agent-created inferred/candidate/needs-review records.
-- [ ] `memory_list_agent_memories(view="inbox")` returns `candidate`/`needs_review`/high-risk items and excludes ordinary low-risk recall memories by default.
+- [x] `memory_create_agent_memory(created_by="agent")` with valid source refs creates a governed memory without requiring user confirmation for that write.
+- [x] Ordinary valid agent-created memories become recallable (`accepted` + `recall_allowed`) or explicitly marked `candidate` / `needs_review` by deterministic risk/confidence policy.
+- [x] Agent-created memory without `source_refs` returns `VALIDATION_ERROR`.
+- [x] `memory_review_agent_memory(action="accept")` changes status to `accepted` and ordinary policy to `recall_allowed`; `approve` may work as a compatibility alias.
+- [x] `instruction_grade` is allowed only for direct explicit user instruction or user/import/review-approved flow and does not silently pass for raw agent-created inferred/candidate/needs-review records.
+- [x] `memory_list_agent_memories(view="inbox")` returns `candidate`/`needs_review`/high-risk items and excludes ordinary low-risk recall memories by default.
 - [ ] Review Inbox default includes important, conflicting, and long-term records: candidate rules, scope-changing candidates, conflicts, duplicates, high-risk guidance, low-confidence behavior guidance, and promotion/demotion/archive/supersede candidates.
-- [ ] Review Inbox default excludes raw events, ordinary evidence chunks, routine work logs, routine project facts, and low-risk source-linked memories that do not affect future behavior.
-- [ ] `memory_list_agent_memories(view="rules")` returns active `instruction_grade` records by default.
-- [ ] `memory_get_agent_memory` returns source refs and review action history.
-- [ ] Duplicate/candidate report can flag two semantically similar rule memories without auto-deleting either.
-- [ ] Conflict report can flag an older instruction/decision contradicted by a newer accepted decision.
-- [ ] Conflict report explains ADR-0041 applicability/authority/scope-specificity/recency for at least one high-risk conflict.
-- [ ] Two client-adapter records with non-overlapping audiences are not treated as a conflict.
-- [ ] High-risk equal-authority conflict is returned as needs review instead of being silently resolved.
-- [ ] `memory_review_agent_memory(action="edit")` preserves source refs and records previous values in review action metadata.
-- [ ] `memory_review_agent_memory(action="merge")` leaves one canonical memory active and marks merged duplicates as superseded/archived.
-- [ ] `memory_recall_agent_memories` does not return `candidate`, `needs_review`, `stale`, `rejected`, `archived`, `superseded`, or `do_not_use` records by default.
-- [ ] `memory_recall_agent_memories` returns `trace_id`, and `memory_report_recall_usage` updates the matching `recall_traces` row.
-- [ ] `memory_link` creates an edge; `memory_search` with `graph_expand=true` pulls a neighbor within `graph_budget_nodes`.
-- [ ] `memory_set_checkpoint` followed by `memory_get_checkpoint` returns equivalent JSON by semantic equality.
-- [ ] `memory_get_context_pack` returns checkpoint, relevant binding rules, working memories, recovery warnings when present, optional bounded evidence, and suggested next fetches under configured context budget.
-- [ ] `memory_get_context_pack` distinguishes `instruction_grade` binding rules from ordinary working memories.
-- [ ] `memory_get_context_pack` does not import historical docs or read all project files.
-- [ ] `memory_get_context_pack` does not return full raw artifact content; it returns only bounded excerpts/source refs when evidence is included.
+- [x] Review Inbox default excludes raw events, ordinary evidence chunks, routine work logs, routine project facts, and low-risk source-linked memories that do not affect future behavior.
+- [x] `memory_list_agent_memories(view="rules")` returns active `instruction_grade` records by default.
+- [x] `memory_get_agent_memory` returns source refs and review action history.
+- [x] Duplicate/candidate report can flag two semantically similar rule memories without auto-deleting either.
+- [x] Conflict report can flag an older instruction/decision contradicted by a newer accepted decision.
+- [x] Conflict report explains ADR-0041 applicability/authority/scope-specificity/recency for at least one high-risk conflict.
+- [x] Two client-adapter records with non-overlapping audiences are not treated as a conflict.
+- [x] High-risk equal-authority conflict is returned as needs review instead of being silently resolved.
+- [x] `memory_review_agent_memory(action="edit")` preserves source refs and records previous values in review action metadata.
+- [x] `memory_review_agent_memory(action="merge")` leaves one canonical memory active and marks merged duplicates as superseded/archived.
+- [x] `memory_recall_agent_memories` does not return `candidate`, `needs_review`, `stale`, `rejected`, `archived`, `superseded`, or `do_not_use` records by default.
+- [x] `memory_recall_agent_memories` returns `trace_id`, and `memory_report_recall_usage` updates the matching `recall_traces` row.
+- [x] `memory_link` creates an edge; `memory_search` with `graph_expand=true` pulls a neighbor within `graph_budget_nodes`.
+- [x] `memory_set_checkpoint` followed by `memory_get_checkpoint` returns equivalent JSON by semantic equality.
+- [x] `memory_get_context_pack` returns checkpoint, relevant binding rules, working memories, recovery warnings when present, optional bounded evidence, and suggested next fetches under configured context budget.
+- [x] `memory_get_context_pack` distinguishes `instruction_grade` binding rules from ordinary working memories.
+- [x] `memory_get_context_pack` does not import historical docs or read all project files.
+- [x] `memory_get_context_pack` does not return full raw artifact content; it returns only bounded excerpts/source refs when evidence is included.
 - [x] `memory_forget(..., dry_run=true)` returns affected counts and warnings without changing data.
 - [x] `memory_forget` without required confirmation does not erase content and returns `pending_confirmation` or equivalent.
-- [ ] Confirmed `memory_forget` removes/redacts target content from chunks, embeddings, governed memory body/source quotes, derived summaries/indexes, context-pack output, and UI/list responses.
+- [x] Confirmed `memory_forget` removes/redacts target content from chunks, embeddings, governed memory body/source quotes, derived summaries/indexes, context-pack output, and UI/list responses.
 - [x] Erasure receipt contains safe ids/counts/status only and does not contain the erased content.
 
 ## Phase 6.5 — Review UI

@@ -63,6 +63,13 @@ async function callToolRaw(id, name, args) {
   return waitForResponse(id);
 }
 
+let nextToolId = 13;
+async function callNextTool(name, args) {
+  const response = await callTool(nextToolId, name, args);
+  nextToolId += 1;
+  return response;
+}
+
 send({
   jsonrpc: "2.0",
   id: 1,
@@ -187,6 +194,378 @@ await callTool(12, "memory_report_recall_usage", {
   ignored_memory_ids: [candidate.memory_id],
   note: "phase6 smoke usage"
 });
+
+const directUserRule = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "developer",
+  title: "Always honor direct owner instructions",
+  body: "Always honor direct owner instructions when they are explicit and safe.",
+  confidence: 1,
+  created_by: "user",
+  metadata: { owner_confirmed_global_rule: true },
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "direct owner" }]
+});
+if (directUserRule.status !== "accepted" || directUserRule.use_policy !== "instruction_grade") {
+  throw new Error(
+    `Direct user instruction did not become instruction-grade: ${JSON.stringify(directUserRule)}`
+  );
+}
+
+const needsReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Production deployment secret decision",
+  body: "Production deployment API secret handling needs owner review before reuse.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "secret handling" }]
+});
+if (needsReview.status !== "needs_review" || needsReview.use_policy !== "evidence_only") {
+  throw new Error(
+    `High-risk agent memory was not routed to review: ${JSON.stringify(needsReview)}`
+  );
+}
+
+const acceptedReview = await callNextTool("memory_review_agent_memory", {
+  memory_id: needsReview.memory_id,
+  action: "accept",
+  actor_kind: "user",
+  note: "phase6 accept smoke"
+});
+if (acceptedReview.status !== "accepted" || acceptedReview.use_policy !== "recall_allowed") {
+  throw new Error(`Accept review action failed: ${JSON.stringify(acceptedReview)}`);
+}
+
+const approveAliasCandidate = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Always run approve alias smoke",
+  body: "Always run approve alias smoke as a candidate rule.",
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "approve alias" }]
+});
+const approvedAlias = await callNextTool("memory_review_agent_memory", {
+  memory_id: approveAliasCandidate.memory_id,
+  action: "approve",
+  actor_kind: "user",
+  note: "phase6 approve alias smoke"
+});
+if (approvedAlias.status !== "accepted" || approvedAlias.use_policy !== "recall_allowed") {
+  throw new Error(`Approve alias failed: ${JSON.stringify(approvedAlias)}`);
+}
+
+const lowConfidence = await callNextTool("memory_create_agent_memory", {
+  memory_type: "preference",
+  scope: "developer",
+  title: "Maybe all projects should use phase6 low confidence style",
+  body: "Maybe all projects should use phase6 low confidence style.",
+  confidence: 0.2,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "Maybe all projects" }]
+});
+if (lowConfidence.status !== "needs_review") {
+  throw new Error(
+    `Low-confidence behavior guidance did not require review: ${JSON.stringify(lowConfidence)}`
+  );
+}
+
+const highRiskInboxItem = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 inbox high risk secret handling",
+  body: "This project has a secret handling rule that needs review before reuse.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "secret handling" }]
+});
+const candidateInboxItem = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Always keep phase6 inbox candidate visible",
+  body: "Always keep phase6 inbox candidate visible until owner review.",
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "inbox candidate" }]
+});
+const expandedInbox = await callNextTool("memory_list_agent_memories", {
+  view: "inbox",
+  limit: 50
+});
+if (
+  !expandedInbox.memories.some((memory) => memory.memory_id === candidateInboxItem.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === lowConfidence.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === highRiskInboxItem.memory_id) ||
+  expandedInbox.memories.some((memory) => memory.memory_id === ordinary.memory_id)
+) {
+  throw new Error(`Expanded inbox policy failed: ${JSON.stringify(expandedInbox)}`);
+}
+
+const duplicateA = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Duplicate phase6 review rule",
+  body: "Always keep duplicate phase6 review rule as the first candidate.",
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate first" }]
+});
+const duplicateB = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Duplicate phase6 review rule",
+  body: "Always keep duplicate phase6 review rule as the second candidate.",
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate second" }]
+});
+const duplicates = await callNextTool("memory_list_agent_memories", {
+  view: "duplicates",
+  limit: 20
+});
+if (
+  !duplicates.memories.some((memory) => memory.memory_id === duplicateA.memory_id) ||
+  !duplicates.memories.some((memory) => memory.memory_id === duplicateB.memory_id) ||
+  !duplicates.memories.every((memory) => memory.possible_duplicate === true)
+) {
+  throw new Error(`Duplicate report failed: ${JSON.stringify(duplicates)}`);
+}
+
+const conflictOld = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Production deploy provider",
+  body: "Always use blue provider for production deploys.",
+  confidence: 1,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "blue provider" }]
+});
+const conflictNew = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Production deploy provider",
+  body: "Always use green provider for production deploys.",
+  confidence: 1,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "green provider" }]
+});
+const conflicts = await callNextTool("memory_list_agent_memories", {
+  view: "conflicts",
+  limit: 20
+});
+const highRiskConflict = conflicts.memories.find(
+  (memory) => memory.memory_id === conflictNew.memory_id
+);
+if (
+  !conflicts.memories.some((memory) => memory.memory_id === conflictOld.memory_id) ||
+  !highRiskConflict ||
+  highRiskConflict.review_status !== "needs_review" ||
+  highRiskConflict.conflict_report?.adr !== "ADR-0041" ||
+  !String(highRiskConflict.conflict_report?.authority ?? "").includes("equal") ||
+  !String(highRiskConflict.conflict_report?.resolution ?? "").includes("review")
+) {
+  throw new Error(`Conflict report failed: ${JSON.stringify(conflicts)}`);
+}
+
+await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  scope_kind: "client_adapter",
+  scope_id: "codex",
+  audience: [{ kind: "specific_client", id: "codex" }],
+  title: "Client adapter non-overlap phase6",
+  body: "Always use Codex-only adapter behavior.",
+  confidence: 1,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "codex only" }]
+});
+await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  scope_kind: "client_adapter",
+  scope_id: "claude_code",
+  audience: [{ kind: "specific_client", id: "claude_code" }],
+  title: "Client adapter non-overlap phase6",
+  body: "Always use Claude-only adapter behavior.",
+  confidence: 1,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "claude only" }]
+});
+const clientAdapterConflicts = await callNextTool("memory_list_agent_memories", {
+  view: "conflicts",
+  scope_kind: "client_adapter",
+  limit: 20
+});
+if (
+  clientAdapterConflicts.memories.some(
+    (memory) => memory.title === "Client adapter non-overlap phase6"
+  )
+) {
+  throw new Error(
+    `Non-overlapping client-adapter audiences were treated as a conflict: ${JSON.stringify(clientAdapterConflicts)}`
+  );
+}
+
+const editTarget = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 edit source refs target",
+  body: "Original editable governed memory body.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "editable source ref" }]
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: editTarget.memory_id,
+  action: "edit",
+  actor_kind: "user",
+  note: "phase6 edit smoke",
+  patch: {
+    title: "Phase6 edited source refs target",
+    body: "Edited governed memory body."
+  }
+});
+const editedDetail = await callNextTool("memory_get_agent_memory", {
+  memory_id: editTarget.memory_id
+});
+const editAction = editedDetail.review_actions.find((action) => action.action === "edit");
+if (
+  editedDetail.source_refs.length !== 1 ||
+  editedDetail.memory.title !== "Phase6 edited source refs target" ||
+  editAction?.metadata?.previous?.title !== "Phase6 edit source refs target"
+) {
+  throw new Error(
+    `Edit did not preserve source refs/previous values: ${JSON.stringify(editedDetail)}`
+  );
+}
+
+await callNextTool("memory_review_agent_memory", {
+  memory_id: duplicateA.memory_id,
+  action: "accept",
+  actor_kind: "user",
+  note: "phase6 merge canonical accept"
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: duplicateA.memory_id,
+  action: "merge",
+  actor_kind: "user",
+  note: "phase6 merge smoke",
+  merge_memory_ids: [duplicateB.memory_id]
+});
+const canonicalAfterMerge = await callNextTool("memory_get_agent_memory", {
+  memory_id: duplicateA.memory_id
+});
+const mergedAfterMerge = await callNextTool("memory_get_agent_memory", {
+  memory_id: duplicateB.memory_id
+});
+if (
+  canonicalAfterMerge.memory.status !== "accepted" ||
+  mergedAfterMerge.memory.status !== "superseded" ||
+  mergedAfterMerge.memory.superseded_by !== duplicateA.memory_id
+) {
+  throw new Error(
+    `Merge did not keep canonical and supersede duplicate: ${JSON.stringify({
+      canonicalAfterMerge,
+      mergedAfterMerge
+    })}`
+  );
+}
+
+const excludedRecallToken = `excluded_recall_${randomUUID()}`;
+const excludedCandidate = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Excluded recall candidate",
+  body: `Always keep ${excludedRecallToken} as a candidate-only rule.`,
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+const excludedNeedsReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Excluded recall needs review",
+  body: `${excludedRecallToken} mentions a production secret and needs review.`,
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+const excludedRejected = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Excluded recall rejected",
+  body: `${excludedRecallToken} rejected body.`,
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+const excludedArchived = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Excluded recall archived",
+  body: `${excludedRecallToken} archived body.`,
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+const excludedStale = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Excluded recall stale",
+  body: `${excludedRecallToken} stale body.`,
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+const excludedSuperseded = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Excluded recall superseded",
+  body: `${excludedRecallToken} superseded body.`,
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: excludedRecallToken }]
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: excludedRejected.memory_id,
+  action: "reject",
+  actor_kind: "user"
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: excludedArchived.memory_id,
+  action: "archive",
+  actor_kind: "user"
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: excludedStale.memory_id,
+  action: "mark_stale",
+  actor_kind: "user"
+});
+await callNextTool("memory_review_agent_memory", {
+  memory_id: excludedSuperseded.memory_id,
+  action: "supersede",
+  actor_kind: "user",
+  superseded_by: ordinary.memory_id
+});
+const excludedRecall = await callNextTool("memory_recall_agent_memories", {
+  query: excludedRecallToken,
+  scope: "project",
+  top_k: 20,
+  max_chars_total: 4000
+});
+const excludedIds = new Set([
+  excludedCandidate.memory_id,
+  excludedNeedsReview.memory_id,
+  excludedRejected.memory_id,
+  excludedArchived.memory_id,
+  excludedStale.memory_id,
+  excludedSuperseded.memory_id
+]);
+if (excludedRecall.memories.some((memory) => excludedIds.has(memory.memory_id))) {
+  throw new Error(
+    `Default governed recall returned non-recallable memory: ${JSON.stringify(excludedRecall)}`
+  );
+}
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();

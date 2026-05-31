@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -120,14 +120,25 @@ await client.query(
   ]
 );
 
+const checkpointPayload = {
+  current_status: "phase6 graph context smoke",
+  current_focus: "context pack",
+  next_step: "verify graph and forget",
+  open_questions: []
+};
 await callTool(3, "memory_set_checkpoint", {
-  payload: {
-    current_status: "phase6 graph context smoke",
-    current_focus: "context pack",
-    next_step: "verify graph and forget",
-    open_questions: []
-  }
+  payload: checkpointPayload
 });
+const checkpoint = await callTool(30, "memory_get_checkpoint", {});
+if (
+  checkpoint.payload?.current_status !== checkpointPayload.current_status ||
+  checkpoint.payload?.current_focus !== checkpointPayload.current_focus ||
+  checkpoint.payload?.next_step !== checkpointPayload.next_step ||
+  JSON.stringify(checkpoint.payload?.open_questions ?? []) !==
+    JSON.stringify(checkpointPayload.open_questions)
+) {
+  throw new Error(`Checkpoint round trip failed: ${JSON.stringify(checkpoint)}`);
+}
 
 const alpha = await callTool(4, "memory_append_turn", {
   session_id: started.session_id,
@@ -143,6 +154,30 @@ const beta = await callTool(5, "memory_append_turn", {
   text: "beta_neighbor graph expanded chunk",
   dedup_key: `phase6-beta-${randomUUID()}`
 });
+const rawSentinel = `FULL_RAW_ARTIFACT_SENTINEL_${randomUUID()}`;
+await callTool(31, "memory_append_event", {
+  session_id: started.session_id,
+  client_kind: "codex",
+  event_kind: "tool_result",
+  text: "alpha raw artifact summary only",
+  raw_artifacts: [
+    {
+      artifact_kind: "tool_output",
+      storage_backend: "postgres_inline",
+      uri: "inline://phase6/raw-artifact",
+      sha256: randomUUID(),
+      size_bytes: rawSentinel.length,
+      content_type: "text/plain",
+      excerpt: `${rawSentinel} should never appear in a context pack.`,
+      metadata: { smoke: true }
+    }
+  ],
+  dedup_key: `phase6-raw-${randomUUID()}`
+});
+await writeFile(
+  join(projectDir, "PROJECT_LOG.md"),
+  `# Historical project log\n\nHISTORICAL_DOC_SENTINEL_${randomUUID()} should not be imported by context pack.\n`
+);
 
 await callTool(6, "memory_link", {
   src_kind: "chunk",
@@ -184,6 +219,22 @@ await callTool(9, "memory_review_agent_memory", {
   actor_kind: "user",
   note: "phase6 context pack smoke"
 });
+const workingMemory = await callTool(32, "memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Alpha context pack working memory",
+  body: "alpha context pack working memory should be recalled as ordinary working memory.",
+  created_by: "agent",
+  confidence: 0.9,
+  source_refs: [{ source_kind: "event", source_id: alpha.event_id, quote: "alpha context" }]
+});
+await client.query(
+  `
+    INSERT INTO sessions (project_id, client_kind, client_version, status, last_seen_at)
+    VALUES ($1, 'codex', 'smoke', 'interrupted', now() - interval '5 minutes')
+  `,
+  [projectId]
+);
 
 const pack = await callTool(10, "memory_get_context_pack", {
   session_id: started.session_id,
@@ -195,9 +246,19 @@ const pack = await callTool(10, "memory_get_context_pack", {
 if (
   pack.sections?.checkpoint?.payload?.current_focus !== "context pack" ||
   !pack.sections?.binding_rules?.some((memory) => memory.memory_id === rule.memory_id) ||
+  !pack.sections?.working_memories?.some(
+    (memory) => memory.memory_id === workingMemory.memory_id
+  ) ||
+  pack.sections?.working_memories?.some((memory) => memory.memory_id === rule.memory_id) ||
+  !Array.isArray(pack.sections?.recovery) ||
+  pack.sections.recovery.length === 0 ||
   !pack.sections?.evidence_excerpts?.some((hit) => hit.source_event_id === alpha.event_id)
 ) {
   throw new Error(`Context pack composition failed: ${JSON.stringify(pack)}`);
+}
+const serializedPack = JSON.stringify(pack);
+if (serializedPack.includes(rawSentinel) || serializedPack.includes("HISTORICAL_DOC_SENTINEL")) {
+  throw new Error(`Context pack leaked raw artifact or historical project file: ${serializedPack}`);
 }
 
 const mcpPreviewPack = await callTool(11, "memory_get_context_pack", {
@@ -262,18 +323,121 @@ if (fetched.text !== "[REDACTED]" || fetched.archived_at === null) {
   );
 }
 
+const afterChunkForgetPack = await callTool(33, "memory_get_context_pack", {
+  session_id: started.session_id,
+  task_hint: "beta_neighbor",
+  include_raw_evidence: "always",
+  max_chars_total: 3000
+});
+if (JSON.stringify(afterChunkForgetPack).includes("beta_neighbor graph expanded chunk")) {
+  throw new Error(
+    `Context pack returned forgotten chunk content: ${JSON.stringify(afterChunkForgetPack)}`
+  );
+}
+
+const forgetMemoryToken = `forget_agent_memory_${randomUUID()}`;
+const forgetMemory = await callTool(34, "memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Forget governed memory target",
+  body: `${forgetMemoryToken} should disappear from governed memory recall and detail bodies.`,
+  created_by: "agent",
+  confidence: 0.9,
+  source_refs: [
+    { source_kind: "event", source_id: alpha.event_id, quote: `${forgetMemoryToken} source quote` }
+  ]
+});
+const erasedMemory = await callTool(35, "memory_forget", {
+  target: { kind: "agent_memory", id: forgetMemory.memory_id, selector: {} },
+  reason: "phase6 governed memory forget",
+  dry_run: false,
+  confirmation: { confirmed: true, confirmation_token: "phase6-agent-memory" }
+});
+if (
+  erasedMemory.status !== "completed" ||
+  erasedMemory.redacted_receipt?.affected?.agent_memories !== 1
+) {
+  throw new Error(`Confirmed governed-memory forget failed: ${JSON.stringify(erasedMemory)}`);
+}
+const forgottenDetail = await callTool(36, "memory_get_agent_memory", {
+  memory_id: forgetMemory.memory_id
+});
+if (
+  forgottenDetail.memory.title !== "[REDACTED]" ||
+  forgottenDetail.memory.body !== "[REDACTED]" ||
+  forgottenDetail.memory.status !== "archived" ||
+  forgottenDetail.memory.use_policy !== "do_not_use" ||
+  forgottenDetail.source_refs.some((sourceRef) => sourceRef.quote !== null)
+) {
+  throw new Error(`Governed-memory detail was not redacted: ${JSON.stringify(forgottenDetail)}`);
+}
+const forgottenList = await callTool(39, "memory_list_agent_memories", {
+  view: "all",
+  status: "archived",
+  limit: 20
+});
+if (!Array.isArray(forgottenList.memories)) {
+  throw new Error(
+    `Governed-memory list response missing memories: ${JSON.stringify(forgottenList)}`
+  );
+}
+const forgottenListRow = forgottenList.memories.find(
+  (memory) => memory.memory_id === forgetMemory.memory_id
+);
+if (
+  !forgottenListRow ||
+  forgottenListRow.title !== "[REDACTED]" ||
+  forgottenListRow.body !== "[REDACTED]" ||
+  JSON.stringify(forgottenListRow).includes(forgetMemoryToken)
+) {
+  throw new Error(
+    `Governed-memory list response was not redacted: ${JSON.stringify(forgottenList)}`
+  );
+}
+const forgottenRecall = await callTool(37, "memory_recall_agent_memories", {
+  query: forgetMemoryToken,
+  scope: "project",
+  top_k: 5,
+  max_chars_total: 2000
+});
+const forgottenContextPack = await callTool(38, "memory_get_context_pack", {
+  session_id: started.session_id,
+  task_hint: forgetMemoryToken,
+  include_raw_evidence: "always",
+  max_chars_total: 3000
+});
+if (
+  forgottenRecall.memories.length !== 0 ||
+  JSON.stringify(forgottenContextPack).includes(forgetMemoryToken)
+) {
+  throw new Error(
+    `Forgotten governed memory remained recallable: ${JSON.stringify({
+      forgottenRecall,
+      forgottenContextPack
+    })}`
+  );
+}
+
 try {
   const checks = await client.query(
     `
       SELECT
         (SELECT count(*)::int FROM edges WHERE src_id = $1 AND dst_id = $2) AS edge_count,
         (SELECT count(*)::int FROM erasure_requests WHERE status = 'completed') AS erasure_count,
-        (SELECT count(*)::int FROM embeddings WHERE chunk_id = $2::uuid) AS erased_embedding_count
+        (SELECT count(*)::int FROM embeddings WHERE chunk_id = $2::uuid) AS erased_embedding_count,
+        (SELECT body FROM agent_memories WHERE id = $3) AS erased_memory_body,
+        (SELECT count(*)::int FROM agent_memory_source_refs WHERE memory_id = $3 AND quote IS NULL) AS erased_memory_redacted_refs
     `,
-    [alpha.chunk_ids[0], beta.chunk_ids[0]]
+    [alpha.chunk_ids[0], beta.chunk_ids[0], forgetMemory.memory_id]
   );
   const row = checks.rows[0];
-  if (row.edge_count !== 1 || row.erasure_count < 1 || row.erased_embedding_count !== 0) {
+  if (
+    row.edge_count !== 1 ||
+    row.erasure_count < 2 ||
+    row.erased_embedding_count !== 0 ||
+    row.erased_memory_body !== "[REDACTED]" ||
+    row.erased_memory_redacted_refs !== 1
+  ) {
     throw new Error(`Graph/context/forget DB state failed: ${JSON.stringify(row)}`);
   }
 } finally {
