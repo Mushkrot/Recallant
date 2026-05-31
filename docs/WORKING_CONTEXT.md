@@ -1,6 +1,6 @@
 # Working context snapshot
 
-Last updated: 2026-05-30.
+Last updated: 2026-05-31.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
@@ -250,10 +250,37 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   `similar_projects`, and `all_projects_review` modes; results are source-linked and labeled with
   source project/path/ref, status/use policy, applicability warning, and promotion policy; ordinary
   context packs still exclude unrelated project memory.
-- The active next plan is Phase 10: `docs/AUTONOMOUS_ATTACH.md` and
-  `docs/CROSS_PROJECT_RECALL.md`.
+- The first Phase 10 implementation slices are complete: autonomous attach modes, governed detach,
+  controlled cross-project recall, capture-runtime bootstrap, owner-facing Review/Management UI
+  basics, and safe local cleanup have smoke coverage.
+- The active engineering plan is now contract hardening, full-suite regression, and controlled
+  deployment readiness: keep closing behavior against `docs/TEST_CONTRACT.md`, prove it with smoke
+  tests, then update docs and deploy only through the accepted server/service safety path.
 - The current handoff for new sessions is `docs/SESSION_HANDOFF_CURRENT.md`.
 - The old dated handoff from 2026-05-21 is archived under `docs/archive/SESSION_HANDOFF_2026-05-21.md`.
+
+Latest contract-hardening checkpoint:
+
+- `docs/TEST_CONTRACT.md` now has no remaining unchecked rows. The previously open Review Inbox,
+  Review UI critical-status/rule-filter/cost, closeout-warning, Phase 8 security/backup/cleanup,
+  Phase 9 cleanup/decay, Pre-Pilot readiness, and Phase 10 raw-secret attach-policy rows are backed
+  by implementation and smoke assertions.
+- Review Inbox default includes important long-term records beyond simple candidates:
+  scope-changing candidates, duplicate/conflict signals, recommended promotion/demotion/archive/
+  supersede candidates, high-risk guidance, and low-confidence long-term behavior guidance while
+  still excluding routine raw events and low-risk evidence.
+- Review Dashboard first screen exposes unclosed/interrupted sessions, unsynced local spool,
+  high-risk conflicts, pending review, paid API approvals, active-session state, active-rule
+  filters, current day/month cost summaries, and cost by project/provider/model/purpose.
+- `memory_closeout` now returns attention-required warnings for governed-memory conflicts, failed
+  writes, incomplete repo sync, low extraction confidence, and server/model/provider errors in
+  addition to pending review and unsynced spool.
+- `recallant attach` reports raw secret findings without leaking values, never modifies
+  production-sensitive source files for secret cleanup during preflight, and only masks sandbox/test
+  bootstrap files after a redacted local backup exists.
+- `recallant doctor` includes a production-readiness object covering doctor/Postgres status, local
+  stdio MCP smoke expectation, Cloudflare Access expectations, localhost-only origin, backup timer,
+  latest backup verification, duplicate `/ai/recallant` row check, and unintended paid API use.
 
 ## Expansion stance
 

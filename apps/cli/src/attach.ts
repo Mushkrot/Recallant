@@ -477,6 +477,22 @@ function plannedChanges(input: {
   ];
 }
 
+function rawSecretFindings(candidates: readonly DiscoveryCandidate[]) {
+  return candidates
+    .filter((candidate) =>
+      candidate.risks.some((risk) => risk.code === "raw_secret_value_detected")
+    )
+    .map((candidate) => ({
+      path: candidate.path,
+      source_sha256: candidate.source_ref.sha256,
+      risk: candidate.risk,
+      source_modified: false,
+      review_required: true,
+      cleanup_plan:
+        "Review the source file, rotate real secrets if needed, and keep only secret reference names in Recallant."
+    }));
+}
+
 function contentTypeForPath(path: string) {
   if (path.endsWith(".md")) return "text/markdown";
   if (path.includes(".env") || path.endsWith(".example")) return "text/plain";
@@ -743,6 +759,7 @@ export async function runAttach(argv: readonly string[]) {
     existingProjectLog === null ? null : "PROJECT_LOG.md"
   ].filter((item): item is string => item !== null);
   const agentFiles = await discoverAgentFiles(options.projectDir, candidates);
+  const secretFindings = rawSecretFindings(candidates);
   const plan = plannedChanges({
     effectiveMode,
     executionAllowed,
@@ -778,6 +795,14 @@ export async function runAttach(argv: readonly string[]) {
       selected_for_import: importCandidates.length,
       review_needed: candidates.filter(candidateNeedsReview).length,
       agent_files: agentFiles.length
+    },
+    secret_findings: {
+      raw_secret_count: secretFindings.length,
+      findings: secretFindings,
+      live_policy:
+        "Live/production-sensitive attach never edits source files for secret cleanup during preflight.",
+      sandbox_policy:
+        "Sandbox/test attach may mask changed bootstrap files only after a redacted local backup exists."
     }
   };
 
@@ -811,6 +836,10 @@ export async function runAttach(argv: readonly string[]) {
       agentFiles,
       changedExistingAgentFiles
     });
+    const maskChangedBootstrapSecrets =
+      options.explicitSandbox &&
+      !production.production_sensitive &&
+      (backup?.redacted_file_count ?? 0) > 0;
     await writeFile(
       join(options.projectDir, ".recallant", "config"),
       configJson(identity.projectId, options.serverUrl)
@@ -823,7 +852,14 @@ export async function runAttach(argv: readonly string[]) {
       join(options.projectDir, ".gitignore"),
       await upsertGitignore(options.projectDir)
     );
-    await writeFile(agentsPath, upsertMemorySection(existingAgents));
+    await writeFile(
+      agentsPath,
+      upsertMemorySection(
+        maskChangedBootstrapSecrets && existingAgents !== null
+          ? redactSecretValues(existingAgents)
+          : existingAgents
+      )
+    );
     await writeFile(
       projectLogPath,
       compactProjectLog({
@@ -890,6 +926,22 @@ export async function runAttach(argv: readonly string[]) {
       dry_run: false,
       status: "attached",
       backup,
+      secret_findings: {
+        raw_secret_count: secretFindings.length,
+        findings: secretFindings.map((finding) => ({
+          ...finding,
+          source_modified:
+            maskChangedBootstrapSecrets &&
+            changedExistingAgentFiles.includes(finding.path) &&
+            candidateIsAgentFile(candidates.find((candidate) => candidate.path === finding.path)!)
+        })),
+        live_policy:
+          "Live/production-sensitive attach never edits source files for secret cleanup during preflight.",
+        sandbox_policy:
+          "Sandbox/test attach may mask changed bootstrap files only after a redacted local backup exists.",
+        masked_after_redacted_backup: maskChangedBootstrapSecrets,
+        backup_manifest_path: backup?.manifest_path ?? null
+      },
       changed_files: changedFiles,
       imported,
       starter_memory: starterMemory,

@@ -1,15 +1,16 @@
 # Implementation Status
 
-Last updated: 2026-05-30.
+Last updated: 2026-05-31.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
 ## Current State
 
-Recallant has a working local v1 implementation slice for coding-agent memory, but the main product
-loop is not complete until [PRODUCT_ACCEPTANCE_TEST.md](PRODUCT_ACCEPTANCE_TEST.md) passes. Project
-registration, attach reports, UI visibility, and component smoke tests are useful checkpoints; they
-do not by themselves prove autonomous agent memory.
+Recallant has a working local v1 implementation slice for coding-agent memory. The Product
+Acceptance agent-capture loop passes for the first production-ready slice, and
+[TEST_CONTRACT.md](TEST_CONTRACT.md) now has no remaining unchecked rows. Project registration,
+attach reports, UI visibility, and component smoke tests remain useful checkpoints, but readiness is
+defined by the full capture/closeout/recall loop plus contract-backed regression tests.
 
 Current implemented slices include:
 
@@ -114,6 +115,13 @@ Current implemented slices include:
   writing DB rows, or touching systemd.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
+- Contract-hardening checkpoint: Review Inbox now includes important long-term records and
+  lifecycle/action candidates by default; Review UI first screen shows critical capture/spool/
+  conflict status, active-rule filters, and current day/month cost summaries; Management Chat gates
+  destructive/cost/security/global/connector actions; `memory_closeout` reports conflicts, failed
+  writes, repo-sync gaps, low extraction confidence, and server/model/provider errors; attach raw
+  secret findings use live-vs-sandbox policy; and `recallant doctor` reports a structured
+  production-readiness gate.
 
 ## Accepted Production Deployment Plan
 
@@ -229,10 +237,13 @@ Completed Product Acceptance work:
 
 Next useful work:
 
-1. Deepen owner-facing Management UI action flows beyond the first implementation slice.
-2. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
+1. Run full regression and deploy/restart only through the accepted controlled service path when the
+   owner wants this code live.
+2. Deepen owner-facing Management UI action flows beyond the first implementation slice.
+3. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
    pointer/runtime cleanup slice.
-3. Close remaining CLI init/discover/import contract gaps against `TEST_CONTRACT`.
+4. Start the next sandbox/live-project pilot only after the agent has already run the equivalent
+   autonomous attach/capture/closeout/recall validation itself.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -255,6 +266,22 @@ The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](S
 Earlier implementation commits cover Phase 0 through Phase 9 slices and are summarized in `docs/WORKING_CONTEXT.md`.
 
 ## Validation
+
+Latest contract-hardening validation on 2026-05-31:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- Targeted changed-slice checks: `npm run phase7:smoke`, `npm run phase6:smoke:governed`,
+  `npm run review-ui:smoke`, and `npm run phase10:smoke`
+- Clean `make db-reset`
+- Full `npm run smoke:core` against isolated `recallant-dev` Postgres on `127.0.0.1:15433`
+- `make db-down`
+
+This validation covers the final `TEST_CONTRACT.md` closure pass: Review Inbox defaults, Review UI
+critical/rule/cost panels, closeout warning paths, attach raw-secret policy, production-readiness
+doctor output, Phase 8 backup/security/error/search rows, Phase 9 archive/decay/cleanup rows,
+Product Acceptance, onboarding, installer, and cross-client smoke.
 
 Latest full local validation was run on a clean Docker Postgres database:
 

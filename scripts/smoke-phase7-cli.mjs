@@ -2,12 +2,14 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 const repoRoot = process.cwd();
+const smokeDeveloperId = process.env.RECALLANT_SMOKE_DEVELOPER_ID ?? randomUUID();
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-"));
 await writeFile(join(projectDir, ".env.example"), "OPENAI_API_KEY=\nPUBLIC_FLAG=true\n");
@@ -19,6 +21,7 @@ function runRaw(args, extraEnv = {}) {
     env: {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: smokeDeveloperId,
       RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
       ...extraEnv
     },
@@ -367,6 +370,34 @@ if (
   !unreachableDoctor.local_model?.error
 ) {
   throw new Error(`doctor unavailable Ollama state failed: ${JSON.stringify(unreachableDoctor)}`);
+}
+
+const productionDoctor = run(["doctor", "--project-dir", projectDir], {
+  RECALLANT_PORTS_FILE: portsFile,
+  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_PORT: "3005",
+  RECALLANT_HOST: "127.0.0.1",
+  RECALLANT_CLOUDFLARE_MODE: "enabled",
+  RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+  RECALLANT_ADMIN_EMAILS: "owner@example.invalid",
+  RECALLANT_BACKUP_TIMER_ENABLED: "true",
+  RECALLANT_BACKUP_TIMER_STATUS: "enabled",
+  RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS: "passed"
+});
+if (
+  productionDoctor.production_readiness?.doctor_ok !== true ||
+  productionDoctor.production_readiness?.local_stdio_mcp_smoke?.command !== "npm run mcp:smoke" ||
+  productionDoctor.production_readiness?.review_ui_cloudflare_access?.edge_auth_required !== true ||
+  productionDoctor.production_readiness?.localhost_only_origin?.ok !== true ||
+  productionDoctor.production_readiness?.backup_timer?.enabled !== true ||
+  productionDoctor.production_readiness?.latest_backup_verification?.ok !== true ||
+  productionDoctor.production_readiness?.no_duplicate_recallant_project_rows !== true ||
+  productionDoctor.production_readiness?.no_unintended_paid_api_use !== true ||
+  productionDoctor.production_readiness?.ready !== true
+) {
+  throw new Error(
+    `production readiness doctor failed: ${JSON.stringify(productionDoctor.production_readiness)}`
+  );
 }
 
 const client = new pg.Client({ connectionString: databaseUrl });

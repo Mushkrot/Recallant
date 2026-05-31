@@ -118,6 +118,7 @@ export type ListAgentMemoriesInput = {
   project_id?: string | null;
   scope?: string | null;
   scope_kind?: string | null;
+  memory_type?: string | null;
   audience_kind?: string | null;
   memory_domain?: string | null;
   status?: string | null;
@@ -2039,7 +2040,16 @@ export class RecallantDb {
     if (input.view !== "all") clauses.push("(project_id = $1::uuid OR scope = 'developer')");
     if (input.view === "inbox") {
       clauses.push(
-        "(status IN ('candidate', 'needs_review') OR metadata->>'policy_reason' LIKE '%high_risk%')"
+        `(
+          status IN ('candidate', 'needs_review')
+          OR metadata->>'policy_reason' LIKE '%high_risk%'
+          OR metadata::text ILIKE '%possible_duplicate%'
+          OR metadata::text ILIKE '%possible_conflict%'
+          OR metadata::text ILIKE '%recommended_action%'
+          OR metadata::text ILIKE '%review_candidate_action%'
+          OR metadata::text ILIKE '%scope_change%'
+          OR metadata::text ILIKE '%long_term%'
+        )`
       );
     } else if (input.view === "rules") {
       clauses.push("status = 'accepted' AND use_policy = 'instruction_grade'");
@@ -2061,11 +2071,19 @@ export class RecallantDb {
       values.push(input.scope_kind);
       clauses.push(`scope_kind = $${values.length}`);
     }
+    if (input.memory_type) {
+      values.push(input.memory_type);
+      clauses.push(`memory_type = $${values.length}`);
+    }
+    if (input.memory_domain) {
+      values.push(input.memory_domain);
+      clauses.push(`memory_domain = $${values.length}`);
+    }
     values.push(input.limit ?? 50);
     const result = await this.pool.query(
       `
-        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
-               scope_id, audience, confidence, created_by, updated_at
+        SELECT id AS memory_id, memory_domain, memory_type, title, body, status, use_policy, scope, scope_kind,
+               scope_id, audience, confidence, created_by, metadata, updated_at
         FROM agent_memories
         WHERE ${clauses.join(" AND ")}
         ORDER BY updated_at DESC
@@ -2587,6 +2605,10 @@ export class RecallantDb {
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
+    rule_scope?: string | null;
+    rule_scope_kind?: string | null;
+    rule_memory_type?: string | null;
+    rule_memory_domain?: string | null;
   }) {
     const context = await this.ensureProject();
     const dashboardProjectId = input?.project_id ?? context.projectId;
@@ -2628,6 +2650,12 @@ export class RecallantDb {
       `,
       [context.developerId]
     );
+    const currentProject =
+      projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
+    const ruleMemoryDomain =
+      input?.rule_memory_domain === "all"
+        ? undefined
+        : (input?.rule_memory_domain ?? currentProject?.memory_domain ?? "agent_work");
     const inbox = await this.listAgentMemories({
       view: "inbox",
       project_id: dashboardProjectId,
@@ -2636,6 +2664,16 @@ export class RecallantDb {
     const rules = await this.listAgentMemories({
       view: "rules",
       project_id: dashboardProjectId,
+      scope: input?.rule_scope && input.rule_scope !== "all" ? input.rule_scope : undefined,
+      scope_kind:
+        input?.rule_scope_kind && input.rule_scope_kind !== "all"
+          ? input.rule_scope_kind
+          : undefined,
+      memory_type:
+        input?.rule_memory_type && input.rule_memory_type !== "all"
+          ? input.rule_memory_type
+          : undefined,
+      memory_domain: ruleMemoryDomain,
       limit: 25
     });
     const importCandidates = await this.pool.query(
@@ -2673,26 +2711,132 @@ export class RecallantDb {
     const critical = await this.pool.query(
       `
         SELECT
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL) AS active_sessions,
           (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
           (SELECT count(*)::int FROM agent_memories WHERE (project_id = $1 OR scope = 'developer') AND status IN ('candidate', 'needs_review')) AS pending_review,
-          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals
+          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals,
+          (
+            SELECT coalesce((payload->'metadata'->'local_spool_status'->>'unsynced_count')::int, 0)
+            FROM events
+            WHERE project_id = $1
+              AND payload->'metadata'->>'capture_kind' = 'context_read'
+              AND payload->'metadata'->'local_spool_status' IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) AS unsynced_spool_records,
+          (
+            SELECT count(*)::int
+            FROM agent_memories
+            WHERE developer_id = $2
+              AND (project_id = $1 OR scope = 'developer')
+              AND status NOT IN ('rejected', 'archived', 'superseded')
+              AND (
+                metadata::text ILIKE '%possible_conflict%'
+                OR metadata::text ILIKE '%conflict%'
+              )
+              AND (title || ' ' || body) ~* '(secret|deploy|deployment|production|destructive|delete|erase|paid|billing|api|provider|model|server|account|connector)'
+          ) AS high_risk_conflicts
       `,
-      [dashboardProjectId]
+      [dashboardProjectId, context.developerId]
     );
     const costs = await this.pool.query(
       `
-        SELECT provider, model, purpose,
+        SELECT project_id, provider, model, purpose,
                coalesce(sum(cost_actual_usd), 0)::float AS actual_usd,
                coalesce(sum(cost_estimate_usd), 0)::float AS estimated_usd,
                count(*)::int AS call_count
         FROM model_calls
-        WHERE project_id = $1
+        WHERE developer_id = $1
           AND created_at >= now() - interval '30 days'
-        GROUP BY provider, model, purpose
+          AND (
+            project_id = $2
+            OR project_id IN (
+              SELECT id
+              FROM projects
+              WHERE developer_id = $1
+            )
+          )
+        GROUP BY project_id, provider, model, purpose
         ORDER BY estimated_usd DESC, call_count DESC
         LIMIT 20
       `,
-      [dashboardProjectId]
+      [context.developerId, dashboardProjectId]
+    );
+    const costSummary = await this.pool.query(
+      `
+        SELECT
+          (
+            SELECT coalesce(sum(cost_estimate_usd), 0)::float
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('day', now())
+          ) AS current_day_estimated_usd,
+          (
+            SELECT coalesce(sum(cost_actual_usd), 0)::float
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('day', now())
+          ) AS current_day_actual_usd,
+          (
+            SELECT count(*)::int
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('day', now())
+          ) AS current_day_calls,
+          (
+            SELECT coalesce(sum(cost_estimate_usd), 0)::float
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('month', now())
+          ) AS current_month_estimated_usd,
+          (
+            SELECT coalesce(sum(cost_actual_usd), 0)::float
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('month', now())
+          ) AS current_month_actual_usd,
+          (
+            SELECT count(*)::int
+            FROM model_calls
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND created_at >= date_trunc('month', now())
+          ) AS current_month_calls,
+          (
+            SELECT count(*)::int
+            FROM paid_api_approval_requests
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND status = 'pending'
+          ) AS pending_approval_count,
+          (
+            SELECT coalesce(sum(cost_estimate_usd), 0)::float
+            FROM paid_api_approval_requests
+            WHERE developer_id = $1
+              AND project_id = $2
+              AND status = 'pending'
+          ) AS pending_approval_estimated_usd
+      `,
+      [context.developerId, dashboardProjectId]
+    );
+    const pendingPaidApprovals = await this.pool.query(
+      `
+        SELECT id AS approval_id, provider, model, purpose,
+               coalesce(cost_estimate_usd, 0)::float AS estimated_usd,
+               status, requested_by, created_at, expires_at
+        FROM paid_api_approval_requests
+        WHERE developer_id = $1
+          AND project_id = $2
+          AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 10
+      `,
+      [context.developerId, dashboardProjectId]
     );
     const settings = await this.pool.query(
       `
@@ -2753,8 +2897,6 @@ export class RecallantDb {
       `,
       [dashboardProjectId]
     );
-    const currentProject =
-      projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
     const selectedMemoryId =
       input?.selected_memory_id ??
       importCandidates.rows[0]?.memory_id ??
@@ -2788,7 +2930,15 @@ export class RecallantDb {
         "supersede"
       ],
       rules: rules.memories,
+      rule_filters: {
+        scope: input?.rule_scope ?? "all",
+        scope_kind: input?.rule_scope_kind ?? "all",
+        memory_type: input?.rule_memory_type ?? "all",
+        memory_domain: ruleMemoryDomain ?? "all"
+      },
       costs: costs.rows,
+      cost_summary: costSummary.rows[0],
+      pending_paid_api_approvals: pendingPaidApprovals.rows,
       settings: settings.rows,
       project_readiness: readiness.rows[0],
       project_cleanup: {
@@ -3198,7 +3348,8 @@ export class RecallantDb {
     sessionId: string,
     checkpointPayload: JsonObject,
     endedReason = "closeout",
-    localSpoolStatus?: JsonObject | null
+    localSpoolStatus?: JsonObject | null,
+    closeoutDiagnostics?: JsonObject | null
   ) {
     const context = await this.contextForSession(sessionId);
     const checkpoint = await this.setCheckpoint(context.projectId, checkpointPayload);
@@ -3218,6 +3369,53 @@ export class RecallantDb {
       warnings.push(
         `Local spool has ${unsyncedCount} unsynced record(s). Run recallant sync-spool.`
       );
+    }
+    const conflictReport = await this.listAgentMemories({
+      view: "conflicts",
+      project_id: context.projectId,
+      limit: 1
+    });
+    if (conflictReport.memories.length > 0) {
+      warnings.push("Governed memory conflicts exist and should be reviewed before closeout.");
+    }
+    const modelErrors = await this.pool.query(
+      `
+        SELECT count(*)::int AS count
+        FROM model_calls
+        WHERE project_id = $1
+          AND status IN ('failed', 'cancelled')
+          AND created_at >= now() - interval '24 hours'
+      `,
+      [context.projectId]
+    );
+    if (Number(modelErrors.rows[0]?.count ?? 0) > 0) {
+      warnings.push("Recent model/provider errors exist for this project.");
+    }
+    const diagnostics = closeoutDiagnostics ?? {};
+    const repoStatus = String(
+      diagnostics.repo_sync_status ?? diagnostics.repo_status ?? ""
+    ).toLowerCase();
+    const repoClean = diagnostics.repo_clean;
+    const repoAhead = Number(diagnostics.repo_ahead ?? 0);
+    const repoBehind = Number(diagnostics.repo_behind ?? 0);
+    if (
+      ["incomplete", "unsynced", "dirty", "behind", "diverged"].includes(repoStatus) ||
+      repoClean === false ||
+      repoAhead > 0 ||
+      repoBehind > 0
+    ) {
+      warnings.push("Repository sync is incomplete; review commit/push status before closeout.");
+    }
+    const extractionConfidence = Number(diagnostics.extraction_confidence ?? 1);
+    if (Number.isFinite(extractionConfidence) && extractionConfidence < 0.5) {
+      warnings.push("Closeout extraction confidence is low; owner-readable report is required.");
+    }
+    for (const key of ["server_errors", "model_errors", "provider_errors"]) {
+      const value = diagnostics[key];
+      const count = Array.isArray(value) ? value.length : value ? 1 : 0;
+      if (count > 0) {
+        warnings.push(`${String(key).replaceAll("_", "/")} reported ${count} issue(s).`);
+      }
     }
     return {
       ...checkpoint,

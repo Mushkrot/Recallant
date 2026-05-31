@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import pg from "pg";
 
@@ -10,6 +13,11 @@ const databaseUrl =
 
 const developerId = randomUUID();
 const projectId = randomUUID();
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase6-governed-"));
+await writeFile(
+  join(projectPath, "PROJECT_LOG.md"),
+  "# Project Log\n\n## Current Session\n\nStatus: phase6 governed smoke.\n"
+);
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -18,7 +26,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
+    RECALLANT_PROJECT_PATH: projectPath
   },
   stdio: ["pipe", "pipe", "pipe"]
 });
@@ -86,7 +94,7 @@ send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectPath,
   session_label: "phase6-governed-smoke",
   resume_policy: "normal"
 });
@@ -288,6 +296,79 @@ const candidateInboxItem = await callNextTool("memory_create_agent_memory", {
   created_by: "agent",
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "inbox candidate" }]
 });
+const scopeChangingCandidate = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "developer",
+  title: "Always keep scope-changing phase6 candidate visible",
+  body: "Always keep scope-changing candidates visible until owner review.",
+  confidence: 0.8,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "scope changing" }],
+  metadata: { scope_change: true }
+});
+const acceptedDuplicateReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 accepted duplicate still needs review",
+  body: "Accepted duplicate candidates should remain visible for merge/archive review.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate review" }],
+  metadata: { possible_duplicate: true, review_candidate_action: "merge" }
+});
+const acceptedConflictReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 accepted conflict still needs review",
+  body: "Accepted conflict candidates should remain visible for supersede review.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "conflict review" }],
+  metadata: { possible_conflict: true, review_candidate_action: "supersede" }
+});
+const promotionReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "project",
+  title: "Phase6 accepted promotion candidate",
+  body: "Promotion candidates should remain visible until an owner promotes or rejects them.",
+  confidence: 0.9,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "promotion review" }],
+  metadata: { recommended_action: "promote_instruction", long_term: true }
+});
+const demotionReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "procedure",
+  scope: "developer",
+  title: "Phase6 accepted demotion candidate",
+  body: "Instruction-grade memories can be proposed for demotion without disappearing from review.",
+  confidence: 1,
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "demotion review" }],
+  metadata: {
+    owner_confirmed_global_rule: true,
+    review_candidate_action: "demote_instruction"
+  }
+});
+const archiveReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 accepted archive candidate",
+  body: "Archive candidates should remain visible until an owner archives or keeps them.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "archive review" }],
+  metadata: { review_candidate_action: "archive" }
+});
+const supersedeReview = await callNextTool("memory_create_agent_memory", {
+  memory_type: "decision",
+  scope: "project",
+  title: "Phase6 accepted supersede candidate",
+  body: "Supersede candidates should remain visible until a canonical memory is chosen.",
+  confidence: 0.9,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "supersede review" }],
+  metadata: { review_candidate_action: "supersede" }
+});
 const expandedInbox = await callNextTool("memory_list_agent_memories", {
   view: "inbox",
   limit: 50
@@ -296,6 +377,15 @@ if (
   !expandedInbox.memories.some((memory) => memory.memory_id === candidateInboxItem.memory_id) ||
   !expandedInbox.memories.some((memory) => memory.memory_id === lowConfidence.memory_id) ||
   !expandedInbox.memories.some((memory) => memory.memory_id === highRiskInboxItem.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === scopeChangingCandidate.memory_id) ||
+  !expandedInbox.memories.some(
+    (memory) => memory.memory_id === acceptedDuplicateReview.memory_id
+  ) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === acceptedConflictReview.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === promotionReview.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === demotionReview.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === archiveReview.memory_id) ||
+  !expandedInbox.memories.some((memory) => memory.memory_id === supersedeReview.memory_id) ||
   expandedInbox.memories.some((memory) => memory.memory_id === ordinary.memory_id)
 ) {
   throw new Error(`Expanded inbox policy failed: ${JSON.stringify(expandedInbox)}`);
@@ -365,6 +455,49 @@ if (
   !String(highRiskConflict.conflict_report?.resolution ?? "").includes("review")
 ) {
   throw new Error(`Conflict report failed: ${JSON.stringify(conflicts)}`);
+}
+
+const warningCloseout = await callNextTool("memory_closeout", {
+  session_id: started.session_id,
+  closeout_intent: "task_complete",
+  summary: "Phase 6 closeout warning smoke.",
+  checkpoint_payload: {
+    current_status: "warning smoke complete",
+    current_focus: "closeout warning policy",
+    next_step: "review warning report",
+    open_questions: []
+  },
+  governed_memory_candidates: [
+    {
+      memory_type: "decision",
+      title: "Low confidence closeout extraction",
+      body: "Maybe this low confidence extraction should become memory.",
+      confidence: 0.2,
+      source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "low confidence" }]
+    }
+  ],
+  artifact_refs: [],
+  local_spool_status: { status: "unsynced", unsynced_count: 2 },
+  closeout_diagnostics: {
+    repo_sync_status: "incomplete",
+    extraction_confidence: 0.2,
+    server_errors: ["phase6 server warning"],
+    model_errors: ["phase6 model warning"],
+    provider_errors: ["phase6 provider warning"]
+  }
+});
+if (
+  warningCloseout.report_required !== true ||
+  warningCloseout.warnings.length < 6 ||
+  !warningCloseout.warnings.some((warning) => warning.includes("Local spool")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("conflicts")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("Repository sync")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("confidence")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("server/errors")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("model/errors")) ||
+  !warningCloseout.warnings.some((warning) => warning.includes("provider/errors"))
+) {
+  throw new Error(`Closeout warning report failed: ${JSON.stringify(warningCloseout)}`);
 }
 
 await callNextTool("memory_create_agent_memory", {
@@ -596,5 +729,6 @@ try {
 child.stdin.end();
 child.kill();
 await once(child, "close");
+await rm(projectPath, { recursive: true, force: true });
 
 process.stdout.write("Phase 6 governed memory smoke passed\n");

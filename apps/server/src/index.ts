@@ -268,6 +268,17 @@ function reviewPath(projectId: unknown, memoryId?: unknown) {
   return `/review${query ? `?${query}` : ""}`;
 }
 
+function reviewPathWithParams(projectId: unknown, params: Record<string, unknown>) {
+  const query = new URLSearchParams();
+  if (projectId) query.set("project_id", String(projectId));
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "" || value === "all") continue;
+    query.set(key, String(value));
+  }
+  const rendered = query.toString();
+  return `/review${rendered ? `?${rendered}` : ""}`;
+}
+
 function shortId(value: unknown) {
   return String(value ?? "").slice(0, 8);
 }
@@ -296,6 +307,10 @@ function formatDisplayValue(value: unknown) {
     }
   }
   return String(value);
+}
+
+function formatUsd(value: unknown) {
+  return `$${Number(value ?? 0).toFixed(4)}`;
 }
 
 function isSensitiveSettingKey(key: unknown) {
@@ -1110,22 +1125,63 @@ function renderSettings(data: ReviewDashboardData, state?: SettingRenderState) {
     ${settingRows}`;
 }
 
-function renderCosts(rows: Array<Record<string, unknown>>) {
-  if (rows.length === 0) return `<p class="empty">No model cost records in the last 30 days.</p>`;
+function renderCosts(data: ReviewDashboardData) {
+  const rows = data.costs;
+  const summary = asRecord(data.cost_summary);
+  const pendingApprovals = Array.isArray(data.pending_paid_api_approvals)
+    ? data.pending_paid_api_approvals
+    : [];
+  if (rows.length === 0 && pendingApprovals.length === 0) {
+    return `<p class="empty">No model cost records in the last 30 days.</p>`;
+  }
   const actualUsd = rows.reduce((sum, row) => sum + Number(row.actual_usd ?? 0), 0);
   const estimatedUsd = rows.reduce((sum, row) => sum + Number(row.estimated_usd ?? 0), 0);
   const callCount = rows.reduce((sum, row) => sum + Number(row.call_count ?? 0), 0);
   return `<div class="cost-summary">
+    <h3>Current day</h3>
     <div class="summary-grid">
-      <span><strong>${escapeHtml(rows.length)}</strong> records</span>
-      <span><strong>${escapeHtml(callCount)}</strong> calls</span>
-      <span><strong>$${escapeHtml(actualUsd.toFixed(4))}</strong> actual</span>
-      <span><strong>$${escapeHtml(estimatedUsd.toFixed(4))}</strong> estimated</span>
+      <span><strong>${escapeHtml(summary.current_day_calls ?? 0)}</strong> calls</span>
+      <span><strong>${escapeHtml(formatUsd(summary.current_day_actual_usd))}</strong> actual</span>
+      <span><strong>${escapeHtml(formatUsd(summary.current_day_estimated_usd))}</strong> estimated</span>
+      <span><strong>${escapeHtml(pendingApprovals.length)}</strong> pending approvals</span>
+    </div>
+    <h3>Current month</h3>
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(summary.current_month_calls ?? callCount)}</strong> calls</span>
+      <span><strong>${escapeHtml(formatUsd(summary.current_month_actual_usd ?? actualUsd))}</strong> actual</span>
+      <span><strong>${escapeHtml(formatUsd(summary.current_month_estimated_usd ?? estimatedUsd))}</strong> estimated</span>
+      <span><strong>${escapeHtml(formatUsd(summary.pending_approval_estimated_usd))}</strong> pending estimate</span>
     </div>
     <details>
-      <summary>Model call details</summary>
+      <summary>Cost by project/provider/model/purpose</summary>
       ${renderRows(rows, "No model cost records in the last 30 days.")}
     </details>
+    <details>
+      <summary>Pending paid API approvals</summary>
+      ${renderRows(pendingApprovals, "No paid API approvals are pending.")}
+    </details>
+  </div>`;
+}
+
+function renderRuleFilters(data: ReviewDashboardData) {
+  const filters = asRecord(data.rule_filters);
+  const projectId = data.current_project_id;
+  const current = {
+    scope: String(filters.scope ?? "all"),
+    scope_kind: String(filters.scope_kind ?? "all"),
+    rule_type: String(filters.memory_type ?? "all"),
+    rule_domain: String(filters.memory_domain ?? "agent_work")
+  };
+  const link = (label: string, params: Record<string, unknown>) =>
+    `<a class="filter-chip" href="${escapeHtml(
+      reviewPathWithParams(projectId, { ...current, ...params })
+    )}">${escapeHtml(label)}</a>`;
+  return `<div class="rule-filters" aria-label="Active rule filters">
+    <h3>Rule filters</h3>
+    <div><strong>Scope filter</strong> ${link("All", { scope: "all" })} ${link("Project", { scope: "project" })} ${link("Developer", { scope: "developer" })}</div>
+    <div><strong>Type filter</strong> ${link("All", { rule_type: "all" })} ${link("Procedure", { rule_type: "procedure" })} ${link("Constraint", { rule_type: "constraint" })} ${link("Decision", { rule_type: "decision" })}</div>
+    <div><strong>Project filter</strong> <span>${escapeHtml(shortId(projectId))}</span></div>
+    <div><strong>Domain filter</strong> <span>${escapeHtml(current.rule_domain)}</span></div>
   </div>`;
 }
 
@@ -1151,8 +1207,18 @@ function renderAttention(data: ReviewDashboardData) {
   const conflicts = rowCount(data.duplicate_conflicts);
   const imports = rowCount(data.import_candidates);
   const interrupted = criticalCount(data, "interrupted_sessions");
+  const activeSessions = criticalCount(data, "active_sessions");
   const paidApprovals = criticalCount(data, "pending_paid_approvals");
-  const urgent = pendingReview + conflicts + interrupted + paidApprovals;
+  const unsyncedSpool = criticalCount(data, "unsynced_spool_records");
+  const highRiskConflicts = criticalCount(data, "high_risk_conflicts");
+  const urgent =
+    pendingReview +
+    conflicts +
+    interrupted +
+    activeSessions +
+    paidApprovals +
+    unsyncedSpool +
+    highRiskConflicts;
   if (urgent === 0) {
     return `<p>No urgent owner decision is waiting. The useful check now is whether the next agent starts from Recallant context instead of reading old project logs by hand.</p>`;
   }
@@ -1166,8 +1232,17 @@ function renderAttention(data: ReviewDashboardData) {
     conflicts > 0
       ? `${conflicts} possible conflict/duplicate item${conflicts === 1 ? "" : "s"} need attention.`
       : "",
+    highRiskConflicts > 0
+      ? `${highRiskConflicts} high-risk conflict${highRiskConflicts === 1 ? "" : "s"} need owner review.`
+      : "",
+    activeSessions > 0
+      ? `${activeSessions} unclosed active session${activeSessions === 1 ? "" : "s"} should be closed when work is done.`
+      : "",
     interrupted > 0
       ? `${interrupted} interrupted session${interrupted === 1 ? "" : "s"} should be checked.`
+      : "",
+    unsyncedSpool > 0
+      ? `${unsyncedSpool} local spool record${unsyncedSpool === 1 ? "" : "s"} are not synced yet.`
       : "",
     paidApprovals > 0
       ? `${paidApprovals} paid API approval${paidApprovals === 1 ? "" : "s"} are pending.`
@@ -1497,6 +1572,12 @@ function renderDashboard(
     .setting-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin-bottom: 10px; background: #fbfcfe; }
     .setting-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
     .setting-result p { margin: 0 0 8px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .rule-filters { display: grid; gap: 7px; margin-bottom: 12px; color: #4f5867; font-size: 12px; }
+    .rule-filters h3 { margin: 0; font-size: 13px; color: #303845; }
+    .rule-filters div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; text-decoration: none; }
+    .filter-chip:hover { background: #eef4fb; }
+    .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
     .chat-form { display: grid; gap: 8px; }
@@ -1535,8 +1616,10 @@ function renderDashboard(
       <section class="panel">
         <h2>Critical Status</h2>
         <div class="status">
+          <span class="pill">Active ${escapeHtml(data.critical?.active_sessions ?? 0)}</span>
           <span class="pill">Interrupted ${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</span>
           <span class="pill">Review ${escapeHtml(data.critical?.pending_review ?? 0)}</span>
+          <span class="pill">Conflicts ${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</span>
           <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
         </div>
       </section>
@@ -1572,7 +1655,8 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Active Rules</h2>
-        ${renderRows(data.rules, "No instruction-grade rules yet.", data.current_project_id)}
+        ${renderRuleFilters(data)}
+        ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
       </section>
     </section>
     <aside class="right-rail">
@@ -1582,7 +1666,7 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Cost / Paid API</h2>
-        ${renderCosts(data.costs)}
+        ${renderCosts(data)}
       </section>
       <section class="panel">
         <h2>Cleanup / Forget</h2>
@@ -1624,7 +1708,11 @@ export function createRecallantHttpServer() {
     }
     const dashboardInput = {
       project_id: requestUrl.searchParams.get("project_id"),
-      selected_memory_id: requestUrl.searchParams.get("memory_id")
+      selected_memory_id: requestUrl.searchParams.get("memory_id"),
+      rule_scope: requestUrl.searchParams.get("scope"),
+      rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
+      rule_memory_type: requestUrl.searchParams.get("rule_type"),
+      rule_memory_domain: requestUrl.searchParams.get("rule_domain")
     };
     if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
       write(

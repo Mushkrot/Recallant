@@ -96,6 +96,57 @@ const event = await db.appendTurn({
   text: "Review UI smoke source event.",
   dedup_key: `review-ui-${randomUUID()}`
 });
+await db.appendEvent({
+  session_id: session.session_id,
+  client_kind: "codex",
+  event_kind: "system",
+  text: "Review UI smoke context read with unsynced spool status.",
+  metadata: {
+    capture_kind: "context_read",
+    local_spool_status: { status: "unsynced", unsynced_count: 2 }
+  },
+  raw_artifacts: [],
+  dedup_key: `review-ui-context-read-${randomUUID()}`
+});
+await db.pool.query(
+  `
+    INSERT INTO sessions (project_id, client_kind, client_version, status, ended_reason)
+    VALUES ($1, 'codex', 'smoke', 'interrupted', 'crash_or_unknown')
+  `,
+  [projectId]
+);
+await db.pool.query(
+  `
+    INSERT INTO model_calls (
+      developer_id, project_id, session_id, memory_domain, route_class, provider, model,
+      purpose, routing_reason, confirmation_status, input_tokens, output_tokens,
+      cost_estimate_usd, cost_actual_usd, latency_ms, status, metadata
+    )
+    VALUES
+      ($1, $2, $3, 'agent_work', 'local_model', 'ollama', 'nomic-embed-text',
+       'chunk_embedding', 'review ui smoke', 'not_required', 128, 0, 0.0012, 0.0000, 12, 'success', $4),
+      ($1, $2, $3, 'agent_work', 'paid_api_provider', 'openai', 'gpt-5.4-mini',
+       'planning', 'review ui smoke', 'approved', 256, 64, 0.0450, 0.0430, 320, 'success', $4)
+  `,
+  [developerId, projectId, session.session_id, JSON.stringify({ smoke: true })]
+);
+await db.pool.query(
+  `
+    INSERT INTO paid_api_approval_requests (
+      developer_id, project_id, session_id, purpose, provider, model,
+      routing_reason, attempted_routes, input_tokens_estimate, output_tokens_estimate,
+      cost_estimate_usd, status, requested_by
+    )
+    VALUES ($1, $2, $3, 'research', 'openai', 'gpt-5.4',
+            'review ui pending approval smoke', $4, 1000, 500, 0.25, 'pending', 'agent')
+  `,
+  [
+    developerId,
+    projectId,
+    session.session_id,
+    JSON.stringify([{ provider: "openai", model: "gpt-5.4" }])
+  ]
+);
 const importText =
   "Imported AGENTS.md says the pilot sandbox should review source refs before promotion.";
 const importSource = await db.importSource({
@@ -141,6 +192,40 @@ await db.reviewAgentMemory({
   actor_kind: "user",
   note: "review ui smoke"
 });
+const filteredRule = await db.createAgentMemory({
+  memory_type: "constraint",
+  scope: "project",
+  title: "Review UI constraint rule",
+  body: "Constraint rules must be filterable separately from procedure rules.",
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "constraint rule" }]
+});
+await db.reviewAgentMemory({
+  memory_id: filteredRule.memory_id,
+  action: "promote_instruction",
+  actor_kind: "user",
+  note: "review ui filter smoke"
+});
+const altDomainRuleId = randomUUID();
+await db.pool.query(
+  `
+    INSERT INTO agent_memories (
+      id, developer_id, project_id, memory_domain, scope, scope_kind, scope_id, audience,
+      memory_type, title, body, status, use_policy, confidence, created_by, metadata
+    )
+    VALUES ($1, $2, $3::uuid, 'personal_life', 'project', 'project', $3::text, $4,
+            'procedure', 'Out-of-domain active rule',
+            'This rule should not appear while the active rule domain filter is agent_work.',
+            'accepted', 'instruction_grade', 0.9, 'user', $5)
+  `,
+  [
+    altDomainRuleId,
+    developerId,
+    projectId,
+    JSON.stringify([{ kind: "all_agents", id: null }]),
+    JSON.stringify({ smoke: true })
+  ]
+);
 const editable = await db.createAgentMemory({
   memory_type: "decision",
   scope: "project",
@@ -199,6 +284,15 @@ const conflictNew = await db.createAgentMemory({
     conflict_role: "new"
   }
 });
+await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Review UI high risk production provider conflict",
+  body: "Production provider conflict mentions secrets and paid API routing.",
+  created_by: "user",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "high risk conflict" }],
+  metadata: { possible_conflict: true, conflict_group: "review-ui-critical-conflict" }
+});
 const noSourcePromotion = await db.createAgentMemory({
   memory_type: "procedure",
   scope: "project",
@@ -228,6 +322,19 @@ try {
   const unauthorized = await fetch(`${baseUrl}/review`);
   if (unauthorized.status !== 401) {
     throw new Error(`Review UI did not require auth: ${unauthorized.status}`);
+  }
+  for (const publicPath of [
+    "/api/review-dashboard",
+    "/api/management-chat",
+    "/api/project-detach",
+    "/backups/latest",
+    "/raw-artifacts/review-smoke",
+    "/mcp"
+  ]) {
+    const publicResponse = await fetch(`${baseUrl}${publicPath}`);
+    if (publicResponse.status !== 401) {
+      throw new Error(`Unauthenticated route was exposed: ${publicPath} ${publicResponse.status}`);
+    }
   }
 
   const html = await fetch(`${baseUrl}/review`, {
@@ -268,9 +375,22 @@ try {
     "Management Chat",
     'id="management-chat"',
     "Agent Readiness",
-    "Registered only. Agent context has not been read yet.",
+    "Capture active. Checkpoint is still missing.",
     "last context read",
     "last memory write",
+    "unclosed active session",
+    "interrupted session",
+    "local spool records are not synced yet",
+    "high-risk conflict",
+    "Rule filters",
+    "Scope filter",
+    "Type filter",
+    "Project filter",
+    "Domain filter",
+    "Current day",
+    "Current month",
+    "Cost by project/provider/model/purpose",
+    "Pending paid API approvals",
     "local cleanup dry-run",
     "Ask what to review next",
     "Local embeddings"
@@ -305,13 +425,59 @@ try {
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     json.project_readiness?.project_registered !== true ||
     typeof json.project_readiness?.capture_event_count !== "number" ||
-    json.project_readiness?.last_context_read_at !== null ||
+    !json.project_readiness?.last_context_read_at ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"
     ) ||
-    json.critical.pending_review < 1
+    json.critical.pending_review < 1 ||
+    json.critical.active_sessions < 1 ||
+    json.critical.interrupted_sessions < 1 ||
+    json.critical.unsynced_spool_records !== 2 ||
+    json.critical.high_risk_conflicts < 1 ||
+    json.cost_summary?.current_day_estimated_usd <= 0 ||
+    json.cost_summary?.current_month_estimated_usd <= 0 ||
+    json.cost_summary?.pending_approval_count !== 1 ||
+    !json.pending_paid_api_approvals.some((approval) => approval.provider === "openai") ||
+    !json.costs.some(
+      (row) =>
+        row.project_id === projectId && row.provider === "openai" && row.purpose === "planning"
+    ) ||
+    json.rules.some((memory) => memory.memory_id === altDomainRuleId)
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
+  }
+
+  const filteredRules = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&rule_type=procedure`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const filteredRulesJson = await filteredRules.json();
+  if (
+    filteredRules.status !== 200 ||
+    filteredRulesJson.rule_filters?.memory_type !== "procedure" ||
+    filteredRulesJson.rule_filters?.memory_domain !== "agent_work" ||
+    !filteredRulesJson.rules.some((memory) => memory.memory_id === rule.memory_id) ||
+    filteredRulesJson.rules.some((memory) => memory.memory_id === filteredRule.memory_id) ||
+    filteredRulesJson.rules.some((memory) => memory.memory_id === altDomainRuleId)
+  ) {
+    throw new Error(`Rule filter API smoke failed: ${JSON.stringify(filteredRulesJson)}`);
+  }
+
+  const allDomainRules = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&rule_type=procedure&rule_domain=all`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const allDomainRulesJson = await allDomainRules.json();
+  if (
+    allDomainRules.status !== 200 ||
+    allDomainRulesJson.rule_filters?.memory_domain !== "all" ||
+    !allDomainRulesJson.rules.some((memory) => memory.memory_id === altDomainRuleId)
+  ) {
+    throw new Error(`Rule domain filter API smoke failed: ${JSON.stringify(allDomainRulesJson)}`);
   }
 
   const russianChat = await fetch(`${baseUrl}/api/management-chat`, {
@@ -432,6 +598,50 @@ try {
   ) {
     throw new Error(
       `Public exposure chat was not confirmation-gated: ${JSON.stringify(publicExposureChatJson)}`
+    );
+  }
+
+  const connectorChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Подключи Google Drive connector account ко всем проектам"
+    })
+  });
+  const connectorChatJson = await connectorChat.json();
+  if (
+    connectorChat.status !== 200 ||
+    connectorChatJson.confirmation_required !== true ||
+    connectorChatJson.destructive_or_sensitive !== true
+  ) {
+    throw new Error(
+      `Connector/account chat was not confirmation-gated: ${JSON.stringify(connectorChatJson)}`
+    );
+  }
+
+  const globalSettingChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Change global setting model provider to paid API"
+    })
+  });
+  const globalSettingChatJson = await globalSettingChat.json();
+  if (
+    globalSettingChat.status !== 200 ||
+    globalSettingChatJson.confirmation_required !== true ||
+    globalSettingChatJson.destructive_or_sensitive !== true
+  ) {
+    throw new Error(
+      `Global setting chat was not confirmation-gated: ${JSON.stringify(globalSettingChatJson)}`
     );
   }
 

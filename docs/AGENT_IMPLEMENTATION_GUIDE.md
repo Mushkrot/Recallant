@@ -2,11 +2,12 @@
 
 This document defines the implementation order for an AI agent building Recallant.
 
-**Current status:** implementation is authorized, the main local v1 implementation slices are present,
-the first owner-server production deployment is running, and the first copied-project pilot is
-complete. The active next plan is Phase 10: autonomous attach and controlled cross-project recall.
-See [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md), [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md),
-and [TASK_GRAPH.md](TASK_GRAPH.md).
+**Current status:** implementation is authorized, the main local v1 implementation slices are
+present, the first owner-server production deployment is running, the first copied-project pilot is
+complete, and `TEST_CONTRACT.md` has no remaining unchecked rows. Phase 10 autonomous attach,
+governed detach, and controlled cross-project recall are implemented for the first production-ready
+slice. See [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md),
+[CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md), and [TASK_GRAPH.md](TASK_GRAPH.md).
 
 This guide implements the v1 full coding-agent memory core defined in [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md). Do not add future expansion work such as personal-life capture, external productivity connectors, object storage, dedicated vector/graph DBs, public packaging, or multi-user/SaaS features unless the owner explicitly reopens scope.
 
@@ -24,8 +25,8 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Monorepo or single package root with `README`, `LICENSE`, formatter/linter config.
-- [ ] Preferred monorepo layout, unless implementation evidence justifies a simpler equivalent:
+- [x] Monorepo or single package root with `README`, `LICENSE`, formatter/linter config.
+- [x] Preferred monorepo layout, unless implementation evidence justifies a simpler equivalent:
   - `apps/cli`
   - `apps/server`
   - `apps/review-ui`
@@ -34,9 +35,9 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
   - `packages/mcp`
   - `packages/contracts`
   - `packages/adapters`
-- [ ] Module boundaries keep storage, policy, routing, UI, CLI, MCP, adapters, and workers loosely coupled.
-- [ ] Code style prevents large catch-all files; refactor when files outgrow a clear responsibility.
-- [ ] Empty CI workflow placeholder for lint and test hooks.
+- [x] Module boundaries keep storage, policy, routing, UI, CLI, MCP, adapters, and workers loosely coupled.
+- [x] Code style prevents large catch-all files; refactor when files outgrow a clear responsibility.
+- [x] Empty CI workflow placeholder for lint and test hooks.
 
 **Gate:** `TEST_CONTRACT.md` Phase 0 checks pass.
 
@@ -99,9 +100,9 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 **Deliverables:**
 
 - [x] Implement the pipeline from [RETRIEVAL.md](RETRIEVAL.md).
-- [ ] Configurable retrieval policy for `N_lex`, `N_vec`, default `top_k`, `max_chars_total`, graph budgets, and related caps.
-- [ ] Retrieval and governed-memory recall enforce ADR-0040 scope/audience filtering before ranking.
-- [ ] Context Pack and retrieval conflict handling follow [ADR-0041](ADR-0041-conflict-resolution-priority.md).
+- [x] Configurable retrieval policy for `N_lex`, `N_vec`, default `top_k`, `max_chars_total`, graph budgets, and related caps.
+- [x] Retrieval and governed-memory recall enforce ADR-0040 scope/audience filtering before ranking.
+- [x] Context Pack and retrieval conflict handling follow [ADR-0041](ADR-0041-conflict-resolution-priority.md).
 
 **Gate:** `TEST_CONTRACT.md` retrieval checks pass.
 
@@ -116,7 +117,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [x] `memory_link` and graph expansion branch.
 - [x] `memory_get_checkpoint` / `memory_set_checkpoint`.
 - [x] `memory_get_context_pack` from [ADR-0024-automatic-startup-context-pack-builder.md](ADR-0024-automatic-startup-context-pack-builder.md): server-side composition of checkpoint, recovery warnings, governed memories/rules, optional bounded evidence, and suggested next fetches.
-- [ ] Rule management workflow from [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md): promote/demote/reject/archive/supersede, duplicate/conflict reports, and closeout proposals.
+- [x] Rule management workflow from [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md): promote/demote/reject/archive/supersede, duplicate/conflict reports, and closeout proposals.
 - [x] Conflict reports explain applicability, authority, scope specificity, and recency per ADR-0041.
 - [x] Erasure workflow from [ADR-0042](ADR-0042-managed-ai-native-platform-and-operations.md) and [MCP_SPEC.md](MCP_SPEC.md): dry-run, confirmation, redacted receipt, and removal/redaction of derived material.
 
@@ -167,9 +168,9 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [x] Owner-server deployment profile validates that planned Recallant service ports are present in `/ai/PORTS.yaml` before daemon/service start.
 - [x] Owner-server deployment profile surfaces `/ai/SECURITY` as the security baseline to consult for public exposure, Cloudflare, firewall, service, or secret changes.
 - [x] `recallant doctor` or equivalent diagnostics show effective model routes and whether local, active-agent, subscription-worker, and paid API routes are enabled/disabled.
-- [ ] Cost / Paid API management view shows model-call audit, estimated cost, pending approvals, and confirms default `paid_api_mode=confirm_each`.
+- [x] Cost / Paid API management view shows model-call audit, estimated cost, pending approvals, and confirms default `paid_api_mode=confirm_each`.
 - [x] Closeout intent handling follows [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md): known trigger phrases plus model-routed classification for ambiguous cases.
-- [ ] Normal closeout calls `memory_closeout`; abnormal interruption recovery starts at the next `memory_start_session`.
+- [x] Normal closeout calls `memory_closeout`; abnormal interruption recovery starts at the next `memory_start_session`.
 
 **Gate:** `TEST_CONTRACT.md` Phase 7 checks pass.
 
@@ -177,13 +178,13 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Rate limits, size limits, structured errors.
-- [ ] Security/access hardening from [ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md](ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md): private bind defaults, Recallant auth, secret handling, token/session checks, and Cloudflare-ready config.
-- [ ] Natural-language management actions are policy-gated; destructive/cost/security/global-rule/connector-account/public-exposure operations require explicit confirmation.
-- [ ] Backup commands/jobs from [BACKUP_RESTORE.md](BACKUP_RESTORE.md): Postgres backup, raw artifact backup, manifest creation, and encrypted local target support.
-- [ ] Restore verification command/job: restore into temporary DB/location and run basic read checks without touching production.
-- [ ] Backup target abstraction allows future SSH/Tailscale replication to a second backup server, even if the initial implementation writes only to local Recallant-server storage.
-- [ ] Export/restore design preserves portability metadata and supports remapping/rebinding of project paths, secret references, connector/account bindings, and environment facts per ADR-0038.
+- [x] Rate limits, size limits, structured errors.
+- [x] Security/access hardening from [ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md](ADR-0029-private-by-default-access-and-cloudflare-ready-auth.md): private bind defaults, Recallant auth, secret handling, token/session checks, and Cloudflare-ready config.
+- [x] Natural-language management actions are policy-gated; destructive/cost/security/global-rule/connector-account/public-exposure operations require explicit confirmation.
+- [x] Backup commands/jobs from [BACKUP_RESTORE.md](BACKUP_RESTORE.md): Postgres backup, raw artifact backup, manifest creation, and encrypted local target support.
+- [x] Restore verification command/job: restore into temporary DB/location and run basic read checks without touching production.
+- [x] Backup target abstraction allows future SSH/Tailscale replication to a second backup server, even if the initial implementation writes only to local Recallant-server storage.
+- [x] Export/restore design preserves portability metadata and supports remapping/rebinding of project paths, secret references, connector/account bindings, and environment facts per ADR-0038.
 - [ ] Startup documentation for at least three clients with official external links and Recallant env/config guidance.
 
 **Gate:** full `TEST_CONTRACT.md` green.
@@ -192,15 +193,15 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Score decay in retrieval: formula from `CLEANUP.md`, parameters through env/settings.
-- [ ] Access tracking: asynchronous update of `last_accessed_at` / `access_count` after every retrieval.
-- [ ] `supersedes` penalty in the rerank pipeline.
-- [ ] MCP tool `memory_archive` for archive/unarchive.
-- [ ] MCP tool `memory_forget` with dry-run, owner confirmation, redacted receipt, and derived-material erasure.
-- [ ] `recallant analyze` with an interactive report and LLM summary, with Ollama/local provider fallback to keyword extraction.
-- [ ] `recallant cleanup` with `--archive`, `--delete-archived`, `--dry-run`, `--no-confirm`.
-- [ ] Self-cleaning identifies duplicates, stale decisions, superseded guidance, abandoned experiments, low-value context, poor provenance, and conflicting connector/account bindings.
-- [ ] Batch cleanup does not perform permanent erasure silently.
+- [x] Score decay in retrieval: formula from `CLEANUP.md`, parameters through env/settings.
+- [x] Access tracking: asynchronous update of `last_accessed_at` / `access_count` after every retrieval.
+- [x] `supersedes` penalty in the rerank pipeline.
+- [x] MCP tool `memory_archive` for archive/unarchive.
+- [x] MCP tool `memory_forget` with dry-run, owner confirmation, redacted receipt, and derived-material erasure.
+- [x] `recallant analyze` with an interactive report and LLM summary, with Ollama/local provider fallback to keyword extraction.
+- [x] `recallant cleanup` with `--archive`, `--delete-archived`, `--dry-run`, `--no-confirm`.
+- [x] Self-cleaning identifies duplicates, stale decisions, superseded guidance, abandoned experiments, low-value context, poor provenance, and conflicting connector/account bindings.
+- [x] Batch cleanup does not perform permanent erasure silently.
 
 **Gate:** `TEST_CONTRACT.md` Phase 9 checks pass.
 

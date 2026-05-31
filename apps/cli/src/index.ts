@@ -1041,6 +1041,107 @@ async function checkOwnerServerDeployment() {
   };
 }
 
+async function checkProductionReadiness(postgresReachable: boolean) {
+  const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
+  const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
+  const edgeAuth = process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH ?? "disabled";
+  const backupTimerEnabled =
+    process.env.RECALLANT_BACKUP_TIMER_ENABLED === "true" ||
+    process.env.RECALLANT_BACKUP_TIMER_STATUS === "enabled";
+  const latestBackupVerification =
+    process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS ?? "unknown";
+  let duplicateRecallantProjectRows: number | null = null;
+  let unintendedPaidApiSuccessCalls30d: number | null = null;
+  if (process.env.RECALLANT_DATABASE_URL) {
+    const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+    const developerId = process.env.RECALLANT_DEVELOPER_ID ?? null;
+    await client.connect();
+    try {
+      const checks = await client.query(
+        `
+          SELECT
+            (
+              SELECT count(*)::int
+              FROM projects
+              WHERE primary_path = '/ai/recallant'
+                AND ($1::uuid IS NULL OR developer_id = $1::uuid)
+            ) AS recallant_project_rows,
+            (
+              SELECT count(*)::int
+              FROM model_calls c
+              JOIN projects p ON p.id = c.project_id
+              WHERE p.primary_path = '/ai/recallant'
+                AND ($1::uuid IS NULL OR p.developer_id = $1::uuid)
+                AND c.route_class = 'paid_api_provider'
+                AND c.status = 'success'
+                AND c.created_at >= now() - interval '30 days'
+            ) AS paid_api_success_calls
+        `,
+        [developerId]
+      );
+      duplicateRecallantProjectRows = Number(checks.rows[0]?.recallant_project_rows ?? 0);
+      unintendedPaidApiSuccessCalls30d = Number(checks.rows[0]?.paid_api_success_calls ?? 0);
+    } catch {
+      duplicateRecallantProjectRows = null;
+      unintendedPaidApiSuccessCalls30d = null;
+    } finally {
+      await client.end();
+    }
+  }
+  const localhostOnlyOrigin =
+    bindHost === "127.0.0.1" || bindHost === "::1" || bindHost.endsWith(".tailnet");
+  return {
+    doctor_ok: postgresReachable,
+    local_stdio_mcp_smoke: {
+      required: true,
+      command: "npm run mcp:smoke"
+    },
+    review_ui_cloudflare_access: {
+      required: true,
+      mode: cloudflareMode,
+      edge_auth_required: edgeAuth === "required",
+      admin_email_count: (
+        process.env.RECALLANT_ADMIN_EMAILS ??
+        process.env.RECALLANT_ADMIN_EMAIL ??
+        ""
+      )
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean).length
+    },
+    localhost_only_origin: {
+      bind_host: bindHost,
+      ok: localhostOnlyOrigin
+    },
+    backup_timer: {
+      enabled: backupTimerEnabled,
+      status:
+        process.env.RECALLANT_BACKUP_TIMER_STATUS ?? (backupTimerEnabled ? "enabled" : "unknown")
+    },
+    latest_backup_verification: {
+      status: latestBackupVerification,
+      ok: latestBackupVerification === "passed"
+    },
+    recallant_project_rows: duplicateRecallantProjectRows,
+    no_duplicate_recallant_project_rows:
+      duplicateRecallantProjectRows === null ? null : duplicateRecallantProjectRows <= 1,
+    unintended_paid_api_success_calls_30d: unintendedPaidApiSuccessCalls30d,
+    no_unintended_paid_api_use:
+      unintendedPaidApiSuccessCalls30d === null ? null : unintendedPaidApiSuccessCalls30d === 0,
+    ready:
+      postgresReachable &&
+      localhostOnlyOrigin &&
+      cloudflareMode === "enabled" &&
+      edgeAuth === "required" &&
+      backupTimerEnabled &&
+      latestBackupVerification === "passed" &&
+      duplicateRecallantProjectRows !== null &&
+      duplicateRecallantProjectRows <= 1 &&
+      unintendedPaidApiSuccessCalls30d !== null &&
+      unintendedPaidApiSuccessCalls30d === 0
+  };
+}
+
 async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
@@ -1127,6 +1228,7 @@ async function runDoctor(argv: readonly string[]) {
           starts_local_services: false
         },
         owner_server_deployment: await checkOwnerServerDeployment(),
+        production_readiness: await checkProductionReadiness(postgres.reachable),
         owner_server_notes: [
           "/ai/PORTS.yaml must be checked before service start",
           "/ai/SECURITY must be consulted before public exposure"
@@ -1629,6 +1731,7 @@ async function startAgentSession(
   const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
   const clientVersion = parseFlag(argv, "--client-version") ?? null;
   const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+  const localSpoolStatus = await getLocalSpoolStatus(argv);
   const started = await database.startSession({
     client_kind: clientKind,
     client_version: clientVersion,
@@ -1642,7 +1745,7 @@ async function startAgentSession(
     task_hint: taskHint,
     include_raw_evidence: "auto",
     include_recovery: true,
-    local_spool_status: await getLocalSpoolStatus(argv)
+    local_spool_status: localSpoolStatus
   });
   const contextRead = await database.appendEvent({
     session_id: sessionId,
@@ -1652,7 +1755,8 @@ async function startAgentSession(
     metadata: {
       capture_kind: "context_read",
       context_pack_id: pack.context_pack_id,
-      task_hint: taskHint
+      task_hint: taskHint,
+      local_spool_status: localSpoolStatus
     },
     dedup_key: dedupHash("agent-context-read", {
       session_id: sessionId,

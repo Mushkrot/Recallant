@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Installer dry-run/profile smoke, full local smoke isolation, policy-aware lint-context, Phase 7 init/discover/import contract coverage, broad startup search rejection, and owner-server doctor checks are implemented and verified.
-Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: audit remaining closeout, startup-context, and doctor/model-routing contract gaps against TEST_CONTRACT.
-Last updated: 2026-05-31T08:50:00Z.
+Status: Latest contract-hardening slice is implemented and full `smoke:core` passed on a clean dev database.
+Current focus: commit and push the verified contract-hardening checkpoint.
+Next step: deploy/restart only through the accepted controlled service path when applying this checkpoint live.
+Last updated: 2026-05-31T10:44:45Z.
 
 ## Active Constraints
 
@@ -44,6 +44,8 @@ Last updated: 2026-05-31T08:50:00Z.
   decisions/actions/tests/checkpoints, close out, and recall that memory in a later session.
 - Commit/progress checkpoints are not stopping points. Continue to the next documented gate unless a
   real owner-dependent blocker appears.
+- `docs/TEST_CONTRACT.md` has no remaining unchecked rows; do not reopen the full contract gap list
+  unless a regression appears.
 
 ## Verification
 
@@ -125,6 +127,26 @@ Last updated: 2026-05-31T08:50:00Z.
   specific evidence query.
 - `recallant doctor` now emits structured owner-server deployment checks for planned Recallant port
   registration and the `/ai/SECURITY` consultation baseline.
+- Review Inbox now includes important long-term/action candidates by default: scope-changing
+  candidates, duplicate/conflict signals, promotion/demotion/archive/supersede candidates,
+  high-risk guidance, and low-confidence behavior guidance.
+- Review Dashboard first screen now exposes unclosed/interrupted sessions, unsynced spool,
+  high-risk conflicts, active-rule filters, current day/month cost summaries, cost rows by
+  project/provider/model/purpose, and pending paid API approvals.
+- `memory_closeout` now reports attention-required warnings for governed-memory conflicts,
+  incomplete repo sync, low extraction confidence, and server/model/provider errors.
+- `recallant attach` reports raw secret findings without leaking values. Live/production-sensitive
+  preflight does not modify source files; sandbox/test masking happens only after a redacted local
+  backup exists.
+- `recallant doctor` now includes production-readiness diagnostics for local stdio MCP smoke,
+  Cloudflare Access, localhost-only origin, backup timer, latest backup verification, duplicate
+  `/ai/recallant` project rows, and unintended paid API use.
+- Targeted latest-slice verification passed: `npm run build`, `npm run phase7:smoke`,
+  `npm run phase6:smoke:governed`, `npm run review-ui:smoke`, and `npm run phase10:smoke`.
+- Full latest-slice verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  clean `make db-reset`, full `npm run smoke:core`, and `make db-down`.
+- Dogfood capture checkpoint for this contract-hardening work synced from local spool to Recallant
+  event `f6562c63-638b-4be4-9533-5eb4597f21c2`; synced spool record was pruned afterward.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -158,43 +180,43 @@ Last updated: 2026-05-31T08:50:00Z.
 - `npm run local-cleanup:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
 - `npm run review-ui:smoke` against the same isolated DB; passed with local cleanup command visible
 - production deploy verification after local cleanup restart: `systemctl is-active
-  recallant.service`, local `/health`, authenticated `/api/review-dashboard`, and Review HTML local
+recallant.service`, local `/health`, authenticated `/api/review-dashboard`, and Review HTML local
   cleanup check all passed
 - `npm run onboarding:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   full review action matrix coverage
 - production deploy verification after Review action restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review HTML check for `Promote to rule`,
+recallant.service`, local `/health`, and authenticated Review HTML check for `Promote to rule`,
   `Edit memory`, and `Supersede / merge` all passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   permanent-forget API/form dry-run, confirmation gate, governed-memory redaction, source quote
   clearing, and safe erasure receipt coverage
 - production deploy verification after permanent-forget restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review HTML check for `Forget forever`,
+recallant.service`, local `/health`, and authenticated Review HTML check for `Forget forever`,
   `/memory-forget`, and `Dry-run forget forever` all passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   settings editor visibility, safe setting update, dangerous setting confirmation, selected-project
   setting writes, and `settings_audit_events` coverage
 - production deploy verification after Settings UI restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review HTML check for `Edit project
-  settings`, `Context budget`, `Enabled clients`, `Project aliases`, and `system_settings` all
+recallant.service`, local `/health`, and authenticated Review HTML check for `Edit project
+settings`, `Context budget`, `Enabled clients`, `Project aliases`, and `system_settings` all
   passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   instruction promotion review-history coverage and source-ref-required API/UI guard coverage
 - production deploy verification after promotion-guard restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review HTML check for evidence-backed
+recallant.service`, local `/health`, and authenticated Review HTML check for evidence-backed
   `Promote to rule` all passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   duplicate resolution detail visibility and canonical merge form coverage
 - production deploy verification after duplicate-resolution restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review route check for
+recallant.service`, local `/health`, and authenticated Review route check for
   `Conflicts / Duplicates` all passed. Conditional canonical controls remain covered by isolated
   DB smoke because production has no active duplicate fixture.
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   conflict old/new detail visibility, supersede/demote/archive action visibility, and use-newer
   supersede form coverage
 - production deploy verification after conflict-resolution restart: `systemctl is-active
-  recallant.service`, local `/health`, and authenticated Review route check for
+recallant.service`, local `/health`, and authenticated Review route check for
   `Conflicts / Duplicates` all passed. Conditional old/new controls remain covered by isolated DB
   smoke because production has no active conflict fixture.
 - `npm run installer:smoke`; passed with owner-server and single-user dry-run profiles and asserts

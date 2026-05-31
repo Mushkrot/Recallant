@@ -430,10 +430,28 @@ function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent)
     "forever",
     "секрет",
     "secret",
+    "security",
+    "deploy",
+    "deployment",
     "public",
+    "cloudflare",
     "firewall",
     "paid api",
-    "auto_with_caps"
+    "auto_with_caps",
+    "connector",
+    "account",
+    "global setting",
+    "developer setting",
+    "model",
+    "provider",
+    "безопас",
+    "деплой",
+    "публич",
+    "коннектор",
+    "аккаунт",
+    "глобаль",
+    "модель",
+    "провайдер"
   ]);
 }
 

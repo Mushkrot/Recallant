@@ -18,8 +18,15 @@ capture-active readiness in the Review UI/API, and detach safely without touchin
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
-work is to deepen owner-facing Management UI action flows, close remaining CLI init/discover/import
-contract gaps, or extend local sandbox cleanup beyond the first safe pointer/runtime-artifact slice.
+work is to deepen owner-facing Management UI action flows, extend local sandbox cleanup beyond the
+first safe pointer/runtime-artifact slice, or run another sandbox/live-project pilot after the agent
+has independently validated the same attach/capture/closeout/recall flow.
+
+Current contract status: `docs/TEST_CONTRACT.md` has no remaining unchecked rows. The latest
+contract-hardening slice added smoke-backed coverage for Review Inbox long-term/action candidates,
+Review UI first-screen critical status/rule filters/cost view, closeout warnings for conflicts/
+repo-sync/low-confidence/model-provider errors, raw-secret attach policy, and production-readiness
+diagnostics in `recallant doctor`.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -307,12 +314,12 @@ Latest QA correction checkpoint:
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 
-The next required target is no longer the Product Acceptance loop; that loop is green for the first
-slice. Permanent-forget UI, richer Management UI action flows, remaining CLI init/discover/import
-contract gaps, or a separate explicit workflow for deleting sandbox copy directories are now the
-highest-value follow-ups.
+The next required target is no longer the Product Acceptance loop or the TEST_CONTRACT gap list;
+those are green for the first production-ready slice. Richer Management UI action flows, a separate
+explicit workflow for deleting sandbox copy directories, target-aware `generic` startup generation,
+and three-client startup documentation are now the highest-value follow-ups.
 
-Current contract-hardening checkpoint:
+Previous contract-hardening checkpoint:
 
 - `recallant closeout-intent` is implemented as a read-only CLI helper for configured Russian and
   English closeout phrases, `Exit`, ambiguous pause wording, and risky/non-routine wording.
@@ -332,8 +339,27 @@ Current contract-hardening checkpoint:
   `npm run phase3:smoke`; follow-up parity verification passed with
   `npm run phase6:smoke:graph`; paid-approval verification passed with `npm run phase4:smoke`;
   schema/MCP verification passed with `npm run schema:smoke` and `npm run mcp:smoke`.
-- Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures and the
-  broader backup/security/cleanup rows still need explicit smoke-backed closure.
+Latest contract-hardening checkpoint:
+
+- `memory_list_agent_memories(view="inbox")` now includes important long-term/action candidates:
+  scope changes, duplicate/conflict signals, promotion/demotion/archive/supersede candidates,
+  high-risk guidance, and low-confidence behavior guidance, while keeping routine evidence out of
+  mandatory review.
+- Review Dashboard first screen now exposes unclosed/interrupted sessions, unsynced spool,
+  high-risk conflicts, pending paid API approvals, active-rule filters, and current day/month cost
+  summaries by project/provider/model/purpose.
+- `memory_closeout` now sets `report_required=true` for governed-memory conflicts, failed writes,
+  incomplete repo sync, low extraction confidence, and server/model/provider errors.
+- `recallant attach` now reports raw secret findings without leaking values; live/production
+  preflight does not modify source files, while sandbox/test masking happens only after a redacted
+  local backup exists.
+- `recallant doctor` now reports a structured production-readiness object for local stdio MCP smoke,
+  Cloudflare Access, localhost-only origin, backup timer, latest backup verification, duplicate
+  `/ai/recallant` rows, and unintended paid API use.
+- Verification for this latest slice: `npm run build`, `npm run lint`, `npm run format:check`,
+  targeted changed-slice checks (`npm run phase7:smoke`, `npm run phase6:smoke:governed`,
+  `npm run review-ui:smoke`, `npm run phase10:smoke`), clean `make db-reset`, full
+  `npm run smoke:core`, and `make db-down`.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -364,5 +390,6 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 ## Success Condition For The Next Session
 
 The next session should start clean from this handoff, `PROJECT_LOG.md`, and current git state. It
-should continue from the green Product Acceptance slice into the next documented follow-up without
-reopening the already-passed attach/capture/dogfood gate unless a regression appears.
+should continue from the green Product Acceptance and TEST_CONTRACT slices into the next documented
+follow-up without reopening already-passed attach/capture/dogfood/contract gates unless a regression
+appears.

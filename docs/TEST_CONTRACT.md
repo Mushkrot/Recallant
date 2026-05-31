@@ -72,7 +72,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] `memory_review_agent_memory(action="accept")` changes status to `accepted` and ordinary policy to `recall_allowed`; `approve` may work as a compatibility alias.
 - [x] `instruction_grade` is allowed only for direct explicit user instruction or user/import/review-approved flow and does not silently pass for raw agent-created inferred/candidate/needs-review records.
 - [x] `memory_list_agent_memories(view="inbox")` returns `candidate`/`needs_review`/high-risk items and excludes ordinary low-risk recall memories by default.
-- [ ] Review Inbox default includes important, conflicting, and long-term records: candidate rules, scope-changing candidates, conflicts, duplicates, high-risk guidance, low-confidence behavior guidance, and promotion/demotion/archive/supersede candidates.
+- [x] Review Inbox default includes important, conflicting, and long-term records: candidate rules, scope-changing candidates, conflicts, duplicates, high-risk guidance, low-confidence behavior guidance, and promotion/demotion/archive/supersede candidates.
 - [x] Review Inbox default excludes raw events, ordinary evidence chunks, routine work logs, routine project facts, and low-risk source-linked memories that do not affect future behavior.
 - [x] `memory_list_agent_memories(view="rules")` returns active `instruction_grade` records by default.
 - [x] `memory_get_agent_memory` returns source refs and review action history.
@@ -112,13 +112,13 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Settings UI writes `settings_audit_events` for every setting change.
 - [x] Dangerous settings changes require explicit confirmation: paid API enablement, future `auto_with_caps`, subscription worker enablement, developer/global edits, major capture/context increases, preview models, and quality-critical route changes.
 - [x] Settings UI shows secret status/reference only and never raw provider API keys, database URLs, backup encryption keys, auth secrets, or Cloudflare secret values.
-- [ ] First screen shows critical status when present: unclosed/interrupted session, unsynced spool, high-risk conflicts.
+- [x] First screen shows critical status when present: unclosed/interrupted session, unsynced spool, high-risk conflicts.
 - [x] First screen has priority lanes or equivalent grouping for Conflicts, Candidate Rules, Important/Needs Review, and Duplicates.
 - [x] Selecting an item shows source refs/evidence, status/use policy/confidence, related records, and available actions.
 - [x] Review UI shows inbox records: `candidate`, `needs_review`, important, high-risk, duplicate, and conflict candidates.
 - [x] Review UI does not make ordinary low-risk memories mandatory review work.
-- [ ] Review UI shows active `instruction_grade` rules with scope/type/project/domain filters.
-- [ ] Management UI includes a Cost / Paid API view showing current day/month estimated paid API cost, cost by project/provider/model/purpose, and pending approvals.
+- [x] Review UI shows active `instruction_grade` rules with scope/type/project/domain filters.
+- [x] Management UI includes a Cost / Paid API view showing current day/month estimated paid API cost, cost by project/provider/model/purpose, and pending approvals.
 - [x] Management UI does not expose a full raw memory browser, graph explorer, broad analytics suite, or public SaaS dashboard in v1.
 - [x] Browser/UI clients cannot read provider API keys or raw prompts from cost/model-call records.
 - [x] Memory detail view shows body, status, use policy, confidence, source refs, related records, and review action history.
@@ -153,7 +153,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] `memory_closeout` marks the session closed, updates checkpoint, creates/updates governed-memory candidates, and returns a `PROJECT_LOG.md` update payload.
 - [x] Successful warning-free `memory_closeout` returns `report_required=false`.
 - [x] `memory_closeout` returns `report_required=true` and warnings when spool is unsynced or `candidate`/`needs_review` records are created.
-- [ ] `memory_closeout` returns `report_required=true` and warnings when conflicts exist, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
+- [x] `memory_closeout` returns `report_required=true` and warnings when conflicts exist, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
 - [x] Ambiguous closeout wording uses model routing or asks for confirmation; risky/non-routine actions require confirmation.
 - [x] `recallant lint-context` passes on fresh bootstrap and fails on a fixture with a large duplicated historical log in `AGENTS.md`.
 - [x] `recallant lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
@@ -190,51 +190,51 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Phase 8
 
-- [ ] Appending text larger than the configured limit returns `VALIDATION_ERROR` without writing to DB.
-- [ ] `memory_search` on a representative fixture DB finishes below the configured p95 budget. Example profiles such as 10k chunks / 1500ms on dev hardware may be local CI profiles, not hard production SLOs.
-- [ ] Backup command/job creates a backup manifest with backup id, timestamp, Recallant version, schema version, included DBs, artifact roots, hash manifest, target, encryption status, and job status.
-- [ ] Backup includes `recallant_agent_work` Postgres data and raw artifact storage metadata/files required by `raw_artifacts`.
-- [ ] Restore verification restores backup into temporary database/location without overwriting production.
-- [ ] Restore verification checks schema/migration version, raw artifact pointers, artifact hashes according to policy, project list, latest checkpoint, governed memory recall, and bounded search.
-- [ ] Backup target config can represent current local Recallant-server storage and a future second server over SSH/Tailscale.
-- [ ] Portable restore/remap fixture can map old project roots, secret references, connector/account bindings, and environment facts to new values without editing raw memories by hand.
-- [ ] Backup manifests/logs do not include provider API keys or raw secrets.
-- [ ] Default HTTP bind config is localhost/Tailnet/private interface, not public `0.0.0.0`, unless explicit owner config enables another mode.
-- [ ] Remote MCP/admin API rejects unauthenticated requests.
-- [ ] Future Cloudflare mode exists as explicit config but is disabled by default.
-- [ ] Cloudflare mode requires both edge-auth metadata/config and Recallant auth/session; tests must reject unauthenticated public access.
-- [ ] No unauthenticated public route exposes Review UI, admin API, MCP tools, backups, or raw artifacts.
-- [ ] Natural-language management cannot bypass confirmation for erasure, paid API, global settings, connector/account bindings, public exposure, or security-sensitive operations.
+- [x] Appending text larger than the configured limit returns `VALIDATION_ERROR` without writing to DB.
+- [x] `memory_search` on a representative fixture DB finishes below the configured p95 budget. Example profiles such as 10k chunks / 1500ms on dev hardware may be local CI profiles, not hard production SLOs.
+- [x] Backup command/job creates a backup manifest with backup id, timestamp, Recallant version, schema version, included DBs, artifact roots, hash manifest, target, encryption status, and job status.
+- [x] Backup includes `recallant_agent_work` Postgres data and raw artifact storage metadata/files required by `raw_artifacts`.
+- [x] Restore verification restores backup into temporary database/location without overwriting production.
+- [x] Restore verification checks schema/migration version, raw artifact pointers, artifact hashes according to policy, project list, latest checkpoint, governed memory recall, and bounded search.
+- [x] Backup target config can represent current local Recallant-server storage and a future second server over SSH/Tailscale.
+- [x] Portable restore/remap fixture can map old project roots, secret references, connector/account bindings, and environment facts to new values without editing raw memories by hand.
+- [x] Backup manifests/logs do not include provider API keys or raw secrets.
+- [x] Default HTTP bind config is localhost/Tailnet/private interface, not public `0.0.0.0`, unless explicit owner config enables another mode.
+- [x] Remote MCP/admin API rejects unauthenticated requests.
+- [x] Future Cloudflare mode exists as explicit config but is disabled by default.
+- [x] Cloudflare mode requires both edge-auth metadata/config and Recallant auth/session; tests must reject unauthenticated public access.
+- [x] No unauthenticated public route exposes Review UI, admin API, MCP tools, backups, or raw artifacts.
+- [x] Natural-language management cannot bypass confirmation for erasure, paid API, global settings, connector/account bindings, public exposure, or security-sensitive operations.
 
 ## Phase 9
 
-- [ ] `memory_search` returns an older fixture chunk with lower score than an identical fresh chunk when decay is enabled. The exact age gap is defined by the test profile.
-- [ ] A chunk with `archived_at IS NOT NULL` does not appear in `memory_search` unless `include_archived=true`.
-- [ ] Ordinary cleanup can archive/delete derived chunks/embeddings but does not delete L0 events or raw artifact records by default.
-- [ ] Spool pruning deletes only records confirmed synced to server.
-- [ ] Governed-memory cleanup changes lifecycle status (`archived`, `superseded`, `rejected`, or `stale`) rather than hard-deleting by default.
-- [ ] After `memory_link(relation_type="supersedes", src=new, dst=old)`, the old chunk gets score penalty: `S_final < S_base * decay`.
-- [ ] Chunk `access_count` increases after a `memory_search` that returned it.
-- [ ] `recallant analyze --dry-run` does not change data and prints a report.
-- [ ] `recallant cleanup --archive --not-accessed <configured-threshold> --dry-run` does not change data and prints candidate list.
-- [ ] Self-cleaning reports can identify duplicate/stale/superseded/low-value/poor-provenance/conflicting-connector candidates without auto-deleting them.
-- [ ] `recallant cleanup` does not execute permanent erasure without routing through `memory_forget` confirmation.
+- [x] `memory_search` returns an older fixture chunk with lower score than an identical fresh chunk when decay is enabled. The exact age gap is defined by the test profile.
+- [x] A chunk with `archived_at IS NOT NULL` does not appear in `memory_search` unless `include_archived=true`.
+- [x] Ordinary cleanup can archive/delete derived chunks/embeddings but does not delete L0 events or raw artifact records by default.
+- [x] Spool pruning deletes only records confirmed synced to server.
+- [x] Governed-memory cleanup changes lifecycle status (`archived`, `superseded`, `rejected`, or `stale`) rather than hard-deleting by default.
+- [x] After `memory_link(relation_type="supersedes", src=new, dst=old)`, the old chunk gets score penalty: `S_final < S_base * decay`.
+- [x] Chunk `access_count` increases after a `memory_search` that returned it.
+- [x] `recallant analyze --dry-run` does not change data and prints a report.
+- [x] `recallant cleanup --archive --not-accessed <configured-threshold> --dry-run` does not change data and prints candidate list.
+- [x] Self-cleaning reports can identify duplicate/stale/superseded/low-value/poor-provenance/conflicting-connector candidates without auto-deleting them.
+- [x] `recallant cleanup` does not execute permanent erasure without routing through `memory_forget` confirmation.
 
 ## Pre-Pilot Readiness
 
-- [ ] `recallant discover --project-dir <fixture>` reports existing manual memory surfaces without writing durable import records.
-- [ ] Discovery classifies `AGENTS.md`, `PROJECT_LOG.md`, `.cursor/SESSION_HANDOFF.md`, `CLAUDE.md`, selected docs, and `.env.example` into source-linked candidate classes.
-- [ ] Discovery reports source path, content hash, provisional scope/audience, risk, and suggested import command for each candidate.
-- [ ] Discovery warns on duplicated history dumps, stale handoff material, oversized context files, possible conflicts, possible duplicates, and raw secret values without leaking secret contents.
-- [ ] `recallant import --dry-run` shows the same source refs, result classes, scope/audience, risks, and conflicts without writing.
-- [ ] Confirmed `recallant import` writes an `import_batch` event plus source-linked evidence/chunks/candidates/facts according to import type.
-- [ ] Re-running the same import is idempotent by source path, hash, project, and result class.
-- [ ] Imported client-specific docs default to client-specific audience, not universal all-agent behavior.
-- [ ] Imported candidate rules and high-risk facts appear in Review UI/API and do not become `instruction_grade` without review/promotion.
-- [ ] Review UI can show imported candidate detail with source path, bounded quote, hash/provenance, status, use policy, scope, audience, confidence, and review history.
-- [ ] Review UI can apply at least accept, reject, promote instruction, archive, edit, merge, and supersede actions through the same server policy path as MCP/CLI.
-- [ ] A sandbox copied project can complete discover, import dry-run, selected import, MCP startup/context-pack smoke, append/search smoke, closeout, and detach/rollback without touching the original project.
-- [ ] Production readiness check covers `recallant doctor`, local stdio MCP smoke, Review UI access through Cloudflare Access, localhost-only origin, enabled backup timer, latest backup verification, no duplicate `/ai/recallant` project rows, and no unintended paid API use.
+- [x] `recallant discover --project-dir <fixture>` reports existing manual memory surfaces without writing durable import records.
+- [x] Discovery classifies `AGENTS.md`, `PROJECT_LOG.md`, `.cursor/SESSION_HANDOFF.md`, `CLAUDE.md`, selected docs, and `.env.example` into source-linked candidate classes.
+- [x] Discovery reports source path, content hash, provisional scope/audience, risk, and suggested import command for each candidate.
+- [x] Discovery warns on duplicated history dumps, stale handoff material, oversized context files, possible conflicts, possible duplicates, and raw secret values without leaking secret contents.
+- [x] `recallant import --dry-run` shows the same source refs, result classes, scope/audience, risks, and conflicts without writing.
+- [x] Confirmed `recallant import` writes an `import_batch` event plus source-linked evidence/chunks/candidates/facts according to import type.
+- [x] Re-running the same import is idempotent by source path, hash, project, and result class.
+- [x] Imported client-specific docs default to client-specific audience, not universal all-agent behavior.
+- [x] Imported candidate rules and high-risk facts appear in Review UI/API and do not become `instruction_grade` without review/promotion.
+- [x] Review UI can show imported candidate detail with source path, bounded quote, hash/provenance, status, use policy, scope, audience, confidence, and review history.
+- [x] Review UI can apply at least accept, reject, promote instruction, archive, edit, merge, and supersede actions through the same server policy path as MCP/CLI.
+- [x] A sandbox copied project can complete discover, import dry-run, selected import, MCP startup/context-pack smoke, append/search smoke, closeout, and detach/rollback without touching the original project.
+- [x] Production readiness check covers `recallant doctor`, local stdio MCP smoke, Review UI access through Cloudflare Access, localhost-only origin, enabled backup timer, latest backup verification, no duplicate `/ai/recallant` project rows, and no unintended paid API use.
 
 ## Phase 10 - Autonomous attach and controlled cross-project recall
 
@@ -250,8 +250,8 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Autopilot does not create `instruction_grade` memories from imported/inferred project material unless an explicit strong policy path is present.
 - [x] `.env.example` imports store variable names/purpose and secret/capability references only, never raw values.
 - [x] Raw secret values in agent/startup files are not imported into Recallant.
-- [ ] Live/production-sensitive project raw secret findings create warning/review/cleanup plan without modifying the source file.
-- [ ] Sandbox/test raw secret findings may be masked automatically only after redacted local backup when policy permits.
+- [x] Live/production-sensitive project raw secret findings create warning/review/cleanup plan without modifying the source file.
+- [x] Sandbox/test raw secret findings may be masked automatically only after redacted local backup when policy permits.
 - [x] Backup copies redact raw secrets and cannot restore the secret value.
 - [x] Autopilot does not enable paid API, public exposure, connector/capability activation, or destructive cleanup without confirmation.
 - [x] Re-running attach on the same project is idempotent for project registration, imported source hashes, bootstrap sections, and report metadata.

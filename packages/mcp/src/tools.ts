@@ -813,6 +813,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           })
         )
         .default([]),
+      closeout_diagnostics: z.record(z.string(), z.unknown()).nullable().optional(),
       local_spool_status: z.record(z.string(), z.unknown()).nullable().optional()
     }),
     handler: async (args) => {
@@ -822,12 +823,18 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           args.session_id as string,
           args.checkpoint_payload as JsonObject,
           "closeout",
-          args.local_spool_status as JsonObject | null | undefined
+          args.local_spool_status as JsonObject | null | undefined,
+          args.closeout_diagnostics as JsonObject | null | undefined
         );
         const createdMemoryIds: string[] = [];
         const needsReviewIds: string[] = [];
         const warnings = [...(checkpoint?.warnings ?? [])];
         for (const candidate of args.governed_memory_candidates as Array<Record<string, unknown>>) {
+          if (typeof candidate.confidence === "number" && candidate.confidence < 0.5) {
+            warnings.push(
+              `Closeout candidate "${String(candidate.title)}" has low extraction confidence.`
+            );
+          }
           try {
             const created = await database.createAgentMemory({
               memory_type: String(candidate.memory_type),

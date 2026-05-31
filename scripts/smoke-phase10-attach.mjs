@@ -174,6 +174,8 @@ if (
   attach.review_visibility?.project_visible !== true ||
   !attach.backup?.manifest_path ||
   attach.backup?.redacted_file_count < 1 ||
+  attach.secret_findings?.raw_secret_count < 1 ||
+  attach.secret_findings?.masked_after_redacted_backup !== true ||
   !attach.owner_report?.ready_status
 ) {
   throw new Error(`Autopilot attach failed: ${JSON.stringify(attach)}`);
@@ -200,6 +202,8 @@ if (
   !agents.includes("memory_start_session") ||
   !agents.includes("recallant agent-start") ||
   agents.includes("memory_promote") ||
+  agents.includes("sk-fixturetoken123456") ||
+  !agents.includes("<redacted-token>") ||
   !projectLog.includes("Status: attached to Recallant.") ||
   !projectLog.includes("recallant agent-start") ||
   !projectLog.includes("compact fallback/checkpoint") ||
@@ -246,13 +250,22 @@ if (
 
 const prodDir = await mkdtemp(join(tmpdir(), "recallant-phase10-prod-"));
 await writeFile(join(prodDir, "README.md"), "# Live Project\nProduction deploy uses Cloudflare.\n");
+await writeFile(
+  join(prodDir, "AGENTS.md"),
+  "# Live Agent Instructions\nProduction token example: OPENAI_API_KEY=sk-livefixture123456\n"
+);
 const prodPlan = runJson(["attach", prodDir, "--target", "codex", "--mode", "autopilot"]);
+const prodAgentsAfter = await readFile(join(prodDir, "AGENTS.md"), "utf8");
 if (
   prodPlan.effective_mode !== "guided" ||
   prodPlan.status !== "needs_confirmation" ||
   prodPlan.writes_files !== false ||
   (await exists(join(prodDir, ".recallant", "config"))) ||
-  prodPlan.production_sensitive?.production_sensitive !== true
+  prodPlan.production_sensitive?.production_sensitive !== true ||
+  prodPlan.secret_findings?.raw_secret_count < 1 ||
+  prodPlan.secret_findings?.findings?.some((finding) => finding.source_modified !== false) ||
+  !prodPlan.secret_findings?.live_policy?.includes("never edits source files") ||
+  !prodAgentsAfter.includes("sk-livefixture123456")
 ) {
   throw new Error(`Production-sensitive downgrade failed: ${JSON.stringify(prodPlan)}`);
 }
