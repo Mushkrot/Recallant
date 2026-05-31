@@ -127,6 +127,7 @@ export type ListAgentMemoriesInput = {
 
 export type RecallAgentMemoriesInput = {
   query: string;
+  project_id?: string | null;
   scope?: string;
   scope_kind?: string | null;
   audience_kind?: string | null;
@@ -1276,6 +1277,7 @@ export class RecallantDb {
     const working =
       input.task_hint && input.task_hint.trim()
         ? await this.recallAgentMemories({
+            project_id: context.projectId,
             query: input.task_hint,
             top_k: 8,
             max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 2)
@@ -1910,7 +1912,9 @@ export class RecallantDb {
   }
 
   async recallAgentMemories(input: RecallAgentMemoriesInput) {
-    const context = await this.ensureProject();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject();
     const lifecycle = await this.getProjectLifecycle(context.projectId);
     if (projectLifecycleIsDetached(lifecycle)) {
       return {
@@ -1925,14 +1929,34 @@ export class RecallantDb {
     if (input.include_candidates) statuses.push("candidate");
     if (input.include_needs_review) statuses.push("needs_review");
     if (input.include_stale) statuses.push("stale");
+    const terms = Array.from(
+      new Set(
+        input.query
+          .split(/[^A-Za-z0-9_-]+/)
+          .map((term) => term.trim())
+          .filter((term) => term.length >= 3)
+          .slice(0, 8)
+      )
+    );
     const values: unknown[] = [context.developerId, context.projectId, input.query, statuses];
     const clauses = [
       "developer_id = $1::uuid",
       "(project_id = $2::uuid OR scope = 'developer')",
       "status = ANY($4::text[])",
-      "use_policy <> 'do_not_use'",
-      "(title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%' OR memory_type ILIKE '%' || $3 || '%')"
+      "use_policy <> 'do_not_use'"
     ];
+    if (terms.length > 0) {
+      clauses.push("$3::text IS NOT NULL");
+      const termClauses = terms.map((term) => {
+        values.push(term);
+        return `(title ILIKE '%' || $${values.length} || '%' OR body ILIKE '%' || $${values.length} || '%' OR memory_type ILIKE '%' || $${values.length} || '%')`;
+      });
+      clauses.push(`(${termClauses.join(" OR ")})`);
+    } else {
+      clauses.push(
+        "(title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%' OR memory_type ILIKE '%' || $3 || '%')"
+      );
+    }
     if (!input.include_candidates) clauses.push("status <> 'candidate'");
     if (!input.include_needs_review) clauses.push("status <> 'needs_review'");
     if (!input.include_stale) clauses.push("status <> 'stale'");
@@ -2987,6 +3011,16 @@ export class RecallantDb {
     const row = result.rows[0];
     if (!row) throw new Error(`Unknown session_id: ${sessionId}`);
     return { projectId: row.project_id, developerId: row.developer_id };
+  }
+
+  private async contextForProject(projectId: string): Promise<ProjectContext> {
+    const result = await this.pool.query<{ developer_id: string }>(
+      "SELECT developer_id FROM projects WHERE id = $1",
+      [projectId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error(`Unknown project_id: ${projectId}`);
+    return { projectId, developerId: row.developer_id };
   }
 
   private async resolveCapturePolicy(

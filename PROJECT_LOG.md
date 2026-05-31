@@ -2,11 +2,10 @@
 
 ## Current Session
 
-Status: product acceptance gap identified and contract update in progress.
-Current focus: implement the autonomous agent capture loop so attached projects write and recall
-real agent work through Recallant.
-Next step: finish the Product Acceptance contract checkpoint, then implement CLI/MCP-backed capture
-commands, attach/bootstrap integration, UI readiness telemetry, acceptance smoke, and self-dogfood.
+Status: CLI-backed agent capture runtime implemented and smoke-tested.
+Current focus: integrate capture runtime into project attach/bootstrap and Review UI readiness.
+Next step: update attach-generated startup files and reports so normal agents use `agent-start`,
+`agent-event`, `agent-checkpoint`, and `agent-closeout` before claiming project readiness.
 
 ## Active Constraints
 
@@ -58,6 +57,12 @@ commands, attach/bootstrap integration, UI readiness telemetry, acceptance smoke
   remained visible afterward
 - live DB inspection showed `/ai/recallant` is registered, but current Codex chat work was not
   automatically captured as events; this is now the primary product gap
+- CLI fallback commands now cover the first capture loop slice: `agent-start`, `agent-event`,
+  `agent-checkpoint`, and `agent-closeout`. Decision events create source-linked accepted
+  project-local memories so a later context pack can recall them.
+- Governed-memory recall now tokenizes task hints and scopes context-pack working-memory recall to
+  the session project, fixing the issue where a stored decision did not return for a related task
+  hint.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -69,6 +74,9 @@ commands, attach/bootstrap integration, UI readiness telemetry, acceptance smoke
 - production `recallant doctor`
 - production `/health`
 - live Management Chat API using local `mistral-small:24b`
+- `npm run agent-capture:smoke` against an isolated temporary Postgres on `127.0.0.1:55433`;
+  verified attach, agent-start, decision/action/test capture, checkpoint, closeout, later context
+  recall, offline spool, sync-spool, and repeat sync idempotency
 
 ## Open Questions
 

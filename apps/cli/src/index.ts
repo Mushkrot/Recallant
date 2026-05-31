@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { createRecallantDbFromEnv } from "@recallant/db";
-import type { RawArtifactInput } from "@recallant/db";
+import type { JsonObject, RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
 import {
@@ -29,7 +29,9 @@ const memorySection = `## Memory (Recallant)
 - On clear pause/exit/closeout intent: call \`memory_closeout\` and update \`PROJECT_LOG.md\` from the closeout payload.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
 - Never paste secrets into memory tools.
-- If MCP is unavailable: update \`PROJECT_LOG.md\` and, when available, write local spool.
+- If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
+  \`recallant agent-event\`, \`recallant agent-checkpoint\`, and \`recallant agent-closeout\`.
+  If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
 `;
 
 function parseEnvValue(raw: string) {
@@ -101,7 +103,16 @@ function positionalArgs(argv: readonly string[]) {
     "--not-accessed",
     "--older-than",
     "--limit",
-    "--format"
+    "--format",
+    "--client-kind",
+    "--client-version",
+    "--session-label",
+    "--session-id",
+    "--status",
+    "--focus",
+    "--next-step",
+    "--summary",
+    "--title"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -160,6 +171,134 @@ async function getLocalSpoolStatus(argv: readonly string[]) {
     unsynced_count: unsynced.length,
     checked_at: new Date().toISOString()
   };
+}
+
+type AgentSessionState = {
+  schema_version: 1;
+  status: "active" | "closed" | "offline";
+  session_id: string;
+  project_id?: string | null;
+  project_dir: string;
+  client_kind: string;
+  client_version?: string | null;
+  task_hint?: string | null;
+  started_at: string;
+  updated_at: string;
+  context_pack_id?: string | null;
+  last_context_read_at?: string | null;
+  last_memory_write_at?: string | null;
+  last_checkpoint_at?: string | null;
+  last_event_id?: string | null;
+  last_memory_id?: string | null;
+};
+
+function projectDir(argv: readonly string[]) {
+  return resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+}
+
+function recallantDir(projectDir: string) {
+  return join(projectDir, ".recallant");
+}
+
+function currentSessionPathFor(projectDir: string) {
+  return join(recallantDir(projectDir), "current-session.json");
+}
+
+async function readAgentSessionState(projectDir: string): Promise<AgentSessionState | null> {
+  const content = await readOptional(currentSessionPathFor(projectDir));
+  if (!content) return null;
+  return JSON.parse(content) as AgentSessionState;
+}
+
+async function writeAgentSessionState(projectDir: string, state: AgentSessionState) {
+  await mkdir(recallantDir(projectDir), { recursive: true });
+  await writeFile(currentSessionPathFor(projectDir), `${JSON.stringify(state, null, 2)}\n`);
+}
+
+function summarizeText(text: string, max = 88) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, max - 1)}...`;
+}
+
+function dedupHash(prefix: string, payload: Record<string, unknown>) {
+  return `${prefix}:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+}
+
+function eventKindForAgentKind(kind: string) {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized === "test" || normalized === "verification") return "tool_result";
+  if (normalized === "file_change") return "file_change";
+  if (normalized === "checkpoint") return "checkpoint";
+  if (normalized === "context_read" || normalized === "closeout") return "system";
+  return "other";
+}
+
+function checkpointPayloadFromFlags(argv: readonly string[], fallbackSummary?: string): JsonObject {
+  return {
+    schema_version: 1,
+    status: parseFlag(argv, "--status") ?? "in_progress",
+    current_focus: parseFlag(argv, "--focus") ?? fallbackSummary ?? "Recallant-backed agent work",
+    next_step: parseFlag(argv, "--next-step") ?? "Continue from Recallant context.",
+    summary: parseFlag(argv, "--summary") ?? fallbackSummary ?? null,
+    updated_at: new Date().toISOString(),
+    source: "recallant-cli-agent-capture"
+  };
+}
+
+function renderProjectLogSession(payload: JsonObject) {
+  return `## Current Session
+
+Status: ${String(payload.status ?? "in_progress")}.
+Current focus: ${String(payload.current_focus ?? "Recallant-backed agent work")}.
+Next step: ${String(payload.next_step ?? "Continue from Recallant context.")}.
+Last updated: ${String(payload.updated_at ?? new Date().toISOString())}.
+`;
+}
+
+async function updateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
+  const projectLogPath = join(projectDir, "PROJECT_LOG.md");
+  const existing = await readOptional(projectLogPath);
+  const rendered = renderProjectLogSession(payload);
+  if (!existing) {
+    await writeFile(
+      projectLogPath,
+      `# Project Log
+
+${rendered}
+## Notes
+
+- Recallant is the main source of truth for durable memory.
+- This file is a compact fallback/checkpoint.
+`
+    );
+    return { status: "created", path: projectLogPath };
+  }
+  const pattern = /## Current Session[\s\S]*?(?=\n## |\n# |$)/;
+  const next = pattern.test(existing)
+    ? existing.replace(pattern, rendered.trimEnd())
+    : `${existing.trimEnd()}\n\n${rendered}`;
+  await writeFile(projectLogPath, next.endsWith("\n") ? next : `${next}\n`);
+  return { status: "updated", path: projectLogPath };
+}
+
+async function appendSpoolRecord(
+  argv: readonly string[],
+  recordKind: string,
+  payload: Record<string, unknown>,
+  dedupKey?: string
+) {
+  const finalDedupKey = dedupKey ?? dedupHash("spool", payload);
+  const record = {
+    local_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    record_kind: recordKind,
+    dedup_key: finalDedupKey,
+    payload: { ...payload, dedup_key: finalDedupKey }
+  };
+  await mkdir(spoolDir(argv), { recursive: true });
+  await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
+  return record;
 }
 
 function parseInitOptions(argv: readonly string[]): InitOptions {
@@ -1043,6 +1182,437 @@ async function runCleanup(argv: readonly string[]) {
   );
 }
 
+async function startAgentSession(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  argv: readonly string[]
+) {
+  const dir = projectDir(argv);
+  const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
+  const clientVersion = parseFlag(argv, "--client-version") ?? null;
+  const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+  const started = await database.startSession({
+    client_kind: clientKind,
+    client_version: clientVersion,
+    project_path: dir,
+    session_label: parseFlag(argv, "--session-label") ?? "recallant-agent-session",
+    resume_policy: "normal"
+  });
+  const sessionId = String(started.session_id);
+  const pack = await database.getContextPack({
+    session_id: sessionId,
+    task_hint: taskHint,
+    include_raw_evidence: "auto",
+    include_recovery: true,
+    local_spool_status: await getLocalSpoolStatus(argv)
+  });
+  const contextRead = await database.appendEvent({
+    session_id: sessionId,
+    client_kind: clientKind,
+    event_kind: "system",
+    text: `Context pack read for task: ${taskHint}`,
+    metadata: {
+      capture_kind: "context_read",
+      context_pack_id: pack.context_pack_id,
+      task_hint: taskHint
+    },
+    dedup_key: dedupHash("agent-context-read", {
+      session_id: sessionId,
+      context_pack_id: pack.context_pack_id
+    })
+  });
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "active",
+    session_id: sessionId,
+    project_id: String(started.project_id),
+    project_dir: dir,
+    client_kind: clientKind,
+    client_version: clientVersion,
+    task_hint: taskHint,
+    started_at: now,
+    updated_at: now,
+    context_pack_id: String(pack.context_pack_id),
+    last_context_read_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(contextRead.event_id)
+  };
+  await writeAgentSessionState(dir, state);
+  return { state, pack, context_read: contextRead, start_result: started };
+}
+
+async function ensureOfflineAgentSession(argv: readonly string[], reason: string) {
+  const dir = projectDir(argv);
+  const existing = await readAgentSessionState(dir);
+  if (existing?.status === "offline" || existing?.status === "active") return existing;
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "offline",
+    session_id: `local-${randomUUID()}`,
+    project_id: null,
+    project_dir: dir,
+    client_kind: parseFlag(argv, "--client-kind") ?? "codex",
+    client_version: parseFlag(argv, "--client-version") ?? null,
+    task_hint: parseFlag(argv, "--task-hint") ?? reason,
+    started_at: now,
+    updated_at: now
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function loadActiveAgentState(argv: readonly string[]) {
+  const state = await readAgentSessionState(projectDir(argv));
+  if (state?.status === "active") return state;
+  return null;
+}
+
+async function runAgentStart(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    const state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+    const record = await appendSpoolRecord(argv, "event", {
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: "Offline Recallant agent session started; server database is not configured.",
+      metadata: { capture_kind: "agent_start_offline", local_session_id: state.session_id },
+      raw_artifacts: []
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_start",
+          mode: "offline_spool",
+          state_path: currentSessionPathFor(state.project_dir),
+          spool_path: spoolPath(argv),
+          local_id: record.local_id,
+          warning: "Server database is unavailable; capture records will sync later."
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+  try {
+    const result = await startAgentSession(database, argv);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_start",
+          mode: "server",
+          project_id: result.state.project_id,
+          session_id: result.state.session_id,
+          context_pack_id: result.state.context_pack_id,
+          state_path: currentSessionPathFor(result.state.project_dir),
+          previous_unclosed_session: result.start_result.previous_unclosed_session,
+          recommended_next_action:
+            "Use recallant agent-event after meaningful decisions/actions/tests."
+        },
+        null,
+        2
+      )}\n`
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+async function runAgentEvent(argv: readonly string[]) {
+  const kind = parseFlag(argv, "--kind") ?? "action";
+  const text = parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ");
+  if (!text.trim()) throw new Error("VALIDATION_ERROR: agent-event requires --text");
+  const dir = projectDir(argv);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  const title = parseFlag(argv, "--title") ?? summarizeText(text, 72);
+  const clientKind = state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex";
+  const metadata = {
+    capture_kind: `agent_${kind}`,
+    project_dir: dir,
+    title
+  };
+  const dedupKey =
+    parseFlag(argv, "--dedup-key") ??
+    dedupHash("agent-event", {
+      session_id: state?.session_id ?? null,
+      kind,
+      text,
+      created_at: new Date().toISOString()
+    });
+
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      }
+      const event = await database.appendEvent({
+        session_id: state.session_id,
+        client_kind: clientKind,
+        event_kind: eventKindForAgentKind(kind),
+        text,
+        metadata,
+        raw_artifacts: [],
+        dedup_key: dedupKey
+      });
+      let memory = null;
+      if (kind === "decision") {
+        memory = await database.createAgentMemory({
+          project_path: dir,
+          memory_type: "decision",
+          scope: "project",
+          scope_kind: "project",
+          title,
+          body: text,
+          confidence: 0.9,
+          created_by: "agent",
+          source_refs: [
+            {
+              source_kind: "event",
+              source_id: String(event.event_id),
+              quote: summarizeText(text, 500),
+              metadata: { capture_kind: "agent_decision" }
+            }
+          ],
+          metadata: { created_from: "recallant_agent_event" }
+        });
+      }
+      const now = new Date().toISOString();
+      state = {
+        ...state,
+        updated_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(event.event_id),
+        last_memory_id: memory ? String(memory.memory_id) : state.last_memory_id
+      };
+      await writeAgentSessionState(dir, state);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_event",
+            mode: "server",
+            kind,
+            project_id: state.project_id,
+            session_id: state.session_id,
+            event_id: event.event_id,
+            memory
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+
+  const record = await appendSpoolRecord(argv, "event", {
+    session_id: state.session_id,
+    client_kind: clientKind,
+    event_kind: eventKindForAgentKind(kind),
+    text,
+    metadata: { ...metadata, local_session_id: state.session_id },
+    raw_artifacts: []
+  });
+  const now = new Date().toISOString();
+  await writeAgentSessionState(dir, {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(record.local_id)
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_event",
+        mode: "offline_spool",
+        kind,
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        warning: "Server write failed or is unavailable; event was spooled locally."
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runAgentCheckpoint(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const payload = checkpointPayloadFromFlags(argv);
+  const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      }
+      const checkpoint = await database.setCheckpoint(state.project_id, payload);
+      const event = await database.appendEvent({
+        session_id: state.session_id,
+        client_kind: state.client_kind,
+        event_kind: "checkpoint",
+        text: `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+        metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: payload },
+        raw_artifacts: [],
+        dedup_key: dedupHash("agent-checkpoint", {
+          session_id: state.session_id,
+          payload,
+          created_at: new Date().toISOString()
+        })
+      });
+      const now = new Date().toISOString();
+      await writeAgentSessionState(dir, {
+        ...state,
+        updated_at: now,
+        last_checkpoint_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(event.event_id)
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_checkpoint",
+            mode: "server",
+            project_id: state.project_id,
+            session_id: state.session_id,
+            checkpoint_updated_at: checkpoint.updated_at,
+            event_id: event.event_id,
+            project_log_update: projectLogUpdate
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+  const record = await appendSpoolRecord(argv, "event", {
+    session_id: state.session_id,
+    client_kind: state.client_kind,
+    event_kind: "checkpoint",
+    text: `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+    metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: payload },
+    raw_artifacts: []
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_checkpoint",
+        mode: "offline_spool",
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        project_log_update: projectLogUpdate
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runAgentCloseout(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const state = await loadActiveAgentState(argv);
+  if (!state) throw new Error("VALIDATION_ERROR: no active Recallant agent session");
+  const payload = checkpointPayloadFromFlags(
+    argv,
+    parseFlag(argv, "--summary") ?? "Session closeout"
+  );
+  const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    const record = await appendSpoolRecord(argv, "event", {
+      session_id: state.session_id,
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
+      metadata: { capture_kind: "agent_closeout", checkpoint_payload: payload },
+      raw_artifacts: []
+    });
+    await writeAgentSessionState(dir, {
+      ...state,
+      status: "offline",
+      updated_at: new Date().toISOString(),
+      last_event_id: String(record.local_id)
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_closeout",
+          mode: "offline_spool",
+          local_id: record.local_id,
+          spool_path: spoolPath(argv),
+          project_log_update: projectLogUpdate
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+  try {
+    const closeout = await database.closeout(
+      state.session_id,
+      payload,
+      "closeout",
+      await getLocalSpoolStatus(argv)
+    );
+    const now = new Date().toISOString();
+    await writeAgentSessionState(dir, {
+      ...state,
+      status: "closed",
+      updated_at: now,
+      last_checkpoint_at: now
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_closeout",
+          mode: "server",
+          project_id: state.project_id,
+          session_id: state.session_id,
+          closeout,
+          project_log_update: projectLogUpdate
+        },
+        null,
+        2
+      )}\n`
+    );
+  } finally {
+    await database.close();
+  }
+}
+
 async function runSpoolAppend(argv: readonly string[]) {
   const recordKind = parseFlag(argv, "--kind") ?? "turn";
   const role = parseFlag(argv, "--role") ?? "user";
@@ -1050,7 +1620,7 @@ async function runSpoolAppend(argv: readonly string[]) {
   const eventKind = parseFlag(argv, "--event-kind") ?? "other";
   const rawArtifactJson = parseFlag(argv, "--raw-artifact-json");
   const rawArtifacts = rawArtifactJson ? JSON.parse(rawArtifactJson) : [];
-  const payload =
+  const payload: Record<string, unknown> =
     recordKind === "event"
       ? {
           client_kind: "codex",
@@ -1063,15 +1633,7 @@ async function runSpoolAppend(argv: readonly string[]) {
   const dedupKey =
     parseFlag(argv, "--dedup-key") ??
     `spool:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
-  const record = {
-    local_id: randomUUID(),
-    created_at: new Date().toISOString(),
-    record_kind: recordKind,
-    dedup_key: dedupKey,
-    payload: { ...payload, dedup_key: dedupKey }
-  };
-  await mkdir(spoolDir(argv), { recursive: true });
-  await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
+  const record = await appendSpoolRecord(argv, recordKind, payload, dedupKey);
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -1117,11 +1679,22 @@ async function runSyncSpool(argv: readonly string[]) {
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for sync-spool");
   const synced = { ...manifest.synced };
   try {
+    const syncSession =
+      unsynced.length > 0
+        ? await database.startSession({
+            client_kind: "recallant-cli",
+            project_path: projectDir(argv),
+            session_label: "spool-sync",
+            resume_policy: "normal"
+          })
+        : null;
+    const syncSessionId = syncSession?.session_id ? String(syncSession.session_id) : null;
     for (const record of unsynced) {
       const payload = record.payload as Record<string, unknown>;
       const result =
         record.record_kind === "event"
           ? await database.appendEvent({
+              session_id: syncSessionId,
               client_kind: String(payload.client_kind ?? "codex"),
               event_kind: String(payload.event_kind ?? "other"),
               text: (payload.text as string | null | undefined) ?? null,
@@ -1130,6 +1703,7 @@ async function runSyncSpool(argv: readonly string[]) {
               dedup_key: String(payload.dedup_key ?? record.dedup_key)
             })
           : await database.appendTurn({
+              session_id: syncSessionId,
               client_kind: String(payload.client_kind ?? "codex"),
               role: payload.role === "assistant" ? "assistant" : "user",
               text: String(payload.text ?? ""),
@@ -1209,12 +1783,16 @@ async function main(argv: readonly string[]) {
   if (command === "restore-plan") return runRestorePlan(argv);
   if (command === "analyze") return runAnalyze(argv);
   if (command === "cleanup") return runCleanup(argv);
+  if (command === "agent-start") return runAgentStart(argv);
+  if (command === "agent-event") return runAgentEvent(argv);
+  if (command === "agent-checkpoint") return runAgentCheckpoint(argv);
+  if (command === "agent-closeout") return runAgentCloseout(argv);
   if (command === "spool-append") return runSpoolAppend(argv);
   if (command === "sync-spool") return runSyncSpool(argv);
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|detach|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|detach|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

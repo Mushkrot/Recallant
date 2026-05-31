@@ -85,6 +85,11 @@ Current implemented slices include:
   asks the owner to clarify the target.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
+- CLI-backed agent capture runtime first slice: `recallant agent-start`, `agent-event`,
+  `agent-checkpoint`, and `agent-closeout` bind existing DB/MCP primitives into a normal agent
+  workflow. Decision events create source-linked accepted project memories; checkpoints update
+  compact `PROJECT_LOG.md`; server-unavailable operation spools records locally for later
+  `sync-spool`.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -246,6 +251,18 @@ Russian-language answer fixture, destructive cleanup confirmation gating, and hu
 screen additions. It also covers the left-rail chat anchor, Russian destructive-action form labels,
 and sandbox-target dry-run selection so sandbox cleanup requests do not accidentally target the
 open Recallant project.
+
+Latest agent capture validation:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- `npm run agent-capture:smoke` against an isolated temporary Postgres database
+
+The agent capture smoke runs the real CLI against a clean sandbox project. It verifies attach,
+agent-start, context read recording, decision/action/test event capture, decision memory creation,
+checkpoint plus `PROJECT_LOG.md` update, closeout, second-session recall of the unique decision, and
+offline spool dry-run/sync/repeat-sync idempotency.
 
 Latest Pre-Pilot R1 validation:
 
