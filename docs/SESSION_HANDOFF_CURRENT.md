@@ -346,6 +346,15 @@ Latest PRD synchronization checkpoint:
 - Full clean regression after the sync passed: `npm run build`, `npm run lint`,
   `npm run format:check`, `make db-reset`, `npm run smoke:core`, and `make db-down`.
 
+Latest production-facing verification:
+
+- No Recallant service restart was required for this CLI/docs-only slice. The installed
+  `recallant` wrapper was verified with `recallant init --target generic --dry-run`.
+- Production service checks passed after the pushed commits: `recallant.service` active, local
+  `/health` OK, authenticated local `/api/review-dashboard` OK, public
+  `https://recallant.unicloud.ca/` returns Cloudflare Access `302`, and `recallant doctor
+  --project-dir /ai/recallant` reports `production_readiness.ready=true`.
+
 Previous contract-hardening checkpoint:
 
 - `recallant closeout-intent` is implemented as a read-only CLI helper for configured Russian and
