@@ -664,6 +664,11 @@ Latest contract hardening checkpoint:
   attempt records a cancelled model call with `confirmation_status=denied`, reuses the existing
   approval id, leaves chunks pending/deferred, and does not create a provider call or a new approval
   request. Phase 4 smoke covers this denied-approval path.
+- A dedicated `schema:smoke` check now verifies the migrated Postgres baseline: `pgvector`,
+  project lifecycle columns, raw-artifact links, heartbeat columns, governed-memory/review/trace
+  tables, ADR-0040 scope/audience columns, and settings/audit tables. `smoke:core` runs it after
+  MCP contract smoke.
+- MCP smoke now enforces the exact tool list, not just required-tool presence.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

@@ -44,14 +44,14 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] SQL migrations match [DATA_MODEL.md](DATA_MODEL.md) by table and column names.
-- [ ] L3 governed memory tables included: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.
-- [ ] Raw workflow evidence table included: `raw_artifacts` with event linkage, pointer/hash/excerpt metadata, and sync/delete markers from [DATA_MODEL.md](DATA_MODEL.md).
-- [ ] Scope/audience fields from [ADR-0040](ADR-0040-memory-scope-and-audience-model.md) are represented for chunks/governed memories/import results: `scope_kind`, `scope_id`, and audience metadata, with `project|developer` kept only as compatibility/default subset.
-- [ ] `sessions` includes lifecycle/recovery/heartbeat fields from `DATA_MODEL.md`: `last_seen_at`, `last_heartbeat_at`, `heartbeat_status`, `heartbeat_metadata`, `status`, `ended_reason`, `recovered_from_session_id`.
-- [ ] Settings tables included: `system_settings`, `developer_settings`, `project_settings`, `session_overrides`, `client_adapter_settings`, `settings_audit_events`.
-- [ ] Erasure workflow storage included: `erasure_requests` or an equivalent redacted-receipt table from [DATA_MODEL.md](DATA_MODEL.md).
-- [ ] `docker-compose.yml` or `Makefile` target `db-up` for local Postgres + pgvector.
+- [x] SQL migrations match [DATA_MODEL.md](DATA_MODEL.md) by table and column names.
+- [x] L3 governed memory tables included: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.
+- [x] Raw workflow evidence table included: `raw_artifacts` with event linkage, pointer/hash/excerpt metadata, and sync/delete markers from [DATA_MODEL.md](DATA_MODEL.md).
+- [x] Scope/audience fields from [ADR-0040](ADR-0040-memory-scope-and-audience-model.md) are represented for chunks/governed memories/import results: `scope_kind`, `scope_id`, and audience metadata, with `project|developer` kept only as compatibility/default subset.
+- [x] `sessions` includes lifecycle/recovery/heartbeat fields from `DATA_MODEL.md`: `last_seen_at`, `last_heartbeat_at`, `heartbeat_status`, `heartbeat_metadata`, `status`, `ended_reason`, `recovered_from_session_id`.
+- [x] Settings tables included: `system_settings`, `developer_settings`, `project_settings`, `session_overrides`, `client_adapter_settings`, `settings_audit_events`.
+- [x] Erasure workflow storage included: `erasure_requests` or an equivalent redacted-receipt table from [DATA_MODEL.md](DATA_MODEL.md).
+- [x] `docker-compose.yml` or `Makefile` target `db-up` for local Postgres + pgvector.
 
 **Gate:** migrations apply cleanly to an empty database.
 
@@ -59,12 +59,12 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Register server name `recallant`.
-- [ ] Stub tools with JSON Schema from [MCP_SPEC.md](MCP_SPEC.md); return fixtures.
-- [ ] Universal session lifecycle/startup tools included in the stub surface: `memory_start_session`, `memory_get_context_pack`, `memory_closeout`.
-- [ ] Hybrid heartbeat stub included: `memory_heartbeat`.
-- [ ] Raw workflow evidence stub included: `memory_append_event`.
-- [ ] Explicit erasure stub included: `memory_forget`.
+- [x] Register server name `recallant`.
+- [x] Stub tools with JSON Schema from [MCP_SPEC.md](MCP_SPEC.md); return fixtures.
+- [x] Universal session lifecycle/startup tools included in the stub surface: `memory_start_session`, `memory_get_context_pack`, `memory_closeout`.
+- [x] Hybrid heartbeat stub included: `memory_heartbeat`.
+- [x] Raw workflow evidence stub included: `memory_append_event`.
+- [x] Explicit erasure stub included: `memory_forget`.
 
 **Gate:** an MCP client can connect to the server and call a stub tool.
 

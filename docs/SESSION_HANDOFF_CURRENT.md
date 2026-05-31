@@ -324,9 +324,12 @@ Current contract-hardening checkpoint:
   MCP `memory_get_context_pack`; Phase 6 smoke compares the core pack sections for parity.
 - Paid API embedding routes now defer after a denied/expired approval without creating a second
   approval or provider call; Phase 4 smoke covers the denied-approval branch.
+- `schema:smoke` now verifies the migrated DB baseline and is part of `smoke:core`; MCP smoke now
+  checks the exact tool list.
 - Targeted verification passed for this slice: `npm run build`, `npm run phase7:smoke`, and
   `npm run phase3:smoke`; follow-up parity verification passed with
-  `npm run phase6:smoke:graph`; paid-approval verification passed with `npm run phase4:smoke`.
+  `npm run phase6:smoke:graph`; paid-approval verification passed with `npm run phase4:smoke`;
+  schema/MCP verification passed with `npm run schema:smoke` and `npm run mcp:smoke`.
 - Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures and the
   broader backup/security/cleanup rows still need explicit smoke-backed closure.
 

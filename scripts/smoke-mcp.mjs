@@ -80,8 +80,15 @@ send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 const list = await waitForResponse(2);
 const actualTools = new Set(list.result?.tools?.map((tool) => tool.name) ?? []);
 const missingTools = expectedTools.filter((name) => !actualTools.has(name));
-if (missingTools.length > 0) {
-  throw new Error(`Missing MCP tools: ${missingTools.join(", ")}`);
+const extraTools = [...actualTools].filter((name) => !expectedTools.includes(name));
+if (missingTools.length > 0 || extraTools.length > 0) {
+  throw new Error(
+    `Unexpected MCP tools: ${JSON.stringify({
+      missing: missingTools,
+      extra: extraTools,
+      actual: [...actualTools].sort()
+    })}`
+  );
 }
 
 send({

@@ -4,28 +4,28 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 
 ## Phase 0
 
-- [ ] Linter is configured and `npm run lint` / `ruff check` or equivalent exits 0.
+- [x] Linter is configured and `npm run lint` / `ruff check` or equivalent exits 0.
 
 ## Phase 1
 
-- [ ] `migrate up` succeeds on an empty Postgres database.
-- [ ] Extension `vector` exists.
-- [ ] `projects` table includes `parent_project_id`, `project_kind`, and `memory_domain`.
-- [ ] `raw_artifacts` table exists and links large raw evidence to `events`.
-- [ ] `sessions` table includes heartbeat fields: `last_heartbeat_at`, `heartbeat_status`, and `heartbeat_metadata`.
-- [ ] Tables for governed memory exist: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.
+- [x] `migrate up` succeeds on an empty Postgres database.
+- [x] Extension `vector` exists.
+- [x] `projects` table includes `parent_project_id`, `project_kind`, and `memory_domain`.
+- [x] `raw_artifacts` table exists and links large raw evidence to `events`.
+- [x] `sessions` table includes heartbeat fields: `last_heartbeat_at`, `heartbeat_status`, and `heartbeat_metadata`.
+- [x] Tables for governed memory exist: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.
 - [x] Erasure workflow storage exists: `erasure_requests` or equivalent redacted receipt storage.
-- [ ] Chunk/governed-memory/import-result storage can represent ADR-0040 `scope_kind`, `scope_id`, and audience metadata; `project|developer` remains only the compatibility/default subset.
-- [ ] Settings tables exist: `system_settings`, `developer_settings`, `project_settings`, `session_overrides`, `client_adapter_settings`, `settings_audit_events`.
+- [x] Chunk/governed-memory/import-result storage can represent ADR-0040 `scope_kind`, `scope_id`, and audience metadata; `project|developer` remains only the compatibility/default subset.
+- [x] Settings tables exist: `system_settings`, `developer_settings`, `project_settings`, `session_overrides`, `client_adapter_settings`, `settings_audit_events`.
 
 ## Phase 2
 
-- [ ] MCP handshake: server returns a tool list with names exactly as in [MCP_SPEC.md](MCP_SPEC.md).
-- [ ] Tool list includes universal session lifecycle tools: `memory_start_session` and `memory_closeout`.
-- [ ] Tool list includes automatic startup context tool: `memory_get_context_pack`.
-- [ ] Tool list includes raw workflow evidence tool: `memory_append_event`.
-- [ ] Tool list includes optional liveness tool: `memory_heartbeat`.
-- [ ] Tool list includes explicit erasure tool: `memory_forget`.
+- [x] MCP handshake: server returns a tool list with names exactly as in [MCP_SPEC.md](MCP_SPEC.md).
+- [x] Tool list includes universal session lifecycle tools: `memory_start_session` and `memory_closeout`.
+- [x] Tool list includes automatic startup context tool: `memory_get_context_pack`.
+- [x] Tool list includes raw workflow evidence tool: `memory_append_event`.
+- [x] Tool list includes optional liveness tool: `memory_heartbeat`.
+- [x] Tool list includes explicit erasure tool: `memory_forget`.
 
 ## Phase 3
 
@@ -48,12 +48,12 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 
 ## Phase 4
 
-- [ ] After appending fixture text long enough to enter the chunk/embed path, each chunk has an `embeddings` row or an explicit `pending` flag if that schema is selected. Fixture size is defined by the test profile.
-- [ ] Default embedding route resolves to local `ollama/nomic-embed-text` unless project/session settings override it.
-- [ ] Cloud embedding fallback candidates include OpenAI and Gemini routes in settings, even if provider calls are stubbed in early tests.
-- [ ] Switching embedding model/dims is blocked unless an explicit reindex/migration workflow is requested.
-- [ ] Every embedding/model call writes a `model_calls` audit row with route class/provider/model/purpose/routing reason/status.
-- [ ] Default-profile paid API route creates a `paid_api_approval_requests` row and does not call the provider until approved.
+- [x] After appending fixture text long enough to enter the chunk/embed path, each chunk has an `embeddings` row or an explicit `pending` flag if that schema is selected. Fixture size is defined by the test profile.
+- [x] Default embedding route resolves to local `ollama/nomic-embed-text` unless project/session settings override it.
+- [x] Cloud embedding fallback candidates include OpenAI and Gemini routes in settings, even if provider calls are stubbed in early tests.
+- [x] Switching embedding model/dims is blocked unless an explicit reindex/migration workflow is requested.
+- [x] Every embedding/model call writes a `model_calls` audit row with route class/provider/model/purpose/routing reason/status.
+- [x] Default-profile paid API route creates a `paid_api_approval_requests` row and does not call the provider until approved.
 
 ## Phase 5 — Golden retrieval (minimal)
 
