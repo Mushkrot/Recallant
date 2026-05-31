@@ -298,6 +298,36 @@ function formatDisplayValue(value: unknown) {
   return String(value);
 }
 
+function isSensitiveSettingKey(key: unknown) {
+  return /(secret|api[_-]?key|token|password|database[_-]?url|auth|cloudflare|encryption)/i.test(
+    String(key ?? "")
+  );
+}
+
+function safeSettingValue(key: unknown, value: unknown) {
+  if (!isSensitiveSettingKey(key)) return value;
+  const configured =
+    value !== null &&
+    value !== undefined &&
+    !(typeof value === "string" && value.trim().length === 0);
+  return {
+    status: configured ? "configured" : "not_configured",
+    reference: String(key ?? "secret_setting"),
+    redacted: true
+  };
+}
+
+function sanitizeSettingRow(row: Record<string, unknown>) {
+  return { ...row, value: safeSettingValue(row.key, row.value) };
+}
+
+function sanitizeDashboardForClient(data: ReviewDashboardData): ReviewDashboardData {
+  return {
+    ...data,
+    settings: data.settings.map(sanitizeSettingRow)
+  };
+}
+
 function parseSettingValue(value: unknown) {
   if (value === null || value === undefined) return undefined;
   if (typeof value === "object") return value;
@@ -341,6 +371,11 @@ function settingLabel(key: unknown) {
 
 function settingSummary(row: Record<string, unknown>) {
   const key = String(row.key ?? "");
+  if (isSensitiveSettingKey(key)) {
+    const value = parseSettingValue(row.value);
+    const status = asRecord(value).status ?? "configured";
+    return `Secret setting is ${String(status).replaceAll("_", " ")}; raw value is hidden.`;
+  }
   const value = parseSettingValue(row.value);
   const record = asRecord(value);
   if (key === "embedding_route") {
@@ -1595,7 +1630,9 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        renderDashboard(await database.getReviewDashboard(dashboardInput)),
+        renderDashboard(
+          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput))
+        ),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
@@ -1605,7 +1642,9 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        JSON.stringify(await database.getReviewDashboard(dashboardInput)),
+        JSON.stringify(
+          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput))
+        ),
         "application/json"
       );
       return;
@@ -1617,13 +1656,15 @@ export function createRecallantHttpServer() {
         memory_id?: string | null;
         message?: string;
       };
-      const chatDashboard = await database.getReviewDashboard({
-        project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
-        selected_memory_id:
-          optionalInput(body.selected_memory_id) ??
-          optionalInput(body.memory_id) ??
-          dashboardInput.selected_memory_id
-      });
+      const chatDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+          selected_memory_id:
+            optionalInput(body.selected_memory_id) ??
+            optionalInput(body.memory_id) ??
+            dashboardInput.selected_memory_id
+        })
+      );
       const result = await buildManagementChatResponse({
         message: String(body.message ?? ""),
         dashboard: chatDashboard,
@@ -1634,10 +1675,12 @@ export function createRecallantHttpServer() {
     }
     if (request.method === "POST" && requestUrl.pathname === "/management-chat") {
       const body = await readForm(request);
-      const chatDashboard = await database.getReviewDashboard({
-        project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
-        selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
-      });
+      const chatDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+          selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
+        })
+      );
       const question = String(body.message ?? "");
       const result = await buildManagementChatResponse({
         message: question,
@@ -1705,10 +1748,12 @@ export function createRecallantHttpServer() {
       const targetId = optionalInput(body.target_id) ?? optionalInput(body.memory_id);
       const targetKind = optionalInput(body.target_kind) ?? "agent_memory";
       const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
-      const forgetDashboard = await database.getReviewDashboard({
-        project_id: projectId,
-        selected_memory_id: targetId
-      });
+      const forgetDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId,
+          selected_memory_id: targetId
+        })
+      );
       write(
         response,
         200,
@@ -1761,10 +1806,12 @@ export function createRecallantHttpServer() {
         write(response, 303, "See other", "text/plain", { location: "/review" });
         return;
       }
-      const detachDashboard = await database.getReviewDashboard({
-        project_id: projectId ?? dashboardInput.project_id,
-        selected_memory_id: dashboardInput.selected_memory_id
-      });
+      const detachDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId ?? dashboardInput.project_id,
+          selected_memory_id: dashboardInput.selected_memory_id
+        })
+      );
       write(
         response,
         200,
@@ -1797,10 +1844,12 @@ export function createRecallantHttpServer() {
         actor_id: "review-ui",
         confirmation: { confirmed: body.confirm === "true" }
       });
-      const settingDashboard = await database.getReviewDashboard({
-        project_id: projectId,
-        selected_memory_id: dashboardInput.selected_memory_id
-      });
+      const settingDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId,
+          selected_memory_id: dashboardInput.selected_memory_id
+        })
+      );
       write(
         response,
         result.ok ? 200 : 409,

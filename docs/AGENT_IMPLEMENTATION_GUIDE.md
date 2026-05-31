@@ -126,20 +126,20 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Owner-facing compact Review UI workbench from [ADR-0016-review-ui-in-v1.md](ADR-0016-review-ui-in-v1.md), [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md), and [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md).
-- [ ] UI runs on the Recallant server deployment per [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md).
-- [ ] First screen follows [ADR-0021-review-ui-first-screen.md](ADR-0021-review-ui-first-screen.md): Review Inbox / Command Center, not a metrics dashboard.
-- [ ] Management UI includes project list/selector and project-specific Settings entrypoint per [SETTINGS.md](SETTINGS.md).
-- [ ] Views: project selector/list, inbox, rules, memory detail/source refs/history, duplicates, conflicts, Cost / Paid API, and project settings shortcut.
-- [ ] Natural-language management chat is available for memory questions, context-pack explanation, cleanup requests, and confirmation-gated actions.
-- [ ] Cleanup / Forget surface exists for stale clusters, duplicate/conflict hygiene, archive/rebuild actions, and permanent erasure dry-run/confirmation.
-- [ ] Controlled Settings UI implements editable project settings, effective source display, confirmation-gated dangerous changes, secret redaction, and settings audit events per [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md).
-- [ ] Actions: accept/approve, reject, promote instruction, demote instruction, archive, unarchive, mark stale, edit, merge, supersede.
-- [ ] UI actions use the same server-side policy path as MCP/CLI review actions and write `agent_memory_review_actions`.
-- [ ] UI is private/local-server oriented and requires Recallant-level auth/session/token even on Tailnet/SSH access; no public SaaS assumption.
-- [ ] UI/admin API route/session design is Cloudflare-ready without enabling public/subdomain access by default.
-- [ ] Initial implementation must be a compact working UI, not an approval-only table, while API/routing structure must not block management-platform expansion.
-- [ ] Chat-driven destructive/cost/security/global-scope/connector actions require explicit confirmation and use the same server-side policy path as UI/CLI/MCP.
+- [x] Owner-facing compact Review UI workbench from [ADR-0016-review-ui-in-v1.md](ADR-0016-review-ui-in-v1.md), [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md), and [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md).
+- [x] UI runs on the Recallant server deployment per [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md).
+- [x] First screen follows [ADR-0021-review-ui-first-screen.md](ADR-0021-review-ui-first-screen.md): Review Inbox / Command Center, not a metrics dashboard.
+- [x] Management UI includes project list/selector and project-specific Settings entrypoint per [SETTINGS.md](SETTINGS.md).
+- [x] Views: project selector/list, inbox, rules, memory detail/source refs/history, duplicates, conflicts, Cost / Paid API, and project settings shortcut.
+- [x] Natural-language management chat is available for memory questions, context-pack explanation, cleanup requests, and confirmation-gated actions.
+- [x] Cleanup / Forget surface exists for stale clusters, duplicate/conflict hygiene, archive/rebuild actions, and permanent erasure dry-run/confirmation.
+- [x] Controlled Settings UI implements editable project settings, effective source display, confirmation-gated dangerous changes, secret redaction, and settings audit events per [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md).
+- [x] Actions: accept/approve, reject, promote instruction, demote instruction, archive, unarchive, mark stale, edit, merge, supersede.
+- [x] UI actions use the same server-side policy path as MCP/CLI review actions and write `agent_memory_review_actions`.
+- [x] UI is private/local-server oriented and requires Recallant-level auth/session/token even on Tailnet/SSH access; no public SaaS assumption.
+- [x] UI/admin API route/session design is Cloudflare-ready without enabling public/subdomain access by default.
+- [x] Initial implementation must be a compact working UI, not an approval-only table, while API/routing structure must not block management-platform expansion.
+- [x] Chat-driven destructive/cost/security/global-scope/connector actions require explicit confirmation and use the same server-side policy path as UI/CLI/MCP.
 
 **Gate:** Review UI tests in `TEST_CONTRACT.md` pass.
 

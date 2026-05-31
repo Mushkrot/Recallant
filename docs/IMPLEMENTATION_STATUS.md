@@ -684,6 +684,11 @@ Latest contract hardening checkpoint:
 - Phase 6 graph/context/forget smoke now covers checkpoint semantic equality, context-pack
   composition with recovery/binding/working/evidence sections, no historical-file import, no full
   raw-artifact leakage, and confirmed redaction of both chunks and governed memories.
+- Review UI smoke now verifies the compact private Command Center contract end to end: authenticated
+  HTML/API access, project navigation, inbox/rules/detail/action surfaces, management chat JSON and
+  browser form paths, Russian answers, confirmation gating for destructive/paid/public/global-risk
+  requests, dangerous setting gates including subscription/preview-model routes, secret-setting
+  redaction in API and HTML, review actions, detach, and forget-forever forms.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

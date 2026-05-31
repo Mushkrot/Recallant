@@ -66,6 +66,22 @@ const sandboxDb = new RecallantDb({
 });
 await db.ensureProject(process.cwd());
 await sandboxDb.ensureProject(sandboxPath);
+const rawProviderSecret = `sk-review-ui-${randomUUID()}`;
+const rawDatabaseSecret = `postgres://recallant:${randomUUID()}@db/recallant_agent_work`;
+await db.pool.query(
+  `
+    INSERT INTO system_settings (key, value, is_secret_ref, updated_by)
+    VALUES
+      ('provider_api_key', $1, true, 'review-ui-smoke'),
+      ('database_url', $2, true, 'review-ui-smoke')
+    ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value,
+        is_secret_ref = EXCLUDED.is_secret_ref,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = now()
+  `,
+  [JSON.stringify(rawProviderSecret), JSON.stringify(rawDatabaseSecret)]
+);
 const session = await db.startSession({
   client_kind: "codex",
   client_version: "smoke",
@@ -218,6 +234,9 @@ try {
     headers: { authorization: `Bearer ${token}` }
   });
   const htmlText = await html.text();
+  if (htmlText.includes(rawProviderSecret) || htmlText.includes(rawDatabaseSecret)) {
+    throw new Error("Review UI HTML leaked raw secret setting values");
+  }
   const requiredHtml = [
     "Recallant Review Command Center",
     "What Needs Attention",
@@ -267,8 +286,17 @@ try {
     headers: { authorization: `Bearer ${token}` }
   });
   const json = await api.json();
+  const serializedDashboard = JSON.stringify(json);
   if (
     api.status !== 200 ||
+    serializedDashboard.includes(rawProviderSecret) ||
+    serializedDashboard.includes(rawDatabaseSecret) ||
+    !json.settings.some(
+      (setting) =>
+        setting.key === "provider_api_key" &&
+        setting.value?.redacted === true &&
+        setting.value?.status === "configured"
+    ) ||
     !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
     json.selected_detail?.memory?.id !== importMemoryId ||
     !json.selected_detail?.source_refs?.some((ref) => ref.source_id === importSource.event_id) ||
@@ -362,6 +390,48 @@ try {
   ) {
     throw new Error(
       `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
+    );
+  }
+
+  const paidApiChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Включи paid api auto_with_caps для всех проектов"
+    })
+  });
+  const paidApiChatJson = await paidApiChat.json();
+  if (
+    paidApiChat.status !== 200 ||
+    paidApiChatJson.confirmation_required !== true ||
+    paidApiChatJson.destructive_or_sensitive !== true
+  ) {
+    throw new Error(`Paid API chat was not confirmation-gated: ${JSON.stringify(paidApiChatJson)}`);
+  }
+
+  const publicExposureChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Открой public access и Cloudflare public route"
+    })
+  });
+  const publicExposureChatJson = await publicExposureChat.json();
+  if (
+    publicExposureChat.status !== 200 ||
+    publicExposureChatJson.confirmation_required !== true ||
+    publicExposureChatJson.destructive_or_sensitive !== true
+  ) {
+    throw new Error(
+      `Public exposure chat was not confirmation-gated: ${JSON.stringify(publicExposureChatJson)}`
     );
   }
 
@@ -922,6 +992,48 @@ try {
   if (blockedSetting.status !== 409 || blockedSettingJson.status !== "confirmation_required") {
     throw new Error(
       `Dangerous setting was not confirmation-gated: ${JSON.stringify(blockedSettingJson)}`
+    );
+  }
+  const blockedSubscriptionSetting = await fetch(`${baseUrl}/api/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      key: "subscription_worker",
+      value: { enabled: true },
+      reason: "review ui subscription worker gate smoke"
+    })
+  });
+  const blockedSubscriptionSettingJson = await blockedSubscriptionSetting.json();
+  if (
+    blockedSubscriptionSetting.status !== 409 ||
+    blockedSubscriptionSettingJson.status !== "confirmation_required"
+  ) {
+    throw new Error(
+      `Subscription worker setting was not confirmation-gated: ${JSON.stringify(blockedSubscriptionSettingJson)}`
+    );
+  }
+  const blockedPreviewModelSetting = await fetch(`${baseUrl}/api/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      key: "model_router_profile",
+      value: { primary: "gemini-3.5-pro-preview" },
+      reason: "review ui preview model gate smoke"
+    })
+  });
+  const blockedPreviewModelSettingJson = await blockedPreviewModelSetting.json();
+  if (
+    blockedPreviewModelSetting.status !== 409 ||
+    blockedPreviewModelSettingJson.status !== "confirmation_required"
+  ) {
+    throw new Error(
+      `Preview model setting was not confirmation-gated: ${JSON.stringify(blockedPreviewModelSettingJson)}`
     );
   }
 

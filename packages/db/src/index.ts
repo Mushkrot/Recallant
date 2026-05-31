@@ -2703,6 +2703,11 @@ export class RecallantDb {
         SELECT key, value, 'system_settings' AS source
         FROM system_settings
         WHERE key IN ('capture_profile', 'embedding_route', 'paid_api_mode')
+           OR is_secret_ref = true
+           OR key ILIKE '%secret%'
+           OR key ILIKE '%api_key%'
+           OR key ILIKE '%token%'
+           OR key ILIKE '%database_url%'
         ORDER BY key, source
       `,
       [dashboardProjectId]

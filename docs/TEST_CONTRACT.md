@@ -98,39 +98,39 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Phase 6.5 — Review UI
 
-- [ ] Review UI is served from the Recallant server deployment or a sibling `recallant-review-ui` process behind the same Recallant private boundary.
-- [ ] First screen is Review Inbox / Command Center, not a raw memory list or metrics dashboard.
-- [ ] v1 UI is a compact workbench, not an approval-only table: it includes project navigation, Review Inbox, Rules, detail panel, action controls, Cost / Paid API, and Settings entrypoint.
-- [ ] Management UI includes a natural-language chat/command surface for memory questions, context-pack explanation, cleanup requests, and action proposals.
-- [ ] Management chat has both an authenticated JSON API and a browser form path, and both use the same confirmation-gated policy response model.
-- [ ] Chat answers in the user's language by default in a fixture where the user asks in Russian.
-- [ ] Chat-driven destructive, cost-affecting, security, global-scope, connector/account, or public-exposure actions require explicit confirmation and execute through the same server policy path as UI/CLI actions.
-- [ ] First screen shows current project/scope/domain/capture profile.
-- [ ] Management UI can list all managed projects and navigate into one project's Review Inbox and Settings.
+- [x] Review UI is served from the Recallant server deployment or a sibling `recallant-review-ui` process behind the same Recallant private boundary.
+- [x] First screen is Review Inbox / Command Center, not a raw memory list or metrics dashboard.
+- [x] v1 UI is a compact workbench, not an approval-only table: it includes project navigation, Review Inbox, Rules, detail panel, action controls, Cost / Paid API, and Settings entrypoint.
+- [x] Management UI includes a natural-language chat/command surface for memory questions, context-pack explanation, cleanup requests, and action proposals.
+- [x] Management chat has both an authenticated JSON API and a browser form path, and both use the same confirmation-gated policy response model.
+- [x] Chat answers in the user's language by default in a fixture where the user asks in Russian.
+- [x] Chat-driven destructive, cost-affecting, security, global-scope, connector/account, or public-exposure actions require explicit confirmation and execute through the same server policy path as UI/CLI actions.
+- [x] First screen shows current project/scope/domain/capture profile.
+- [x] Management UI can list all managed projects and navigate into one project's Review Inbox and Settings.
 - [x] Project Settings UI can edit capture profile, context budget profile, review sensitivity, model route enablement, paid API mode, enabled clients, and project paths/aliases.
 - [x] Settings UI shows effective value and source for at least one project setting inherited from developer/global default.
 - [x] Settings UI writes `settings_audit_events` for every setting change.
-- [ ] Dangerous settings changes require explicit confirmation: paid API enablement, future `auto_with_caps`, subscription worker enablement, developer/global edits, major capture/context increases, preview models, and quality-critical route changes.
-- [ ] Settings UI shows secret status/reference only and never raw provider API keys, database URLs, backup encryption keys, auth secrets, or Cloudflare secret values.
+- [x] Dangerous settings changes require explicit confirmation: paid API enablement, future `auto_with_caps`, subscription worker enablement, developer/global edits, major capture/context increases, preview models, and quality-critical route changes.
+- [x] Settings UI shows secret status/reference only and never raw provider API keys, database URLs, backup encryption keys, auth secrets, or Cloudflare secret values.
 - [ ] First screen shows critical status when present: unclosed/interrupted session, unsynced spool, high-risk conflicts.
-- [ ] First screen has priority lanes or equivalent grouping for Conflicts, Candidate Rules, Important/Needs Review, and Duplicates.
-- [ ] Selecting an item shows source refs/evidence, status/use policy/confidence, related records, and available actions.
-- [ ] Review UI shows inbox records: `candidate`, `needs_review`, important, high-risk, duplicate, and conflict candidates.
-- [ ] Review UI does not make ordinary low-risk memories mandatory review work.
+- [x] First screen has priority lanes or equivalent grouping for Conflicts, Candidate Rules, Important/Needs Review, and Duplicates.
+- [x] Selecting an item shows source refs/evidence, status/use policy/confidence, related records, and available actions.
+- [x] Review UI shows inbox records: `candidate`, `needs_review`, important, high-risk, duplicate, and conflict candidates.
+- [x] Review UI does not make ordinary low-risk memories mandatory review work.
 - [ ] Review UI shows active `instruction_grade` rules with scope/type/project/domain filters.
 - [ ] Management UI includes a Cost / Paid API view showing current day/month estimated paid API cost, cost by project/provider/model/purpose, and pending approvals.
-- [ ] Management UI does not expose a full raw memory browser, graph explorer, broad analytics suite, or public SaaS dashboard in v1.
-- [ ] Browser/UI clients cannot read provider API keys or raw prompts from cost/model-call records.
-- [ ] Memory detail view shows body, status, use policy, confidence, source refs, related records, and review action history.
+- [x] Management UI does not expose a full raw memory browser, graph explorer, broad analytics suite, or public SaaS dashboard in v1.
+- [x] Browser/UI clients cannot read provider API keys or raw prompts from cost/model-call records.
+- [x] Memory detail view shows body, status, use policy, confidence, source refs, related records, and review action history.
 - [x] UI accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede actions update the same database state as `memory_review_agent_memory`; approve may remain as a UI label/alias if needed.
 - [x] UI permanent-forget flow performs dry-run, shows affected counts/scope, requires confirmation, and writes a redacted erasure receipt.
 - [x] UI promotion to `instruction_grade` requires visible source refs and writes a review action.
 - [x] Duplicate view allows choosing a canonical memory and marking the others merged/superseded/archived.
 - [x] Conflict view shows old/new records and can apply a supersede/demote/archive resolution.
-- [ ] Ordinary auto-created recallable memories do not appear as mandatory approval work unless policy marks them important/risky/conflicting.
-- [ ] Review UI/admin API is not publicly exposed by default in the local/server test profile.
-- [ ] Review UI/admin API requires Recallant auth/session/token even when bound to localhost/Tailnet.
-- [ ] Browser/UI clients cannot read provider API keys or secret env values.
+- [x] Ordinary auto-created recallable memories do not appear as mandatory approval work unless policy marks them important/risky/conflicting.
+- [x] Review UI/admin API is not publicly exposed by default in the local/server test profile.
+- [x] Review UI/admin API requires Recallant auth/session/token even when bound to localhost/Tailnet.
+- [x] Browser/UI clients cannot read provider API keys or secret env values.
 
 ## Phase 7
 
