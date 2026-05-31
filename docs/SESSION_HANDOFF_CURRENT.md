@@ -169,6 +169,8 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
   `TEST_CONTRACT.md` and covered by smoke automation.
 - `memory_search(query="project")` and similar session-scoped broad startup queries are rejected with
   `BROAD_STARTUP_QUERY`; agents should start with `memory_get_context_pack`.
+- `recallant doctor` now reports structured owner-server deployment checks for Recallant port
+  registration and the `/ai/SECURITY` consultation baseline.
 
 The current Review action follow-up is complete for the governed-memory action set:
 

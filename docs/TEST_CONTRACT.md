@@ -163,8 +163,8 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Startup broad query fixture such as `memory_search(query="project")` is warned/rejected by context-budget lint or policy tests.
 - [ ] `recallant doctor` returns OK when Postgres and configured Ollama/local provider are available and returns a specific error/status when each is unavailable.
 - [ ] `recallant doctor` reports the configured Ollama/local-model endpoint, reachability, expected/missing models, and fallback route without starting a duplicate Ollama stack.
-- [ ] Owner-server deployment check verifies planned Recallant service ports are registered in `/ai/PORTS.yaml` before daemon/service start.
-- [ ] Owner-server deployment check warns that `/ai/SECURITY` must be consulted before exposure/firewall/Cloudflare/service/secret changes.
+- [x] Owner-server deployment check verifies planned Recallant service ports are registered in `/ai/PORTS.yaml` before daemon/service start.
+- [x] Owner-server deployment check warns that `/ai/SECURITY` must be consulted before exposure/firewall/Cloudflare/service/secret changes.
 - [ ] `recallant doctor` or equivalent diagnostics shows effective model routes for `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`, and marks disabled routes clearly.
 - [ ] Default powerful-model escalation is subscription-first/API-last: active agent or supported subscription worker before paid API where available.
 - [ ] Default paid API profile routes through OpenAI unless project/session settings explicitly select Gemini or Claude.

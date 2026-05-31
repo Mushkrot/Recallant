@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Installer dry-run/profile smoke, full local smoke isolation, policy-aware lint-context, Phase 7 init/discover/import contract coverage, and broad startup search rejection are implemented and verified.
+Status: Installer dry-run/profile smoke, full local smoke isolation, policy-aware lint-context, Phase 7 init/discover/import contract coverage, broad startup search rejection, and owner-server doctor checks are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
 Next step: audit remaining closeout, startup-context, and doctor/model-routing contract gaps against TEST_CONTRACT.
-Last updated: 2026-05-31T08:42:00Z.
+Last updated: 2026-05-31T08:50:00Z.
 
 ## Active Constraints
 
@@ -123,6 +123,8 @@ Last updated: 2026-05-31T08:42:00Z.
 - `memory_search` now rejects session-scoped broad startup queries such as `project` with
   `BROAD_STARTUP_QUERY`, telling agents to start with `memory_get_context_pack` and then ask a
   specific evidence query.
+- `recallant doctor` now emits structured owner-server deployment checks for planned Recallant port
+  registration and the `/ai/SECURITY` consultation baseline.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -206,6 +208,7 @@ Last updated: 2026-05-31T08:42:00Z.
   and smoke isolation fixes
 - `npm run phase7:smoke`; passed after strengthening init/discover/import contract assertions
 - `npm run phase5:smoke`; passed with broad startup query rejection coverage
+- `npm run phase7:smoke`; passed with owner-server doctor ports/security coverage
 
 ## Open Questions
 

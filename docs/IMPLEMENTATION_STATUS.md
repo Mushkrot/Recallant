@@ -546,6 +546,8 @@ Latest product-UX readiness checkpoint:
   secret redaction on confirmed import, and client-specific import audience.
 - `memory_search` rejects session-scoped broad startup queries such as `project` with
   `BROAD_STARTUP_QUERY` and directs agents to start with `memory_get_context_pack`.
+- `recallant doctor` reports structured owner-server deployment checks for planned Recallant port
+  registration and the `/ai/SECURITY` consultation baseline.
 - `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
 - The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
   longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.

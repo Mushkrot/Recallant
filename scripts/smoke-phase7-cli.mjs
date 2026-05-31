@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -242,7 +242,16 @@ if (context.sections?.checkpoint === undefined || context.sections?.binding_rule
   throw new Error(`context preview failed: ${JSON.stringify(context)}`);
 }
 
-const doctor = run(["doctor", "--project-dir", projectDir]);
+const ownerOpsDir = await mkdtemp(join(tmpdir(), "recallant-phase7-owner-ops-"));
+const portsFile = join(ownerOpsDir, "PORTS.yaml");
+const securityPath = join(ownerOpsDir, "SECURITY");
+await writeFile(portsFile, "recallant:\n  port: 3005\n  bind: 127.0.0.1\n");
+await mkdir(securityPath);
+const doctor = run(["doctor", "--project-dir", projectDir], {
+  RECALLANT_PORTS_FILE: portsFile,
+  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_PORT: "3005"
+});
 if (
   doctor.postgres?.reachable !== true ||
   doctor.project_config?.present !== true ||
@@ -251,7 +260,10 @@ if (
   doctor.model_routes?.paid_api_provider?.requires_approval !== true ||
   doctor.model_routes?.subscription_worker?.enabled !== false ||
   doctor.paid_api_mode !== "confirm_each" ||
-  doctor.policy?.hidden_api_routes_allowed !== false
+  doctor.policy?.hidden_api_routes_allowed !== false ||
+  doctor.owner_server_deployment?.ports_file?.registered !== true ||
+  doctor.owner_server_deployment?.security_baseline?.must_consult_before_exposure !== true ||
+  !doctor.owner_server_deployment?.warnings?.some((warning) => warning.includes("SECURITY"))
 ) {
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
 }

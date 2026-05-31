@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
@@ -345,6 +345,15 @@ async function readOptional(path: string) {
     return await readFile(path, "utf8");
   } catch {
     return null;
+  }
+}
+
+async function pathPresent(path: string) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -838,6 +847,46 @@ async function checkOllama() {
   }
 }
 
+async function checkOwnerServerDeployment() {
+  const plannedPort = Number(process.env.RECALLANT_PORT ?? "3005");
+  const portsFile = process.env.RECALLANT_PORTS_FILE ?? "/ai/PORTS.yaml";
+  const securityPath = process.env.RECALLANT_SECURITY_PATH ?? "/ai/SECURITY";
+  const portsContent = await readOptional(portsFile);
+  const portsRegistered = Boolean(
+    portsContent &&
+    portsContent.toLowerCase().includes("recallant") &&
+    portsContent.includes(String(plannedPort))
+  );
+  const securityPresent = await pathPresent(securityPath);
+  const warnings = [];
+  if (!portsRegistered) {
+    warnings.push(
+      `Planned Recallant service port ${plannedPort} is not registered in ${portsFile}.`
+    );
+  }
+  warnings.push(
+    `${securityPath} must be consulted before exposure, firewall, Cloudflare, service, or secret changes.`
+  );
+  return {
+    planned_service: {
+      name: "recallant",
+      port: plannedPort,
+      bind_host: process.env.RECALLANT_HOST ?? "127.0.0.1"
+    },
+    ports_file: {
+      path: portsFile,
+      present: portsContent !== null,
+      registered: portsRegistered
+    },
+    security_baseline: {
+      path: securityPath,
+      present: securityPresent,
+      must_consult_before_exposure: true
+    },
+    warnings
+  };
+}
+
 async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
@@ -886,6 +935,7 @@ async function runDoctor(argv: readonly string[]) {
           hidden_api_routes_allowed: false,
           starts_local_services: false
         },
+        owner_server_deployment: await checkOwnerServerDeployment(),
         owner_server_notes: [
           "/ai/PORTS.yaml must be checked before service start",
           "/ai/SECURITY must be consulted before public exposure"
