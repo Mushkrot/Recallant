@@ -192,10 +192,15 @@ The current Settings UI follow-up is complete for the first editable project-set
 - dangerous route/cost/capture-style changes remain confirmation-gated;
 - `npm run review-ui:smoke` verifies settings editor visibility, inherited/project source display,
   safe setting update, dangerous setting confirmation, confirmed update, and
-  `settings_audit_events` rows.
+  `settings_audit_events` rows;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and authenticated Review HTML shows `Edit project settings`, `Context budget`,
+  `Enabled clients`, `Project aliases`, and `system_settings`.
 
 Latest deployed checkpoint:
 
+- Commit `4700867 Add editable project settings UI` was pushed to `origin/main` and applied by
+  controlled `recallant.service` restart.
 - Commit `fe93e12 Add Review UI permanent forget flow` was pushed to `origin/main` and applied by
   controlled `recallant.service` restart.
 - Commit `c33982f Enable full review action controls` was pushed to `origin/main` and applied by

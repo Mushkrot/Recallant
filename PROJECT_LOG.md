@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, and project settings edit forms are implemented and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, and project settings edit forms are implemented, deployed, and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
 Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer conflict/duplicate resolution views.
-Last updated: 2026-05-31T07:09:14Z.
+Last updated: 2026-05-31T07:16:20Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -140,6 +140,10 @@ Last updated: 2026-05-31T07:09:14Z.
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   settings editor visibility, safe setting update, dangerous setting confirmation, selected-project
   setting writes, and `settings_audit_events` coverage
+- production deploy verification after Settings UI restart: `systemctl is-active
+  recallant.service`, local `/health`, and authenticated Review HTML check for `Edit project
+  settings`, `Context budget`, `Enabled clients`, `Project aliases`, and `system_settings` all
+  passed
 
 ## Open Questions
 

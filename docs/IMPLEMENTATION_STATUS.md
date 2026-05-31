@@ -346,6 +346,9 @@ authenticated Review page shows `Forget forever`, `/memory-forget`, and `Dry-run
 Latest Settings UI validation:
 
 - `npm run review-ui:smoke`
+- Controlled `recallant.service` restart
+- Local `/health`
+- Authenticated Review HTML settings-editor check
 
 The Settings panel now includes human-editable browser forms for capture profile, context budget
 profile, review sensitivity, local embedding route enablement, paid API mode, enabled clients,
@@ -353,7 +356,8 @@ project paths, and project aliases. Project setting writes include `project_id`,
 project is updated instead of the server host project by accident. The smoke suite verifies visible
 effective sources (`project_settings` and `system_settings`), a safe browser form update,
 confirmation gating for a dangerous route-setting change, the confirmed update, and corresponding
-`settings_audit_events` rows.
+`settings_audit_events` rows. The production service was restarted after this server-rendered UI
+change, and the live authenticated Review page shows the settings editor markers.
 
 Latest attach/capture integration validation:
 
