@@ -538,6 +538,9 @@ Latest product-UX readiness checkpoint:
   `recallant-dev` database on `127.0.0.1:15433`.
 - The full smoke suite also verifies source-linked developer-wide cross-project recall and
   project-bound spool sync.
+- `recallant lint-context` is now policy-aware: it resolves CLI overrides, project
+  `context_budget_profile`, or the default profile; expanded/custom CLI overrides require a reason;
+  duplicated history, adapter rule duplication, and secret-like values remain hard failures.
 - `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
 - The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
   longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.

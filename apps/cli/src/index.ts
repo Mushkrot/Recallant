@@ -113,7 +113,10 @@ function positionalArgs(argv: readonly string[]) {
     "--focus",
     "--next-step",
     "--summary",
-    "--title"
+    "--title",
+    "--context-profile",
+    "--override-reason",
+    "--reason"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -372,6 +375,118 @@ Next step: start a Recallant-backed agent session.
 `;
 }
 
+type ContextPolicyProfile = "compact" | "standard" | "expanded" | "custom";
+
+type ContextLintPolicy = {
+  profile: ContextPolicyProfile;
+  source: "default" | "project_settings" | "cli";
+  override_reason: string | null;
+  limits: {
+    agents_max_chars: number;
+    project_log_max_chars: number;
+  };
+  size_excess: "error" | "warn";
+};
+
+const contextPolicyProfiles: Record<
+  ContextPolicyProfile,
+  Omit<ContextLintPolicy, "source" | "override_reason">
+> = {
+  compact: {
+    profile: "compact",
+    limits: { agents_max_chars: 12_000, project_log_max_chars: 16_000 },
+    size_excess: "error"
+  },
+  standard: {
+    profile: "standard",
+    limits: { agents_max_chars: 24_000, project_log_max_chars: 32_000 },
+    size_excess: "error"
+  },
+  expanded: {
+    profile: "expanded",
+    limits: { agents_max_chars: 48_000, project_log_max_chars: 64_000 },
+    size_excess: "warn"
+  },
+  custom: {
+    profile: "custom",
+    limits: { agents_max_chars: 48_000, project_log_max_chars: 64_000 },
+    size_excess: "warn"
+  }
+};
+
+function contextPolicyFromProfile(
+  profile: string | null | undefined,
+  source: ContextLintPolicy["source"],
+  overrideReason: string | null
+): ContextLintPolicy {
+  const selected = profile && profile in contextPolicyProfiles ? profile : "standard";
+  const base = contextPolicyProfiles[selected as ContextPolicyProfile];
+  return { ...base, source, override_reason: overrideReason };
+}
+
+async function readProjectConfig(projectDir: string) {
+  const content = await readOptional(join(projectDir, ".recallant", "config"));
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as { project_id?: string; recallant_server_url?: string };
+  } catch {
+    return null;
+  }
+}
+
+async function readProjectContextProfile(projectDir: string) {
+  if (!process.env.RECALLANT_DATABASE_URL) return null;
+  const config = await readProjectConfig(projectDir);
+  if (!config?.project_id) return null;
+  const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+  await client.connect();
+  try {
+    const result = await client.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'context_budget_profile'",
+      [config.project_id]
+    );
+    const value = result.rows[0]?.value;
+    return typeof value === "string" ? value : null;
+  } finally {
+    await client.end();
+  }
+}
+
+async function resolveContextLintPolicy(
+  projectDir: string,
+  argv: readonly string[]
+): Promise<ContextLintPolicy> {
+  const cliProfile = parseFlag(argv, "--context-profile");
+  const overrideReason =
+    parseFlag(argv, "--override-reason") ?? parseFlag(argv, "--reason") ?? null;
+  if (cliProfile) return contextPolicyFromProfile(cliProfile, "cli", overrideReason);
+  const projectProfile = await readProjectContextProfile(projectDir).catch(() => null);
+  if (projectProfile) return contextPolicyFromProfile(projectProfile, "project_settings", null);
+  return contextPolicyFromProfile("standard", "default", null);
+}
+
+function containsSecretValue(content: string) {
+  return /^\s*[A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|DSN|DATABASE_URL)[A-Z0-9_]*\s*=\s*\S+/im.test(
+    content
+  );
+}
+
+function looksLikeHistoryDump(content: string) {
+  const signals = [
+    ...(content.match(/^#{2,4}\s+(Session|Current Session|History|Handoff)\b/gim) ?? []),
+    ...(content.match(/\b(Current focus|Next step|Last updated|Status):/gim) ?? [])
+  ];
+  return signals.length >= 8;
+}
+
+function adapterFiles(projectDir: string) {
+  return [
+    join(projectDir, "CLAUDE.md"),
+    join(projectDir, ".cursor", "SESSION_HANDOFF.md"),
+    join(projectDir, ".cursor", "rules", "memory.md")
+  ];
+}
+
 function audiencePreviewToJson(audience: string) {
   if (audience.startsWith("specific_client:")) {
     return [{ kind: "specific_client", id: audience.split(":")[1] ?? null }];
@@ -543,19 +658,97 @@ async function runImport(argv: readonly string[]) {
 
 async function runLintContext(argv: readonly string[]) {
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const policy = await resolveContextLintPolicy(projectDir, argv);
   const agents = await readOptional(join(projectDir, "AGENTS.md"));
   const projectLog = await readOptional(join(projectDir, "PROJECT_LOG.md"));
-  const failures = [];
-  if (agents && agents.length > 24_000 && !agents.includes("large-project override")) {
-    failures.push("AGENTS.md exceeds configured bootstrap context budget");
+  const failures: Array<{ code: string; file: string; message: string }> = [];
+  const warnings: Array<{ code: string; file: string; message: string }> = [];
+  const noteSizeExcess = (file: string, length: number, limit: number) => {
+    const item = {
+      code: "context_budget_exceeded",
+      file,
+      message: `${file} has ${length} characters; policy ${policy.profile} allows ${limit}.`
+    };
+    if (policy.size_excess === "warn") warnings.push(item);
+    else failures.push(item);
+  };
+  if (
+    policy.source === "cli" &&
+    (policy.profile === "expanded" || policy.profile === "custom") &&
+    !policy.override_reason
+  ) {
+    failures.push({
+      code: "override_reason_required",
+      file: "context_policy",
+      message: "Expanded/custom context policy overrides require --override-reason."
+    });
+  }
+  if (agents && agents.length > policy.limits.agents_max_chars) {
+    noteSizeExcess("AGENTS.md", agents.length, policy.limits.agents_max_chars);
   }
   if (agents && (agents.match(/## Memory \(Recallant\)/g)?.length ?? 0) > 1) {
-    failures.push("AGENTS.md contains duplicated Memory (Recallant) sections");
+    failures.push({
+      code: "duplicated_memory_section",
+      file: "AGENTS.md",
+      message: "AGENTS.md contains duplicated Memory (Recallant) sections."
+    });
   }
-  if (projectLog && projectLog.length > 32_000 && !projectLog.includes("large-project override")) {
-    failures.push("PROJECT_LOG.md appears to contain long historical archive");
+  if (agents && looksLikeHistoryDump(agents)) {
+    failures.push({
+      code: "history_dump",
+      file: "AGENTS.md",
+      message: "AGENTS.md appears to contain copied historical/session log material."
+    });
   }
-  const result = { ok: failures.length === 0, failures, project_dir: projectDir };
+  if (agents && containsSecretValue(agents)) {
+    failures.push({
+      code: "secret_value",
+      file: "AGENTS.md",
+      message: "AGENTS.md contains a secret-like environment value."
+    });
+  }
+  if (projectLog && projectLog.length > policy.limits.project_log_max_chars) {
+    noteSizeExcess("PROJECT_LOG.md", projectLog.length, policy.limits.project_log_max_chars);
+  }
+  if (projectLog && looksLikeHistoryDump(projectLog) && projectLog.length > 12_000) {
+    failures.push({
+      code: "project_log_archive",
+      file: "PROJECT_LOG.md",
+      message: "PROJECT_LOG.md appears to be an archive instead of a compact current checkpoint."
+    });
+  }
+  if (projectLog && containsSecretValue(projectLog)) {
+    failures.push({
+      code: "secret_value",
+      file: "PROJECT_LOG.md",
+      message: "PROJECT_LOG.md contains a secret-like environment value."
+    });
+  }
+  for (const adapterPath of adapterFiles(projectDir)) {
+    const adapterContent = await readOptional(adapterPath);
+    if (!adapterContent) continue;
+    if (adapterContent.includes("## Memory (Recallant)") || looksLikeHistoryDump(adapterContent)) {
+      failures.push({
+        code: "adapter_rule_duplication",
+        file: adapterPath.slice(projectDir.length + 1),
+        message: "Adapter file duplicates Recallant bootstrap/history instead of pointing to it."
+      });
+    }
+    if (containsSecretValue(adapterContent)) {
+      failures.push({
+        code: "secret_value",
+        file: adapterPath.slice(projectDir.length + 1),
+        message: "Adapter file contains a secret-like environment value."
+      });
+    }
+  }
+  const result = {
+    ok: failures.length === 0,
+    failures,
+    warnings,
+    policy,
+    project_dir: projectDir
+  };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.ok) process.exitCode = 1;
 }

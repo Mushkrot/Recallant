@@ -13,8 +13,8 @@ const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-"));
 await writeFile(join(projectDir, ".env.example"), "OPENAI_API_KEY=\nPUBLIC_FLAG=true\n");
 await writeFile(join(projectDir, "CLAUDE.md"), "# Claude project notes\n");
 
-function run(args, extraEnv = {}) {
-  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+function runRaw(args, extraEnv = {}) {
+  return spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -24,12 +24,42 @@ function run(args, extraEnv = {}) {
     },
     encoding: "utf8"
   });
+}
+
+function run(args, extraEnv = {}) {
+  const result = runRaw(args, extraEnv);
   if (result.status !== 0) {
     throw new Error(
       `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
     );
   }
   return JSON.parse(result.stdout);
+}
+
+function runExpectedFailure(args) {
+  const result = runRaw(args);
+  if (result.status === 0) {
+    throw new Error(`Command unexpectedly passed: recallant ${args.join(" ")}\n${result.stdout}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+async function withClient(callback) {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    return await callback(client);
+  } finally {
+    await client.end();
+  }
+}
+
+function hasFailure(result, code) {
+  return result.failures?.some((failure) => failure.code === code);
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
 }
 
 const dryRun = run(["init", "--target", "codex", "--dry-run", "--project-dir", projectDir]);
@@ -95,6 +125,90 @@ const lint = run(["lint-context", "--project-dir", projectDir]);
 if (lint.ok !== true) {
   throw new Error(`lint-context failed on fresh bootstrap: ${JSON.stringify(lint)}`);
 }
+await withClient(async (client) => {
+  await client.query(
+    `
+      INSERT INTO project_settings (project_id, key, value, reason, updated_by)
+      VALUES ($1, 'context_budget_profile', $2, 'phase7 smoke expanded context policy', 'smoke')
+      ON CONFLICT (project_id, key) DO UPDATE
+      SET value = EXCLUDED.value, reason = EXCLUDED.reason, updated_by = EXCLUDED.updated_by, updated_at = now()
+    `,
+    [init.project_id, JSON.stringify("expanded")]
+  );
+});
+const expandedAgents = `${agents}\n${"Large routing note for an intentionally expanded project.\n".repeat(700)}`;
+await writeFile(join(projectDir, "AGENTS.md"), expandedAgents);
+const expandedLint = run(["lint-context", "--project-dir", projectDir]);
+assert(
+  expandedLint.ok === true &&
+    expandedLint.policy?.profile === "expanded" &&
+    expandedLint.policy?.source === "project_settings",
+  `lint-context did not apply project context policy: ${JSON.stringify(expandedLint)}`
+);
+await writeFile(join(projectDir, "AGENTS.md"), agents);
+
+const largeProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-large-lint-"));
+await writeFile(
+  join(largeProjectDir, "AGENTS.md"),
+  `# Agent Instructions\n\n${"Large but ordinary bootstrap routing note.\n".repeat(800)}`
+);
+const largeDefaultLint = runExpectedFailure(["lint-context", "--project-dir", largeProjectDir]);
+assert(
+  hasFailure(largeDefaultLint, "context_budget_exceeded"),
+  `Default lint policy did not fail oversized bootstrap: ${JSON.stringify(largeDefaultLint)}`
+);
+const largeOverrideLint = run([
+  "lint-context",
+  "--project-dir",
+  largeProjectDir,
+  "--context-profile",
+  "expanded",
+  "--override-reason",
+  "Large ops-heavy project fixture"
+]);
+assert(
+  largeOverrideLint.ok === true && largeOverrideLint.policy?.override_reason,
+  `Explicit large-project override was not accepted: ${JSON.stringify(largeOverrideLint)}`
+);
+const historyProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-history-lint-"));
+await writeFile(
+  join(historyProjectDir, "AGENTS.md"),
+  `# Agent Instructions\n\n${Array.from(
+    { length: 12 },
+    (_, index) =>
+      `## Session ${index}\nStatus: old work\nCurrent focus: archive\nNext step: keep reading logs\nLast updated: 2026-05-${String(
+        index + 1
+      ).padStart(2, "0")}T00:00:00Z\n`
+  ).join("\n")}`
+);
+const historyLint = runExpectedFailure([
+  "lint-context",
+  "--project-dir",
+  historyProjectDir,
+  "--context-profile",
+  "expanded",
+  "--override-reason",
+  "Large project still cannot duplicate history"
+]);
+assert(
+  hasFailure(historyLint, "history_dump"),
+  `History dump lint failure missing: ${JSON.stringify(historyLint)}`
+);
+const secretProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-secret-lint-"));
+await writeFile(join(secretProjectDir, "AGENTS.md"), "OPENAI_API_KEY=sk-fixture-secret\n");
+const secretLint = runExpectedFailure([
+  "lint-context",
+  "--project-dir",
+  secretProjectDir,
+  "--context-profile",
+  "expanded",
+  "--override-reason",
+  "Secret check fixture"
+]);
+assert(
+  hasFailure(secretLint, "secret_value"),
+  `Secret lint failure missing: ${JSON.stringify(secretLint)}`
+);
 
 const context = run(["context", "--project-dir", projectDir, "--task-hint", "project onboarding"]);
 if (context.sections?.checkpoint === undefined || context.sections?.binding_rules === undefined) {

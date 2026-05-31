@@ -154,9 +154,9 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Successful warning-free `memory_closeout` returns `report_required=false`.
 - [ ] `memory_closeout` returns `report_required=true` and warnings when spool is unsynced, conflicts exist, `candidate`/`needs_review` records are created, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
 - [ ] Ambiguous closeout wording uses model routing or asks for confirmation; risky/non-routine actions require confirmation.
-- [ ] `recallant lint-context` passes on fresh bootstrap and fails on a fixture with a large duplicated historical log in `AGENTS.md`.
-- [ ] `recallant lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
-- [ ] `recallant lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
+- [x] `recallant lint-context` passes on fresh bootstrap and fails on a fixture with a large duplicated historical log in `AGENTS.md`.
+- [x] `recallant lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
+- [x] `recallant lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
 - [ ] Startup fixture restores context through checkpoint + governed memories without reading long docs or archive logs.
 - [ ] Startup fixture uses `memory_start_session` followed by `memory_get_context_pack` as the normal automatic path.
 - [ ] `recallant context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.

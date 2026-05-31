@@ -159,6 +159,11 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
   starting Docker, writing DB rows, or touching systemd.
 - The local dev database used by smoke tests is now isolated on `127.0.0.1:15433`; a clean
   `make db-reset` followed by `npm run smoke:core` passes end to end.
+- `recallant lint-context` now applies configured context policy instead of fixed size checks, accepts
+  explicit large-project overrides with a reason, and still fails hard on copied history, adapter
+  rule duplication, or secret-like values.
+- Phase 6 graph/context smoke uses a temporary project path, so full `smoke:core` no longer mutates
+  `/ai/recallant/PROJECT_LOG.md`.
 
 The current Review action follow-up is complete for the governed-memory action set:
 

@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import pg from "pg";
 
@@ -10,6 +13,7 @@ const databaseUrl =
 
 const developerId = randomUUID();
 const projectId = randomUUID();
+const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase6-graph-context-"));
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -18,7 +22,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
+    RECALLANT_PROJECT_PATH: projectDir
   },
   stdio: ["pipe", "pipe", "pipe"]
 });
@@ -74,7 +78,7 @@ send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectDir,
   session_label: "phase6-graph-context-smoke",
   resume_policy: "normal"
 });
@@ -203,7 +207,9 @@ const fetched = await callTool(13, "memory_fetch_chunk", {
   max_chars: 2000
 });
 if (fetched.text !== "[REDACTED]" || fetched.archived_at === null) {
-  throw new Error(`Fetch after forget did not return redacted archived chunk: ${JSON.stringify(fetched)}`);
+  throw new Error(
+    `Fetch after forget did not return redacted archived chunk: ${JSON.stringify(fetched)}`
+  );
 }
 
 try {

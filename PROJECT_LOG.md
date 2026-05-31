@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Installer dry-run/profile smoke and full local smoke isolation are implemented and verified.
+Status: Installer dry-run/profile smoke, full local smoke isolation, and policy-aware lint-context are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: audit remaining CLI init/discover/import contract gaps against TEST_CONTRACT.
-Last updated: 2026-05-31T08:05:26Z.
+Next step: audit remaining CLI init/discover/import and closeout contract gaps against TEST_CONTRACT.
+Last updated: 2026-05-31T08:18:00Z.
 
 ## Active Constraints
 
@@ -109,6 +109,13 @@ Last updated: 2026-05-31T08:05:26Z.
   source refs are present.
 - Spool sync smoke now passes `--project-dir` when syncing a specific project spool, so the fallback
   capture path verifies the intended project binding instead of the caller's cwd.
+- `recallant lint-context` now resolves a configurable context policy from CLI override,
+  project-level `context_budget_profile`, or the default profile. Expanded/custom CLI overrides
+  require an explicit reason.
+- Context lint treats size excess as policy-controlled, but duplicated history dumps, duplicated
+  adapter/bootstrap rules, and secret-like values remain hard failures.
+- Phase 6 graph/context smoke now uses a temporary project path so checkpoint sync cannot mutate
+  `/ai/recallant/PROJECT_LOG.md`.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -185,10 +192,15 @@ Last updated: 2026-05-31T08:05:26Z.
   no env file, data dir, CLI prefix, containers, DB rows, or systemd services were changed
 - Clean `make db-reset` followed by full `npm run smoke:core`; passed against isolated
   `recallant-dev` Postgres on `127.0.0.1:15433`
+- `npm run phase7:smoke`; passed with fresh bootstrap lint, project-level expanded context policy,
+  explicit large-project override, and hard failures for history dumps and secret-like values
+- `npm run phase6:smoke:graph`; passed and left this repo `PROJECT_LOG.md` unchanged
+- Final clean `make db-reset` followed by full `npm run smoke:core`; passed after the lint-context
+  and smoke isolation fixes
 
 ## Open Questions
 
-- None that block the next documented implementation step.
+- None recorded.
 
 ## Recallant
 
