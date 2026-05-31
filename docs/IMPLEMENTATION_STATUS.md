@@ -90,6 +90,10 @@ Current implemented slices include:
   workflow. Decision events create source-linked accepted project memories; checkpoints update
   compact `PROJECT_LOG.md`; server-unavailable operation spools records locally for later
   `sync-spool`.
+- Attach/bootstrap integration for the capture runtime: generated `AGENTS.md`, `PROJECT_LOG.md`,
+  starter memories, startup smoke checkpoint, and owner reports now point agents to
+  `recallant agent-start --task-hint "<current task>"` plus `agent-event`, `agent-checkpoint`, and
+  `agent-closeout` instead of treating project registration as sufficient readiness.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -263,6 +267,14 @@ The agent capture smoke runs the real CLI against a clean sandbox project. It ve
 agent-start, context read recording, decision/action/test event capture, decision memory creation,
 checkpoint plus `PROJECT_LOG.md` update, closeout, second-session recall of the unique decision, and
 offline spool dry-run/sync/repeat-sync idempotency.
+
+Latest attach/capture integration validation:
+
+- `npm run phase10:smoke`
+- `npm run agent-capture:smoke`
+
+Both passed against the same isolated temporary Postgres after generated attach startup files were
+updated to require the capture runtime.
 
 Latest Pre-Pilot R1 validation:
 

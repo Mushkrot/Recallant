@@ -198,8 +198,10 @@ if (
   !JSON.stringify(mcpConfig).includes("recallant") ||
   !agents.includes("Always keep the fixture formatter deterministic.") ||
   !agents.includes("memory_start_session") ||
+  !agents.includes("recallant agent-start") ||
   agents.includes("memory_promote") ||
   !projectLog.includes("Status: attached to Recallant.") ||
+  !projectLog.includes("recallant agent-start") ||
   !projectLog.includes("compact fallback/checkpoint") ||
   !gitignore.includes(".recallant/") ||
   backupAgents.includes("sk-fixturetoken123456") ||

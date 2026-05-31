@@ -2,10 +2,11 @@
 
 ## Current Session
 
-Status: CLI-backed agent capture runtime implemented and smoke-tested.
-Current focus: integrate capture runtime into project attach/bootstrap and Review UI readiness.
-Next step: update attach-generated startup files and reports so normal agents use `agent-start`,
-`agent-event`, `agent-checkpoint`, and `agent-closeout` before claiming project readiness.
+Status: attach/bootstrap now points agents to the CLI-backed capture runtime.
+Current focus: add Review UI/API readiness telemetry for capture-active versus registered-only
+projects.
+Next step: expose last context read, last memory write, last checkpoint, and capture status in the
+Review dashboard.
 
 ## Active Constraints
 
@@ -63,6 +64,10 @@ Next step: update attach-generated startup files and reports so normal agents us
 - Governed-memory recall now tokenizes task hints and scopes context-pack working-memory recall to
   the session project, fixing the issue where a stored decision did not return for a related task
   hint.
+- `recallant attach` now generates startup text and owner reports that point agents to
+  `recallant agent-start --task-hint`, with `agent-event`, `agent-checkpoint`, and
+  `agent-closeout` as the fallback capture runtime. Attach no longer implies that project
+  registration alone is enough.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -77,6 +82,8 @@ Next step: update attach-generated startup files and reports so normal agents us
 - `npm run agent-capture:smoke` against an isolated temporary Postgres on `127.0.0.1:55433`;
   verified attach, agent-start, decision/action/test capture, checkpoint, closeout, later context
   recall, offline spool, sync-spool, and repeat sync idempotency
+- `npm run phase10:smoke` and `npm run agent-capture:smoke` passed together against the same
+  isolated temporary Postgres after attach/bootstrap integration
 
 ## Open Questions
 

@@ -48,7 +48,9 @@ const attachMemorySection = `## Memory (Recallant)
 - On clear pause/exit/closeout intent: call \`memory_closeout\` and update \`PROJECT_LOG.md\` from the closeout payload.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
 - Never paste secrets into memory tools.
-- If MCP is unavailable: update \`PROJECT_LOG.md\` and, when available, write local spool.
+- If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
+  \`recallant agent-event\`, \`recallant agent-checkpoint\`, and \`recallant agent-closeout\`.
+  If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
 `;
 
 function parseFlag(argv: readonly string[], name: string) {
@@ -180,7 +182,7 @@ function compactProjectLog(input: {
 
 Status: attached to Recallant.
 Current focus: Recallant-backed project work.
-Next step: start the next agent session with \`memory_start_session\` and \`memory_get_context_pack\`.
+Next step: start the next agent session with \`recallant agent-start --task-hint "<current task>"\`.
 
 ## Active Constraints
 
@@ -558,7 +560,7 @@ async function createStarterMemory(input: {
       `Project attached to Recallant in ${input.mode} mode.`,
       "Recallant is the main source of truth for durable project memory.",
       "`PROJECT_LOG.md` is a compact fallback/checkpoint file.",
-      "Agents should start with `memory_start_session` and `memory_get_context_pack`.",
+      'Agents should start with `recallant agent-start --task-hint "<current task>"`; direct MCP tools remain the underlying transport when available.',
       `Bootstrap files changed: ${input.changedFiles.join(", ") || "none"}.`
     ].join(" "),
     confidence: 0.95,
@@ -638,8 +640,7 @@ async function runStartupSmoke(input: { database: RecallantDb; projectDir: strin
     {
       current_status: "attach startup smoke complete",
       current_focus: "Recallant-backed project work",
-      next_step:
-        "start the next agent session with memory_start_session and memory_get_context_pack",
+      next_step: "start the next agent session with recallant agent-start --task-hint",
       open_questions: []
     },
     "closeout",
@@ -897,15 +898,15 @@ export async function runAttach(argv: readonly string[]) {
       review_visibility: reviewVisibility,
       diagnostics,
       owner_report: {
-        ready_status: "Project attached.",
-        what_was_done: `Updated bootstrap files and imported ${imported.length} source(s).`,
+        ready_status: "Project attached; agent capture is ready to start.",
+        what_was_done: `Updated bootstrap files, prepared Recallant capture startup, and imported ${imported.length} source(s).`,
         what_needs_attention:
           candidates.filter(candidateNeedsReview).length > 0
             ? `${candidates.filter(candidateNeedsReview).length} imported item(s) need review.`
             : "Nothing urgent.",
         how_to_check:
           "Open the Review UI or inspect .recallant/config, AGENTS.md, and PROJECT_LOG.md.",
-        next_step: "Start an agent session with memory_start_session and memory_get_context_pack."
+        next_step: 'Start an agent session with recallant agent-start --task-hint "<current task>".'
       }
     });
   } finally {

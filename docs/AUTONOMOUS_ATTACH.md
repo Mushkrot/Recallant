@@ -72,7 +72,9 @@ For a new empty project, attach should also create a starter project-local memor
 - which bootstrap files were created or updated;
 - Recallant is the main source of truth for project memory;
 - `PROJECT_LOG.md` is a compact fallback/checkpoint file;
-- agents should start with `memory_start_session` and `memory_get_context_pack`.
+- agents should start with `recallant agent-start --task-hint "<current task>"`, which uses
+  `memory_start_session` and `memory_get_context_pack` when direct MCP is available and local spool
+  fallback when it is not.
 
 This starter memory is ordinary `accepted` + `recall_allowed` memory unless a stronger
 owner-confirmed rule path applies.
@@ -126,8 +128,9 @@ Startup files after attach should be thin:
 After a local backup, autopilot may normalize files when confidence is high:
 
 - add or update `Memory (Recallant)` sections;
-- replace old "read all local history at startup" flows with `memory_start_session` plus
-  `memory_get_context_pack`;
+- replace old "read all local history at startup" flows with the Recallant capture runtime:
+  `recallant agent-start`, meaningful `agent-event` calls, `agent-checkpoint`, and
+  `agent-closeout`;
 - shrink or remove history/handoff sections that were imported as evidence;
 - update `PROJECT_LOG.md` to the compact fallback/checkpoint format;
 - keep project-specific rules that agents still need locally;
