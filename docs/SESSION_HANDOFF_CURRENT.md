@@ -164,6 +164,9 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
   rule duplication, or secret-like values.
 - Phase 6 graph/context smoke uses a temporary project path, so full `smoke:core` no longer mutates
   `/ai/recallant/PROJECT_LOG.md`.
+- Phase 7 init/discover/import contract rows for dry-run, pointer-only config, capture profiles,
+  preview safety, `.env` secret redaction, and client-specific audience are now checked in
+  `TEST_CONTRACT.md` and covered by smoke automation.
 
 The current Review action follow-up is complete for the governed-memory action set:
 

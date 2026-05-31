@@ -62,16 +62,33 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const dryRun = run(["init", "--target", "codex", "--dry-run", "--project-dir", projectDir]);
-try {
-  await stat(join(projectDir, ".recallant", "config"));
-  throw new Error("Dry run created .recallant/config");
-} catch (error) {
-  if (error.code !== "ENOENT") throw error;
+async function assertMissing(path, message) {
+  try {
+    await stat(path);
+    throw new Error(message);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
 }
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+const dryRun = run(["init", "--target", "codex", "--dry-run", "--project-dir", projectDir]);
+await assertMissing(join(projectDir, ".recallant", "config"), "Dry run created .recallant/config");
+await assertMissing(join(projectDir, "AGENTS.md"), "Dry run created AGENTS.md");
+await assertMissing(join(projectDir, "PROJECT_LOG.md"), "Dry run created PROJECT_LOG.md");
 if (dryRun.capture_profile !== "standard" || dryRun.import_candidates.length < 2) {
   throw new Error(`Unexpected init dry-run plan: ${JSON.stringify(dryRun)}`);
 }
+
+const defaultProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-default-"));
+const defaultInit = run(["init", "--target", "codex", "--project-dir", defaultProjectDir]);
+assert(
+  defaultInit.capture_profile === "standard" && isUuid(defaultInit.project_id),
+  `Default init did not report standard profile/valid id: ${JSON.stringify(defaultInit)}`
+);
 
 const init = run([
   "init",
@@ -87,6 +104,8 @@ const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 if (
   config.project_id !== init.project_id ||
+  !isUuid(config.project_id) ||
+  Object.keys(config).sort().join(",") !== "project_id,recallant_server_url" ||
   config.recallant_server_url !== "http://127.0.0.1:3005" ||
   !agents.includes("## Memory (Recallant)") ||
   !agents.includes("memory_start_session") ||
@@ -103,7 +122,11 @@ if (
 }
 
 const discover = run(["discover", "--dry-run", "--project-dir", projectDir]);
-if (discover.writes_memory !== false || discover.candidates.length < 3) {
+if (
+  discover.writes_memory !== false ||
+  discover.promotes_instruction_grade !== false ||
+  discover.candidates.length < 3
+) {
   throw new Error(`Discover dry run failed: ${JSON.stringify(discover)}`);
 }
 
@@ -111,6 +134,10 @@ const envImport = run(["import", "--dry-run", ".env.example", "--project-dir", p
 if (
   envImport.writes_memory !== false ||
   envImport.result_class !== "secret_reference_names_only" ||
+  envImport.source_refs?.length !== 1 ||
+  !Array.isArray(envImport.risks) ||
+  envImport.secret_references?.length < 1 ||
+  envImport.planned_changes?.[0]?.writes_database !== false ||
   !envImport.warning.includes("Preview only")
 ) {
   throw new Error(`Import dry run failed: ${JSON.stringify(envImport)}`);
@@ -237,12 +264,22 @@ try {
       SELECT
         (SELECT count(*)::int FROM projects WHERE id = $1) AS project_count,
         (SELECT value FROM project_settings WHERE project_id = $1 AND key = 'capture_profile') AS capture_profile,
-        (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events
+        (SELECT count(*)::int FROM projects WHERE id = $2) AS default_project_count,
+        (SELECT value FROM project_settings WHERE project_id = $2 AND key = 'capture_profile') AS default_capture_profile,
+        (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events,
+        (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories
     `,
-    [init.project_id]
+    [init.project_id, defaultInit.project_id]
   );
   const row = checks.rows[0];
-  if (row.project_count !== 1 || row.capture_profile !== "detailed" || row.import_events !== 0) {
+  if (
+    row.project_count !== 1 ||
+    row.capture_profile !== "detailed" ||
+    row.default_project_count !== 1 ||
+    row.default_capture_profile !== "standard" ||
+    row.import_events !== 0 ||
+    row.agent_memories !== 0
+  ) {
     throw new Error(`Phase 7 DB state failed: ${JSON.stringify(row)}`);
   }
 } finally {

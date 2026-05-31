@@ -147,7 +147,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] `recallant init --target codex` in a project directory:
+- [x] `recallant init --target codex` in a project directory:
   1. creates a `projects` record, generates `project_id`, and binds it to `developer_id`;
   2. assigns default `capture_profile=standard` unless overridden by `--capture-profile`;
   3. writes `.recallant/config` into the project root with `project_id` and `recallant_server_url`;
@@ -155,10 +155,10 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
   5. creates `PROJECT_LOG.md` if missing;
   6. prints the MCP configuration block for the target client;
   7. may show import candidates, but does not create import events or run imports without explicit `recallant import ...`.
-- [ ] `recallant discover` follows [ADR-0038](ADR-0038-environment-discovery-and-portable-instance.md) and [ADR-0039](ADR-0039-v1-import-workflow.md): scan candidates without silently importing or promoting them.
-- [ ] `recallant import --dry-run` previews source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts before durable writes.
-- [ ] `--dry-run` shows the plan without changes.
-- [ ] `--capture-profile light|standard|detailed|custom` overrides the automatic init default.
+- [x] `recallant discover` follows [ADR-0038](ADR-0038-environment-discovery-and-portable-instance.md) and [ADR-0039](ADR-0039-v1-import-workflow.md): scan candidates without silently importing or promoting them.
+- [x] `recallant import --dry-run` previews source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts before durable writes.
+- [x] `--dry-run` shows the plan without changes.
+- [x] `--capture-profile light|standard|detailed|custom` overrides the automatic init default.
 - [ ] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
 - [x] `recallant lint-context` verifies bootstrap files did not become duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
 - [ ] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.

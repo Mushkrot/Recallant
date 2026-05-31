@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Installer dry-run/profile smoke, full local smoke isolation, and policy-aware lint-context are implemented and verified.
+Status: Installer dry-run/profile smoke, full local smoke isolation, policy-aware lint-context, and Phase 7 init/discover/import contract coverage are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: audit remaining CLI init/discover/import and closeout contract gaps against TEST_CONTRACT.
-Last updated: 2026-05-31T08:18:00Z.
+Next step: audit remaining closeout, startup-context, and doctor/model-routing contract gaps against TEST_CONTRACT.
+Last updated: 2026-05-31T08:33:00Z.
 
 ## Active Constraints
 
@@ -116,6 +116,10 @@ Last updated: 2026-05-31T08:18:00Z.
   adapter/bootstrap rules, and secret-like values remain hard failures.
 - Phase 6 graph/context smoke now uses a temporary project path so checkpoint sync cannot mutate
   `/ai/recallant/PROJECT_LOG.md`.
+- Phase 7 smoke now asserts dry-run creates no files, init writes pointer-only config with valid UUID,
+  default init stores `capture_profile=standard`, detailed override is stored, preview workflows do
+  not create import batches or agent memories, and dry-run import exposes source refs/risks without
+  durable writes.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -197,6 +201,7 @@ Last updated: 2026-05-31T08:18:00Z.
 - `npm run phase6:smoke:graph`; passed and left this repo `PROJECT_LOG.md` unchanged
 - Final clean `make db-reset` followed by full `npm run smoke:core`; passed after the lint-context
   and smoke isolation fixes
+- `npm run phase7:smoke`; passed after strengthening init/discover/import contract assertions
 
 ## Open Questions
 

@@ -134,21 +134,21 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Phase 7
 
-- [ ] `recallant init --target codex --dry-run` in a folder without `.recallant/config` prints a plan and changes no files.
-- [ ] `recallant init --target codex` creates `.recallant/config` with valid UUID `project_id` and a `projects` table record.
-- [ ] `recallant init --target codex` assigns `capture_profile=standard` by default and prints it in the plan/output.
-- [ ] `recallant init --target codex --capture-profile detailed` stores the override and prints it in the plan/output.
-- [ ] `recallant init` stores authoritative project settings on the Recallant server; `.recallant/config` contains only pointer data such as `project_id` and `recallant_server_url`.
-- [ ] `recallant init --target codex` creates or updates thin `AGENTS.md` with a `Memory (Recallant)` section.
-- [ ] `recallant init --target codex` creates `PROJECT_LOG.md` if missing.
-- [ ] `recallant init --target codex` prints the ready MCP config block for Codex.
+- [x] `recallant init --target codex --dry-run` in a folder without `.recallant/config` prints a plan and changes no files.
+- [x] `recallant init --target codex` creates `.recallant/config` with valid UUID `project_id` and a `projects` table record.
+- [x] `recallant init --target codex` assigns `capture_profile=standard` by default and prints it in the plan/output.
+- [x] `recallant init --target codex --capture-profile detailed` stores the override and prints it in the plan/output.
+- [x] `recallant init` stores authoritative project settings on the Recallant server; `.recallant/config` contains only pointer data such as `project_id` and `recallant_server_url`.
+- [x] `recallant init --target codex` creates or updates thin `AGENTS.md` with a `Memory (Recallant)` section.
+- [x] `recallant init --target codex` creates `PROJECT_LOG.md` if missing.
+- [x] `recallant init --target codex` prints the ready MCP config block for Codex.
 - [x] Installed CLI wrapper smoke can install `recallant` into a temporary prefix and use that
   command to run ordinary `recallant attach .`, `agent-start`, decision capture, and closeout.
-- [ ] `recallant init --target codex` may print import candidates, but does not create `events.kind=import_batch` and does not run import without explicit `recallant import ...`.
-- [ ] `recallant discover --dry-run` shows project/server/secret-reference/import candidates without creating active memories or instruction-grade records.
-- [ ] `recallant import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.
-- [ ] `recallant import` of `.env.example` stores variable names/meanings only and never raw secret values.
-- [ ] `recallant import` of client-specific docs such as `CLAUDE.md` defaults to client-adapter/specific-client audience rather than universal all-agent instruction.
+- [x] `recallant init --target codex` may print import candidates, but does not create `events.kind=import_batch` and does not run import without explicit `recallant import ...`.
+- [x] `recallant discover --dry-run` shows project/server/secret-reference/import candidates without creating active memories or instruction-grade records.
+- [x] `recallant import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.
+- [x] `recallant import` of `.env.example` stores variable names/meanings only and never raw secret values.
+- [x] `recallant import` of client-specific docs such as `CLAUDE.md` defaults to client-adapter/specific-client audience rather than universal all-agent instruction.
 - [ ] Closeout intent recognizer treats configured Russian/English closeout phrases and "Exit" as closeout triggers when context supports it.
 - [ ] `memory_closeout` marks the session closed, updates checkpoint, creates/updates governed-memory candidates, and returns a `PROJECT_LOG.md` update payload.
 - [ ] Successful warning-free `memory_closeout` returns `report_required=false`.

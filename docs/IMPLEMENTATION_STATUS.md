@@ -541,6 +541,9 @@ Latest product-UX readiness checkpoint:
 - `recallant lint-context` is now policy-aware: it resolves CLI overrides, project
   `context_budget_profile`, or the default profile; expanded/custom CLI overrides require a reason;
   duplicated history, adapter rule duplication, and secret-like values remain hard failures.
+- Phase 7 smoke now explicitly covers init dry-run/no-write behavior, pointer-only project config,
+  valid project ids, default and overridden capture profiles, discovery/import preview safety, `.env`
+  secret redaction on confirmed import, and client-specific import audience.
 - `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
 - The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
   longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.
