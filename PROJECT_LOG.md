@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, duplicate canonical resolution, and conflict old/new resolution are implemented and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, duplicate canonical resolution, and conflict old/new resolution are implemented, deployed, and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
 Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer dry-run/profile smoke.
-Last updated: 2026-05-31T07:44:25Z.
+Last updated: 2026-05-31T07:46:32Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -167,6 +167,10 @@ Last updated: 2026-05-31T07:44:25Z.
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   conflict old/new detail visibility, supersede/demote/archive action visibility, and use-newer
   supersede form coverage
+- production deploy verification after conflict-resolution restart: `systemctl is-active
+  recallant.service`, local `/health`, and authenticated Review route check for
+  `Conflicts / Duplicates` all passed. Conditional old/new controls remain covered by isolated DB
+  smoke because production has no active conflict fixture.
 
 ## Open Questions
 

@@ -227,10 +227,14 @@ The current conflict-resolution follow-up is complete for old/new Review UI hand
 - `supersede` and `merge` now move superseded records out of `instruction_grade` to preserve the
   governed-memory lifecycle invariant;
 - `npm run review-ui:smoke` verifies the old/new detail and the use-newer supersede form against an
-  isolated database.
+  isolated database;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and the authenticated Review route still renders `Conflicts / Duplicates`.
 
 Latest deployed checkpoint:
 
+- Commit `595e13c Add conflict resolution review UI` was pushed to `origin/main` and applied by
+  controlled `recallant.service` restart.
 - Commit `194435d Add duplicate canonical resolution UI` was pushed to `origin/main` and applied by
   controlled `recallant.service` restart.
 - Commit `505a143 Require source refs for instruction promotion` was pushed to `origin/main` and
