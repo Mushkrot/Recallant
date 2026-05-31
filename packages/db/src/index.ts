@@ -208,6 +208,7 @@ export type ForgetInput = {
 };
 
 export type ProjectSettingInput = {
+  project_id?: string | null;
   key: string;
   value: unknown;
   reason?: string | null;
@@ -542,6 +543,7 @@ function isDangerousSetting(key: string, value: unknown) {
       "subscription_worker",
       "model_router_profile",
       "embedding_route",
+      "embedding_route_enabled",
       "capture_profile",
       "context_budget_profile"
     ].includes(key)
@@ -2620,7 +2622,7 @@ export class RecallantDb {
   }
 
   async setProjectSetting(input: ProjectSettingInput) {
-    const context = await this.ensureProject();
+    const context = input.project_id ? { projectId: input.project_id } : await this.ensureProject();
     if (isDangerousSetting(input.key, input.value) && input.confirmation?.confirmed !== true) {
       return {
         ok: false,

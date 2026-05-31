@@ -107,9 +107,9 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Chat-driven destructive, cost-affecting, security, global-scope, connector/account, or public-exposure actions require explicit confirmation and execute through the same server policy path as UI/CLI actions.
 - [ ] First screen shows current project/scope/domain/capture profile.
 - [ ] Management UI can list all managed projects and navigate into one project's Review Inbox and Settings.
-- [ ] Project Settings UI can edit capture profile, context budget profile, review sensitivity, model route enablement, paid API mode, enabled clients, and project paths/aliases.
-- [ ] Settings UI shows effective value and source for at least one project setting inherited from developer/global default.
-- [ ] Settings UI writes `settings_audit_events` for every setting change.
+- [x] Project Settings UI can edit capture profile, context budget profile, review sensitivity, model route enablement, paid API mode, enabled clients, and project paths/aliases.
+- [x] Settings UI shows effective value and source for at least one project setting inherited from developer/global default.
+- [x] Settings UI writes `settings_audit_events` for every setting change.
 - [ ] Dangerous settings changes require explicit confirmation: paid API enablement, future `auto_with_caps`, subscription worker enablement, developer/global edits, major capture/context increases, preview models, and quality-critical route changes.
 - [ ] Settings UI shows secret status/reference only and never raw provider API keys, database URLs, backup encryption keys, auth secrets, or Cloudflare secret values.
 - [ ] First screen shows critical status when present: unclosed/interrupted session, unsynced spool, high-risk conflicts.

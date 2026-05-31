@@ -34,6 +34,13 @@ type MemoryForgetRenderState = {
   reason?: string | null;
 };
 
+type SettingRenderState = {
+  result?: Record<string, unknown>;
+  key?: string | null;
+  rawValue?: string | null;
+  reason?: string | null;
+};
+
 export function describeServerBoundary() {
   return {
     core: getRecallantCoreInfo(),
@@ -304,13 +311,29 @@ function parseSettingValue(value: unknown) {
   return value;
 }
 
+function parseProjectSettingFormValue(key: string, rawValue: unknown) {
+  const value = String(rawValue ?? "").trim();
+  if (key === "embedding_route_enabled") return value === "true";
+  if (key === "enabled_clients" || key === "project_paths" || key === "project_aliases") {
+    return value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return parseSettingValue(value);
+}
+
 function settingLabel(key: unknown) {
   const settingKey = String(key ?? "");
   const labels: Record<string, string> = {
     capture_profile: "Capture profile",
     context_budget_profile: "Context budget",
+    embedding_route_enabled: "Local embedding route",
+    enabled_clients: "Enabled clients",
     embedding_route: "Local embeddings",
     paid_api_mode: "Paid API mode",
+    project_aliases: "Project aliases",
+    project_paths: "Project paths",
     review_sensitivity: "Review sensitivity"
   };
   return labels[settingKey] ?? settingKey.replaceAll("_", " ");
@@ -738,12 +761,89 @@ function currentProject(data: ReviewDashboardData) {
   return data.projects.find((row) => row.project_id === data.current_project_id) ?? {};
 }
 
-function renderSettings(rows: Array<Record<string, unknown>>) {
-  if (rows.length === 0) return `<p class="empty">No project settings configured.</p>`;
-  return rows
-    .map((row) => {
-      const value = formatDisplayValue(row.value);
-      return `<article class="setting">
+function selectedSettingValue(rows: Array<Record<string, unknown>>, key: string) {
+  const row =
+    rows.find((setting) => setting.key === key && setting.source === "project_settings") ??
+    rows.find((setting) => setting.key === key);
+  return row ? parseSettingValue(row.value) : undefined;
+}
+
+function optionTags(options: string[], selected: unknown) {
+  return options
+    .map((option) => {
+      const active = String(selected ?? "") === option;
+      return `<option value="${escapeHtml(option)}"${active ? " selected" : ""}>${escapeHtml(option.replaceAll("_", " "))}</option>`;
+    })
+    .join("");
+}
+
+function linesValue(value: unknown) {
+  if (Array.isArray(value)) return value.join("\n");
+  if (value === undefined || value === null) return "";
+  return String(value);
+}
+
+function renderSettingResult(projectId: unknown, state?: SettingRenderState) {
+  if (!state?.result) return "";
+  const result = state.result;
+  const key = state.key ?? result.key;
+  const status = String(result.status ?? "");
+  if (status === "confirmation_required") {
+    return `<article class="setting-result">
+      <strong>Confirmation required before changing setting.</strong>
+      <p>This setting can affect cost, model behavior, capture volume, or routing. Review it, then confirm if it is intentional.</p>
+      <form method="post" action="/project-setting">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="key" value="${escapeHtml(key)}" />
+        <input type="hidden" name="value" value="${escapeHtml(state.rawValue)}" />
+        <input type="hidden" name="reason" value="${escapeHtml(state.reason ?? "Review UI confirmed setting change")}" />
+        <input type="hidden" name="confirm" value="true" />
+        <button class="danger" type="submit">Confirm setting change</button>
+      </form>
+    </article>`;
+  }
+  return `<article class="setting-result">
+    <strong>Setting updated.</strong>
+    <p>${escapeHtml(settingLabel(key))} is now stored for this project. The audit log records the previous and new values.</p>
+  </article>`;
+}
+
+function renderSettingForm(input: {
+  projectId: unknown;
+  key: string;
+  valueHtml: string;
+  reason: string;
+  danger?: boolean;
+}) {
+  return `<form class="setting-form" method="post" action="/project-setting">
+    <input type="hidden" name="project_id" value="${escapeHtml(input.projectId)}" />
+    <input type="hidden" name="key" value="${escapeHtml(input.key)}" />
+    <label>${escapeHtml(settingLabel(input.key))}${input.valueHtml}</label>
+    <input type="hidden" name="reason" value="${escapeHtml(input.reason)}" />
+    <button${input.danger ? ' class="danger"' : ""} type="submit">Save</button>
+  </form>`;
+}
+
+function renderSettings(data: ReviewDashboardData, state?: SettingRenderState) {
+  const rows = data.settings;
+  const projectId = data.current_project_id;
+  const project = currentProject(data);
+  const captureProfile = selectedSettingValue(rows, "capture_profile") ?? "standard";
+  const contextBudget = selectedSettingValue(rows, "context_budget_profile") ?? "compact";
+  const reviewSensitivity = selectedSettingValue(rows, "review_sensitivity") ?? "normal";
+  const paidApiMode = selectedSettingValue(rows, "paid_api_mode") ?? "confirm_each";
+  const embeddingEnabled = selectedSettingValue(rows, "embedding_route_enabled");
+  const enabledClients = selectedSettingValue(rows, "enabled_clients") ?? ["codex"];
+  const projectPaths =
+    selectedSettingValue(rows, "project_paths") ?? [project.primary_path].filter(Boolean);
+  const projectAliases = selectedSettingValue(rows, "project_aliases") ?? [];
+  const settingRows =
+    rows.length === 0
+      ? `<p class="empty">No project settings configured.</p>`
+      : rows
+          .map((row) => {
+            const value = formatDisplayValue(row.value);
+            return `<article class="setting">
         <div class="setting-head">
           <h3>${escapeHtml(settingLabel(row.key))}</h3>
           <span>${escapeHtml(row.source)}</span>
@@ -754,8 +854,67 @@ function renderSettings(rows: Array<Record<string, unknown>>) {
           <pre>${escapeHtml(value || "Not set")}</pre>
         </details>
       </article>`;
-    })
-    .join("");
+          })
+          .join("");
+  return `${renderSettingResult(projectId, state)}
+    <details class="settings-editor">
+      <summary>Edit project settings</summary>
+      <div class="settings-grid">
+        ${renderSettingForm({
+          projectId,
+          key: "capture_profile",
+          reason: "Review UI capture profile change",
+          danger: true,
+          valueHtml: `<select name="value">${optionTags(["light", "standard", "detailed"], captureProfile)}</select>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "context_budget_profile",
+          reason: "Review UI context budget profile change",
+          danger: true,
+          valueHtml: `<select name="value">${optionTags(["compact", "standard", "expanded"], contextBudget)}</select>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "review_sensitivity",
+          reason: "Review UI review sensitivity change",
+          valueHtml: `<select name="value">${optionTags(["low", "normal", "strict"], reviewSensitivity)}</select>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "embedding_route_enabled",
+          reason: "Review UI embedding route enablement change",
+          danger: true,
+          valueHtml: `<select name="value">${optionTags(["true", "false"], embeddingEnabled === false ? "false" : "true")}</select>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "paid_api_mode",
+          reason: "Review UI paid API mode change",
+          danger: true,
+          valueHtml: `<select name="value">${optionTags(["disabled", "confirm_each", "auto_with_caps"], paidApiMode)}</select>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "enabled_clients",
+          reason: "Review UI enabled clients change",
+          valueHtml: `<textarea name="value" rows="3">${escapeHtml(linesValue(enabledClients))}</textarea>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "project_paths",
+          reason: "Review UI project paths change",
+          valueHtml: `<textarea name="value" rows="3">${escapeHtml(linesValue(projectPaths))}</textarea>`
+        })}
+        ${renderSettingForm({
+          projectId,
+          key: "project_aliases",
+          reason: "Review UI project aliases change",
+          valueHtml: `<textarea name="value" rows="3">${escapeHtml(linesValue(projectAliases))}</textarea>`
+        })}
+      </div>
+    </details>
+    ${settingRows}`;
 }
 
 function renderCosts(rows: Array<Record<string, unknown>>) {
@@ -1034,11 +1193,13 @@ function renderDashboard(
     chat?: ChatRenderState;
     detach?: DetachRenderState;
     memoryForget?: MemoryForgetRenderState;
+    setting?: SettingRenderState;
   }
 ) {
   const chat = state?.chat;
   const detach = state?.detach;
   const memoryForget = state?.memoryForget;
+  const setting = state?.setting;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1122,6 +1283,14 @@ function renderDashboard(
     .setting-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
     .setting-head span { color: #6a7280; font-size: 12px; }
     .setting-value { margin: 0; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+    .settings-grid { display: grid; gap: 8px; margin-top: 10px; }
+    .setting-form { display: grid; gap: 6px; border: 1px solid #e1e7ef; border-radius: 7px; padding: 8px; background: #fbfcfe; }
+    .setting-form label { display: grid; gap: 5px; color: #303845; font-size: 12px; font-weight: 650; }
+    .setting-form select, .setting-form textarea { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; background: #fff; color: #20242c; }
+    .setting-form button { justify-self: start; }
+    .setting-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin-bottom: 10px; background: #fbfcfe; }
+    .setting-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .setting-result p { margin: 0 0 8px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
     .chat-form { display: grid; gap: 8px; }
@@ -1215,7 +1384,7 @@ function renderDashboard(
       </section>
       <section class="panel">
         <h2>Settings</h2>
-        ${renderSettings(data.settings)}
+        ${renderSettings(data, setting)}
       </section>
     </aside>
   </main>
@@ -1444,6 +1613,40 @@ export function createRecallantHttpServer() {
         actor_kind: body.actor_kind ?? "user"
       });
       write(response, result.ok ? 200 : 409, JSON.stringify(result), "application/json");
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/project-setting") {
+      const body = await readForm(request);
+      const key = String(body.key ?? "");
+      const rawValue = String(body.value ?? "");
+      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+      const result = await database.setProjectSetting({
+        project_id: projectId,
+        key,
+        value: parseProjectSettingFormValue(key, rawValue),
+        reason: optionalInput(body.reason) ?? "Review UI setting change",
+        actor_kind: "user",
+        actor_id: "review-ui",
+        confirmation: { confirmed: body.confirm === "true" }
+      });
+      const settingDashboard = await database.getReviewDashboard({
+        project_id: projectId,
+        selected_memory_id: dashboardInput.selected_memory_id
+      });
+      write(
+        response,
+        result.ok ? 200 : 409,
+        renderDashboard(settingDashboard, {
+          setting: {
+            result: result as Record<string, unknown>,
+            key,
+            rawValue,
+            reason: optionalInput(body.reason)
+          }
+        }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
       return;
     }
     write(response, 404, "Not found", "text/plain");

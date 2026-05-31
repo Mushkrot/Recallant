@@ -168,37 +168,45 @@ try {
     headers: { authorization: `Bearer ${token}` }
   });
   const htmlText = await html.text();
-  if (
-    html.status !== 200 ||
-    !htmlText.includes("Recallant Review Command Center") ||
-    !htmlText.includes("What Needs Attention") ||
-    !htmlText.includes("Project Actions") ||
-    !htmlText.includes("Import Candidates") ||
-    !htmlText.includes("Selected Detail") ||
-    !htmlText.includes("Evidence excerpts") ||
-    !htmlText.includes("Recommended action") ||
-    !htmlText.includes("Technical details") ||
-    !htmlText.includes("Promote to rule") ||
-    !htmlText.includes("Edit memory") ||
-    !htmlText.includes("Supersede / merge") ||
-    !htmlText.includes("Forget forever") ||
-    !htmlText.includes("AGENTS.md") ||
-    !htmlText.includes(importMemoryId) ||
-    !htmlText.includes(candidate.memory_id) ||
-    !htmlText.includes(rule.memory_id) ||
-    !htmlText.includes("Cost / Paid API") ||
-    !htmlText.includes("Settings") ||
-    !htmlText.includes("Management Chat") ||
-    !htmlText.includes('id="management-chat"') ||
-    !htmlText.includes("Agent Readiness") ||
-    !htmlText.includes("Registered only. Agent context has not been read yet.") ||
-    !htmlText.includes("last context read") ||
-    !htmlText.includes("last memory write") ||
-    !htmlText.includes("local cleanup dry-run") ||
-    !htmlText.includes("Ask what to review next") ||
-    !htmlText.includes("Local embeddings")
-  ) {
-    throw new Error(`Review UI HTML smoke failed: ${html.status} ${htmlText.slice(0, 500)}`);
+  const requiredHtml = [
+    "Recallant Review Command Center",
+    "What Needs Attention",
+    "Project Actions",
+    "Import Candidates",
+    "Selected Detail",
+    "Evidence excerpts",
+    "Recommended action",
+    "Technical details",
+    "Promote to rule",
+    "Edit memory",
+    "Supersede / merge",
+    "Forget forever",
+    "AGENTS.md",
+    importMemoryId,
+    candidate.memory_id,
+    rule.memory_id,
+    "Cost / Paid API",
+    "Settings",
+    "Edit project settings",
+    "Context budget",
+    "Enabled clients",
+    "Project aliases",
+    "system_settings",
+    "Management Chat",
+    'id="management-chat"',
+    "Agent Readiness",
+    "Registered only. Agent context has not been read yet.",
+    "last context read",
+    "last memory write",
+    "local cleanup dry-run",
+    "Ask what to review next",
+    "Local embeddings"
+  ];
+  const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
+  if (html.status !== 200 || missingHtml.length > 0) {
+    throw new Error(
+      `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; ${htmlText.slice(0, 500)}`
+    );
   }
 
   const api = await fetch(`${baseUrl}/api/review-dashboard`, {
@@ -216,7 +224,9 @@ try {
     json.project_readiness?.project_registered !== true ||
     typeof json.project_readiness?.capture_event_count !== "number" ||
     json.project_readiness?.last_context_read_at !== null ||
-    !String(json.project_cleanup?.local_cleanup_command ?? "").includes("recallant local-cleanup") ||
+    !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
+      "recallant local-cleanup"
+    ) ||
     json.critical.pending_review < 1
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
@@ -434,7 +444,9 @@ try {
   }
   const postDetachDashboard = await db.getReviewDashboard({ project_id: projectId });
   if (postDetachDashboard.projects.some((project) => project.project_id === sandboxProjectId)) {
-    throw new Error(`Detached sandbox project is still visible: ${JSON.stringify(postDetachDashboard.projects)}`);
+    throw new Error(
+      `Detached sandbox project is still visible: ${JSON.stringify(postDetachDashboard.projects)}`
+    );
   }
 
   const accepted = await fetch(`${baseUrl}/api/review-action`, {
@@ -557,7 +569,9 @@ try {
     editedDetail.source_refs.length !== 1 ||
     !editedDetail.review_actions.some((action) => action.action === "edit")
   ) {
-    throw new Error(`Review action edit did not preserve/update detail: ${JSON.stringify(editedDetail)}`);
+    throw new Error(
+      `Review action edit did not preserve/update detail: ${JSON.stringify(editedDetail)}`
+    );
   }
 
   const mergeForm = await fetch(`${baseUrl}/review-action`, {
@@ -586,7 +600,9 @@ try {
     duplicateDetail.memory?.status !== "superseded" ||
     duplicateDetail.memory?.superseded_by !== editable.memory_id
   ) {
-    throw new Error(`Review action merge did not supersede duplicate: ${JSON.stringify(duplicateDetail)}`);
+    throw new Error(
+      `Review action merge did not supersede duplicate: ${JSON.stringify(duplicateDetail)}`
+    );
   }
 
   const forgetDryRunApi = await fetch(`${baseUrl}/api/memory-forget`, {
@@ -674,7 +690,9 @@ try {
     forgottenDetail.memory?.use_policy !== "do_not_use" ||
     forgottenDetail.source_refs.some((ref) => ref.quote !== null)
   ) {
-    throw new Error(`Memory forget did not redact governed memory: ${JSON.stringify(forgottenDetail)}`);
+    throw new Error(
+      `Memory forget did not redact governed memory: ${JSON.stringify(forgottenDetail)}`
+    );
   }
   const erasureReceipt = await db.pool.query(
     "SELECT target_selector, redacted_receipt FROM erasure_requests WHERE target_selector->>'id' = $1",
@@ -723,6 +741,94 @@ try {
   const updatedSettingJson = await updatedSetting.json();
   if (updatedSetting.status !== 200 || updatedSettingJson.status !== "updated") {
     throw new Error(`Confirmed setting update failed: ${JSON.stringify(updatedSettingJson)}`);
+  }
+
+  const settingForm = await fetch(`${baseUrl}/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      key: "review_sensitivity",
+      value: "strict",
+      reason: "review ui settings form smoke"
+    })
+  });
+  const settingFormHtml = await settingForm.text();
+  if (
+    settingForm.status !== 200 ||
+    !settingFormHtml.includes("Setting updated.") ||
+    !settingFormHtml.includes("Review sensitivity") ||
+    !settingFormHtml.includes("project_settings")
+  ) {
+    throw new Error(`Project setting form update failed: ${settingForm.status} ${settingFormHtml}`);
+  }
+
+  const dangerousSettingForm = await fetch(`${baseUrl}/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      key: "embedding_route_enabled",
+      value: "false",
+      reason: "review ui dangerous setting form smoke"
+    })
+  });
+  const dangerousSettingFormHtml = await dangerousSettingForm.text();
+  if (
+    dangerousSettingForm.status !== 409 ||
+    !dangerousSettingFormHtml.includes("Confirmation required before changing setting.") ||
+    !dangerousSettingFormHtml.includes("Confirm setting change")
+  ) {
+    throw new Error(
+      `Project dangerous setting form did not require confirmation: ${dangerousSettingForm.status} ${dangerousSettingFormHtml}`
+    );
+  }
+
+  const confirmedDangerousSettingForm = await fetch(`${baseUrl}/project-setting`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      key: "embedding_route_enabled",
+      value: "false",
+      reason: "review ui confirmed dangerous setting form smoke",
+      confirm: "true"
+    })
+  });
+  const confirmedDangerousSettingFormHtml = await confirmedDangerousSettingForm.text();
+  if (
+    confirmedDangerousSettingForm.status !== 200 ||
+    !confirmedDangerousSettingFormHtml.includes("Setting updated.") ||
+    !confirmedDangerousSettingFormHtml.includes("Local embedding route")
+  ) {
+    throw new Error(
+      `Project dangerous setting confirmation failed: ${confirmedDangerousSettingForm.status} ${confirmedDangerousSettingFormHtml}`
+    );
+  }
+
+  const settingsAudit = await db.pool.query(
+    "SELECT key, new_value FROM settings_audit_events WHERE scope_id = $1 AND key IN ('review_sensitivity', 'embedding_route_enabled')",
+    [projectId]
+  );
+  if (
+    settingsAudit.rowCount < 2 ||
+    !settingsAudit.rows.some(
+      (row) => row.key === "review_sensitivity" && row.new_value === "strict"
+    ) ||
+    !settingsAudit.rows.some(
+      (row) => row.key === "embedding_route_enabled" && row.new_value === false
+    )
+  ) {
+    throw new Error(`Project setting audit rows missing: ${JSON.stringify(settingsAudit.rows)}`);
   }
 
   const audit = await db.getReviewDashboard();

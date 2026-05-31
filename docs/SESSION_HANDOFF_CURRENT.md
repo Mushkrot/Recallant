@@ -180,6 +180,20 @@ The current Review permanent-forget follow-up is complete for selected governed 
   `/health` is OK, and authenticated Review HTML shows `Forget forever`, `/memory-forget`, and
   `Dry-run forget forever`.
 
+The current Settings UI follow-up is complete for the first editable project-settings slice:
+
+- Settings now shows browser forms for capture profile, context budget profile, review sensitivity,
+  local embedding route enablement, paid API mode, enabled clients, project paths, and project
+  aliases;
+- `/project-setting` form posts and `/api/project-setting` JSON posts both write through
+  `setProjectSetting`;
+- `setProjectSetting` now accepts `project_id`, so Review UI writes target the selected project
+  rather than silently using the server host project;
+- dangerous route/cost/capture-style changes remain confirmation-gated;
+- `npm run review-ui:smoke` verifies settings editor visibility, inherited/project source display,
+  safe setting update, dangerous setting confirmation, confirmed update, and
+  `settings_audit_events` rows.
+
 Latest deployed checkpoint:
 
 - Commit `fe93e12 Add Review UI permanent forget flow` was pushed to `origin/main` and applied by

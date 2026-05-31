@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, and UI permanent-forget dry-run/confirm are implemented, deployed, and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, and project settings edit forms are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer settings edit coverage.
-Last updated: 2026-05-31T07:01:50Z.
+Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer conflict/duplicate resolution views.
+Last updated: 2026-05-31T07:09:14Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -87,6 +87,9 @@ Last updated: 2026-05-31T07:01:50Z.
 - Review UI permanent-forget now has a separate selected-memory flow: dry-run first, explicit
   confirm second, governed-memory redaction on confirm, and redacted receipt display without erased
   content.
+- Review UI project settings now has human-editable forms for capture profile, context budget,
+  review sensitivity, local embedding route enablement, paid API mode, enabled clients, project
+  paths, and project aliases. Setting writes target the selected project and record audit events.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -134,6 +137,9 @@ Last updated: 2026-05-31T07:01:50Z.
 - production deploy verification after permanent-forget restart: `systemctl is-active
   recallant.service`, local `/health`, and authenticated Review HTML check for `Forget forever`,
   `/memory-forget`, and `Dry-run forget forever` all passed
+- `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
+  settings editor visibility, safe setting update, dangerous setting confirmation, selected-project
+  setting writes, and `settings_audit_events` coverage
 
 ## Open Questions
 
