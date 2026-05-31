@@ -281,21 +281,23 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Product Acceptance - Agent Capture Loop
 
-- [ ] Project attach readiness is not satisfied by project registration alone; the dashboard/API must
+- [x] Project attach readiness is not satisfied by project registration alone; the dashboard/API must
   distinguish `registered only` from `capture active`.
-- [ ] A clean-project acceptance smoke runs `recallant attach .` through the normal default path.
-- [ ] The acceptance smoke starts a Recallant-backed agent session from the attached project.
-- [ ] The smoke obtains a context pack before non-trivial work and records that context read.
-- [ ] The smoke writes at least one unique owner decision, one agent action, one verification result,
+- [x] A clean-project acceptance smoke runs `recallant attach .` through the normal default path.
+- [x] The acceptance smoke starts a Recallant-backed agent session from the attached project.
+- [x] The smoke obtains a context pack before non-trivial work and records that context read.
+- [x] The smoke writes at least one unique owner decision, one agent action, one verification result,
   and one checkpoint through the same capture path generated for agents.
-- [ ] The smoke closes the session and updates compact `PROJECT_LOG.md`.
-- [ ] A second session in the same project receives the unique previous decision through
+- [x] The smoke closes the session and updates compact `PROJECT_LOG.md`.
+- [x] A second session in the same project receives the unique previous decision through
   `memory_get_context_pack` or an equivalent context command without reading historical project logs.
-- [ ] The Review UI/API shows last context read, last memory write, last checkpoint, and capture
+- [x] The Review UI/API shows last context read, last memory write, last checkpoint, and capture
   status for the project.
-- [ ] Offline/server-unavailable mode writes capture records to `.recallant/spool`, syncs them later,
+- [x] Offline/server-unavailable mode writes capture records to `.recallant/spool`, syncs them later,
   and does not duplicate records on repeat sync.
-- [ ] `/ai/recallant` dogfoods the same capture loop: real Recallant development work is written to
+- [x] The acceptance smoke performs detach dry-run plus confirmed safe detach and verifies project
+  files remain intact while the test project is hidden from active Recallant views/search.
+- [x] `/ai/recallant` dogfoods the same capture loop: real Recallant development work is written to
   Recallant and recalled in a later Recallant-backed session.
 
 ## Cross-client smoke

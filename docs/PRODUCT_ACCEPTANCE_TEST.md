@@ -52,7 +52,7 @@ The final readiness claim must include:
 
 - local build/lint/format checks;
 - component smoke tests for the touched subsystem;
-- the product acceptance smoke on an isolated project;
+- `npm run product-acceptance:smoke` on an isolated project;
 - dogfood proof that `/ai/recallant` itself can write and recall Recallant work through the same
   capture loop;
 - production health checks after deploy when deployment changed.

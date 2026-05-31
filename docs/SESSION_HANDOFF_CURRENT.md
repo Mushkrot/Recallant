@@ -1,6 +1,6 @@
 # Current Session Handoff
 
-Last updated: 2026-05-30.
+Last updated: 2026-05-31.
 
 This is the current handoff for the next Recallant session. Start here after reading `AGENTS.md`.
 
@@ -9,16 +9,18 @@ This is the current handoff for the next Recallant session. Start here after rea
 Recallant is deployed on the owner server, the GutenDocx copied-project sandbox pilot is complete,
 and the first product-UX readiness pass is deployed. Phase 10 has working first slices for
 autonomous project attach/detach, controlled cross-project recall, one-command project onboarding,
-AI-backed Management Chat, and owner-confirmed developer-wide rules. The main product loop is still
-incomplete until the Product Acceptance agent capture scenario passes: an attached project must
-start a Recallant-backed session, read context, write decisions/actions/tests/checkpoints, close out,
-and recall that memory in a later session without the owner acting as QA.
+AI-backed Management Chat, and owner-confirmed developer-wide rules. The Product Acceptance agent
+capture scenario now passes for the first production-ready slice: a clean project can run ordinary
+`recallant attach .`, start a Recallant-backed session, read context, write
+decisions/actions/tests/checkpoints, close out, recall that memory in a later session, show
+capture-active readiness in the Review UI/API, and detach safely without touching project files.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
-work is to deepen owner-facing Management UI action flows or add optional local sandbox-file cleanup
-after confirmed detach.
+work is to deepen owner-facing Management UI action flows, add optional local sandbox-file cleanup
+after confirmed detach, or package the install/onboarding story for a fresh non-owner server
+profile.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -122,6 +124,18 @@ The current install/onboarding UX target is implemented for the owner-server pro
   `RECALLANT_PROJECT_ID`/`RECALLANT_PROJECT_PATH` and asserts that a new sandbox receives its own
   project id.
 
+The current Product Acceptance target is complete for the first implementation slice:
+
+- `npm run product-acceptance:smoke` uses a clean project and ordinary `recallant attach .`;
+- the smoke verifies agent-start, context-read capture, decision/action/test events, checkpoint,
+  closeout, second-session recall, Review dashboard capture readiness, zero lingering active
+  sessions after preview/verification, offline spool sync/idempotency, and safe detach
+  dry-run/confirm;
+- `/ai/recallant` dogfooded the same capture path in production and a later live context pack
+  recalled memory `bbe351f3-66a1-4f1c-a963-ff545c7e314b`;
+- `recallant.service` was restarted after the readiness/deploy change and local `/health`,
+  authenticated `/api/review-dashboard`, and Review HTML readiness checks passed.
+
 Latest deployed checkpoint:
 
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
@@ -169,18 +183,9 @@ Latest QA correction checkpoint:
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 
-The next required target is the Product Acceptance agent capture loop:
-
-- CLI/MCP-backed capture runtime for session start, context read, meaningful events, checkpoint, and
-  closeout;
-- attach/bootstrap integration so generated agent instructions require that runtime;
-- UI/API readiness telemetry that distinguishes registered-only projects from capture-active
-  projects;
-- clean-project acceptance smoke;
-- dogfood proof that `/ai/recallant` writes and recalls its own work through Recallant.
-
-Richer Management UI action flows and optional local sandbox-file cleanup are lower priority until
-this loop is green.
+The next required target is no longer the Product Acceptance loop; that loop is green for the first
+slice. Richer Management UI action flows, optional local sandbox-file cleanup, and fresh-server
+packaging are now the highest-value follow-ups.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -211,5 +216,5 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 ## Success Condition For The Next Session
 
 The next session should start clean from this handoff, `PROJECT_LOG.md`, and current git state. It
-must continue the Product Acceptance agent capture loop until the acceptance smoke and `/ai/recallant`
-dogfood verification pass, unless a real owner-dependent blocker appears.
+should continue from the green Product Acceptance slice into the next documented follow-up without
+reopening the already-passed attach/capture/dogfood gate unless a regression appears.

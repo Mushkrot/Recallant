@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: live self-dogfood capture passed; CLI session cleanup fix is in progress.
-Current focus: commit the session-cleanup fix, then restart the Review UI service so capture readiness is visible live.
-Next step: deploy the rebuilt service and verify `/ai/recallant` shows capture-active readiness.
-Last updated: 2026-05-31T06:04:10Z.
+Status: Product Acceptance agent capture loop passed for the first production-ready slice.
+Current focus: package the acceptance smoke/docs checkpoint and continue to the next follow-up.
+Next step: deepen owner-facing Management UI actions, optional local sandbox cleanup, or fresh-server onboarding packaging.
+Last updated: 2026-05-31T06:10:00Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -71,6 +71,10 @@ Last updated: 2026-05-31T06:04:10Z.
   captured decision count.
 - Context previews and spool sync now close their technical sessions with `client_exit` so ordinary
   context checks do not leave confusing active sessions in the Review UI.
+- `npm run product-acceptance:smoke` is the named acceptance gate. It uses ordinary
+  `recallant attach .`, verifies the capture loop, confirms later recall, checks dashboard
+  readiness, verifies no lingering active sessions, exercises offline spool sync, and safely
+  detaches the test project without changing files.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -97,6 +101,10 @@ Last updated: 2026-05-31T06:04:10Z.
   decision
 - rerun `npm run agent-capture:smoke` after the session cleanup fix; smoke now also asserts active
   sessions are zero after recall verification
+- `npm run product-acceptance:smoke` rerun against isolated temporary Postgres on
+  `127.0.0.1:55433`; passed after adding ordinary attach and detach cleanup checks
+- production deploy verification after restart: `systemctl is-active recallant.service`, local
+  `/health`, authenticated `/api/review-dashboard`, and Review HTML readiness check all passed
 
 ## Open Questions
 

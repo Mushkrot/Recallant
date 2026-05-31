@@ -182,11 +182,12 @@ structured settings as formatted JSON instead of `[object Object]`.
 
 ## Active Next Plan
 
-The active next checkpoint is the Product Acceptance agent capture loop. The detailed pilot record
-remains [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md), but copied
-project pilot success is no longer enough: Recallant must prove that a normal attached project starts
-capture, writes decisions/actions/tests/checkpoints, closes out, and recalls that memory in a later
-session.
+The Product Acceptance agent capture loop is now complete for the first production-ready slice. The
+detailed pilot record remains
+[PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md), but the stronger gate
+is now covered: a normal attached project starts capture, writes decisions/actions/tests/checkpoints,
+closes out, recalls that memory in a later session, exposes capture readiness in the dashboard, and
+can be detached safely without touching project files.
 
 Current work order:
 
@@ -204,15 +205,20 @@ Current work order:
 10. Phase 10 controlled cross-project recall first slice. Complete for copied-project fixtures and
     covered by `scripts/smoke-phase10-cross-project.mjs`.
 
-Next required work:
+Completed Product Acceptance work:
 
-1. Implement the CLI/MCP-backed agent capture runtime and local spool fallback for normal agent work.
-2. Make `recallant attach .` generate startup files that require the capture runtime before
-   non-trivial work.
-3. Add Review UI/API readiness telemetry for registered-only vs capture-active projects.
-4. Add the clean-project product acceptance smoke and a `/ai/recallant` dogfood verification.
-5. Only after this loop is green should richer management actions or optional local sandbox cleanup
-   become the next priority.
+1. CLI/MCP-backed agent capture runtime and local spool fallback for normal agent work.
+2. `recallant attach .` bootstrap files that require the capture runtime before non-trivial work.
+3. Review UI/API readiness telemetry for registered-only vs capture-active projects.
+4. Clean-project `npm run product-acceptance:smoke`.
+5. `/ai/recallant` live dogfood write + recall verification.
+6. Safe detach dry-run + confirmed detach in the acceptance smoke.
+
+Next useful work:
+
+1. Deepen owner-facing Management UI action flows beyond the first implementation slice.
+2. Add optional local sandbox-file cleanup after confirmed detach.
+3. Package the install/onboarding story for a fresh non-owner server profile.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -261,17 +267,19 @@ screen additions. It also covers the left-rail chat anchor, Russian destructive-
 and sandbox-target dry-run selection so sandbox cleanup requests do not accidentally target the
 open Recallant project.
 
-Latest agent capture validation:
+Latest product acceptance validation:
 
 - `npm run build`
 - `npm run lint`
 - `npm run format:check`
-- `npm run agent-capture:smoke` against an isolated temporary Postgres database
+- `npm run product-acceptance:smoke` against an isolated temporary Postgres database
 
-The agent capture smoke runs the real CLI against a clean sandbox project. It verifies attach,
-agent-start, context read recording, decision/action/test event capture, decision memory creation,
-checkpoint plus `PROJECT_LOG.md` update, closeout, second-session recall of the unique decision, and
-offline spool dry-run/sync/repeat-sync idempotency.
+The product acceptance smoke runs the real CLI against a clean project through ordinary
+`recallant attach .`. It verifies attach, agent-start, context read recording,
+decision/action/test event capture, decision memory creation, checkpoint plus `PROJECT_LOG.md`
+update, closeout, second-session recall of the unique decision, dashboard readiness fields,
+active-session cleanup, safe detach dry-run plus confirmed detach, and offline
+spool dry-run/sync/repeat-sync idempotency.
 
 Latest attach/capture integration validation:
 
@@ -284,10 +292,10 @@ updated to require the capture runtime.
 Latest Review UI readiness validation:
 
 - `npm run review-ui:smoke`
-- `npm run agent-capture:smoke`
+- `npm run product-acceptance:smoke`
 
-The Review UI smoke verifies the registered-only state, while the agent capture smoke verifies the
-capture-active dashboard API fields after a real CLI capture loop.
+The Review UI smoke verifies the registered-only state, while the product acceptance smoke verifies
+the capture-active dashboard API fields after a real CLI capture loop.
 
 Latest self-dogfood validation:
 
@@ -297,7 +305,7 @@ Latest self-dogfood validation:
 - Live `recallant agent-checkpoint`
 - Live `recallant agent-closeout`
 - Live `recallant context --task-hint "product acceptance decision ..."`
-- `npm run agent-capture:smoke`
+- `npm run product-acceptance:smoke`
 
 The live context pack recalled the captured product-acceptance decision from memory
 `bbe351f3-66a1-4f1c-a963-ff545c7e314b`. The smoke suite also verifies that context preview and

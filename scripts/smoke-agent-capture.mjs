@@ -45,8 +45,12 @@ const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-off
 const marker = `CAPTURE-SMOKE-${randomUUID()}`;
 
 try {
-  const attach = await cli(onlineProject, ["attach", ".", "--sandbox"]);
+  const attach = await cli(onlineProject, ["attach", "."]);
   assert(attach.status === "attached", `attach failed: ${JSON.stringify(attach)}`);
+  assert(
+    attach.requested_mode === "autopilot" && attach.effective_mode === "autopilot",
+    `ordinary attach did not use autopilot: ${JSON.stringify(attach)}`
+  );
 
   const started = await cli(onlineProject, [
     "agent-start",
@@ -183,6 +187,33 @@ try {
   const projectLog = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
   assert(projectLog.includes(marker), "PROJECT_LOG was not updated with checkpoint marker");
 
+  const detachDryRun = await cli(onlineProject, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--dry-run"
+  ]);
+  assert(
+    detachDryRun.status === "pending_confirmation" && detachDryRun.writes_database === false,
+    `detach dry-run changed state or skipped confirmation: ${JSON.stringify(detachDryRun)}`
+  );
+
+  const detach = await cli(onlineProject, ["detach", "--project-id", attach.project_id, "--confirm"]);
+  assert(
+    detach.status === "detached" &&
+      detach.writes_database === true &&
+      detach.changes?.physically_deleted_records === 0 &&
+      detach.changes?.files_changed === 0 &&
+      detach.lifecycle?.visibility === "hidden" &&
+      detach.lifecycle?.searchable === false,
+    `detach did not safely remove project from active Recallant views: ${JSON.stringify(detach)}`
+  );
+  const configAfterDetach = await readFile(join(onlineProject, ".recallant", "config"), "utf8");
+  assert(
+    configAfterDetach.includes(attach.project_id),
+    "detach unexpectedly removed or rewrote local project config"
+  );
+
   const offlineStart = await cli(
     offlineProject,
     ["agent-start", "--task-hint", `${marker} offline capture`],
@@ -210,4 +241,4 @@ try {
   await rm(offlineProject, { recursive: true, force: true });
 }
 
-process.stdout.write("Agent capture smoke passed\n");
+process.stdout.write("Product acceptance smoke passed\n");
