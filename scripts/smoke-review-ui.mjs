@@ -139,7 +139,17 @@ const duplicate = await db.createAgentMemory({
   title: "Review UI duplicate memory",
   body: "Review UI should merge this duplicate into another memory.",
   created_by: "agent",
-  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate memory" }]
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate memory" }],
+  metadata: { possible_duplicate: true, duplicate_group: "review-ui-smoke" }
+});
+const duplicatePeer = await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Review UI duplicate peer",
+  body: "Review UI should offer this peer as another canonical option.",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate peer" }],
+  metadata: { possible_duplicate: true, duplicate_group: "review-ui-smoke" }
 });
 const noSourcePromotion = await db.createAgentMemory({
   memory_type: "procedure",
@@ -188,6 +198,8 @@ try {
     "Promote to rule",
     "Edit memory",
     "Supersede / merge",
+    "Duplicate resolution",
+    "Keep this, merge other",
     "Forget forever",
     "AGENTS.md",
     importMemoryId,
@@ -580,6 +592,55 @@ try {
       `No-source promotion UI guard failed: ${noSourceHtml.status} ${noSourceHtmlText}`
     );
   }
+
+  const duplicateResolutionHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&memory_id=${duplicate.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const duplicateResolutionText = await duplicateResolutionHtml.text();
+  if (
+    duplicateResolutionHtml.status !== 200 ||
+    !duplicateResolutionText.includes("Duplicate resolution") ||
+    !duplicateResolutionText.includes("Review UI duplicate peer") ||
+    !duplicateResolutionText.includes("Keep this, merge other") ||
+    !duplicateResolutionText.includes("Use other, supersede this")
+  ) {
+    throw new Error(
+      `Duplicate resolution UI failed: ${duplicateResolutionHtml.status} ${duplicateResolutionText}`
+    );
+  }
+
+  const duplicateCanonicalForm = await fetch(`${baseUrl}/review-action`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      memory_id: duplicate.memory_id,
+      action: "merge",
+      merge_memory_ids: duplicatePeer.memory_id,
+      note: "review ui duplicate resolution smoke"
+    })
+  });
+  if (
+    duplicateCanonicalForm.status !== 303 ||
+    !String(duplicateCanonicalForm.headers.get("location")).includes(duplicate.memory_id)
+  ) {
+    throw new Error(`Duplicate canonical form failed: ${duplicateCanonicalForm.status}`);
+  }
+  const duplicatePeerDetail = await db.getAgentMemory(duplicatePeer.memory_id);
+  if (
+    duplicatePeerDetail.memory?.status !== "superseded" ||
+    duplicatePeerDetail.memory?.superseded_by !== duplicate.memory_id
+  ) {
+    throw new Error(`Duplicate peer was not merged: ${JSON.stringify(duplicatePeerDetail)}`);
+  }
+
   const demoted = await apiReviewAction(ruleMemory.memory_id, "demote_instruction");
   if (demoted.use_policy !== "recall_allowed") {
     throw new Error(`Demote action failed: ${JSON.stringify(demoted)}`);

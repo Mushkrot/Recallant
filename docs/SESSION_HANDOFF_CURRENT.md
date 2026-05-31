@@ -209,6 +209,14 @@ The current instruction-promotion guard follow-up is complete:
   `/health` is OK, and authenticated Review HTML still shows `Promote to rule` for a selected
   memory with visible evidence excerpts.
 
+The current duplicate-resolution follow-up is complete for canonical choice:
+
+- selected duplicate/conflict memories show `Duplicate resolution` in detail when peers exist;
+- the owner can choose `Keep this, merge other` or `Use other, supersede this`;
+- those forms post to the same `/review-action` merge/supersede policy path;
+- `npm run review-ui:smoke` verifies the detail controls and that choosing selected memory as
+  canonical marks the peer `superseded`.
+
 Latest deployed checkpoint:
 
 - Commit `505a143 Require source refs for instruction promotion` was pushed to `origin/main` and

@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, and instruction promotion source-ref guard are implemented, deployed, and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, and duplicate canonical resolution are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer conflict/duplicate resolution views.
-Last updated: 2026-05-31T07:24:47Z.
+Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or conflict old/new resolution views.
+Last updated: 2026-05-31T07:31:22Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -93,6 +93,9 @@ Last updated: 2026-05-31T07:24:47Z.
 - Promotion to `instruction_grade` now requires visible source refs. The UI shows an explanation
   instead of a promote button when source refs are missing, and the DB policy rejects crafted
   promote requests without source refs.
+- Duplicate candidate detail now shows canonical-choice actions. The owner can keep the selected
+  memory and merge a peer, or use another peer and supersede the selected memory, without copying
+  UUIDs by hand.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -152,6 +155,8 @@ Last updated: 2026-05-31T07:24:47Z.
 - production deploy verification after promotion-guard restart: `systemctl is-active
   recallant.service`, local `/health`, and authenticated Review HTML check for evidence-backed
   `Promote to rule` all passed
+- `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
+  duplicate resolution detail visibility and canonical merge form coverage
 
 ## Open Questions
 

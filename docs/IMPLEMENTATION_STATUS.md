@@ -373,6 +373,15 @@ suite also verifies successful promotion writes review history. The production s
 after this policy/UI change, and the live authenticated Review page still shows `Promote to rule`
 for a memory with visible evidence excerpts.
 
+Latest Duplicate resolution validation:
+
+- `npm run review-ui:smoke`
+
+Duplicate candidate detail now renders canonical-choice actions from the dashboard's
+duplicate/conflict candidate list. The owner can keep the selected memory and merge a peer, or use a
+peer as canonical and supersede the selected memory, without hand-copying memory ids. The smoke
+suite verifies the browser detail and a canonical merge form that supersedes the peer.
+
 Latest attach/capture integration validation:
 
 - `npm run phase10:smoke`

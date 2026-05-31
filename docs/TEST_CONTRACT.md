@@ -125,7 +125,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] UI accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede actions update the same database state as `memory_review_agent_memory`; approve may remain as a UI label/alias if needed.
 - [x] UI permanent-forget flow performs dry-run, shows affected counts/scope, requires confirmation, and writes a redacted erasure receipt.
 - [x] UI promotion to `instruction_grade` requires visible source refs and writes a review action.
-- [ ] Duplicate view allows choosing a canonical memory and marking the others merged/superseded/archived.
+- [x] Duplicate view allows choosing a canonical memory and marking the others merged/superseded/archived.
 - [ ] Conflict view shows old/new records and can apply a supersede/demote/archive resolution.
 - [ ] Ordinary auto-created recallable memories do not appear as mandatory approval work unless policy marks them important/risky/conflicting.
 - [ ] Review UI/admin API is not publicly exposed by default in the local/server test profile.

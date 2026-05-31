@@ -677,11 +677,59 @@ function renderMemoryForgetAction(
   </details>`;
 }
 
+function renderDuplicateResolution(
+  memory: Record<string, unknown>,
+  projectId: unknown,
+  duplicateRows: Array<Record<string, unknown>>
+) {
+  const selectedId = String(memory.id ?? "");
+  const selectedInList = duplicateRows.some((row) => row.memory_id === selectedId);
+  const metadataText = JSON.stringify(memory.metadata ?? {});
+  const looksDuplicate =
+    selectedInList || /duplicate|conflict|possible_duplicate|possible_conflict/i.test(metadataText);
+  const peers = duplicateRows.filter(
+    (row) => row.memory_id && String(row.memory_id) !== selectedId
+  );
+  if (!looksDuplicate || peers.length === 0) return "";
+  return `<details class="action-detail">
+    <summary>Duplicate resolution</summary>
+    <p>Choose which memory should remain canonical. Recallant will mark the other memory as merged or superseded through the normal review policy path.</p>
+    <div class="duplicate-options">
+      ${peers
+        .slice(0, 6)
+        .map(
+          (peer) => `<article>
+            <strong>${escapeHtml(sourcePath(peer))}</strong>
+            <p>${escapeHtml(currentEffect(peer))}</p>
+            <form method="post" action="/review-action">
+              <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+              <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+              <input type="hidden" name="action" value="merge" />
+              <input type="hidden" name="merge_memory_ids" value="${escapeHtml(peer.memory_id)}" />
+              <input type="hidden" name="note" value="Owner chose this memory as canonical from Review UI" />
+              <button type="submit">Keep this, merge other</button>
+            </form>
+            <form method="post" action="/review-action">
+              <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+              <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+              <input type="hidden" name="action" value="supersede" />
+              <input type="hidden" name="superseded_by" value="${escapeHtml(peer.memory_id)}" />
+              <input type="hidden" name="note" value="Owner chose another canonical memory from Review UI" />
+              <button type="submit">Use other, supersede this</button>
+            </form>
+          </article>`
+        )
+        .join("")}
+    </div>
+  </details>`;
+}
+
 function renderDetail(
   detail: unknown,
   availableActions: unknown,
   projectId: unknown,
-  memoryForget?: MemoryForgetRenderState
+  memoryForget?: MemoryForgetRenderState,
+  duplicateRows: Array<Record<string, unknown>> = []
 ) {
   if (!detail || typeof detail !== "object") {
     return `<p class="empty">No selected memory.</p>`;
@@ -709,6 +757,7 @@ function renderDetail(
     <p>${escapeHtml(recommendedAction(memory))}</p>
     <h4>Actions</h4>
     <div class="actions">${renderReviewActions(memory, projectId, payload.source_refs?.length ?? 0)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
+    ${renderDuplicateResolution(memory, projectId, duplicateRows)}
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -1285,6 +1334,11 @@ function renderDashboard(
     .danger-zone p, .forget-result p { margin: 8px 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .forget-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fbfcfe; }
     .forget-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .duplicate-options { display: grid; gap: 8px; margin-top: 10px; }
+    .duplicate-options article { border: 1px solid #e1e7ef; border-radius: 7px; padding: 8px; background: #fbfcfe; }
+    .duplicate-options strong { display: block; font-size: 13px; margin-bottom: 5px; overflow-wrap: anywhere; }
+    .duplicate-options p { margin: 0 0 8px; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .duplicate-options form { display: inline-block; margin: 0 6px 6px 0; }
     button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #f2f6fb; }
     button.danger { border-color: #b77f62; color: #8a3c15; }
@@ -1383,7 +1437,7 @@ function renderDashboard(
     <aside class="right-rail">
       <section class="panel">
         <h2>Selected Detail</h2>
-        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget)}
+        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
       </section>
       <section class="panel">
         <h2>Cost / Paid API</h2>
