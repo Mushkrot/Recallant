@@ -7,9 +7,12 @@ This is the current handoff for the next Recallant session. Start here after rea
 ## Current State
 
 Recallant is deployed on the owner server, the GutenDocx copied-project sandbox pilot is complete,
-and the first product-UX readiness pass is deployed. Phase 10 now has working first slices for
+and the first product-UX readiness pass is deployed. Phase 10 has working first slices for
 autonomous project attach/detach, controlled cross-project recall, one-command project onboarding,
-AI-backed Management Chat, and owner-confirmed developer-wide rules.
+AI-backed Management Chat, and owner-confirmed developer-wide rules. The main product loop is still
+incomplete until the Product Acceptance agent capture scenario passes: an attached project must
+start a Recallant-backed session, read context, write decisions/actions/tests/checkpoints, close out,
+and recall that memory in a later session without the owner acting as QA.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
@@ -31,15 +34,16 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 
 1. Read `AGENTS.md`.
 2. Read `PROJECT_LOG.md`.
-3. Read `docs/WORKING_CONTEXT.md`.
-4. Read `docs/PRE_PILOT_READINESS.md`.
-5. Read `docs/AUTONOMOUS_ATTACH.md`.
-6. Read `docs/CROSS_PROJECT_RECALL.md`.
-7. Read `docs/IMPLEMENTATION_STATUS.md`.
-8. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
-9. Run `git status --short --branch`.
-10. Run `git log --oneline -8`.
-11. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
+3. Read `docs/PRODUCT_ACCEPTANCE_TEST.md`.
+4. Read `docs/WORKING_CONTEXT.md`.
+5. Read `docs/PRE_PILOT_READINESS.md`.
+6. Read `docs/AUTONOMOUS_ATTACH.md`.
+7. Read `docs/CROSS_PROJECT_RECALL.md`.
+8. Read `docs/IMPLEMENTATION_STATUS.md`.
+9. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
+10. Run `git status --short --branch`.
+11. Run `git log --oneline -8`.
+12. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
 
 ## Active Work Order
 
@@ -165,14 +169,18 @@ Latest QA correction checkpoint:
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 
-The next useful targets are:
+The next required target is the Product Acceptance agent capture loop:
 
-- deepen Review/Management UI action flows for settings, context-pack preview, and review
-  proposals;
-- optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
-  confirmation.
-- optionally continue by inspecting the `/ai/test_project_1` UI state, cleaning sandbox E2E test
-  data through the governed detach/cleanup path, or adding richer Management UI action flows.
+- CLI/MCP-backed capture runtime for session start, context read, meaningful events, checkpoint, and
+  closeout;
+- attach/bootstrap integration so generated agent instructions require that runtime;
+- UI/API readiness telemetry that distinguishes registered-only projects from capture-active
+  projects;
+- clean-project acceptance smoke;
+- dogfood proof that `/ai/recallant` writes and recalls its own work through Recallant.
+
+Richer Management UI action flows and optional local sandbox-file cleanup are lower priority until
+this loop is green.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
@@ -202,7 +210,6 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 
 ## Success Condition For The Next Session
 
-The next session should start clean from this handoff, `PROJECT_LOG.md`, and current git state. The
-most practical next slices are richer owner-facing settings/review/context-pack action flows,
-optional local sandbox cleanup after confirmed detach, or a user-driven test of a brand-new sandbox
-project through `recallant attach . --sandbox`.
+The next session should start clean from this handoff, `PROJECT_LOG.md`, and current git state. It
+must continue the Product Acceptance agent capture loop until the acceptance smoke and `/ai/recallant`
+dogfood verification pass, unless a real owner-dependent blocker appears.

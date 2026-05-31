@@ -6,7 +6,12 @@ This file records the current implementation checkpoint for Recallant so future 
 
 ## Current State
 
-Recallant now has a working local v1 implementation slice for coding-agent memory:
+Recallant has a working local v1 implementation slice for coding-agent memory, but the main product
+loop is not complete until [PRODUCT_ACCEPTANCE_TEST.md](PRODUCT_ACCEPTANCE_TEST.md) passes. Project
+registration, attach reports, UI visibility, and component smoke tests are useful checkpoints; they
+do not by themselves prove autonomous agent memory.
+
+Current implemented slices include:
 
 - TypeScript monorepo skeleton, linting, formatting, build, Docker Postgres, and initial CI hooks.
 - Postgres/pgvector schema for developers, projects, sessions, raw events, raw artifacts, chunks, embeddings, graph edges, checkpoints, governed memories, review actions, recall traces, erasure receipts, settings, model calls, and paid API approvals.
@@ -163,9 +168,11 @@ structured settings as formatted JSON instead of `[object Object]`.
 
 ## Active Next Plan
 
-The active next checkpoint is Phase 10: autonomous attach and controlled cross-project recall. The
-detailed pilot record remains
-[PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md).
+The active next checkpoint is the Product Acceptance agent capture loop. The detailed pilot record
+remains [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md), but copied
+project pilot success is no longer enough: Recallant must prove that a normal attached project starts
+capture, writes decisions/actions/tests/checkpoints, closes out, and recalls that memory in a later
+session.
 
 Current work order:
 
@@ -183,12 +190,15 @@ Current work order:
 10. Phase 10 controlled cross-project recall first slice. Complete for copied-project fixtures and
     covered by `scripts/smoke-phase10-cross-project.mjs`.
 
-Next recommended work:
+Next required work:
 
-1. Continue deepening Review/Management UI action flows, especially richer settings edits, review
-   proposals, and context-pack previews from the same private management surface.
-2. Add optional local sandbox-file cleanup after confirmed detach, still gated by dry-run and
-   confirmation.
+1. Implement the CLI/MCP-backed agent capture runtime and local spool fallback for normal agent work.
+2. Make `recallant attach .` generate startup files that require the capture runtime before
+   non-trivial work.
+3. Add Review UI/API readiness telemetry for registered-only vs capture-active projects.
+4. Add the clean-project product acceptance smoke and a `/ai/recallant` dogfood verification.
+5. Only after this loop is green should richer management actions or optional local sandbox cleanup
+   become the next priority.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 

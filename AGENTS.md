@@ -8,17 +8,24 @@ Do not stop just to report progress, summarize completed work, ask whether to co
 
 Stop only when the next step genuinely requires the owner: security/public exposure, secrets, paid API use, destructive operations, server/firewall/service changes, or a real contradiction in the specs. If none of those blockers exists, continue to the next documented implementation step.
 
+Do not call Recallant ready because a project is registered, files were generated, or a component
+smoke passed. The main product loop is ready only after the acceptance scenario in
+`docs/PRODUCT_ACCEPTANCE_TEST.md` proves that an attached project starts a Recallant-backed session,
+reads context, writes decisions/actions/tests/checkpoints, closes out, and recalls that memory in a
+new session without owner QA.
+
 ## Canonical Context
 
 Start with:
 
 1. `docs/WORKING_CONTEXT.md`
-2. `docs/PRE_PILOT_READINESS.md`
-3. `docs/SESSION_HANDOFF_CURRENT.md`
-4. `docs/README.md`
-5. `docs/AGENT_IMPLEMENTATION_GUIDE.md`
-6. `docs/TASK_GRAPH.md`
-7. `docs/TEST_CONTRACT.md`
+2. `docs/PRODUCT_ACCEPTANCE_TEST.md`
+3. `docs/PRE_PILOT_READINESS.md`
+4. `docs/SESSION_HANDOFF_CURRENT.md`
+5. `docs/README.md`
+6. `docs/AGENT_IMPLEMENTATION_GUIDE.md`
+7. `docs/TASK_GRAPH.md`
+8. `docs/TEST_CONTRACT.md`
 
 The repository artifacts are English. Conversation with the owner may be Russian.
 

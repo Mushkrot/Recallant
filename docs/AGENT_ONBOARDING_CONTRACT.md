@@ -3,19 +3,27 @@
 Last updated: 2026-05-28.
 
 This contract describes how a coding agent should use Recallant after a project is initialized.
+Project registration is not enough. A project is truly attached only when the agent capture loop
+starts a Recallant-backed session, reads context, writes meaningful evidence/checkpoints, closes out,
+and proves that a later session can recall the result.
 
 ## Startup Contract
 
 1. Read the project instructions such as `AGENTS.md`.
-2. Call `memory_start_session`.
-3. Call `memory_get_context_pack` before non-trivial work.
+2. Start a Recallant-backed session with the generated MCP flow or CLI fallback.
+3. Call `memory_start_session` and then `memory_get_context_pack` before non-trivial work.
 4. Work normally.
 5. Use `memory_search` only for specific follow-up evidence queries.
-6. Write meaningful workflow evidence through `memory_append_event`.
+6. Write meaningful workflow evidence through `memory_append_event` or the CLI capture fallback.
 7. Create governed memory proposals through `memory_create_agent_memory` when source refs exist.
 8. Update checkpoint through `memory_set_checkpoint` after meaningful progress.
 9. On clear pause/exit/closeout intent, call `memory_closeout`.
-10. If MCP is unavailable, update `PROJECT_LOG.md` and local spool when available.
+10. If MCP is unavailable, update `PROJECT_LOG.md` and local spool through the CLI fallback.
+
+For Codex v1, passive capture of every desktop chat token is not assumed. The required behavior is
+agent-enforced capture: the startup instructions and CLI/MCP tooling must make the agent start the
+session and write meaningful events/checkpoints as part of normal work. If that loop is not visible
+in Recallant, the project is registered only, not capture-ready.
 
 ## Existing Project Onboarding
 
@@ -79,6 +87,13 @@ recallant context --project-dir <project> --task-hint "initial work"
 For new empty projects, `recallant attach` should also create starter project-local memory recording
 that the project is attached and that Recallant is the primary source of truth while
 `PROJECT_LOG.md` is fallback/checkpoint.
+
+## Product Acceptance Gate
+
+Every implementation checkpoint that claims onboarding/capture readiness must pass the scenario in
+[PRODUCT_ACCEPTANCE_TEST.md](PRODUCT_ACCEPTANCE_TEST.md). At minimum, a smoke test must create an
+attached project, start capture, write a unique owner decision, close out, start a new session, and
+prove that the unique decision returns through Recallant context.
 
 ## Cross-Project Recall Contract
 

@@ -2,11 +2,11 @@
 
 ## Current Session
 
-Status: manual UI project removal flow added and verified.
-Current focus: let the owner remove sandbox projects from Recallant through the Command Center
-without deleting files from disk.
-Next step: deploy this UI flow, then the owner can dry-run and confirm removal for
-`test_project_1` and `gutendocx-20260528T161238Z` from the Cleanup / Forget panel.
+Status: product acceptance gap identified and contract update in progress.
+Current focus: implement the autonomous agent capture loop so attached projects write and recall
+real agent work through Recallant.
+Next step: finish the Product Acceptance contract checkpoint, then implement CLI/MCP-backed capture
+commands, attach/bootstrap integration, UI readiness telemetry, acceptance smoke, and self-dogfood.
 
 ## Active Constraints
 
@@ -40,6 +40,11 @@ Next step: deploy this UI flow, then the owner can dry-run and confirm removal f
   explicit.
 - Do not ask the owner to perform basic attach validation before the agent has independently run an
   equivalent real command path.
+- Product readiness requires the end-to-end agent capture loop, not only attach/project
+  registration. An attached project must start a Recallant-backed session, read context, write
+  decisions/actions/tests/checkpoints, close out, and recall that memory in a later session.
+- Commit/progress checkpoints are not stopping points. Continue to the next documented gate unless a
+  real owner-dependent blocker appears.
 
 ## Verification
 
@@ -51,6 +56,8 @@ Next step: deploy this UI flow, then the owner can dry-run and confirm removal f
 - live `/project-detach` dry-run for `gutendocx-20260528T161238Z` after service restart; confirm
   button, selected project name/path, 18 active chunks, and 5 active memories rendered; project
   remained visible afterward
+- live DB inspection showed `/ai/recallant` is registered, but current Codex chat work was not
+  automatically captured as events; this is now the primary product gap
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -65,9 +72,7 @@ Next step: deploy this UI flow, then the owner can dry-run and confirm removal f
 
 ## Open Questions
 
-- Whether to keep or later clean up the sandbox E2E memories/events in `/ai/test_project_1`.
-- Whether to implement local sandbox file cleanup after confirmed detach next.
-- How far to deepen Management UI action flows before attaching a live production-sensitive project.
+- None that block implementation of the product acceptance loop.
 
 ## Recallant
 
