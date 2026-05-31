@@ -656,6 +656,10 @@ Latest contract hardening checkpoint:
   model-route policy output.
 - Phase 3 smoke now verifies closeout session closure, checkpoint state, governed-memory candidate
   persistence/source refs, unsynced-spool warning, and review-needed closeout warning.
+- `recallant context` now accepts `--session-id` so the CLI preview can use the same active session
+  policy as MCP `memory_get_context_pack`; Phase 6 graph/context smoke compares checkpoint,
+  binding-rules, working-memory, and suggested-fetch sections between CLI and MCP for the same
+  session.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

@@ -894,15 +894,22 @@ async function runContext(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for context preview");
   let sessionId: string | null = null;
+  let shouldCloseSession = false;
   try {
     const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
-    const started = await database.startSession({
-      client_kind: "codex",
-      project_path: projectDir,
-      session_label: "context-preview",
-      resume_policy: "normal"
-    });
-    sessionId = started.session_id ? String(started.session_id) : null;
+    const explicitSessionId = parseFlag(argv, "--session-id");
+    if (explicitSessionId) {
+      sessionId = explicitSessionId;
+    } else {
+      const started = await database.startSession({
+        client_kind: "codex",
+        project_path: projectDir,
+        session_label: "context-preview",
+        resume_policy: "normal"
+      });
+      sessionId = started.session_id ? String(started.session_id) : null;
+      shouldCloseSession = true;
+    }
     if (!sessionId) throw new Error("context preview did not start a session");
     const pack = await database.getContextPack({
       session_id: sessionId,
@@ -913,7 +920,7 @@ async function runContext(argv: readonly string[]) {
     });
     process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
   } finally {
-    if (sessionId) await database.closeSession(sessionId, "client_exit");
+    if (sessionId && shouldCloseSession) await database.closeSession(sessionId, "client_exit");
     await database.close();
   }
 }

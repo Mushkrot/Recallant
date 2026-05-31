@@ -160,7 +160,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] `recallant lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
 - [x] Startup fixture restores context through checkpoint + governed memories without reading long docs or archive logs.
 - [x] Startup fixture uses `memory_start_session` followed by `memory_get_context_pack` as the normal automatic path.
-- [ ] `recallant context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.
+- [x] `recallant context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.
 - [x] Startup broad query fixture such as `memory_search(query="project")` is warned/rejected by context-budget lint or policy tests.
 - [x] `recallant doctor` returns OK when Postgres and configured Ollama/local provider are available and returns a specific error/status when each is unavailable.
 - [x] `recallant doctor` reports the configured Ollama/local-model endpoint, reachability, expected/missing models, and fallback route without starting a duplicate Ollama stack.

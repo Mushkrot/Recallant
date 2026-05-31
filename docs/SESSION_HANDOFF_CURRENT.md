@@ -320,11 +320,14 @@ Current contract-hardening checkpoint:
 - `recallant doctor` now exposes richer model-route policy for local model, active-agent,
   subscription-worker, and paid API routes, including disabled/confirmation-gated states and
   explicit opt-in boundaries for preview/expensive models.
+- `recallant context --session-id <id>` now previews the same active-session context pack path as
+  MCP `memory_get_context_pack`; Phase 6 smoke compares the core pack sections for parity.
 - Targeted verification passed for this slice: `npm run build`, `npm run phase7:smoke`, and
-  `npm run phase3:smoke`.
+  `npm run phase3:smoke`; follow-up parity verification passed with
+  `npm run phase6:smoke:graph`.
 - Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures, exact
-  `recallant context`/MCP parity, denied/expired paid API approval behavior, and the broader
-  backup/security/cleanup rows still need explicit smoke-backed closure.
+  denied/expired paid API approval behavior, and the broader backup/security/cleanup rows still
+  need explicit smoke-backed closure.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

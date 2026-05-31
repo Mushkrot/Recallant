@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp } from "node:fs/promises";
@@ -40,6 +40,24 @@ let stderr = "";
 child.stderr.on("data", (chunk) => {
   stderr += chunk.toString();
 });
+
+function runCliContext(args) {
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: projectId,
+      RECALLANT_PROJECT_PATH: projectDir
+    },
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    throw new Error(`CLI context failed: ${result.stderr}\n${result.stdout}`);
+  }
+  return JSON.parse(result.stdout);
+}
 
 function send(message) {
   child.stdin.write(`${JSON.stringify(message)}\n`);
@@ -182,7 +200,39 @@ if (
   throw new Error(`Context pack composition failed: ${JSON.stringify(pack)}`);
 }
 
-const dryRun = await callTool(11, "memory_forget", {
+const mcpPreviewPack = await callTool(11, "memory_get_context_pack", {
+  session_id: started.session_id,
+  task_hint: "alpha context pack",
+  include_recovery: true
+});
+const cliPreviewPack = runCliContext([
+  "context",
+  "--project-dir",
+  projectDir,
+  "--session-id",
+  started.session_id,
+  "--task-hint",
+  "alpha context pack"
+]);
+if (
+  JSON.stringify(cliPreviewPack.sections?.checkpoint ?? null) !==
+    JSON.stringify(mcpPreviewPack.sections?.checkpoint ?? null) ||
+  JSON.stringify(cliPreviewPack.sections?.binding_rules ?? []) !==
+    JSON.stringify(mcpPreviewPack.sections?.binding_rules ?? []) ||
+  JSON.stringify(cliPreviewPack.sections?.working_memories ?? []) !==
+    JSON.stringify(mcpPreviewPack.sections?.working_memories ?? []) ||
+  JSON.stringify(cliPreviewPack.sections?.suggested_next_fetches ?? []) !==
+    JSON.stringify(mcpPreviewPack.sections?.suggested_next_fetches ?? [])
+) {
+  throw new Error(
+    `CLI context preview diverged from MCP context pack: ${JSON.stringify({
+      cliPreviewPack,
+      mcpPreviewPack
+    })}`
+  );
+}
+
+const dryRun = await callTool(12, "memory_forget", {
   target: { kind: "chunk", id: beta.chunk_ids[0], selector: {} },
   reason: "phase6 smoke dry run",
   dry_run: true,
@@ -192,7 +242,7 @@ if (dryRun.status !== "pending_confirmation" || dryRun.affected?.chunks !== 1) {
   throw new Error(`Forget dry run failed: ${JSON.stringify(dryRun)}`);
 }
 
-const erased = await callTool(12, "memory_forget", {
+const erased = await callTool(13, "memory_forget", {
   target: { kind: "chunk", id: beta.chunk_ids[0], selector: {} },
   reason: "phase6 smoke confirmed",
   dry_run: false,
@@ -202,7 +252,7 @@ if (erased.status !== "completed" || erased.redacted_receipt?.affected?.chunks !
   throw new Error(`Confirmed forget failed: ${JSON.stringify(erased)}`);
 }
 
-const fetched = await callTool(13, "memory_fetch_chunk", {
+const fetched = await callTool(14, "memory_fetch_chunk", {
   chunk_id: beta.chunk_ids[0],
   max_chars: 2000
 });

@@ -161,7 +161,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [x] `--capture-profile light|standard|detailed|custom` overrides the automatic init default.
 - [ ] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
 - [x] `recallant lint-context` verifies bootstrap files did not become duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
-- [ ] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
+- [x] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
 - [x] `recallant doctor` checks connectivity for Postgres, configured local model provider/Ollama, and `.recallant/config`.
 - [x] `recallant doctor` reports whether Ollama/local-model capability is reachable, which endpoint is configured, which expected models are missing, and which fallback route applies.
 - [x] Owner-server deployment profile validates that planned Recallant service ports are present in `/ai/PORTS.yaml` before daemon/service start.
