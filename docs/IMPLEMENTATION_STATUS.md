@@ -366,10 +366,18 @@ Latest QA correction checkpoint:
 - The database project-resolution logic now ignores configured `RECALLANT_PROJECT_ID` for explicit
   paths that do not match configured `RECALLANT_PROJECT_PATH`, and only caches the configured
   project context for the configured binding.
+- Attach now also validates an existing `.recallant/config` against the database binding. If the
+  config points to a project id bound to another path, attach ignores the stale/foreign config,
+  reports the mismatch, and rewrites the project with a correct id for the current path.
 - Verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
   `npm run phase10:smoke` against isolated dev Postgres, and a real installed-wrapper check from
   `/tmp/recallant-new-project-smoke` using production-like env binding. The installed-wrapper check
   created project id `874b7379-50a7-4b34-91b1-cee30d09130e`, not the host id.
+- Follow-up production repair on 2026-05-31 restored the host project metadata to
+  `recallant /ai/recallant`, archived the two erroneous attach-bootstrap memories that landed on
+  the host project, closed the two erroneous `recallant-attach` startup-smoke sessions as
+  `superseded`, and successfully attached `/ai/test_project_1` as sandbox project
+  `9f7bca40-f763-4cb2-846b-909729882c51`.
 
 ## Current Boundary
 

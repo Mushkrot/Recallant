@@ -404,7 +404,29 @@ async function resolveProjectIdentity(input: {
 }) {
   const developerId = process.env.RECALLANT_DEVELOPER_ID ?? randomUUID();
   if (input.existingConfig?.project_id) {
-    return { projectId: input.existingConfig.project_id, developerId, source: "existing_config" };
+    if (!input.database) {
+      return { projectId: input.existingConfig.project_id, developerId, source: "existing_config" };
+    }
+    const binding = await input.database.getProjectBinding(input.existingConfig.project_id);
+    if (binding?.primary_path === input.projectDir) {
+      return {
+        projectId: input.existingConfig.project_id,
+        developerId: binding.developer_id,
+        source: "existing_config"
+      };
+    }
+    const issue = binding
+      ? `Existing .recallant/config points to project ${input.existingConfig.project_id} bound to ${binding.primary_path ?? "no path"}, not ${input.projectDir}. Ignoring stale/foreign config.`
+      : `Existing .recallant/config points to missing project ${input.existingConfig.project_id}. Ignoring stale config.`;
+    if (input.database) {
+      const context = await input.database.ensureProject(input.projectDir);
+      return {
+        projectId: context.projectId,
+        developerId: context.developerId,
+        source: "database",
+        existingConfigIssue: issue
+      };
+    }
   }
   if (input.database) {
     const context = await input.database.ensureProject(input.projectDir);
@@ -730,7 +752,9 @@ export async function runAttach(argv: readonly string[]) {
     project_id: identity.projectId,
     project_id_source: identity.source,
     production_sensitive: production,
-    existing_config_error: existingConfigResult.error,
+    existing_config_error:
+      existingConfigResult.error ??
+      ("existingConfigIssue" in identity ? String(identity.existingConfigIssue) : null),
     writes_files: executionAllowed,
     writes_database: executionAllowed && database !== null,
     planned_changes: plan,
@@ -820,7 +844,7 @@ export async function runAttach(argv: readonly string[]) {
         candidates: importCandidates,
         importTextByPath
       });
-      if (!existingConfigResult.config?.project_id) {
+      if (identity.source !== "existing_config") {
         starterMemory = await createStarterMemory({
           database,
           projectDir: options.projectDir,

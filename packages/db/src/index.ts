@@ -769,6 +769,24 @@ export class RecallantDb {
     return { developerId, projectId: input.projectId };
   }
 
+  async getProjectBinding(projectId: string) {
+    const result = await this.pool.query<{
+      project_id: string;
+      developer_id: string;
+      name: string;
+      primary_path: string | null;
+    }>(
+      `
+        SELECT id AS project_id, developer_id, name, primary_path
+        FROM projects
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [projectId]
+    );
+    return result.rows[0] ?? null;
+  }
+
   async startSession(input: StartSessionInput) {
     const project = await this.ensureProject(input.project_path);
     return withTransaction(this.pool, async (client) => {

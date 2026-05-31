@@ -140,11 +140,19 @@ if (
 const readOnlyClient = new pg.Client({ connectionString: databaseUrl });
 await readOnlyClient.connect();
 try {
+  await readOnlyClient.query(
+    "INSERT INTO developers (id, name) VALUES ($1, 'Smoke Developer') ON CONFLICT (id) DO NOTHING",
+    [developerId]
+  );
+  await readOnlyClient.query(
+    "INSERT INTO projects (id, developer_id, name, primary_path) VALUES ($1, $2, 'recallant', $3) ON CONFLICT (id) DO UPDATE SET primary_path = EXCLUDED.primary_path",
+    [hostProjectId, developerId, repoRoot]
+  );
   const readOnlyChecks = await readOnlyClient.query(
     "SELECT count(*)::int AS project_count FROM projects WHERE developer_id = $1",
     [developerId]
   );
-  if (readOnlyChecks.rows[0]?.project_count !== 0) {
+  if (readOnlyChecks.rows[0]?.project_count !== 1) {
     throw new Error(`Plan-only attach wrote DB rows: ${JSON.stringify(readOnlyChecks.rows[0])}`);
   }
 } finally {
@@ -215,6 +223,22 @@ if (
 const rerun = runJson(["attach", projectDir, "--target", "codex", "--sandbox"]);
 if (rerun.project_id !== attach.project_id || rerun.project_id_source !== "existing_config") {
   throw new Error(`Attach rerun did not reuse project id: ${JSON.stringify(rerun)}`);
+}
+
+const staleConfigDir = await mkdtemp(join(tmpdir(), "recallant-phase10-stale-config-"));
+await mkdir(join(staleConfigDir, ".recallant"), { recursive: true });
+await writeFile(
+  join(staleConfigDir, ".recallant", "config"),
+  `${JSON.stringify({ project_id: hostProjectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
+);
+const staleAttach = runJson(["attach", staleConfigDir, "--target", "codex", "--sandbox"]);
+if (
+  staleAttach.project_id === hostProjectId ||
+  staleAttach.project_id_source !== "database" ||
+  staleAttach.starter_memory?.status !== "accepted" ||
+  !String(staleAttach.existing_config_error ?? "").includes("Ignoring stale/foreign config")
+) {
+  throw new Error(`Attach reused stale foreign config: ${JSON.stringify(staleAttach)}`);
 }
 
 const prodDir = await mkdtemp(join(tmpdir(), "recallant-phase10-prod-"));

@@ -2,11 +2,12 @@
 
 ## Current Session
 
-Status: QA-found attach identity bug fixed and verified.
+Status: QA-found attach identity bug fixed, stale-config handling fixed, and production sandbox
+repair completed.
 Current focus: make the one-command project onboarding path trustworthy without using the owner as
 manual QA.
-Next step: commit/push this fix, then continue with either safe repair/detach of the bad
-`/ai/test_project_1` attachment record or richer owner-facing Management UI actions.
+Next step: commit/push this fix, then continue with real agent context-pack testing for
+`/ai/test_project_1` or richer owner-facing Management UI actions.
 
 ## Active Constraints
 
@@ -28,6 +29,8 @@ Next step: commit/push this fix, then continue with either safe repair/detach of
   `instruction_grade` memories that future Context Packs include across projects.
 - Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
   server's configured `RECALLANT_PROJECT_ID` for `/ai/recallant` when attaching another project.
+- Existing `.recallant/config` must be validated against the DB project binding. If it points to a
+  different path, attach treats it as stale/foreign and rewrites it for the current project.
 - Do not ask the owner to perform basic attach validation before the agent has independently run an
   equivalent real command path.
 
@@ -40,14 +43,16 @@ Next step: commit/push this fix, then continue with either safe repair/detach of
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
+- real installed-wrapper attach of `/ai/test_project_1`, resulting in sandbox project
+  `9f7bca40-f763-4cb2-846b-909729882c51`
 - production `recallant doctor`
 - production `/health`
 - live Management Chat API using local `mistral-small:24b`
 
 ## Open Questions
 
-- Whether to repair or detach the incorrect `/ai/test_project_1` sandbox record created before this
-  fix.
+- Whether to open a real agent session in `/ai/test_project_1` and verify the context-pack workflow
+  end to end.
 - Whether to implement local sandbox file cleanup after confirmed detach next.
 - How far to deepen Management UI action flows before attaching a live production-sensitive project.
 

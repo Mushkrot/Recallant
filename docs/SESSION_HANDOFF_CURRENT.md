@@ -138,10 +138,16 @@ Latest QA correction checkpoint:
   existing `/ai/recallant` project id `84eda3bf-cb72-4bcf-aeec-2f2b84ebd6ce`.
 - Fixed project resolution so explicit attach paths ignore configured `RECALLANT_PROJECT_ID` unless
   they match configured `RECALLANT_PROJECT_PATH`.
+- Fixed stale local config handling so attach validates an existing `.recallant/config` against the
+  database project binding and ignores it when it points to a different path.
 - Verified with `npm run build`, `npm run lint`, `npm run format:check`, `npm run phase10:smoke`
   against isolated dev Postgres, and a real installed-wrapper attach in
   `/tmp/recallant-new-project-smoke` with production-like env binding. The wrapper produced a new
   project id, not the host id.
+- Production repair on 2026-05-31: restored project `84eda3bf-cb72-4bcf-aeec-2f2b84ebd6ce` to
+  `name=recallant`, `primary_path=/ai/recallant`; archived the two wrong attach-bootstrap memories
+  on that project; closed two wrong `recallant-attach` sessions as `superseded`; attached
+  `/ai/test_project_1` as sandbox project `9f7bca40-f763-4cb2-846b-909729882c51`.
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 
@@ -151,8 +157,8 @@ The next useful targets are:
   proposals;
 - optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
   confirmation.
-- optionally repair or detach any sandbox project records created before the attach identity fix;
-  this must start with a dry-run and must not delete owner files without explicit confirmation.
+- optionally continue by opening/testing `/ai/test_project_1` with a real agent context-pack flow,
+  or add richer Management UI action flows.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
