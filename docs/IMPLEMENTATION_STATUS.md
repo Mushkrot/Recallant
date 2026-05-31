@@ -121,7 +121,8 @@ Current implemented slices include:
   destructive/cost/security/global/connector actions; `memory_closeout` reports conflicts, failed
   writes, repo-sync gaps, low extraction confidence, and server/model/provider errors; attach raw
   secret findings use live-vs-sandbox policy; and `recallant doctor` reports a structured
-  production-readiness gate.
+  production-readiness gate backed by real systemd backup timer state and a latest backup
+  verification sidecar.
 
 ## Accepted Production Deployment Plan
 
@@ -282,6 +283,21 @@ This validation covers the final `TEST_CONTRACT.md` closure pass: Review Inbox d
 critical/rule/cost panels, closeout warning paths, attach raw-secret policy, production-readiness
 doctor output, Phase 8 backup/security/error/search rows, Phase 9 archive/decay/cleanup rows,
 Product Acceptance, onboarding, installer, and cross-client smoke.
+
+Latest production-readiness follow-up validation on 2026-05-31:
+
+- `scripts/recallant-production-backup.sh` created a new backup, ran `backup-verify`, wrote
+  `/ai/recallant-data/backups/latest-verification.json`, and updated `latest-manifest.json`
+- controlled `systemctl restart recallant.service`
+- `systemctl is-active recallant.service`
+- local `/health`
+- authenticated `/api/review-dashboard`
+- public unauthenticated `https://recallant.unicloud.ca/` returned Cloudflare Access `302`
+- production `recallant doctor --project-dir /ai/recallant` reported
+  `production_readiness.ready=true`
+- local stdio `npm run mcp:smoke`
+- clean `make db-reset`, full `npm run smoke:core`, and `make db-down` were rerun after the
+  production-readiness/systemd backup sidecar fix
 
 Latest full local validation was run on a clean Docker Postgres database:
 

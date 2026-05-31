@@ -281,6 +281,9 @@ Latest contract-hardening checkpoint:
 - `recallant doctor` includes a production-readiness object covering doctor/Postgres status, local
   stdio MCP smoke expectation, Cloudflare Access expectations, localhost-only origin, backup timer,
   latest backup verification, duplicate `/ai/recallant` row check, and unintended paid API use.
+  In production it reads `recallant-backup.timer` through systemd and the latest
+  `/ai/recallant-data/backups/latest-verification.json` sidecar written by the backup job after
+  `backup-verify`.
 
 ## Expansion stance
 

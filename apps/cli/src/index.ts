@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -1041,15 +1042,73 @@ async function checkOwnerServerDeployment() {
   };
 }
 
+function systemctlValue(args: readonly string[]) {
+  const result = spawnSync("systemctl", [...args], { encoding: "utf8" });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim() || null;
+}
+
+function systemdBackupTimerStatus() {
+  const active = systemctlValue(["is-active", "recallant-backup.timer"]);
+  const enabled = systemctlValue(["is-enabled", "recallant-backup.timer"]);
+  return {
+    enabled: active === "active" || enabled === "enabled",
+    status: [active, enabled].filter(Boolean).join("/") || "unknown",
+    source: "systemd"
+  };
+}
+
+async function latestBackupVerificationStatus() {
+  const envStatus = process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS;
+  if (envStatus) return { status: envStatus, ok: envStatus === "passed", source: "env" };
+
+  const verificationPath =
+    process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_FILE ??
+    "/ai/recallant-data/backups/latest-verification.json";
+  try {
+    const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
+    const status = String(parsed.restore_verification ?? parsed.status ?? "unknown");
+    return {
+      status,
+      ok: status === "passed" && parsed.production_overwritten !== true,
+      source: "latest-verification-file",
+      path: verificationPath,
+      verified_at: parsed.verified_at ?? null,
+      manifest_path: parsed.manifest_path ?? null
+    };
+  } catch {
+    const manifestPath =
+      process.env.RECALLANT_LATEST_BACKUP_MANIFEST ??
+      "/ai/recallant-data/backups/latest-manifest.json";
+    try {
+      const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        restore_verification?: { status?: string };
+      };
+      const status = parsed.restore_verification?.status ?? "unknown";
+      return { status, ok: status === "passed", source: "manifest", path: manifestPath };
+    } catch {
+      return { status: "unknown", ok: false, source: "missing" };
+    }
+  }
+}
+
 async function checkProductionReadiness(postgresReachable: boolean) {
   const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
   const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
   const edgeAuth = process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH ?? "disabled";
-  const backupTimerEnabled =
+  const envBackupTimerEnabled =
     process.env.RECALLANT_BACKUP_TIMER_ENABLED === "true" ||
     process.env.RECALLANT_BACKUP_TIMER_STATUS === "enabled";
-  const latestBackupVerification =
-    process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS ?? "unknown";
+  const backupTimer = process.env.RECALLANT_BACKUP_TIMER_STATUS
+    ? {
+        enabled: envBackupTimerEnabled,
+        status: process.env.RECALLANT_BACKUP_TIMER_STATUS,
+        source: "env"
+      }
+    : envBackupTimerEnabled
+      ? { enabled: true, status: "enabled", source: "env" }
+      : systemdBackupTimerStatus();
+  const latestBackupVerification = await latestBackupVerificationStatus();
   let duplicateRecallantProjectRows: number | null = null;
   let unintendedPaidApiSuccessCalls30d: number | null = null;
   if (process.env.RECALLANT_DATABASE_URL) {
@@ -1114,14 +1173,11 @@ async function checkProductionReadiness(postgresReachable: boolean) {
       ok: localhostOnlyOrigin
     },
     backup_timer: {
-      enabled: backupTimerEnabled,
-      status:
-        process.env.RECALLANT_BACKUP_TIMER_STATUS ?? (backupTimerEnabled ? "enabled" : "unknown")
+      enabled: backupTimer.enabled,
+      status: backupTimer.status,
+      source: backupTimer.source
     },
-    latest_backup_verification: {
-      status: latestBackupVerification,
-      ok: latestBackupVerification === "passed"
-    },
+    latest_backup_verification: latestBackupVerification,
     recallant_project_rows: duplicateRecallantProjectRows,
     no_duplicate_recallant_project_rows:
       duplicateRecallantProjectRows === null ? null : duplicateRecallantProjectRows <= 1,
@@ -1133,8 +1189,8 @@ async function checkProductionReadiness(postgresReachable: boolean) {
       localhostOnlyOrigin &&
       cloudflareMode === "enabled" &&
       edgeAuth === "required" &&
-      backupTimerEnabled &&
-      latestBackupVerification === "passed" &&
+      backupTimer.enabled &&
+      latestBackupVerification.ok &&
       duplicateRecallantProjectRows !== null &&
       duplicateRecallantProjectRows <= 1 &&
       unintendedPaidApiSuccessCalls30d !== null &&

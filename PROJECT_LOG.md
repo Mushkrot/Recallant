@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Latest contract-hardening slice is implemented and full `smoke:core` passed on a clean dev database.
-Current focus: commit and push the verified contract-hardening checkpoint.
-Next step: deploy/restart only through the accepted controlled service path when applying this checkpoint live.
-Last updated: 2026-05-31T10:44:45Z.
+Status: Latest contract-hardening slice is implemented, full `smoke:core` passed on a clean dev database, and live `recallant doctor` now reports `production_readiness.ready=true`.
+Current focus: commit and push the production-readiness follow-up checkpoint.
+Next step: continue only from documented follow-ups; deploy/restart stays on the accepted controlled service path.
+Last updated: 2026-05-31T10:56:17Z.
 
 ## Active Constraints
 
@@ -141,12 +141,21 @@ Last updated: 2026-05-31T10:44:45Z.
 - `recallant doctor` now includes production-readiness diagnostics for local stdio MCP smoke,
   Cloudflare Access, localhost-only origin, backup timer, latest backup verification, duplicate
   `/ai/recallant` project rows, and unintended paid API use.
+- Production readiness now reads the real `recallant-backup.timer` systemd state and
+  `/ai/recallant-data/backups/latest-verification.json`; the production backup job writes that
+  verification sidecar after `backup-verify`.
 - Targeted latest-slice verification passed: `npm run build`, `npm run phase7:smoke`,
   `npm run phase6:smoke:governed`, `npm run review-ui:smoke`, and `npm run phase10:smoke`.
 - Full latest-slice verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
   clean `make db-reset`, full `npm run smoke:core`, and `make db-down`.
+- Full smoke was rerun after the production-readiness/systemd backup sidecar fix and passed again
+  on a clean dev database.
 - Dogfood capture checkpoint for this contract-hardening work synced from local spool to Recallant
   event `f6562c63-638b-4be4-9533-5eb4597f21c2`; synced spool record was pruned afterward.
+- Controlled production checks passed after restart: `recallant.service` active, local `/health`
+  OK, authenticated `/api/review-dashboard` OK, public `recallant.unicloud.ca` returned Cloudflare
+  Access `302`, production backup+verify wrote latest verification, `recallant doctor` reported
+  `production_readiness.ready=true`, and local stdio `npm run mcp:smoke` passed.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding

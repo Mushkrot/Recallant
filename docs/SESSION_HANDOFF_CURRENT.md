@@ -356,10 +356,16 @@ Latest contract-hardening checkpoint:
 - `recallant doctor` now reports a structured production-readiness object for local stdio MCP smoke,
   Cloudflare Access, localhost-only origin, backup timer, latest backup verification, duplicate
   `/ai/recallant` rows, and unintended paid API use.
+- Production readiness now uses real server state for backup checks: `recallant-backup.timer`
+  systemd status plus `/ai/recallant-data/backups/latest-verification.json`, which the production
+  backup script writes after `backup-verify`.
 - Verification for this latest slice: `npm run build`, `npm run lint`, `npm run format:check`,
   targeted changed-slice checks (`npm run phase7:smoke`, `npm run phase6:smoke:governed`,
   `npm run review-ui:smoke`, `npm run phase10:smoke`), clean `make db-reset`, full
   `npm run smoke:core`, and `make db-down`.
+- Production verification after controlled restart passed: service active, local `/health`,
+  authenticated `/api/review-dashboard`, public Cloudflare Access `302`, backup+verify sidecar,
+  `production_readiness.ready=true`, and local stdio MCP smoke.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
