@@ -197,7 +197,9 @@ Operational recovery as of 2026-05-28:
   Recallant Review Command Center for project `84eda3bf`;
 - production `recallant doctor`, local stdio MCP smoke, and backup restore verification pass;
 - dev database Make targets now use the separate Docker Compose project name `recallant-dev` so
-  local smoke cleanup cannot remove the production database container again.
+  local smoke cleanup cannot remove the production database container again;
+- dev smoke scripts use the dedicated host port `127.0.0.1:15433`, because this server also has
+  unrelated Postgres services on other localhost ports.
 
 Pre-pilot and Phase 10 decision as of 2026-05-28:
 

@@ -19,6 +19,18 @@ The installer builds Recallant, creates a private env file if one does not exist
 localhost-only Postgres service, installs the `recallant` command, and starts
 `recallant.service` when systemd is available.
 
+Preview the server install without changing files, Docker, the database, or systemd:
+
+```bash
+./scripts/install-recallant.sh --dry-run --profile owner-server
+```
+
+For a non-root single-user preview:
+
+```bash
+./scripts/install-recallant.sh --dry-run --profile single-user
+```
+
 For an already configured server where only the CLI wrapper is missing:
 
 ```bash
@@ -91,7 +103,8 @@ the Postgres container. Do not inspect production compose with resolved real sec
 
 The development database targets (`make db-up`, `make db-reset`, `make db-down`) use the separate
 Docker Compose project name `recallant-dev`. They are for local smoke-test databases only and must
-not be used as production lifecycle commands.
+not be used as production lifecycle commands. The dev Postgres container is published only on
+`127.0.0.1:15433` so smoke tests do not collide with unrelated local Postgres services.
 
 For the first production deployment, do not expose remote MCP through Cloudflare. The Cloudflare
 hostname is for the human Review/Management UI and same-origin admin API. Agents use the local

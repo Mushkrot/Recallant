@@ -6,7 +6,7 @@ import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
 const token = `review-smoke-${randomUUID()}`;
 process.env.RECALLANT_AUTH_TOKEN = token;

@@ -2,10 +2,119 @@
 set -euo pipefail
 
 RECALLANT_HOME="${RECALLANT_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ENV_FILE="${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}"
-DATA_DIR="${RECALLANT_DATA_DIR:-/ai/recallant-data}"
+INSTALL_PROFILE="${RECALLANT_INSTALL_PROFILE:-owner-server}"
+ENV_FILE="${RECALLANT_ENV_FILE:-}"
+DATA_DIR="${RECALLANT_DATA_DIR:-}"
 RUN_USER="${RECALLANT_RUN_USER:-${SUDO_USER:-$(id -un)}}"
-INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-/usr/local/bin}"
+INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-}"
+SYSTEMD_MODE="${RECALLANT_SYSTEMD_MODE:-auto}"
+DRY_RUN=false
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install-recallant.sh [options]
+
+Options:
+  --dry-run                  Print the install plan without changing files, Docker, or systemd.
+  --profile <name>           owner-server (default) or single-user.
+  --recallant-home <path>    Repository/runtime path to install from.
+  --env-file <path>          Environment file path.
+  --data-dir <path>          Recallant data directory.
+  --install-cli-prefix <dir> Directory where the recallant CLI wrapper is installed.
+  --run-user <user>          systemd service user.
+  --no-systemd               Do not write or start a systemd service.
+  -h, --help                 Show this help.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --profile)
+      INSTALL_PROFILE="${2:-}"
+      shift 2
+      ;;
+    --recallant-home)
+      RECALLANT_HOME="${2:-}"
+      shift 2
+      ;;
+    --env-file)
+      ENV_FILE="${2:-}"
+      shift 2
+      ;;
+    --data-dir)
+      DATA_DIR="${2:-}"
+      shift 2
+      ;;
+    --install-cli-prefix)
+      INSTALL_CLI_PREFIX="${2:-}"
+      shift 2
+      ;;
+    --run-user)
+      RUN_USER="${2:-}"
+      shift 2
+      ;;
+    --no-systemd)
+      SYSTEMD_MODE="manual"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$INSTALL_PROFILE" in
+  owner-server)
+    ENV_FILE="${ENV_FILE:-/opt/secure-configs/recallant.env}"
+    DATA_DIR="${DATA_DIR:-/ai/recallant-data}"
+    INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-/usr/local/bin}"
+    ;;
+  single-user)
+    ENV_FILE="${ENV_FILE:-$HOME/.config/recallant/recallant.env}"
+    DATA_DIR="${DATA_DIR:-$HOME/.local/share/recallant}"
+    INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-$HOME/.local/bin}"
+    if [[ "$SYSTEMD_MODE" == "auto" ]]; then
+      SYSTEMD_MODE="manual"
+    fi
+    ;;
+  *)
+    echo "Unknown install profile: $INSTALL_PROFILE" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+print_plan() {
+  cat <<EOF
+Recallant install plan
+profile: $INSTALL_PROFILE
+dry_run: $DRY_RUN
+recallant_home: $RECALLANT_HOME
+env_file: $ENV_FILE
+data_dir: $DATA_DIR
+run_user: $RUN_USER
+install_cli_prefix: $INSTALL_CLI_PREFIX
+systemd_mode: $SYSTEMD_MODE
+will_create_data_dirs: $DATA_DIR/postgres, $DATA_DIR/backups
+will_create_env_file: $([[ -f "$ENV_FILE" ]] && echo no || echo yes)
+will_install_dependencies: $([[ -d "$RECALLANT_HOME/node_modules" ]] && echo no || echo yes)
+will_build: yes
+will_install_cli: yes
+will_start_postgres: yes
+will_apply_migrations: if schema is absent
+will_install_systemd: $([[ "$SYSTEMD_MODE" != "manual" ]] && echo auto || echo no)
+EOF
+}
 
 random_hex() {
   node -e "process.stdout.write(require('crypto').randomBytes(Number(process.argv[1])).toString('hex'))" "$1"
@@ -32,6 +141,12 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 cd "$RECALLANT_HOME"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  print_plan
+  echo "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
+  exit 0
+fi
 
 mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/backups" "$(dirname "$ENV_FILE")"
 
@@ -85,7 +200,7 @@ else
 fi
 
 unit_file="/etc/systemd/system/recallant.service"
-if [[ -d /etc/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+if [[ "$SYSTEMD_MODE" != "manual" && -d /etc/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
   cat >"$unit_file" <<EOF
 [Unit]
 Description=Recallant private memory server

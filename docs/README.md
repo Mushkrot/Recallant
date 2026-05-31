@@ -11,8 +11,10 @@ Historical note: this project was originally drafted under the working name **Ag
 Current operator note: Pre-Pilot Readiness, the first copied-project pilot, autonomous
 attach/detach, controlled cross-project recall, one-command owner-server CLI install/attach UX,
 AI-backed Management UI/chat with deterministic safety gates, detached local cleanup, and installed
-CLI onboarding have first slices. The Product Acceptance agent-capture loop now passes for the
-first production-ready slice: attached projects start Recallant-backed sessions, read context, write
+CLI onboarding have first slices. The server installer now has dry-run owner-server and single-user
+profiles with smoke coverage, so outside testers can preview install effects before anything is
+written. The Product Acceptance agent-capture loop now passes for the first production-ready slice:
+attached projects start Recallant-backed sessions, read context, write
 decisions/actions/tests/checkpoints, close out, and recall that memory in a later session without
 the owner acting as QA. The broader goal remains the full documented v1 product, so unresolved
 TEST_CONTRACT/PRD requirements still need requirement-by-requirement verification and closure.

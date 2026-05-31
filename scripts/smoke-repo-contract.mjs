@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-repo-contract-"));
 const projectLogPath = join(projectDir, "PROJECT_LOG.md");

@@ -4,7 +4,7 @@ import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 const developerId = randomUUID();
 const projectA = {
   id: randomUUID(),
@@ -130,14 +130,25 @@ try {
     title: "Cross-project smoke developer rule",
     body: `Developer-level rule for ${marker}: prefer source-linked examples over copied blind rules.`,
     confidence: 0.95,
-    created_by: "system"
+    created_by: "system",
+    source_refs: [
+      {
+        source_kind: "external",
+        source_id: "owner/cross-project-smoke-rule",
+        quote: `Owner-approved developer rule fixture for ${marker}.`,
+        metadata: { source_path: "owner/cross-project-smoke-rule" }
+      }
+    ]
   });
-  await aDb.reviewAgentMemory({
+  const developerPromotion = await aDb.reviewAgentMemory({
     memory_id: developerRule.memory_id,
     action: "promote_instruction",
     actor_kind: "system",
     note: "Phase 10 cross-project smoke fixture"
   });
+  if (developerPromotion.ok === false || developerPromotion.use_policy !== "instruction_grade") {
+    throw new Error(`Developer-rule promotion failed: ${JSON.stringify(developerPromotion)}`);
+  }
 
   const beforeApplyCount = await countProjectMemories(projectA.id);
   const session = await aDb.startSession({
@@ -152,7 +163,10 @@ try {
     include_raw_evidence: "auto",
     include_recovery: true
   });
-  if (JSON.stringify(contextPack).includes(bPattern.memory_id) || JSON.stringify(contextPack).includes(projectB.id)) {
+  if (
+    JSON.stringify(contextPack).includes(bPattern.memory_id) ||
+    JSON.stringify(contextPack).includes(projectB.id)
+  ) {
     throw new Error(`Default context pack leaked project B memory: ${JSON.stringify(contextPack)}`);
   }
 
@@ -205,7 +219,9 @@ try {
     JSON.stringify(capabilityHit).includes(`sk-${marker}`) ||
     !JSON.stringify(capabilityHit).includes("<redacted")
   ) {
-    throw new Error(`Environment/capability recall leaked secret value: ${JSON.stringify(environmentRecall)}`);
+    throw new Error(
+      `Environment/capability recall leaked secret value: ${JSON.stringify(environmentRecall)}`
+    );
   }
 
   const afterRecallCount = await countProjectMemories(projectA.id);
@@ -243,10 +259,15 @@ try {
     appliedRow?.use_policy === "instruction_grade" ||
     appliedRow?.source_ref_count < 1
   ) {
-    throw new Error(`Applied pattern did not create safe project-A memory: ${JSON.stringify(appliedRow)}`);
+    throw new Error(
+      `Applied pattern did not create safe project-A memory: ${JSON.stringify(appliedRow)}`
+    );
   }
 
-  if (!similar.policy || similar.policy.default_context_pack_includes_cross_project_examples !== false) {
+  if (
+    !similar.policy ||
+    similar.policy.default_context_pack_includes_cross_project_examples !== false
+  ) {
     throw new Error(`Cross-project policy metadata missing: ${JSON.stringify(similar)}`);
   }
 } finally {

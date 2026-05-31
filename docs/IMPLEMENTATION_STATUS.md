@@ -109,6 +109,9 @@ Current implemented slices include:
 - Installed-wrapper onboarding smoke: a temporary `PREFIX` install of `scripts/install-recallant-cli.sh`
   runs the installed `recallant` command through `lint-context`, ordinary `recallant attach .`,
   `agent-start`, decision capture, and closeout against an isolated database.
+- Installer dry-run/profile smoke: `npm run installer:smoke` verifies the full server installer
+  plan for `owner-server` and `single-user` profiles without creating files, starting Docker,
+  writing DB rows, or touching systemd.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -229,8 +232,7 @@ Next useful work:
 1. Deepen owner-facing Management UI action flows beyond the first implementation slice.
 2. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
    pointer/runtime cleanup slice.
-3. Add a full installer dry-run/profile smoke for non-owner Linux servers, beyond the current CLI
-   wrapper smoke.
+3. Close remaining CLI init/discover/import contract gaps against `TEST_CONTRACT`.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -522,12 +524,20 @@ Latest Phase 10 attach/detach/cross-project validation:
   after adding `memory_cross_project_recall` to the MCP tool list.
 
 Smoke scripts that previously assumed a Docker `/work` mount now use the current repository root, so
-the full local host `smoke:core` suite can run against the isolated `recallant-dev` database.
+the full local host `smoke:core` suite can run against the isolated `recallant-dev` database. The
+dev database is exposed on `127.0.0.1:15433` to avoid accidental connections to unrelated
+localhost Postgres services.
 
 Latest product-UX readiness checkpoint:
 
 - `scripts/install-recallant.sh` provides the intended server install entrypoint:
   clone, run one installer, get Postgres, the HTTP service, and the global `recallant` CLI.
+- `scripts/install-recallant.sh --dry-run --profile owner-server|single-user` prints the exact
+  install plan and exits before file, Docker, database, or systemd writes.
+- Full `npm run smoke:core` now passes from a clean `make db-reset` using the dedicated
+  `recallant-dev` database on `127.0.0.1:15433`.
+- The full smoke suite also verifies source-linked developer-wide cross-project recall and
+  project-bound spool sync.
 - `scripts/install-recallant-cli.sh` installs the CLI wrapper for an already configured server.
 - The CLI now auto-loads `/opt/secure-configs/recallant.env` when present, so project attach no
   longer requires manually sourcing env or invoking `node apps/cli/dist/index.js`.

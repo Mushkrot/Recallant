@@ -18,15 +18,15 @@ capture-active readiness in the Review UI/API, and detach safely without touchin
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
-work is to deepen owner-facing Management UI action flows, add a full installer dry-run/profile
-smoke for non-owner Linux servers, or extend local sandbox cleanup beyond the first safe
-pointer/runtime-artifact slice.
+work is to deepen owner-facing Management UI action flows, close remaining CLI init/discover/import
+contract gaps, or extend local sandbox cleanup beyond the first safe pointer/runtime-artifact slice.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
 with `make prod-db-up`; public unauthenticated access returned Cloudflare Access `302` again. Dev
-database Make targets now use `recallant-dev` as their Docker Compose project name so local
-`make db-down` / `make db-reset` cannot remove the production `recallant-postgres` container.
+database Make targets now use `recallant-dev` as their Docker Compose project name and publish dev
+Postgres on `127.0.0.1:15433` so local `make db-down` / `make db-reset` cannot remove or collide
+with the production `recallant-postgres` container.
 The owner then confirmed in a real browser that authenticated Cloudflare Access loads the Recallant
 Review Command Center for project `84eda3bf`.
 
@@ -153,7 +153,12 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
   `scripts/install-recallant-cli.sh`;
 - the installed wrapper runs `lint-context`, ordinary `recallant attach .`, `agent-start`, decision
   capture, and closeout against an isolated temporary database;
-- this does not yet exercise full systemd/Docker server installation on a fresh non-owner host.
+- `npm run installer:smoke` verifies full server-installer dry-run planning for `owner-server` and
+  `single-user` profiles;
+- dry-run prints env/data/CLI/systemd/Postgres/migration actions and exits before creating files,
+  starting Docker, writing DB rows, or touching systemd.
+- The local dev database used by smoke tests is now isolated on `127.0.0.1:15433`; a clean
+  `make db-reset` followed by `npm run smoke:core` passes end to end.
 
 The current Review action follow-up is complete for the governed-memory action set:
 
@@ -291,8 +296,8 @@ Latest QA correction checkpoint:
   independently.
 
 The next required target is no longer the Product Acceptance loop; that loop is green for the first
-slice. Permanent-forget UI, richer Management UI action flows, a full installer dry-run/profile
-smoke, or a separate explicit workflow for deleting sandbox copy directories are now the
+slice. Permanent-forget UI, richer Management UI action flows, remaining CLI init/discover/import
+contract gaps, or a separate explicit workflow for deleting sandbox copy directories are now the
 highest-value follow-ups.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:

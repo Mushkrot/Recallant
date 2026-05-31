@@ -2,10 +2,11 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, duplicate canonical resolution, and conflict old/new resolution are implemented, deployed, and verified.
+Status: Installer dry-run/profile smoke and full local smoke isolation are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer dry-run/profile smoke.
-Last updated: 2026-05-31T07:46:32Z.
+Next step: audit remaining CLI init/discover/import contract gaps against TEST_CONTRACT.
+Last updated: 2026-05-31T08:05:26Z.
+
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -99,6 +100,15 @@ Last updated: 2026-05-31T07:46:32Z.
 - Conflict candidate detail now shows old/new records and actions to use newer, keep older/archive
   newer, or demote the selected rule. Superseded memories now drop `instruction_grade` so lifecycle
   policy stays schema-valid.
+- `scripts/install-recallant.sh` now supports `--dry-run`, `--profile owner-server`, and
+  `--profile single-user`, with path override flags. Dry-run prints the exact plan and exits before
+  file, Docker, database, or systemd writes.
+- Dev smoke tests now use dedicated Recallant dev Postgres on `127.0.0.1:15433` so they cannot
+  accidentally connect to unrelated localhost Postgres services.
+- Cross-project developer-rule smoke now proves developer-wide `instruction_grade` recall only after
+  source refs are present.
+- Spool sync smoke now passes `--project-dir` when syncing a specific project spool, so the fallback
+  capture path verifies the intended project binding instead of the caller's cwd.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -171,10 +181,14 @@ Last updated: 2026-05-31T07:46:32Z.
   recallant.service`, local `/health`, and authenticated Review route check for
   `Conflicts / Duplicates` all passed. Conditional old/new controls remain covered by isolated DB
   smoke because production has no active conflict fixture.
+- `npm run installer:smoke`; passed with owner-server and single-user dry-run profiles and asserts
+  no env file, data dir, CLI prefix, containers, DB rows, or systemd services were changed
+- Clean `make db-reset` followed by full `npm run smoke:core`; passed against isolated
+  `recallant-dev` Postgres on `127.0.0.1:15433`
 
 ## Open Questions
 
-- None that block implementation of the product acceptance loop.
+- None that block the next documented implementation step.
 
 ## Recallant
 

@@ -8,6 +8,8 @@ services:
     volumes:
       - recallant-postgres-data:/var/lib/postgresql/data
       - ./packages/db/migrations:/migrations:ro
+    ports:
+      - "127.0.0.1:15433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U recallant -d recallant_agent_work"]
       interval: 5s

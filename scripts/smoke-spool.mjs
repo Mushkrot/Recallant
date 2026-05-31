@@ -7,7 +7,7 @@ import pg from "pg";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@localhost:5432/recallant_agent_work";
+  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 const repoRoot = process.cwd();
 
 const spoolDir = await mkdtemp(join(tmpdir(), "recallant-spool-"));
@@ -79,7 +79,14 @@ if (!spoolText.includes(turn.local_id) || !spoolText.includes(event.local_id)) {
   throw new Error(`Spool append did not create JSONL records: ${spoolText}`);
 }
 
-const dryRun = run(["sync-spool", "--spool-dir", spoolDir, "--dry-run"]);
+const dryRun = run([
+  "sync-spool",
+  "--project-dir",
+  projectPath,
+  "--spool-dir",
+  spoolDir,
+  "--dry-run"
+]);
 if (dryRun.writes_database !== false || dryRun.unsynced_count !== 2) {
   throw new Error(`sync-spool dry-run failed: ${JSON.stringify(dryRun)}`);
 }
@@ -100,7 +107,7 @@ if (packSpoolStatus?.status !== "unsynced" || packSpoolStatus?.unsynced_count !=
   );
 }
 
-const firstSync = run(["sync-spool", "--spool-dir", spoolDir]);
+const firstSync = run(["sync-spool", "--project-dir", projectPath, "--spool-dir", spoolDir]);
 if (
   firstSync.synced_count !== 2 ||
   !firstSync.mappings[turn.local_id] ||
@@ -109,7 +116,7 @@ if (
   throw new Error(`sync-spool failed: ${JSON.stringify(firstSync)}`);
 }
 
-const secondSync = run(["sync-spool", "--spool-dir", spoolDir]);
+const secondSync = run(["sync-spool", "--project-dir", projectPath, "--spool-dir", spoolDir]);
 if (secondSync.synced_count !== 0) {
   throw new Error(`sync-spool was not idempotent: ${JSON.stringify(secondSync)}`);
 }
