@@ -3019,6 +3019,18 @@ export class RecallantDb {
     };
   }
 
+  async closeSession(sessionId: string, endedReason = "client_exit") {
+    const result = await this.pool.query(
+      `
+        UPDATE sessions
+        SET status = 'closed', ended_reason = $2, ended_at = coalesce(ended_at, now()), last_seen_at = now()
+        WHERE id = $1 AND status = 'active' AND ended_at IS NULL
+      `,
+      [sessionId, endedReason]
+    );
+    return { closed: result.rowCount ?? 0 };
+  }
+
   private async contextForSession(sessionId?: string | null): Promise<ProjectContext> {
     if (!sessionId) return this.ensureProject();
     const result = await this.pool.query<{

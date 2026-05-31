@@ -562,6 +562,7 @@ async function runLintContext(argv: readonly string[]) {
 async function runContext(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for context preview");
+  let sessionId: string | null = null;
   try {
     const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
     const started = await database.startSession({
@@ -570,8 +571,10 @@ async function runContext(argv: readonly string[]) {
       session_label: "context-preview",
       resume_policy: "normal"
     });
+    sessionId = started.session_id ? String(started.session_id) : null;
+    if (!sessionId) throw new Error("context preview did not start a session");
     const pack = await database.getContextPack({
-      session_id: String(started.session_id),
+      session_id: sessionId,
       task_hint: parseFlag(argv, "--task-hint") ?? "context preview",
       include_raw_evidence: "auto",
       include_recovery: true,
@@ -579,6 +582,7 @@ async function runContext(argv: readonly string[]) {
     });
     process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
   } finally {
+    if (sessionId) await database.closeSession(sessionId, "client_exit");
     await database.close();
   }
 }
@@ -1678,6 +1682,7 @@ async function runSyncSpool(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for sync-spool");
   const synced = { ...manifest.synced };
+  let syncSessionId: string | null = null;
   try {
     const syncSession =
       unsynced.length > 0
@@ -1688,7 +1693,7 @@ async function runSyncSpool(argv: readonly string[]) {
             resume_policy: "normal"
           })
         : null;
-    const syncSessionId = syncSession?.session_id ? String(syncSession.session_id) : null;
+    syncSessionId = syncSession?.session_id ? String(syncSession.session_id) : null;
     for (const record of unsynced) {
       const payload = record.payload as Record<string, unknown>;
       const result =
@@ -1716,6 +1721,7 @@ async function runSyncSpool(argv: readonly string[]) {
       };
     }
   } finally {
+    if (syncSessionId) await database.closeSession(syncSessionId, "client_exit");
     await database.close();
   }
   await mkdir(spoolDir(argv), { recursive: true });

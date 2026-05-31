@@ -132,6 +132,22 @@ try {
     "context pack did not include the latest checkpoint"
   );
 
+  const secondCloseout = await cli(onlineProject, [
+    "agent-closeout",
+    "--status",
+    "closed",
+    "--focus",
+    `Completed recall verification for ${marker}`,
+    "--next-step",
+    "No follow-up for smoke project.",
+    "--summary",
+    `Closed recall verification session for ${marker}`
+  ]);
+  assert(
+    secondCloseout.closeout?.report_required === false,
+    `second closeout reported warnings: ${JSON.stringify(secondCloseout)}`
+  );
+
   const db = new RecallantDb({
     databaseUrl,
     developerId,
@@ -155,6 +171,10 @@ try {
     assert(
       Number(dashboard.project_readiness?.capture_event_count ?? 0) >= 3,
       "dashboard readiness did not count capture events"
+    );
+    assert(
+      Number(dashboard.project_readiness?.active_sessions ?? 0) === 0,
+      `dashboard readiness still has active sessions: ${JSON.stringify(dashboard.project_readiness)}`
     );
   } finally {
     await db.close();

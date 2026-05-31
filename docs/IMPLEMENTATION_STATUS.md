@@ -97,6 +97,8 @@ Current implemented slices include:
 - Review dashboard capture readiness telemetry: projects now expose whether they are only
   registered or have actually run capture, including last context read, last memory write, last
   checkpoint, capture event count, and captured decision count.
+- CLI context previews and spool sync close their technical sessions with `client_exit`, so routine
+  context checks and spool uploads do not leave misleading active sessions in the Review UI.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -286,6 +288,20 @@ Latest Review UI readiness validation:
 
 The Review UI smoke verifies the registered-only state, while the agent capture smoke verifies the
 capture-active dashboard API fields after a real CLI capture loop.
+
+Latest self-dogfood validation:
+
+- Live `/ai/recallant` `recallant agent-start`
+- Live `recallant agent-event --kind decision`
+- Live `recallant agent-event --kind test`
+- Live `recallant agent-checkpoint`
+- Live `recallant agent-closeout`
+- Live `recallant context --task-hint "product acceptance decision ..."`
+- `npm run agent-capture:smoke`
+
+The live context pack recalled the captured product-acceptance decision from memory
+`bbe351f3-66a1-4f1c-a963-ff545c7e314b`. The smoke suite also verifies that context preview and
+recall-verification sessions are closed afterward instead of leaving active technical sessions.
 
 Latest Pre-Pilot R1 validation:
 

@@ -2,11 +2,10 @@
 
 ## Current Session
 
-Status: Review UI/API capture readiness telemetry added and smoke-tested.
-Current focus: run final product acceptance and self-dogfood verification, then deploy.
-Next step: exercise `/ai/recallant` itself through the new capture runtime and confirm the captured
-decision returns in a later context pack.
-
+Status: live self-dogfood capture passed; CLI session cleanup fix is in progress.
+Current focus: commit the session-cleanup fix, then restart the Review UI service so capture readiness is visible live.
+Next step: deploy the rebuilt service and verify `/ai/recallant` shows capture-active readiness.
+Last updated: 2026-05-31T06:04:10Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -70,6 +69,8 @@ decision returns in a later context pack.
 - Review dashboard readiness now distinguishes registered-only projects from capture-active
   projects using last context read, last memory write, last checkpoint, capture event count, and
   captured decision count.
+- Context previews and spool sync now close their technical sessions with `client_exit` so ordinary
+  context checks do not leave confusing active sessions in the Review UI.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -88,6 +89,14 @@ decision returns in a later context pack.
   isolated temporary Postgres after attach/bootstrap integration
 - `npm run review-ui:smoke` verifies the registered-only UI state; `npm run agent-capture:smoke`
   verifies capture-active readiness fields through the dashboard API
+- live `/ai/recallant` dogfood capture: `recallant agent-start`, `agent-event --kind decision`,
+  `agent-event --kind test`, `agent-checkpoint`, and `agent-closeout` wrote a real product
+  acceptance memory and checkpoint
+- live `recallant context --task-hint "product acceptance decision ..."` recalled memory
+  `bbe351f3-66a1-4f1c-a963-ff545c7e314b`, proving the next session can retrieve the captured
+  decision
+- rerun `npm run agent-capture:smoke` after the session cleanup fix; smoke now also asserts active
+  sessions are zero after recall verification
 
 ## Open Questions
 
