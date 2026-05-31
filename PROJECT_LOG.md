@@ -2,11 +2,10 @@
 
 ## Current Session
 
-Status: attach/bootstrap now points agents to the CLI-backed capture runtime.
-Current focus: add Review UI/API readiness telemetry for capture-active versus registered-only
-projects.
-Next step: expose last context read, last memory write, last checkpoint, and capture status in the
-Review dashboard.
+Status: Review UI/API capture readiness telemetry added and smoke-tested.
+Current focus: run final product acceptance and self-dogfood verification, then deploy.
+Next step: exercise `/ai/recallant` itself through the new capture runtime and confirm the captured
+decision returns in a later context pack.
 
 ## Active Constraints
 
@@ -68,6 +67,9 @@ Review dashboard.
   `recallant agent-start --task-hint`, with `agent-event`, `agent-checkpoint`, and
   `agent-closeout` as the fallback capture runtime. Attach no longer implies that project
   registration alone is enough.
+- Review dashboard readiness now distinguishes registered-only projects from capture-active
+  projects using last context read, last memory write, last checkpoint, capture event count, and
+  captured decision count.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -84,6 +86,8 @@ Review dashboard.
   recall, offline spool, sync-spool, and repeat sync idempotency
 - `npm run phase10:smoke` and `npm run agent-capture:smoke` passed together against the same
   isolated temporary Postgres after attach/bootstrap integration
+- `npm run review-ui:smoke` verifies the registered-only UI state; `npm run agent-capture:smoke`
+  verifies capture-active readiness fields through the dashboard API
 
 ## Open Questions
 

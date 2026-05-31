@@ -680,33 +680,47 @@ function renderReadiness(data: ReviewDashboardData) {
   const readiness = asRecord(data.project_readiness);
   const registered = Boolean(readiness.project_registered);
   const checkpointUpdatedAt = readiness.checkpoint_updated_at;
+  const lastContextReadAt = readiness.last_context_read_at;
+  const lastMemoryWriteAt = readiness.last_memory_write_at;
   const activeSessions = Number(readiness.active_sessions ?? 0);
   const interruptedSessions = Number(readiness.interrupted_sessions ?? 0);
-  const activeChunks = Number(readiness.active_chunk_count ?? 0);
-  const acceptedMemories = Number(readiness.accepted_memory_count ?? 0);
+  const captureEvents = Number(readiness.capture_event_count ?? 0);
+  const capturedDecisions = Number(readiness.captured_decision_count ?? 0);
   const reviewMemories = Number(readiness.review_memory_count ?? 0);
-  const ready =
+  const captureActive =
     registered &&
     interruptedSessions === 0 &&
+    lastContextReadAt !== null &&
+    lastContextReadAt !== undefined &&
+    lastMemoryWriteAt !== null &&
+    lastMemoryWriteAt !== undefined &&
     checkpointUpdatedAt !== null &&
-    checkpointUpdatedAt !== undefined &&
-    (activeChunks > 0 || acceptedMemories > 0);
-  const statusText = ready
-    ? "Ready for an agent session."
-    : registered
-      ? "Registered, but one readiness signal is still missing."
-      : "Project is not registered.";
+    checkpointUpdatedAt !== undefined;
+  const statusText = !registered
+    ? "Project is not registered."
+    : captureActive
+      ? "Agent capture active."
+      : !lastContextReadAt
+        ? "Registered only. Agent context has not been read yet."
+        : !lastMemoryWriteAt
+          ? "Capture started. No memory write has been recorded yet."
+          : !checkpointUpdatedAt
+            ? "Capture active. Checkpoint is still missing."
+            : "Capture needs attention.";
   const note =
     activeSessions > 0
       ? `${activeSessions} active session${activeSessions === 1 ? "" : "s"} still open.`
       : "No active agent sessions are open.";
-  return `<div class="readiness ${ready ? "ready" : "needs-work"}">
+  const readinessDate = (value: unknown) => formatDate(value) || "Not yet";
+  return `<div class="readiness ${captureActive ? "ready" : "needs-work"}">
     <strong>${escapeHtml(statusText)}</strong>
     <p>${escapeHtml(note)}</p>
     <div class="summary-grid">
-      <span><strong>${escapeHtml(checkpointUpdatedAt ? "Yes" : "No")}</strong> checkpoint</span>
-      <span><strong>${escapeHtml(activeChunks)}</strong> searchable chunks</span>
-      <span><strong>${escapeHtml(acceptedMemories)}</strong> accepted memories</span>
+      <span><strong>${escapeHtml(readinessDate(lastContextReadAt))}</strong> last context read</span>
+      <span><strong>${escapeHtml(readinessDate(lastMemoryWriteAt))}</strong> last memory write</span>
+      <span><strong>${escapeHtml(readinessDate(checkpointUpdatedAt))}</strong> last checkpoint</span>
+      <span><strong>${escapeHtml(captureEvents)}</strong> capture events</span>
+      <span><strong>${escapeHtml(capturedDecisions)}</strong> captured decisions</span>
       <span><strong>${escapeHtml(reviewMemories)}</strong> needs review</span>
     </div>
     <p class="readiness-note">Last session: ${escapeHtml(formatDate(readiness.last_session_at))}</p>

@@ -162,6 +162,9 @@ try {
     !htmlText.includes("Management Chat") ||
     !htmlText.includes('id="management-chat"') ||
     !htmlText.includes("Agent Readiness") ||
+    !htmlText.includes("Registered only. Agent context has not been read yet.") ||
+    !htmlText.includes("last context read") ||
+    !htmlText.includes("last memory write") ||
     !htmlText.includes("Ask what to review next") ||
     !htmlText.includes("Local embeddings")
   ) {
@@ -181,7 +184,8 @@ try {
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     json.project_readiness?.project_registered !== true ||
-    typeof json.project_readiness?.active_chunk_count !== "number" ||
+    typeof json.project_readiness?.capture_event_count !== "number" ||
+    json.project_readiness?.last_context_read_at !== null ||
     json.critical.pending_review < 1
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);

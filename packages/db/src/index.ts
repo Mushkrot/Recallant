@@ -2536,6 +2536,31 @@ export class RecallantDb {
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'accepted') AS accepted_memory_count,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_memory_count,
           (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
+          (SELECT max(created_at) FROM events WHERE project_id = $1 AND payload->'metadata'->>'capture_kind' = 'context_read') AS last_context_read_at,
+          (
+            SELECT max(created_at)
+            FROM events
+            WHERE project_id = $1
+              AND (
+                payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+                OR kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
+              )
+          ) AS last_memory_write_at,
+          (
+            SELECT count(*)::int
+            FROM events
+            WHERE project_id = $1
+              AND (
+                payload->'metadata'->>'capture_kind' = 'context_read'
+                OR payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+              )
+          ) AS capture_event_count,
+          (
+            SELECT count(*)::int
+            FROM agent_memories
+            WHERE project_id = $1
+              AND metadata->>'created_from' = 'recallant_agent_event'
+          ) AS captured_decision_count,
           (SELECT max(last_seen_at) FROM sessions WHERE project_id = $1) AS last_session_at
       `,
       [dashboardProjectId]

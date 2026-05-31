@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { RecallantDb } from "../packages/db/dist/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -130,6 +131,34 @@ try {
     String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
     "context pack did not include the latest checkpoint"
   );
+
+  const db = new RecallantDb({
+    databaseUrl,
+    developerId,
+    projectId: attach.project_id,
+    projectPath: onlineProject
+  });
+  try {
+    const dashboard = await db.getReviewDashboard({ project_id: attach.project_id });
+    assert(
+      dashboard.project_readiness?.last_context_read_at,
+      "dashboard readiness is missing last context read"
+    );
+    assert(
+      dashboard.project_readiness?.last_memory_write_at,
+      "dashboard readiness is missing last memory write"
+    );
+    assert(
+      dashboard.project_readiness?.checkpoint_updated_at,
+      "dashboard readiness is missing checkpoint timestamp"
+    );
+    assert(
+      Number(dashboard.project_readiness?.capture_event_count ?? 0) >= 3,
+      "dashboard readiness did not count capture events"
+    );
+  } finally {
+    await db.close();
+  }
 
   const projectLog = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
   assert(projectLog.includes(marker), "PROJECT_LOG was not updated with checkpoint marker");

@@ -94,6 +94,9 @@ Current implemented slices include:
   starter memories, startup smoke checkpoint, and owner reports now point agents to
   `recallant agent-start --task-hint "<current task>"` plus `agent-event`, `agent-checkpoint`, and
   `agent-closeout` instead of treating project registration as sufficient readiness.
+- Review dashboard capture readiness telemetry: projects now expose whether they are only
+  registered or have actually run capture, including last context read, last memory write, last
+  checkpoint, capture event count, and captured decision count.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -275,6 +278,14 @@ Latest attach/capture integration validation:
 
 Both passed against the same isolated temporary Postgres after generated attach startup files were
 updated to require the capture runtime.
+
+Latest Review UI readiness validation:
+
+- `npm run review-ui:smoke`
+- `npm run agent-capture:smoke`
+
+The Review UI smoke verifies the registered-only state, while the agent capture smoke verifies the
+capture-active dashboard API fields after a real CLI capture loop.
 
 Latest Pre-Pilot R1 validation:
 
