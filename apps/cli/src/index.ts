@@ -18,6 +18,7 @@ import {
 } from "./discovery.js";
 import { runAttach } from "./attach.js";
 import { runDetach } from "./detach.js";
+import { runLocalCleanup } from "./local-cleanup.js";
 
 const memorySection = `## Memory (Recallant)
 
@@ -1779,6 +1780,8 @@ async function main(argv: readonly string[]) {
   if (command === "doctor") return runDoctor(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
+  if (command === "local-cleanup" || command === "sandbox-local-cleanup")
+    return runLocalCleanup(argv);
   if (command === "init") return runInit(argv);
   if (command === "discover") return runDiscover(argv);
   if (command === "import") return runImport(argv);
@@ -1798,7 +1801,7 @@ async function main(argv: readonly string[]) {
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|detach|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|detach|local-cleanup|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

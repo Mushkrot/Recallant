@@ -301,6 +301,20 @@ Detach policy:
   touch project files by default.
 - sandbox/test cleanup: after dry-run and explicit confirmation, hide the sandbox project from
   active UI/search and archive active chunks so it no longer participates in normal retrieval. The
-  report offers separate local cleanup for `.recallant/config`, bootstrap changes, or the sandbox
-  copy, but this first slice does not remove local files automatically.
+  report offers separate local cleanup for `.recallant/config`, generated MCP hints, and runtime
+  session pointers. Bootstrap files and backups are not removed automatically because backups may be
+  redacted and human review is safer.
 - sensitive/wrong memory: use the separate `forget forever` erasure workflow, not ordinary detach.
+
+Local cleanup command:
+
+```bash
+recallant local-cleanup --project-dir <project> --dry-run
+recallant local-cleanup --project-dir <project> --confirm
+```
+
+Confirmed local cleanup is blocked until the project is already `detached` or `sandbox_cleaned` in
+Recallant. The first slice removes only local Recallant pointer/runtime files:
+`.recallant/config`, `.recallant/codex-mcp.json`, and `.recallant/current-session.json`.
+`AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, source files, local attach backups, and the sandbox
+copy directory are preserved unless a later explicit workflow handles them separately.

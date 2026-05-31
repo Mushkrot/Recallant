@@ -99,6 +99,9 @@ Current implemented slices include:
   checkpoint, capture event count, and captured decision count.
 - CLI context previews and spool sync close their technical sessions with `client_exit`, so routine
   context checks and spool uploads do not leave misleading active sessions in the Review UI.
+- Local cleanup after detach: `recallant local-cleanup` dry-runs and confirms removal of local
+  Recallant pointer/runtime files only after a project is detached or sandbox-cleaned. It preserves
+  `AGENTS.md`, `PROJECT_LOG.md`, source files, and attach backups.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -217,8 +220,9 @@ Completed Product Acceptance work:
 Next useful work:
 
 1. Deepen owner-facing Management UI action flows beyond the first implementation slice.
-2. Add optional local sandbox-file cleanup after confirmed detach.
-3. Package the install/onboarding story for a fresh non-owner server profile.
+2. Package the install/onboarding story for a fresh non-owner server profile.
+3. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
+   pointer/runtime cleanup slice.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -280,6 +284,17 @@ decision/action/test event capture, decision memory creation, checkpoint plus `P
 update, closeout, second-session recall of the unique decision, dashboard readiness fields,
 active-session cleanup, safe detach dry-run plus confirmed detach, and offline
 spool dry-run/sync/repeat-sync idempotency.
+
+Latest local cleanup validation:
+
+- `npm run build`
+- `npm run local-cleanup:smoke`
+- `npm run review-ui:smoke`
+
+The local cleanup smoke verifies that confirmed local cleanup is blocked while the project is still
+active, becomes available after confirmed detach, removes only `.recallant/config`,
+`.recallant/codex-mcp.json`, and `.recallant/current-session.json`, and preserves bootstrap files
+and local attach backups.
 
 Latest attach/capture integration validation:
 

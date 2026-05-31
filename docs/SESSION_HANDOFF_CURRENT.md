@@ -18,9 +18,9 @@ capture-active readiness in the Review UI/API, and detach safely without touchin
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
-work is to deepen owner-facing Management UI action flows, add optional local sandbox-file cleanup
-after confirmed detach, or package the install/onboarding story for a fresh non-owner server
-profile.
+work is to deepen owner-facing Management UI action flows, package the install/onboarding story for a
+fresh non-owner server profile, or extend local sandbox cleanup beyond the first safe
+pointer/runtime-artifact slice.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
 the production Postgres container being absent and `127.0.0.1:15432` refusing connections. Restored
@@ -136,6 +136,17 @@ The current Product Acceptance target is complete for the first implementation s
 - `recallant.service` was restarted after the readiness/deploy change and local `/health`,
   authenticated `/api/review-dashboard`, and Review HTML readiness checks passed.
 
+The current local cleanup follow-up is complete for the first safe slice:
+
+- `recallant local-cleanup --project-dir <project> --dry-run` reports local pointer/runtime files
+  that can be removed after detach;
+- confirmed local cleanup is policy-blocked until the project is already `detached` or
+  `sandbox_cleaned` in Recallant;
+- confirmed cleanup removes `.recallant/config`, `.recallant/codex-mcp.json`, and
+  `.recallant/current-session.json`;
+- `AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, source files, local attach backups, and the sandbox
+  copy directory are preserved.
+
 Latest deployed checkpoint:
 
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
@@ -184,8 +195,8 @@ Latest QA correction checkpoint:
   independently.
 
 The next required target is no longer the Product Acceptance loop; that loop is green for the first
-slice. Richer Management UI action flows, optional local sandbox-file cleanup, and fresh-server
-packaging are now the highest-value follow-ups.
+slice. Richer Management UI action flows, fresh-server packaging, or a separate explicit workflow
+for deleting sandbox copy directories are now the highest-value follow-ups.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

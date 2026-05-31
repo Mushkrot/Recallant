@@ -2573,6 +2573,11 @@ export class RecallantDb {
       inbox.memories[0]?.memory_id ??
       rules.memories[0]?.memory_id;
     const selectedDetail = selectedMemoryId ? await this.getAgentMemory(selectedMemoryId) : null;
+    const selectedProject = await this.pool.query<{ primary_path: string | null }>(
+      "SELECT primary_path FROM projects WHERE id = $1",
+      [dashboardProjectId]
+    );
+    const localProjectPath = selectedProject.rows[0]?.primary_path ?? null;
     return {
       current_project_id: dashboardProjectId,
       current_project: currentProject,
@@ -2602,7 +2607,10 @@ export class RecallantDb {
         dry_run_first: true,
         permanent_erasure_separate: true,
         detach_command: `recallant detach --project-id ${dashboardProjectId} --dry-run`,
-        sandbox_cleanup_command: `recallant detach --project-id ${dashboardProjectId} --mode sandbox --dry-run`
+        sandbox_cleanup_command: `recallant detach --project-id ${dashboardProjectId} --mode sandbox --dry-run`,
+        local_cleanup_command: localProjectPath
+          ? `recallant local-cleanup --project-dir ${JSON.stringify(localProjectPath)} --dry-run`
+          : null
       },
       chat: {
         placeholder: "Ask Recallant about memory, context packs, cleanup, or settings.",

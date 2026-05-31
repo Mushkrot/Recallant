@@ -165,6 +165,7 @@ try {
     !htmlText.includes("Registered only. Agent context has not been read yet.") ||
     !htmlText.includes("last context read") ||
     !htmlText.includes("last memory write") ||
+    !htmlText.includes("local cleanup dry-run") ||
     !htmlText.includes("Ask what to review next") ||
     !htmlText.includes("Local embeddings")
   ) {
@@ -186,6 +187,7 @@ try {
     json.project_readiness?.project_registered !== true ||
     typeof json.project_readiness?.capture_event_count !== "number" ||
     json.project_readiness?.last_context_read_at !== null ||
+    !String(json.project_cleanup?.local_cleanup_command ?? "").includes("recallant local-cleanup") ||
     json.critical.pending_review < 1
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);

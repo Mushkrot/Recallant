@@ -736,6 +736,7 @@ function renderProjectActions(data: ReviewDashboardData) {
       ${renderMeta([
         ["detach dry-run", cleanup.detach_command],
         ["sandbox cleanup dry-run", cleanup.sandbox_cleanup_command],
+        ["local cleanup dry-run", cleanup.local_cleanup_command],
         ["permanent erasure", cleanup.permanent_erasure_separate ? "Separate forget workflow" : ""]
       ])}
     </details>

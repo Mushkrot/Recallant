@@ -3,9 +3,9 @@
 ## Current Session
 
 Status: Product Acceptance agent capture loop passed for the first production-ready slice.
-Current focus: package the acceptance smoke/docs checkpoint and continue to the next follow-up.
-Next step: deepen owner-facing Management UI actions, optional local sandbox cleanup, or fresh-server onboarding packaging.
-Last updated: 2026-05-31T06:10:00Z.
+Current focus: first local cleanup follow-up implemented; preparing verification and commit.
+Next step: package fresh-server onboarding or deepen owner-facing Management UI actions.
+Last updated: 2026-05-31T06:18:00Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -75,6 +75,10 @@ Last updated: 2026-05-31T06:10:00Z.
   `recallant attach .`, verifies the capture loop, confirms later recall, checks dashboard
   readiness, verifies no lingering active sessions, exercises offline spool sync, and safely
   detaches the test project without changing files.
+- `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
+  then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
+  `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach
+  backups.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -105,6 +109,8 @@ Last updated: 2026-05-31T06:10:00Z.
   `127.0.0.1:55433`; passed after adding ordinary attach and detach cleanup checks
 - production deploy verification after restart: `systemctl is-active recallant.service`, local
   `/health`, authenticated `/api/review-dashboard`, and Review HTML readiness check all passed
+- `npm run local-cleanup:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
+- `npm run review-ui:smoke` against the same isolated DB; passed with local cleanup command visible
 
 ## Open Questions
 

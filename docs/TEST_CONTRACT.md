@@ -271,6 +271,10 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Live project detach defaults to hiding/archiving in Recallant without touching files or physically deleting records.
 - [x] Confirmed sandbox detach removes or archives the sandbox project from active UI/search without affecting the original copied project or other projects.
 - [x] Confirmed sandbox cleanup may also offer removal of local `.recallant/config`, bootstrap changes, or sandbox copy after dry-run and confirmation.
+- [x] `recallant local-cleanup --project-dir <project> --confirm` is policy-blocked until the
+  project is already detached or sandbox-cleaned in Recallant.
+- [x] Confirmed local cleanup removes only local Recallant pointer/runtime artifacts and preserves
+  `AGENTS.md`, `PROJECT_LOG.md`, source files, and local attach backups.
 - [x] Sensitive/wrong memory cleanup uses the separate `forget forever` workflow, not ordinary detach.
 - [x] Default context pack for project A excludes ordinary memories from unrelated project B.
 - [x] Explicit similar-project recall can return a source-linked result from project B with source project, source path/ref, scope kind, status, use policy, and applicability warning.
