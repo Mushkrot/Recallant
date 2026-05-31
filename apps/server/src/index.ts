@@ -20,6 +20,10 @@ type ChatRenderState = {
   response?: ManagementChatResponse;
 };
 
+type DetachRenderState = {
+  result?: Record<string, unknown>;
+};
+
 export function describeServerBoundary() {
   return {
     core: getRecallantCoreInfo(),
@@ -720,6 +724,62 @@ function renderProjectActions(data: ReviewDashboardData) {
   </div>`;
 }
 
+function renderProjectDetachResult(data: ReviewDashboardData, detach?: DetachRenderState) {
+  if (!detach?.result) return "";
+  const result = detach.result;
+  const project = asRecord(result.project);
+  const affected = asRecord(result.affected);
+  const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
+  const mode = String(result.mode ?? "sandbox");
+  const projectId = String(project.project_id ?? data.current_project_id ?? "");
+  const dryRun = result.dry_run !== false;
+  const status =
+    result.status === "detached"
+      ? "Removed from active Recallant views."
+      : "Dry-run complete. Nothing changed yet.";
+  return `<article class="detach-result">
+    <strong>${escapeHtml(status)}</strong>
+    <p>${escapeHtml(
+      dryRun
+        ? "Review the affected records, then confirm if this is the project you want to remove from Recallant."
+        : "Project files were not touched. Permanent erasure is still separate."
+    )}</p>
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(affected.sessions ?? 0)}</strong> sessions</span>
+      <span><strong>${escapeHtml(affected.events ?? 0)}</strong> events</span>
+      <span><strong>${escapeHtml(affected.active_chunks ?? 0)}</strong> active chunks</span>
+      <span><strong>${escapeHtml(affected.active_agent_memories ?? 0)}</strong> active memories</span>
+    </div>
+    ${
+      warnings.length > 0
+        ? `<ul class="attention-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+        : ""
+    }
+    ${
+      dryRun && projectId
+        ? `<form class="confirm-form" method="post" action="/project-detach">
+            <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+            <input type="hidden" name="mode" value="${escapeHtml(mode)}" />
+            <input type="hidden" name="confirm" value="true" />
+            <button type="submit">Confirm remove from Recallant</button>
+          </form>`
+        : ""
+    }
+  </article>`;
+}
+
+function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
+  return `<div class="cleanup-flow">
+    <p>Remove the selected project from active Recallant views and search. Project files on disk are not changed. Permanent erasure uses a separate forget-forever workflow.</p>
+    ${renderProjectDetachResult(data, detach)}
+    <form method="post" action="/project-detach">
+      <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+      <input type="hidden" name="mode" value="sandbox" />
+      <button type="submit">Dry-run remove from Recallant</button>
+    </form>
+  </div>`;
+}
+
 function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState) {
   const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
   const selectedMemoryId = selectedMemory.id;
@@ -792,7 +852,12 @@ function actionKindLabel(
   return labels[kind];
 }
 
-function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
+function renderDashboard(
+  data: ReviewDashboardData,
+  state?: { chat?: ChatRenderState; detach?: DetachRenderState }
+) {
+  const chat = state?.chat;
+  const detach = state?.detach;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -828,6 +893,10 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     .chat-panel { position: sticky; top: 12px; z-index: 1; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .cleanup-flow p, .detach-result p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .detach-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin-bottom: 10px; background: #fbfcfe; }
+    .detach-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .confirm-form { margin-top: 10px; }
     .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .summary-grid span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; color: #4f5867; font-size: 12px; background: #f8fafc; }
     .summary-grid strong { display: block; color: #20242c; font-size: 13px; }
@@ -948,10 +1017,7 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
       </section>
       <section class="panel">
         <h2>Cleanup / Forget</h2>
-        <div class="chat">
-          Detach uses a dry-run first and hides the project from active Recallant views without deleting records.
-          Permanent erasure is separate.
-        </div>
+        ${renderCleanup(data, detach)}
       </section>
       <section class="panel">
         <h2>Settings</h2>
@@ -1047,7 +1113,7 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        renderDashboard(chatDashboard, { question, response: result }),
+        renderDashboard(chatDashboard, { chat: { question, response: result } }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
@@ -1074,6 +1140,56 @@ export function createRecallantHttpServer() {
       });
       const location = reviewPath(body.project_id, result.memory_id);
       write(response, 303, "See other", "text/plain", { location });
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/project-detach") {
+      const body = (await readJson(request)) as {
+        project_id?: string | null;
+        mode?: "live" | "sandbox";
+        reason?: string | null;
+        confirmation?: { confirmed?: boolean };
+      };
+      const result = await database.detachProject({
+        project_id: optionalInput(body.project_id),
+        mode: body.mode === "live" ? "live" : "sandbox",
+        reason: optionalInput(body.reason) ?? "Review UI project removal",
+        dry_run: body.confirmation?.confirmed === true ? false : true,
+        actor_kind: "user",
+        actor_id: "review-ui",
+        confirmation: { confirmed: body.confirmation?.confirmed === true }
+      });
+      write(response, 200, JSON.stringify(result), "application/json");
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/project-detach") {
+      const body = await readForm(request);
+      const projectId = optionalInput(body.project_id);
+      const mode = body.mode === "live" ? "live" : "sandbox";
+      const confirmed = body.confirm === "true";
+      const result = await database.detachProject({
+        project_id: projectId,
+        mode,
+        reason: "Review UI project removal",
+        dry_run: confirmed ? false : true,
+        actor_kind: "user",
+        actor_id: "review-ui",
+        confirmation: { confirmed }
+      });
+      if (confirmed && result.status === "detached") {
+        write(response, 303, "See other", "text/plain", { location: "/review" });
+        return;
+      }
+      const detachDashboard = await database.getReviewDashboard({
+        project_id: projectId ?? dashboardInput.project_id,
+        selected_memory_id: dashboardInput.selected_memory_id
+      });
+      write(
+        response,
+        200,
+        renderDashboard(detachDashboard, { detach: { result } }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
       return;
     }
     if (request.method === "POST" && requestUrl.pathname === "/api/project-setting") {

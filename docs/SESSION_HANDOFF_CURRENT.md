@@ -159,6 +159,9 @@ Latest QA correction checkpoint:
   signals and an `Agent Readiness` panel for the selected project. A real dry-run sandbox detach for
   `/ai/test_project_1` succeeded without changing records or files and showed the expected
   hidden/search-disabled lifecycle plan.
+- Manual UI cleanup follow-up: `Cleanup / Forget` now has a dry-run and confirmation form for
+  removing the selected project from active Recallant views/search without touching files on disk.
+  The same backend policy path as CLI detach is used.
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 

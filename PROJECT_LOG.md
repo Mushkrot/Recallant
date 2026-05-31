@@ -2,10 +2,11 @@
 
 ## Current Session
 
-Status: test_project_1 autonomous E2E validation complete; readiness UI added.
-Current focus: make the new-project onboarding path visibly trustworthy from the Command Center.
-Next step: commit/push readiness follow-up, restart Recallant service, then continue with richer
-Management UI action flows or sandbox cleanup execution if desired.
+Status: manual UI project removal flow added and verified.
+Current focus: let the owner remove sandbox projects from Recallant through the Command Center
+without deleting files from disk.
+Next step: deploy this UI flow, then the owner can dry-run and confirm removal for
+`test_project_1` and `gutendocx-20260528T161238Z` from the Cleanup / Forget panel.
 
 ## Active Constraints
 
@@ -31,6 +32,8 @@ Management UI action flows or sandbox cleanup execution if desired.
   different path, attach treats it as stale/foreign and rewrites it for the current project.
 - Review UI should show an owner-readable agent-readiness state instead of forcing the owner to
   infer readiness from low-level sessions/events/memory counters.
+- Project removal from Recallant must be a two-step UI flow: dry-run first, explicit confirmation
+  second. It hides the project from active Recallant views/search and does not touch files on disk.
 - Do not ask the owner to perform basic attach validation before the agent has independently run an
   equivalent real command path.
 
@@ -47,6 +50,7 @@ Management UI action flows or sandbox cleanup execution if desired.
   `9f7bca40-f763-4cb2-846b-909729882c51`
 - production E2E smoke on `/ai/test_project_1`
 - sandbox detach dry-run for `/ai/test_project_1`
+- Review UI smoke for project-removal dry-run and confirmation forms
 - production `recallant doctor`
 - production `/health`
 - live Management Chat API using local `mistral-small:24b`

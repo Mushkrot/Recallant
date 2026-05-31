@@ -410,6 +410,18 @@ Latest management readiness follow-up:
   lifecycle, affected records, no active sessions, no file changes, no permanent erasure, and the
   separate forget-forever boundary.
 
+Latest manual UI cleanup follow-up:
+
+- The Command Center `Cleanup / Forget` panel now supports a manual project removal flow for the
+  selected project: first `Dry-run remove from Recallant`, then an explicit
+  `Confirm remove from Recallant` form.
+- This UI flow calls the same governed `detachProject` backend as the CLI. It hides the project
+  from active Recallant views/search and, for sandbox mode, archives active chunks. It does not
+  touch project files on disk and does not perform permanent erasure.
+- Review UI smoke now covers project detach dry-run through the JSON API, dry-run through the HTML
+  form, confirmation through the HTML form, and verifies that the detached sandbox project no
+  longer appears in the active project list.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10

@@ -335,6 +335,72 @@ try {
     throw new Error(`Management chat form smoke failed: ${chatForm.status} ${chatFormHtml}`);
   }
 
+  const detachDryRunApi = await fetch(`${baseUrl}/api/project-detach`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: sandboxProjectId,
+      mode: "sandbox"
+    })
+  });
+  const detachDryRunApiJson = await detachDryRunApi.json();
+  if (
+    detachDryRunApi.status !== 200 ||
+    detachDryRunApiJson.status !== "pending_confirmation" ||
+    detachDryRunApiJson.dry_run !== true ||
+    detachDryRunApiJson.writes_database !== false ||
+    detachDryRunApiJson.affected?.sessions === undefined
+  ) {
+    throw new Error(`Project detach dry-run API failed: ${JSON.stringify(detachDryRunApiJson)}`);
+  }
+
+  const detachDryRunForm = await fetch(`${baseUrl}/project-detach`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: sandboxProjectId,
+      mode: "sandbox"
+    })
+  });
+  const detachDryRunFormHtml = await detachDryRunForm.text();
+  if (
+    detachDryRunForm.status !== 200 ||
+    !detachDryRunFormHtml.includes("Dry-run complete. Nothing changed yet.") ||
+    !detachDryRunFormHtml.includes("Confirm remove from Recallant") ||
+    !detachDryRunFormHtml.includes(sandboxProjectId)
+  ) {
+    throw new Error(
+      `Project detach dry-run form failed: ${detachDryRunForm.status} ${detachDryRunFormHtml}`
+    );
+  }
+
+  const detachConfirmForm = await fetch(`${baseUrl}/project-detach`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: sandboxProjectId,
+      mode: "sandbox",
+      confirm: "true"
+    })
+  });
+  if (detachConfirmForm.status !== 303 || detachConfirmForm.headers.get("location") !== "/review") {
+    throw new Error(`Project detach confirm form failed: ${detachConfirmForm.status}`);
+  }
+  const postDetachDashboard = await db.getReviewDashboard({ project_id: projectId });
+  if (postDetachDashboard.projects.some((project) => project.project_id === sandboxProjectId)) {
+    throw new Error(`Detached sandbox project is still visible: ${JSON.stringify(postDetachDashboard.projects)}`);
+  }
+
   const accepted = await fetch(`${baseUrl}/api/review-action`, {
     method: "POST",
     headers: {
