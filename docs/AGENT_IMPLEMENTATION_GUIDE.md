@@ -72,13 +72,13 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] `memory_start_session` creates/continues session state, returns checkpoint, and surfaces unclosed prior session recovery metadata.
-- [ ] `memory_append_turn` writes to `events`, chunks according to [INGESTION.md](INGESTION.md), and deduplicates.
-- [ ] `memory_append_event` writes non-turn workflow evidence to `events` and creates `raw_artifacts` rows for large payload refs.
-- [ ] Session-scoped tools update `sessions.last_seen_at`.
-- [ ] `memory_heartbeat` updates liveness metadata only and does not write L0 events/chunks.
-- [ ] Capture policy/profile resolution from [ADR-0017-managed-hybrid-capture.md](ADR-0017-managed-hybrid-capture.md): session override -> project policy -> developer default -> server default.
-- [ ] Tool/terminal/raw-output capture obeys configured policy, including caps/summaries and secret handling.
+- [x] `memory_start_session` creates/continues session state, returns checkpoint, and surfaces unclosed prior session recovery metadata.
+- [x] `memory_append_turn` writes to `events`, chunks according to [INGESTION.md](INGESTION.md), and deduplicates.
+- [x] `memory_append_event` writes non-turn workflow evidence to `events` and creates `raw_artifacts` rows for large payload refs.
+- [x] Session-scoped tools update `sessions.last_seen_at`.
+- [x] `memory_heartbeat` updates liveness metadata only and does not write L0 events/chunks.
+- [x] Capture policy/profile resolution from [ADR-0017-managed-hybrid-capture.md](ADR-0017-managed-hybrid-capture.md): session override -> project policy -> developer default -> server default.
+- [x] Tool/terminal/raw-output capture obeys configured policy, including caps/summaries and secret handling.
 
 **Gate:** unit tests for chunking and an integration append test pass.
 

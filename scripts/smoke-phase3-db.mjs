@@ -252,6 +252,87 @@ await callTool(11, "memory_closeout", {
   artifact_refs: []
 });
 
+let nextToolId = 12;
+const extraClientSessionIds = [];
+for (const extraClientKind of ["cursor", "claude_code", "windsurf"]) {
+  const extraSession = await callTool(nextToolId++, "memory_start_session", {
+    client_kind: extraClientKind,
+    client_version: "smoke",
+    project_path: join(projectDir, extraClientKind),
+    session_label: `phase3-${extraClientKind}`,
+    resume_policy: "normal"
+  });
+  if (
+    !extraSession.session_id ||
+    extraSession.recommended_next_calls?.[0] !== "memory_get_context_pack"
+  ) {
+    throw new Error(
+      `Universal client session contract failed for ${extraClientKind}: ${JSON.stringify(
+        extraSession
+      )}`
+    );
+  }
+  extraClientSessionIds.push(extraSession.session_id);
+  await callTool(nextToolId++, "memory_closeout", {
+    session_id: extraSession.session_id,
+    closeout_intent: "task_complete",
+    summary: `Phase 3 ${extraClientKind} universal client smoke complete.`,
+    checkpoint_payload: {
+      current_status: "phase3 universal client smoke complete",
+      current_focus: extraClientKind,
+      next_step: "continue implementation",
+      open_questions: []
+    },
+    governed_memory_candidates: [],
+    artifact_refs: []
+  });
+}
+
+await client.query(
+  `
+    INSERT INTO developer_settings (developer_id, key, value, updated_by)
+    VALUES ($1, 'capture_profile', $2, 'smoke')
+    ON CONFLICT (developer_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [developerId, JSON.stringify("detailed")]
+);
+const developerPolicySession = await callTool(nextToolId++, "memory_start_session", {
+  client_kind: "codex",
+  client_version: "smoke",
+  project_path: join(projectDir, "developer-policy"),
+  session_label: "phase3-developer-policy",
+  resume_policy: "normal"
+});
+const developerPolicyEvent = await callTool(nextToolId++, "memory_append_event", {
+  session_id: developerPolicySession.session_id,
+  client_kind: "codex",
+  event_kind: "terminal_output",
+  text: "P".repeat(9000),
+  metadata: { command: "developer capture policy" },
+  raw_artifacts: []
+});
+if (
+  developerPolicyEvent.capture_profile !== "detailed" ||
+  developerPolicyEvent.captured_text_chars !== 8000
+) {
+  throw new Error(
+    `Developer capture policy was not applied: ${JSON.stringify(developerPolicyEvent)}`
+  );
+}
+await callTool(nextToolId++, "memory_closeout", {
+  session_id: developerPolicySession.session_id,
+  closeout_intent: "task_complete",
+  summary: "Phase 3 developer capture policy smoke complete.",
+  checkpoint_payload: {
+    current_status: "phase3 developer policy smoke complete",
+    current_focus: "capture policy",
+    next_step: "continue implementation",
+    open_questions: []
+  },
+  governed_memory_candidates: [],
+  artifact_refs: []
+});
+
 try {
   const checks = await client.query(
     `
@@ -285,7 +366,19 @@ try {
           WHERE memory_id = ANY($8::uuid[])
             AND source_kind = 'checkpoint'
             AND source_id = $1::text
-        ) AS closeout_source_ref_count
+        ) AS closeout_source_ref_count,
+        (
+          SELECT count(*)::int
+          FROM sessions
+          WHERE id = ANY($9::uuid[])
+            AND client_kind IN ('cursor', 'claude_code', 'windsurf')
+            AND status = 'closed'
+        ) AS extra_client_session_count,
+        (
+          SELECT payload->'capture'->>'profile'
+          FROM events
+          WHERE id = $10
+        ) AS developer_policy_profile
     `,
     [
       started.session_id,
@@ -295,7 +388,9 @@ try {
       projectId,
       unclosed.session_id,
       recovery.session_id,
-      closeout.created_memory_ids
+      closeout.created_memory_ids,
+      extraClientSessionIds,
+      developerPolicyEvent.event_id
     ]
   );
   const row = checks.rows[0];
@@ -316,7 +411,9 @@ try {
     row.checkpoint_status !== "phase3 recovery smoke complete" ||
     row.checkpoint_next_step !== "continue implementation" ||
     row.closeout_memory_count !== 1 ||
-    row.closeout_source_ref_count !== 1
+    row.closeout_source_ref_count !== 1 ||
+    row.extra_client_session_count !== 3 ||
+    row.developer_policy_profile !== "detailed"
   ) {
     throw new Error(`Unexpected database state: ${JSON.stringify(row)}`);
   }

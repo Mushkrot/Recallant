@@ -29,22 +29,22 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 
 ## Phase 3
 
-- [ ] `memory_start_session(client_kind="codex")` creates an active `sessions` row and returns `session_id`.
-- [ ] `memory_start_session` recommends `memory_get_context_pack` as the normal next startup call.
-- [ ] `memory_start_session(client_kind="cursor"|"claude_code"|"windsurf")` uses the same server contract and differs only by `client_kind`.
-- [ ] Session-scoped tool calls update `sessions.last_seen_at`.
-- [ ] `memory_heartbeat` updates `sessions.last_seen_at`, `last_heartbeat_at`, and bounded heartbeat metadata.
-- [ ] `memory_heartbeat` does not create `events`, chunks, embeddings, or governed memories.
-- [ ] `memory_append_turn` creates exactly one `events` row and at least one `chunks` row for long text.
-- [ ] `memory_append_turn` stores ordinary captured user/assistant turn text in L0 according to the active capture profile.
-- [ ] `memory_append_event(event_kind="terminal_output"|"tool_result")` creates an `events` row with bounded text/excerpt and raw artifact refs when large evidence is present.
-- [ ] Repeating the same `dedup_key` does not create a new `event_id`.
-- [ ] Effective capture policy resolves in order: session override → project policy → developer default → server default.
-- [ ] `light`, `standard`, and `detailed` fixture policies produce different raw/tool-output capture depth while preserving the same governed-memory path.
-- [ ] Large terminal/tool output is capped/summarized in event payload and stored as raw artifact metadata/pointer unless explicit full inline capture is enabled by policy.
-- [ ] Changing a project's capture profile affects only new events in that project; existing events/chunks/governed memories are unchanged unless an explicit reprocess workflow is run.
-- [ ] A new `memory_start_session` detects a previous unclosed session in the same project and returns recovery metadata instead of hiding the interruption.
-- [ ] Stale/interrupted-session detection uses configurable thresholds rather than hard-coded universal numbers.
+- [x] `memory_start_session(client_kind="codex")` creates an active `sessions` row and returns `session_id`.
+- [x] `memory_start_session` recommends `memory_get_context_pack` as the normal next startup call.
+- [x] `memory_start_session(client_kind="cursor"|"claude_code"|"windsurf")` uses the same server contract and differs only by `client_kind`.
+- [x] Session-scoped tool calls update `sessions.last_seen_at`.
+- [x] `memory_heartbeat` updates `sessions.last_seen_at`, `last_heartbeat_at`, and bounded heartbeat metadata.
+- [x] `memory_heartbeat` does not create `events`, chunks, embeddings, or governed memories.
+- [x] `memory_append_turn` creates exactly one `events` row and at least one `chunks` row for long text.
+- [x] `memory_append_turn` stores ordinary captured user/assistant turn text in L0 according to the active capture profile.
+- [x] `memory_append_event(event_kind="terminal_output"|"tool_result")` creates an `events` row with bounded text/excerpt and raw artifact refs when large evidence is present.
+- [x] Repeating the same `dedup_key` does not create a new `event_id`.
+- [x] Effective capture policy resolves in order: session override → project policy → developer default → server default.
+- [x] `light`, `standard`, and `detailed` fixture policies produce different raw/tool-output capture depth while preserving the same governed-memory path.
+- [x] Large terminal/tool output is capped/summarized in event payload and stored as raw artifact metadata/pointer unless explicit full inline capture is enabled by policy.
+- [x] Changing a project's capture profile affects only new events in that project; existing events/chunks/governed memories are unchanged unless an explicit reprocess workflow is run.
+- [x] A new `memory_start_session` detects a previous unclosed session in the same project and returns recovery metadata instead of hiding the interruption.
+- [x] Stale/interrupted-session detection uses configurable thresholds rather than hard-coded universal numbers.
 
 ## Phase 4
 

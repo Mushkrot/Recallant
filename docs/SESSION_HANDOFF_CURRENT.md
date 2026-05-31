@@ -326,6 +326,8 @@ Current contract-hardening checkpoint:
   approval or provider call; Phase 4 smoke covers the denied-approval branch.
 - `schema:smoke` now verifies the migrated DB baseline and is part of `smoke:core`; MCP smoke now
   checks the exact tool list.
+- Phase 3 smoke now verifies Cursor/Claude Code/Windsurf session-start parity and developer-default
+  capture policy precedence.
 - Targeted verification passed for this slice: `npm run build`, `npm run phase7:smoke`, and
   `npm run phase3:smoke`; follow-up parity verification passed with
   `npm run phase6:smoke:graph`; paid-approval verification passed with `npm run phase4:smoke`;

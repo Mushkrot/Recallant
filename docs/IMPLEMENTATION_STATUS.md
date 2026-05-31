@@ -669,6 +669,9 @@ Latest contract hardening checkpoint:
   tables, ADR-0040 scope/audience columns, and settings/audit tables. `smoke:core` runs it after
   MCP contract smoke.
 - MCP smoke now enforces the exact tool list, not just required-tool presence.
+- Phase 3 smoke now also covers Cursor, Claude Code, and Windsurf session-start contract parity,
+  developer-default capture policy resolution, and the full session/project/developer/default
+  capture precedence path.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 
