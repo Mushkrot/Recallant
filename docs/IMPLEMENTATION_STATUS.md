@@ -362,11 +362,16 @@ change, and the live authenticated Review page shows the settings editor markers
 Latest Review promotion validation:
 
 - `npm run review-ui:smoke`
+- Controlled `recallant.service` restart
+- Local `/health`
+- Authenticated Review HTML promotion-control check
 
 Promotion to `instruction_grade` now requires visible source refs. The Review UI omits the promote
 button and explains the requirement when a selected memory has no source refs, while
 `reviewAgentMemory` rejects crafted API promotion attempts with `source_refs_required`. The smoke
-suite also verifies successful promotion writes review history.
+suite also verifies successful promotion writes review history. The production service was restarted
+after this policy/UI change, and the live authenticated Review page still shows `Promote to rule`
+for a memory with visible evidence excerpts.
 
 Latest attach/capture integration validation:
 

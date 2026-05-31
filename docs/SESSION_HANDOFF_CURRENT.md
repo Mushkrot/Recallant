@@ -204,10 +204,15 @@ The current instruction-promotion guard follow-up is complete:
 - `reviewAgentMemory(action="promote_instruction")` returns `source_refs_required` for crafted
   requests without source refs;
 - successful promotion still writes an `agent_memory_review_actions` row;
-- `npm run review-ui:smoke` verifies all of the above against an isolated database.
+- `npm run review-ui:smoke` verifies all of the above against an isolated database;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and authenticated Review HTML still shows `Promote to rule` for a selected
+  memory with visible evidence excerpts.
 
 Latest deployed checkpoint:
 
+- Commit `505a143 Require source refs for instruction promotion` was pushed to `origin/main` and
+  applied by controlled `recallant.service` restart.
 - Commit `4700867 Add editable project settings UI` was pushed to `origin/main` and applied by
   controlled `recallant.service` restart.
 - Commit `fe93e12 Add Review UI permanent forget flow` was pushed to `origin/main` and applied by
