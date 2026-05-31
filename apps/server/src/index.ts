@@ -586,6 +586,10 @@ function renderProjects(rows: Array<Record<string, unknown>>, currentProjectId: 
   return rows.map((row) => renderProjectRow(row, currentProjectId)).join("");
 }
 
+function currentProject(data: ReviewDashboardData) {
+  return data.projects.find((row) => row.project_id === data.current_project_id) ?? {};
+}
+
 function renderSettings(rows: Array<Record<string, unknown>>) {
   if (rows.length === 0) return `<p class="empty">No project settings configured.</p>`;
   return rows
@@ -769,13 +773,22 @@ function renderProjectDetachResult(data: ReviewDashboardData, detach?: DetachRen
 }
 
 function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
+  const project = currentProject(data);
+  const projectName =
+    project.title ?? project.name ?? project.provider ?? project.key ?? data.current_project_id;
+  const projectPath = project.primary_path ?? "No path recorded";
   return `<div class="cleanup-flow">
-    <p>Remove the selected project from active Recallant views and search. Project files on disk are not changed. Permanent erasure uses a separate forget-forever workflow.</p>
+    <article class="selected-project-card">
+      <strong>${escapeHtml(projectName)}</strong>
+      <span>${escapeHtml(projectPath)}</span>
+      <span>ID ${escapeHtml(data.current_project_id)}</span>
+    </article>
+    <p>This removes the selected project from active Recallant views and search. Project files on disk are not changed. Permanent erasure uses a separate forget-forever workflow.</p>
     ${renderProjectDetachResult(data, detach)}
     <form method="post" action="/project-detach">
       <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
       <input type="hidden" name="mode" value="sandbox" />
-      <button type="submit">Dry-run remove from Recallant</button>
+      <button type="submit">Dry-run remove selected project</button>
     </form>
   </div>`;
 }
@@ -900,6 +913,10 @@ function renderDashboard(
     .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .summary-grid span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; color: #4f5867; font-size: 12px; background: #f8fafc; }
     .summary-grid strong { display: block; color: #20242c; font-size: 13px; }
+    .selected-project-card { border: 1px solid #dce3ec; border-radius: 7px; padding: 9px; margin-bottom: 10px; background: #f8fafc; }
+    .selected-project-card strong, .selected-project-card span { display: block; overflow-wrap: anywhere; }
+    .selected-project-card strong { font-size: 14px; margin-bottom: 4px; }
+    .selected-project-card span { color: #4f5867; font-size: 12px; line-height: 1.35; }
     .readiness strong { display: block; font-size: 15px; margin-bottom: 6px; }
     .readiness p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .readiness.ready strong { color: #166454; }
@@ -907,6 +924,7 @@ function renderDashboard(
     .readiness .readiness-note { margin-top: 10px; margin-bottom: 0; color: #6a7280; font-size: 12px; }
     .project { border-top: 1px solid #e5e9f0; padding: 11px 0; }
     .project:first-child { border-top: 0; }
+    .project.active { background: #f4f7fb; border-radius: 6px; padding-left: 10px; padding-right: 10px; }
     .project.active h3::after { content: " active"; color: #246b5a; font-size: 11px; font-weight: 600; }
     .project h3, .setting h3 { font-size: 14px; margin: 0 0 4px; }
     .project p { margin: 0; color: #4f5867; font-size: 13px; overflow-wrap: anywhere; }

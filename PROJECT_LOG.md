@@ -34,6 +34,10 @@ Next step: deploy this UI flow, then the owner can dry-run and confirm removal f
   infer readiness from low-level sessions/events/memory counters.
 - Project removal from Recallant must be a two-step UI flow: dry-run first, explicit confirmation
   second. It hides the project from active Recallant views/search and does not touch files on disk.
+- Cleanup / Forget must show the exact selected project name, path, and full id before dry-run or
+  confirmation. The owner tested removing one sandbox project successfully, then hit confusion on
+  `gutendocx-20260528T161238Z`; live dry-run worked, so the UI now makes the selected target
+  explicit.
 - Do not ask the owner to perform basic attach validation before the agent has independently run an
   equivalent real command path.
 
@@ -43,6 +47,10 @@ Next step: deploy this UI flow, then the owner can dry-run and confirm removal f
 - `npm run lint`
 - `npm run format:check`
 - `npm run review-ui:smoke`
+- isolated temporary Postgres on `127.0.0.1:55432` for Review UI smoke, then container removed
+- live `/project-detach` dry-run for `gutendocx-20260528T161238Z` after service restart; confirm
+  button, selected project name/path, 18 active chunks, and 5 active memories rendered; project
+  remained visible afterward
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding

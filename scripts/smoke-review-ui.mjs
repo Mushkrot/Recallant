@@ -373,6 +373,7 @@ try {
     detachDryRunForm.status !== 200 ||
     !detachDryRunFormHtml.includes("Dry-run complete. Nothing changed yet.") ||
     !detachDryRunFormHtml.includes("Confirm remove from Recallant") ||
+    !detachDryRunFormHtml.includes("Dry-run remove selected project") ||
     !detachDryRunFormHtml.includes(sandboxProjectId)
   ) {
     throw new Error(
