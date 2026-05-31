@@ -750,15 +750,26 @@ Latest target-aware onboarding checkpoint:
 - Verification for this checkpoint: `npm run build`, `npm run lint`, `npm run format:check`,
   `npm run phase7:smoke`, `npm run phase10:smoke`, and `npm run local-cleanup:smoke`.
 
+Latest PRD synchronization checkpoint:
+
+- [PRD.md](PRD.md) acceptance checkboxes are now synchronized against the green
+  [TEST_CONTRACT.md](TEST_CONTRACT.md) surface instead of remaining stale unchecked planning items.
+- Phase 8 size-limit smoke now includes a 1M-size raw artifact pointer/hash/excerpt fixture and
+  verifies bounded `memory_search` output for that artifact.
+- Verification for this focused update: `npm run phase8:smoke:limits`.
+- Full clean regression after the sync passed: `npm run build`, `npm run lint`,
+  `npm run format:check`, `make db-reset`, `npm run smoke:core`, and `make db-down`.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
 attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
 path, AI-backed Management Chat baseline, target-aware `codex`/`generic` MCP config generation, and
 multi-client startup docs are also implemented. The attach path has now been regression-tested
-against the production-env host-project-id binding that exists on the owner server. Continue with
-PRD requirement-by-requirement closure, richer Management UI actions, optional sandbox local-cleanup
-hardening, or a server-side cleanup/repair flow for any sandbox that was attached before this fix.
+against the production-env host-project-id binding that exists on the owner server, and the PRD /
+TEST_CONTRACT acceptance rows are synchronized and green. Continue with production deploy
+verification, richer Management UI actions, optional sandbox local-cleanup hardening, or a
+server-side cleanup/repair flow for any sandbox that was attached before this fix.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

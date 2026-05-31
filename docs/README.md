@@ -16,9 +16,9 @@ slices. The server installer now has dry-run owner-server and single-user profil
 coverage, so outside testers can preview install effects before anything is written. The Product
 Acceptance agent-capture loop now passes for the first production-ready slice: attached projects
 start Recallant-backed sessions, read context, write decisions/actions/tests/checkpoints, close out,
-and recall that memory in a later session without the owner acting as QA. The broader goal remains
-the full documented v1 product, so unresolved PRD requirements still need requirement-by-requirement
-verification and closure.
+and recall that memory in a later session without the owner acting as QA. The PRD and TEST_CONTRACT
+acceptance rows are now synchronized and green; remaining work should be treated as production
+verification, deploy polish, and product improvement rather than stale spec-checkbox closure.
 
 ## Required Reading Order For Implementers
 

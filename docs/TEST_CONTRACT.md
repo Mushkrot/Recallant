@@ -191,6 +191,8 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 ## Phase 8
 
 - [x] Appending text larger than the configured limit returns `VALIDATION_ERROR` without writing to DB.
+- [x] A 1M-size raw artifact stored as pointer/hash/excerpt can be captured and later searched
+  without exceeding configured response bounds.
 - [x] `memory_search` on a representative fixture DB finishes below the configured p95 budget. Example profiles such as 10k chunks / 1500ms on dev hardware may be local CI profiles, not hard production SLOs.
 - [x] Backup command/job creates a backup manifest with backup id, timestamp, Recallant version, schema version, included DBs, artifact roots, hash manifest, target, encryption status, and job status.
 - [x] Backup includes `recallant_agent_work` Postgres data and raw artifact storage metadata/files required by `raw_artifacts`.

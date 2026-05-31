@@ -175,6 +175,60 @@ try {
       })}`
     );
   }
+
+  const hugeArtifact = await callTool(6, "memory_append_event", {
+    session_id: started.session_id,
+    client_kind: "codex",
+    event_kind: "tool_result",
+    text: "huge_raw_artifact_token stored as pointer",
+    metadata: { original_chars: 1_000_000 },
+    raw_artifacts: [
+      {
+        artifact_kind: "tool_output",
+        storage_backend: "external",
+        uri: "smoke://huge-raw-artifact",
+        sha256: "2".repeat(64),
+        size_bytes: 1_000_000,
+        content_type: "text/plain",
+        excerpt: "huge artifact bounded excerpt",
+        metadata: { original_chars: 1_000_000 }
+      }
+    ],
+    dedup_key: `huge-raw-artifact-${randomUUID()}`
+  });
+  const hugeCounts = await client.query(
+    "SELECT size_bytes::int, length(excerpt) AS excerpt_chars FROM raw_artifacts WHERE source_event_id = $1",
+    [hugeArtifact.event_id]
+  );
+  const hugeRow = hugeCounts.rows[0];
+  const boundedSearch = await callTool(7, "memory_search", {
+    session_id: started.session_id,
+    query: "huge_raw_artifact_token",
+    mode: "lexical_only",
+    top_k: 3,
+    max_chars_total: 48
+  });
+  const boundedChars = boundedSearch.hits.reduce(
+    (total, hit) => total + (hit.text_excerpt?.length ?? hit.excerpt?.length ?? 0),
+    0
+  );
+  if (
+    hugeArtifact.status !== "created" ||
+    hugeRow?.size_bytes !== 1_000_000 ||
+    hugeRow?.excerpt_chars > 32 ||
+    boundedSearch.hits.length === 0 ||
+    boundedChars > 48 ||
+    JSON.stringify(boundedSearch).length > 5000
+  ) {
+    throw new Error(
+      `Huge raw artifact bounded response failed: ${JSON.stringify({
+        hugeArtifact,
+        hugeRow,
+        boundedSearch,
+        boundedChars
+      })}`
+    );
+  }
 } finally {
   await client.end();
   child.stdin.end();

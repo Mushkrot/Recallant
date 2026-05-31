@@ -336,6 +336,16 @@ Latest target-aware onboarding checkpoint:
 - Verification for this slice: `npm run build`, `npm run lint`, `npm run format:check`,
   `npm run phase7:smoke`, `npm run phase10:smoke`, and `npm run local-cleanup:smoke`.
 
+Latest PRD synchronization checkpoint:
+
+- `docs/PRD.md` no longer contains stale unchecked acceptance rows; the checkboxes were synchronized
+  against the already-green `docs/TEST_CONTRACT.md` coverage.
+- The only new test added for that sync is the missing G3 stress edge: Phase 8 size-limit smoke now
+  captures a 1M-size raw artifact as pointer/hash/excerpt and verifies bounded search output.
+- Verification for this focused update: `npm run phase8:smoke:limits`.
+- Full clean regression after the sync passed: `npm run build`, `npm run lint`,
+  `npm run format:check`, `make db-reset`, `npm run smoke:core`, and `make db-down`.
+
 Previous contract-hardening checkpoint:
 
 - `recallant closeout-intent` is implemented as a read-only CLI helper for configured Russian and

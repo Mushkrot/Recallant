@@ -5,6 +5,10 @@
 **Doc version:** 1.0  
 **Primary executors:** AI coding agents (not assumed: dedicated human engineering team).
 
+**Status as of 2026-05-31:** v1 acceptance checkboxes in this PRD are synchronized with
+[TEST_CONTRACT.md](TEST_CONTRACT.md). A PRD row is checked only when the corresponding contract
+surface has code, docs, or smoke-test coverage.
+
 ## 0. Product stance
 
 Recallant is intended to become a **full-quality working product for the owner's real AI-assisted development workflow**, not a quick prototype. The project may take more design and implementation effort if that is required for a coherent core.
@@ -63,8 +67,8 @@ For a fixed `project_id`, any supported MCP client can restore practical working
 
 **Acceptance:**
 
-- [ ] Two different clients, for example Codex and Cursor/Claude Code, connect to the same store for one `project_id`.
-- [ ] After session A writes N turns, session B finds the top relevant chunks for a query matching the latest checkpoint task.
+- [x] Two different clients, for example Codex and Cursor/Claude Code, connect to the same store for one `project_id`.
+- [x] After session A writes N turns, session B finds the top relevant chunks for a query matching the latest checkpoint task.
 
 ### G2 — Intra-session resilience
 
@@ -72,13 +76,13 @@ The system preserves raw evidence according to configured capture policy and bui
 
 **Acceptance:**
 
-- [ ] Every `chunk_id` points unambiguously to its L0 source.
-- [ ] A re-embed job does not destroy L0; at most it marks old embedding rows superseded.
-- [ ] Project capture profile controls how much raw detail is recorded without changing the governed-memory model.
-- [ ] Large workflow evidence can be preserved through raw artifact pointer/hash/excerpt records without forcing unbounded event JSONB or context output.
-- [ ] `memory_start_session` detects an unclosed previous session and returns recovery metadata.
-- [ ] Optional `memory_heartbeat` updates liveness metadata for long-running/idle tasks without creating L0 events.
-- [ ] `memory_closeout` marks a normal ending session closed and updates checkpoint/governed-memory state.
+- [x] Every `chunk_id` points unambiguously to its L0 source.
+- [x] A re-embed job does not destroy L0; at most it marks old embedding rows superseded.
+- [x] Project capture profile controls how much raw detail is recorded without changing the governed-memory model.
+- [x] Large workflow evidence can be preserved through raw artifact pointer/hash/excerpt records without forcing unbounded event JSONB or context output.
+- [x] `memory_start_session` detects an unclosed previous session and returns recovery metadata.
+- [x] Optional `memory_heartbeat` updates liveness metadata for long-running/idle tasks without creating L0 events.
+- [x] `memory_closeout` marks a normal ending session closed and updates checkpoint/governed-memory state.
 
 ### G3 — Token-safe agent interface
 
@@ -86,7 +90,7 @@ The agent never receives the entire database in one call. MCP tools return bound
 
 **Acceptance:**
 
-- [ ] Stress test: 1M characters in L0/raw artifacts still yields tool responses within configured max chars and max items.
+- [x] Stress test: 1M characters in L0/raw artifacts still yields tool responses within configured max chars and max items.
 
 ### G4 — Hybrid recall
 
@@ -94,7 +98,7 @@ Support vector + lexical search and optional graph expansion with explicit budge
 
 **Acceptance:**
 
-- [ ] The documented golden query set in `TEST_CONTRACT.md` passes precision@k thresholds defined there.
+- [x] The documented golden query set in `TEST_CONTRACT.md` passes precision@k thresholds defined there.
 
 ### G5 — Where we stopped
 
@@ -102,7 +106,7 @@ Checkpoint state lives in the database and is mirrored semantically into the rep
 
 **Acceptance:**
 
-- [ ] `memory_get_checkpoint` and `PROJECT_LOG.md` agree on `current_focus` or equivalent after `memory_set_checkpoint` within a configured freshness budget. A 5-second budget may be used as a default test profile, but it is not a product-wide invariant.
+- [x] `memory_get_checkpoint` and `PROJECT_LOG.md` agree on `current_focus` or equivalent after `memory_set_checkpoint` within a configured freshness budget. A 5-second budget may be used as a default test profile, but it is not a product-wide invariant.
 
 ### G6 — Governed agent memory
 
@@ -110,11 +114,11 @@ The system stores not only raw events/chunks, but also structured agent memories
 
 **Acceptance:**
 
-- [ ] Agent-generated memories are created automatically without manual confirmation for every record when they pass validation/provenance policy.
-- [ ] Agent-generated memory cannot become `instruction_grade` without explicit user confirmation, trusted import, or another strong policy path.
-- [ ] Every `agent_memory` has at least one source ref to L0/L1 or an external ref unless created directly by the user as imported/confirmed.
-- [ ] Recall returns a bounded set of governed memories with review/use metadata.
-- [ ] Recall trace or usage report shows which governed memories were returned and which the agent marked as used.
+- [x] Agent-generated memories are created automatically without manual confirmation for every record when they pass validation/provenance policy.
+- [x] Agent-generated memory cannot become `instruction_grade` without explicit user confirmation, trusted import, or another strong policy path.
+- [x] Every `agent_memory` has at least one source ref to L0/L1 or an external ref unless created directly by the user as imported/confirmed.
+- [x] Recall returns a bounded set of governed memories with review/use metadata.
+- [x] Recall trace or usage report shows which governed memories were returned and which the agent marked as used.
 
 ### G7 — One-action project onboarding and attach
 
@@ -124,19 +128,19 @@ A new or existing project must connect to Recallant without manually copying rul
 
 - [x] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, and the required MCP/config output for Codex.
 - [x] `recallant init --dry-run` shows a plan without making changes.
-- [ ] `recallant attach <project-dir> --mode manual|guided|autopilot` is the product-level workflow that can coordinate init, discovery, import, lint, context preview, diagnostics, and reporting.
-- [ ] If mode is omitted, `attach` defaults to `autopilot` unless production-sensitive detection downgrades it.
-- [ ] `manual` mode preserves the old cautious workflow: discovery is read-only, dry-run writes nothing, and durable imports require explicit selected commands.
-- [ ] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
-- [ ] `autopilot` mode may import low-risk source-linked evidence, extract ordinary project-local memories, prepare and normalize bootstrap/startup files, run checks, and produce a short report without asking for each safe step.
-- [ ] Before changing existing agent files, attach creates a local backup of all discovered agent files; backups are gitignored and redacted for raw secrets.
-- [ ] `AGENTS.md` remains the primary agent entrypoint, `PROJECT_LOG.md` remains a compact fallback/checkpoint, and Recallant is the main source of truth.
-- [ ] Old archive/handoff files import as historical evidence-only by default and are not startup reads.
-- [ ] Already-attached projects update idempotently without duplicate project ids or duplicate imports.
-- [ ] Production-sensitive projects requested with `autopilot` switch to `guided` unless production-safe autopilot is explicitly approved.
-- [ ] `autopilot` does not silently promote broad/risky memories to `instruction_grade`, import raw secrets, enable paid API, change public exposure, perform destructive cleanup, or bind connector/capability records as active behavior without policy review.
-- [ ] Project bootstrap does not copy large historical documents into the new project.
-- [ ] The architecture allows Journey-style kit/skill distribution as an alternate installation path.
+- [x] `recallant attach <project-dir> --mode manual|guided|autopilot` is the product-level workflow that can coordinate init, discovery, import, lint, context preview, diagnostics, and reporting.
+- [x] If mode is omitted, `attach` defaults to `autopilot` unless production-sensitive detection downgrades it.
+- [x] `manual` mode preserves the old cautious workflow: discovery is read-only, dry-run writes nothing, and durable imports require explicit selected commands.
+- [x] `guided` mode builds a complete attach plan and waits for confirmation before durable writes.
+- [x] `autopilot` mode may import low-risk source-linked evidence, extract ordinary project-local memories, prepare and normalize bootstrap/startup files, run checks, and produce a short report without asking for each safe step.
+- [x] Before changing existing agent files, attach creates a local backup of all discovered agent files; backups are gitignored and redacted for raw secrets.
+- [x] `AGENTS.md` remains the primary agent entrypoint, `PROJECT_LOG.md` remains a compact fallback/checkpoint, and Recallant is the main source of truth.
+- [x] Old archive/handoff files import as historical evidence-only by default and are not startup reads.
+- [x] Already-attached projects update idempotently without duplicate project ids or duplicate imports.
+- [x] Production-sensitive projects requested with `autopilot` switch to `guided` unless production-safe autopilot is explicitly approved.
+- [x] `autopilot` does not silently promote broad/risky memories to `instruction_grade`, import raw secrets, enable paid API, change public exposure, perform destructive cleanup, or bind connector/capability records as active behavior without policy review.
+- [x] Project bootstrap does not copy large historical documents into the new project.
+- [x] The architecture allows Journey-style kit/skill distribution as an alternate installation path.
 
 ### G7.1 — Universal client adapters
 
@@ -144,9 +148,9 @@ Codex must work first, but Recallant must not become Codex-specific.
 
 **Acceptance:**
 
-- [ ] The same MCP tool contracts support `client_kind=codex`, `cursor`, `claude_code`, `windsurf`, and `other`.
-- [ ] Client-specific code is limited to bootstrap/config/adapter generation and smoke tests.
-- [ ] Core storage, policies, session lifecycle, closeout, recovery, and Review UI do not branch on Codex-specific behavior except for metadata/ergonomics.
+- [x] The same MCP tool contracts support `client_kind=codex`, `cursor`, `claude_code`, `windsurf`, and `other`.
+- [x] Client-specific code is limited to bootstrap/config/adapter generation and smoke tests.
+- [x] Core storage, policies, session lifecycle, closeout, recovery, and Review UI do not branch on Codex-specific behavior except for metadata/ergonomics.
 
 ### G7.2 — Controlled cross-project recall
 
@@ -154,12 +158,12 @@ Agents must be able to find useful patterns from other projects without mixing p
 
 **Acceptance:**
 
-- [ ] The default context pack includes the current project plus applicable developer/environment/capability records, but excludes unrelated project memories.
-- [ ] An explicit cross-project query can return source-linked examples from other projects.
-- [ ] Cross-project results show source project, source path/ref, scope kind, status, use policy, and whether the result is an example or a binding rule.
-- [ ] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern.
-- [ ] A memory from project B does not become a project-A rule unless the pattern is applied and the agent creates project-A memory with source refs, or the owner/review policy promotes a general rule.
-- [ ] Connector/account and capability-binding results from other projects require review/confirmation before becoming active long-term behavior for the current project.
+- [x] The default context pack includes the current project plus applicable developer/environment/capability records, but excludes unrelated project memories.
+- [x] An explicit cross-project query can return source-linked examples from other projects.
+- [x] Cross-project results show source project, source path/ref, scope kind, status, use policy, and whether the result is an example or a binding rule.
+- [x] Agents may initiate explicit cross-project recall when the task clearly needs a prior pattern.
+- [x] A memory from project B does not become a project-A rule unless the pattern is applied and the agent creates project-A memory with source refs, or the owner/review policy promotes a general rule.
+- [x] Connector/account and capability-binding results from other projects require review/confirmation before becoming active long-term behavior for the current project.
 
 ### G8 — Context-budget discipline
 
@@ -167,10 +171,10 @@ Recallant must improve agent quality without loading huge files at session start
 
 **Acceptance:**
 
-- [ ] Generated `AGENTS.md`/adapter files stay thin and contain routing rules instead of long-form history.
-- [ ] Startup flow restores context through the automatic server-built context pack (`memory_start_session` -> `memory_get_context_pack`), not manual user explanation.
-- [ ] CLI/UI can preview the same context pack for debugging without creating a separate context-building algorithm.
-- [ ] A test or lint check detects bootstrap files that contain large duplicated historical content.
+- [x] Generated `AGENTS.md`/adapter files stay thin and contain routing rules instead of long-form history.
+- [x] Startup flow restores context through the automatic server-built context pack (`memory_start_session` -> `memory_get_context_pack`), not manual user explanation.
+- [x] CLI/UI can preview the same context pack for debugging without creating a separate context-building algorithm.
+- [x] A test or lint check detects bootstrap files that contain large duplicated historical content.
 
 ### G9 — Local-server-first memory runtime
 
@@ -178,19 +182,19 @@ Core Recallant runs on the owner's Linux server, with local embedding/consolidat
 
 **Acceptance:**
 
-- [ ] Basic append/search works without an external LLM API.
-- [ ] Embedding provider is self-hosted by default when local capability is available.
-- [ ] Existing configured Ollama/local-model service is reused when available instead of starting a duplicate stack.
-- [ ] If Ollama is missing, disabled, remote, or configured differently, `recallant doctor` reports the state and the router falls back according to settings.
-- [ ] External LLM providers are enabled through config only for optional enrichment, consolidation, rerank, and review assistance.
-- [ ] Router can switch local/OpenAI/Gemini/Claude models by purpose/project/session without changing core memory behavior.
-- [ ] Router distinguishes `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`.
-- [ ] Default escalation uses active agent or supported subscription worker before paid API when available.
-- [ ] Paid API is not used silently after subscription limits are exhausted; Recallant defers/downgrades/asks according to policy.
-- [ ] Default paid API mode is `confirm_each`; every direct paid API request requires explicit owner approval before execution.
-- [ ] Recallant management UI includes a near-real-time cost dashboard for paid API estimates, approvals, providers/models, purposes, and project totals.
-- [ ] Default paid API profile uses OpenAI unless a project/session explicitly selects optional Gemini or Claude routes.
-- [ ] Preview/experimental model use is explicit and visible, not hidden inside defaults.
+- [x] Basic append/search works without an external LLM API.
+- [x] Embedding provider is self-hosted by default when local capability is available.
+- [x] Existing configured Ollama/local-model service is reused when available instead of starting a duplicate stack.
+- [x] If Ollama is missing, disabled, remote, or configured differently, `recallant doctor` reports the state and the router falls back according to settings.
+- [x] External LLM providers are enabled through config only for optional enrichment, consolidation, rerank, and review assistance.
+- [x] Router can switch local/OpenAI/Gemini/Claude models by purpose/project/session without changing core memory behavior.
+- [x] Router distinguishes `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`.
+- [x] Default escalation uses active agent or supported subscription worker before paid API when available.
+- [x] Paid API is not used silently after subscription limits are exhausted; Recallant defers/downgrades/asks according to policy.
+- [x] Default paid API mode is `confirm_each`; every direct paid API request requires explicit owner approval before execution.
+- [x] Recallant management UI includes a near-real-time cost dashboard for paid API estimates, approvals, providers/models, purposes, and project totals.
+- [x] Default paid API profile uses OpenAI unless a project/session explicitly selects optional Gemini or Claude routes.
+- [x] Preview/experimental model use is explicit and visible, not hidden inside defaults.
 
 ### G10 — Offline/local spool resilience
 
@@ -198,11 +202,11 @@ Recallant must allow local work when the server is unavailable, internet is slow
 
 **Acceptance:**
 
-- [ ] Local spool writes append-only JSONL/NDJSON records with dedup keys.
-- [ ] `recallant sync-spool` uploads local records to the server and stores a local id -> server `event_id` mapping.
-- [ ] After successful sync, local spool records can be safely pruned/offloaded.
-- [ ] Search/recall explicitly shows when local unsynced records have not reached the server SoT yet.
-- [ ] Local spool follows the same project/session capture policy as live server capture.
+- [x] Local spool writes append-only JSONL/NDJSON records with dedup keys.
+- [x] `recallant sync-spool` uploads local records to the server and stores a local id -> server `event_id` mapping.
+- [x] After successful sync, local spool records can be safely pruned/offloaded.
+- [x] Search/recall explicitly shows when local unsynced records have not reached the server SoT yet.
+- [x] Local spool follows the same project/session capture policy as live server capture.
 
 ### G12 — Practical backup and restore
 
@@ -210,12 +214,12 @@ Recallant must be restorable after server/database/artifact failure.
 
 **Acceptance:**
 
-- [ ] Automated backup includes `recallant_agent_work` Postgres database.
-- [ ] Backup includes raw artifact storage or enough artifact manifests to verify missing payloads.
-- [ ] Backup manifest records timestamp, schema/migration version, included databases, artifact roots, hashes, sizes, and target.
-- [ ] Restore verification can restore into a temporary database/location without overwriting production.
-- [ ] Restore verification runs basic read checks: project list, checkpoint, governed memory recall, and bounded search.
-- [ ] Architecture supports later replication of encrypted backups to a second server over SSH/Tailscale.
+- [x] Automated backup includes `recallant_agent_work` Postgres database.
+- [x] Backup includes raw artifact storage or enough artifact manifests to verify missing payloads.
+- [x] Backup manifest records timestamp, schema/migration version, included databases, artifact roots, hashes, sizes, and target.
+- [x] Restore verification can restore into a temporary database/location without overwriting production.
+- [x] Restore verification runs basic read checks: project list, checkpoint, governed memory recall, and bounded search.
+- [x] Architecture supports later replication of encrypted backups to a second server over SSH/Tailscale.
 
 ### G13 — Private access with Cloudflare-ready auth
 
@@ -223,13 +227,13 @@ Recallant must protect memory and management surfaces by default while remaining
 
 **Acceptance:**
 
-- [ ] Default deployment binds Review UI/admin API to localhost or Tailnet/private interface.
-- [ ] Review UI/admin API require Recallant auth/session/token even on private network.
-- [ ] Postgres is not exposed publicly and is reachable only by Recallant runtime or explicit trusted admin operations.
-- [ ] Provider API keys and secrets are not sent to browser clients.
-- [ ] Future Cloudflare mode is represented in config/routing without being enabled by default.
-- [ ] Cloudflare mode requires edge auth such as Cloudflare Access or equivalent plus Recallant auth.
-- [ ] No unauthenticated public management, MCP, backup, or raw-artifact route exists.
+- [x] Default deployment binds Review UI/admin API to localhost or Tailnet/private interface.
+- [x] Review UI/admin API require Recallant auth/session/token even on private network.
+- [x] Postgres is not exposed publicly and is reachable only by Recallant runtime or explicit trusted admin operations.
+- [x] Provider API keys and secrets are not sent to browser clients.
+- [x] Future Cloudflare mode is represented in config/routing without being enabled by default.
+- [x] Cloudflare mode requires edge auth such as Cloudflare Access or equivalent plus Recallant auth.
+- [x] No unauthenticated public management, MCP, backup, or raw-artifact route exists.
 
 ### G11 — Owner review UI for governed memory
 
@@ -241,18 +245,18 @@ First screen: Review Inbox / Command Center. It should prioritize items that nee
 
 **Acceptance:**
 
-- [ ] UI shows the inbox of important / `candidate` / `needs_review` / high-risk memories.
-- [ ] First screen shows scope/profile, critical review warnings, priority lanes, main review queue, selected item evidence, and review actions.
-- [ ] v1 UI includes project navigation, Inbox, Rules, detail/source panel, Duplicates, Conflicts, Cost / Paid API, and Settings entrypoint.
-- [ ] Management UI can list all managed projects and open project-specific Review/Settings views.
-- [ ] Settings UI can edit project capture profile, context budget profile, review sensitivity, route enablement, paid API mode, client adapters, and project paths/aliases.
-- [ ] Settings UI shows effective value source and writes audit records for changes.
-- [ ] Settings UI confirmation-gates dangerous changes and does not expose raw secrets.
-- [ ] UI shows active `instruction_grade` rules with scope/type filters.
-- [ ] UI shows source refs and review history before promotion.
-- [ ] UI allows accept/reject/promote/demote/archive/unarchive/mark-stale/edit/merge/supersede; approve may remain as a compatibility label/alias.
-- [ ] UI shows duplicate/conflict reports and suggested resolutions.
-- [ ] Ordinary memories do not require manual approval before becoming useful recall records.
+- [x] UI shows the inbox of important / `candidate` / `needs_review` / high-risk memories.
+- [x] First screen shows scope/profile, critical review warnings, priority lanes, main review queue, selected item evidence, and review actions.
+- [x] v1 UI includes project navigation, Inbox, Rules, detail/source panel, Duplicates, Conflicts, Cost / Paid API, and Settings entrypoint.
+- [x] Management UI can list all managed projects and open project-specific Review/Settings views.
+- [x] Settings UI can edit project capture profile, context budget profile, review sensitivity, route enablement, paid API mode, client adapters, and project paths/aliases.
+- [x] Settings UI shows effective value source and writes audit records for changes.
+- [x] Settings UI confirmation-gates dangerous changes and does not expose raw secrets.
+- [x] UI shows active `instruction_grade` rules with scope/type filters.
+- [x] UI shows source refs and review history before promotion.
+- [x] UI allows accept/reject/promote/demote/archive/unarchive/mark-stale/edit/merge/supersede; approve may remain as a compatibility label/alias.
+- [x] UI shows duplicate/conflict reports and suggested resolutions.
+- [x] Ordinary memories do not require manual approval before becoming useful recall records.
 
 ### G14 — Managed deletion and self-cleaning
 
@@ -260,11 +264,11 @@ Recallant memory must be correctable, cleanable, and erasable.
 
 **Measurability:**
 
-- [ ] The owner can archive, reject, supersede, stale, edit, merge, and demote/promote governed memories through UI/CLI/API.
-- [ ] The owner can request a "forget forever" workflow that removes target content and derived chunks/embeddings/summaries/index entries from active memory.
-- [ ] Erasure keeps only a redacted receipt when audit is needed; the original content is not retained in active memory, search, context packs, or UI.
-- [ ] Cleanup analysis identifies stale, duplicate, conflicting, low-value, and poorly sourced records.
-- [ ] Risky cleanup or erasure requires confirmation unless a scoped explicit policy allows it.
+- [x] The owner can archive, reject, supersede, stale, edit, merge, and demote/promote governed memories through UI/CLI/API.
+- [x] The owner can request a "forget forever" workflow that removes target content and derived chunks/embeddings/summaries/index entries from active memory.
+- [x] Erasure keeps only a redacted receipt when audit is needed; the original content is not retained in active memory, search, context packs, or UI.
+- [x] Cleanup analysis identifies stale, duplicate, conflicting, low-value, and poorly sourced records.
+- [x] Risky cleanup or erasure requires confirmation unless a scoped explicit policy allows it.
 
 ### G15 — Natural-language management
 
@@ -272,10 +276,10 @@ Recallant management should be conversational.
 
 **Measurability:**
 
-- [ ] Management UI includes a natural-language command/chat surface for memory questions, cleanup requests, review actions, settings inspection, and context-pack explanation.
-- [ ] The chat interface answers in the user's language by default.
-- [ ] Natural-language destructive/cost/security/global-rule requests become explicit action plans requiring confirmation before execution.
-- [ ] Chat-driven actions use the same server-side policy path as UI/CLI/MCP actions.
+- [x] Management UI includes a natural-language command/chat surface for memory questions, cleanup requests, review actions, settings inspection, and context-pack explanation.
+- [x] The chat interface answers in the user's language by default.
+- [x] Natural-language destructive/cost/security/global-rule requests become explicit action plans requiring confirmation before execution.
+- [x] Chat-driven actions use the same server-side policy path as UI/CLI/MCP actions.
 
 ### G16 — Professional public-quality implementation
 
@@ -283,11 +287,11 @@ Recallant should be suitable for public release and professional review.
 
 **Measurability:**
 
-- [ ] Code, identifiers, comments, documentation, commit messages, API text, and public materials are English.
-- [ ] Implementation follows modular package boundaries and avoids large files with unrelated responsibilities.
-- [ ] Meaningful commits are made at natural checkpoints.
-- [ ] Upstream reuse is preceded by local inspection and documented adaptation decisions.
-- [ ] Owner-server deployment changes consult `/ai/SECURITY` and register ports in `/ai/PORTS.yaml` before services are started.
+- [x] Code, identifiers, comments, documentation, commit messages, API text, and public materials are English.
+- [x] Implementation follows modular package boundaries and avoids large files with unrelated responsibilities.
+- [x] Meaningful commits are made at natural checkpoints.
+- [x] Upstream reuse is preceded by local inspection and documented adaptation decisions.
+- [x] Owner-server deployment changes consult `/ai/SECURITY` and register ports in `/ai/PORTS.yaml` before services are started.
 
 ## 3. User stories (for coding agents)
 
