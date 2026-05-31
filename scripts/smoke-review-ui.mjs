@@ -161,6 +161,7 @@ try {
     !htmlText.includes("Settings") ||
     !htmlText.includes("Management Chat") ||
     !htmlText.includes('id="management-chat"') ||
+    !htmlText.includes("Agent Readiness") ||
     !htmlText.includes("Ask what to review next") ||
     !htmlText.includes("Local embeddings")
   ) {
@@ -179,6 +180,8 @@ try {
     !json.duplicate_conflicts.some((memory) => memory.memory_id === importMemoryId) ||
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
+    json.project_readiness?.project_registered !== true ||
+    typeof json.project_readiness?.active_chunk_count !== "number" ||
     json.critical.pending_review < 1
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);

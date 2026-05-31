@@ -2500,6 +2500,22 @@ export class RecallantDb {
       `,
       [dashboardProjectId]
     );
+    const readiness = await this.pool.query(
+      `
+        SELECT
+          EXISTS (SELECT 1 FROM projects WHERE id = $1) AS project_registered,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active') AS active_sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'closed') AS closed_sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
+          (SELECT count(*)::int FROM events WHERE project_id = $1) AS event_count,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL) AS active_chunk_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'accepted') AS accepted_memory_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_memory_count,
+          (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
+          (SELECT max(last_seen_at) FROM sessions WHERE project_id = $1) AS last_session_at
+      `,
+      [dashboardProjectId]
+    );
     const currentProject =
       projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
     const selectedMemoryId =
@@ -2532,6 +2548,7 @@ export class RecallantDb {
       rules: rules.memories,
       costs: costs.rows,
       settings: settings.rows,
+      project_readiness: readiness.rows[0],
       project_cleanup: {
         dry_run_first: true,
         permanent_erasure_separate: true,

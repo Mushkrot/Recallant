@@ -398,6 +398,18 @@ Latest `/ai/test_project_1` autonomous E2E validation:
   `npm run phase3:smoke`, `npm run phase10:smoke`, `npm run repo-contract:smoke`, and production
   E2E smoke against `/ai/test_project_1`.
 
+Latest management readiness follow-up:
+
+- Review Dashboard API/UI now exposes project readiness signals for the selected project:
+  registered state, active/closed/interrupted sessions, event count, active searchable chunks,
+  accepted memories, review-needed memories, checkpoint timestamp, and last session timestamp.
+- The Command Center first screen now includes an `Agent Readiness` panel so the owner can see
+  whether a selected project is ready for a real agent session instead of inferring readiness from
+  low-level counters.
+- A dry-run sandbox detach was run for `/ai/test_project_1`; it reported the planned hidden
+  lifecycle, affected records, no active sessions, no file changes, no permanent erasure, and the
+  separate forget-forever boundary.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10

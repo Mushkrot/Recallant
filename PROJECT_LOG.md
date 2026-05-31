@@ -2,11 +2,10 @@
 
 ## Current Session
 
-Status: test_project_1 autonomous E2E validation complete; product gaps fixed.
-Current focus: keep the new-project onboarding path reliable through real MCP/context/capture
-smoke coverage.
-Next step: commit/push the E2E fixes, restart Recallant service, then continue with richer
-Management UI action flows or real-agent manual inspection if desired.
+Status: test_project_1 autonomous E2E validation complete; readiness UI added.
+Current focus: make the new-project onboarding path visibly trustworthy from the Command Center.
+Next step: commit/push readiness follow-up, restart Recallant service, then continue with richer
+Management UI action flows or sandbox cleanup execution if desired.
 
 ## Active Constraints
 
@@ -30,6 +29,8 @@ Management UI action flows or real-agent manual inspection if desired.
   server's configured `RECALLANT_PROJECT_ID` for `/ai/recallant` when attaching another project.
 - Existing `.recallant/config` must be validated against the DB project binding. If it points to a
   different path, attach treats it as stale/foreign and rewrites it for the current project.
+- Review UI should show an owner-readable agent-readiness state instead of forcing the owner to
+  infer readiness from low-level sessions/events/memory counters.
 - Do not ask the owner to perform basic attach validation before the agent has independently run an
   equivalent real command path.
 
@@ -44,6 +45,8 @@ Management UI action flows or real-agent manual inspection if desired.
   Postgres with production-like host project env binding
 - real installed-wrapper attach of `/ai/test_project_1`, resulting in sandbox project
   `9f7bca40-f763-4cb2-846b-909729882c51`
+- production E2E smoke on `/ai/test_project_1`
+- sandbox detach dry-run for `/ai/test_project_1`
 - production `recallant doctor`
 - production `/health`
 - live Management Chat API using local `mistral-small:24b`

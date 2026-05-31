@@ -155,6 +155,10 @@ Latest QA correction checkpoint:
 - Fixes from that validation: `memory_append_event` indexes captured text into chunks/embeddings,
   `memory_closeout` updates `PROJECT_LOG.md`, attach startup smoke closes its internal session, and
   Phase 3 smoke no longer mutates the Recallant repo log.
+- Management readiness follow-up: the Review Dashboard API/UI now includes `project_readiness`
+  signals and an `Agent Readiness` panel for the selected project. A real dry-run sandbox detach for
+  `/ai/test_project_1` succeeded without changing records or files and showed the expected
+  hidden/search-disabled lifecycle plan.
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 

@@ -668,6 +668,43 @@ function renderAttention(data: ReviewDashboardData) {
   return `<ul class="attention-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
+function renderReadiness(data: ReviewDashboardData) {
+  const readiness = asRecord(data.project_readiness);
+  const registered = Boolean(readiness.project_registered);
+  const checkpointUpdatedAt = readiness.checkpoint_updated_at;
+  const activeSessions = Number(readiness.active_sessions ?? 0);
+  const interruptedSessions = Number(readiness.interrupted_sessions ?? 0);
+  const activeChunks = Number(readiness.active_chunk_count ?? 0);
+  const acceptedMemories = Number(readiness.accepted_memory_count ?? 0);
+  const reviewMemories = Number(readiness.review_memory_count ?? 0);
+  const ready =
+    registered &&
+    interruptedSessions === 0 &&
+    checkpointUpdatedAt !== null &&
+    checkpointUpdatedAt !== undefined &&
+    (activeChunks > 0 || acceptedMemories > 0);
+  const statusText = ready
+    ? "Ready for an agent session."
+    : registered
+      ? "Registered, but one readiness signal is still missing."
+      : "Project is not registered.";
+  const note =
+    activeSessions > 0
+      ? `${activeSessions} active session${activeSessions === 1 ? "" : "s"} still open.`
+      : "No active agent sessions are open.";
+  return `<div class="readiness ${ready ? "ready" : "needs-work"}">
+    <strong>${escapeHtml(statusText)}</strong>
+    <p>${escapeHtml(note)}</p>
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(checkpointUpdatedAt ? "Yes" : "No")}</strong> checkpoint</span>
+      <span><strong>${escapeHtml(activeChunks)}</strong> searchable chunks</span>
+      <span><strong>${escapeHtml(acceptedMemories)}</strong> accepted memories</span>
+      <span><strong>${escapeHtml(reviewMemories)}</strong> needs review</span>
+    </div>
+    <p class="readiness-note">Last session: ${escapeHtml(formatDate(readiness.last_session_at))}</p>
+  </div>`;
+}
+
 function renderProjectActions(data: ReviewDashboardData) {
   const cleanup = asRecord(data.project_cleanup);
   return `<div class="action-plan">
@@ -794,6 +831,11 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
     .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .summary-grid span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; color: #4f5867; font-size: 12px; background: #f8fafc; }
     .summary-grid strong { display: block; color: #20242c; font-size: 13px; }
+    .readiness strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .readiness p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .readiness.ready strong { color: #166454; }
+    .readiness.needs-work strong { color: #7a4d18; }
+    .readiness .readiness-note { margin-top: 10px; margin-bottom: 0; color: #6a7280; font-size: 12px; }
     .project { border-top: 1px solid #e5e9f0; padding: 11px 0; }
     .project:first-child { border-top: 0; }
     .project.active h3::after { content: " active"; color: #246b5a; font-size: 11px; font-weight: 600; }
@@ -873,6 +915,10 @@ function renderDashboard(data: ReviewDashboardData, chat?: ChatRenderState) {
       <section class="panel">
         <h2>What Needs Attention</h2>
         ${renderAttention(data)}
+      </section>
+      <section class="panel">
+        <h2>Agent Readiness</h2>
+        ${renderReadiness(data)}
       </section>
       <section class="panel">
         <h2>Import Candidates</h2>
