@@ -359,6 +359,15 @@ confirmation gating for a dangerous route-setting change, the confirmed update, 
 `settings_audit_events` rows. The production service was restarted after this server-rendered UI
 change, and the live authenticated Review page shows the settings editor markers.
 
+Latest Review promotion validation:
+
+- `npm run review-ui:smoke`
+
+Promotion to `instruction_grade` now requires visible source refs. The Review UI omits the promote
+button and explains the requirement when a selected memory has no source refs, while
+`reviewAgentMemory` rejects crafted API promotion attempts with `source_refs_required`. The smoke
+suite also verifies successful promotion writes review history.
+
 Latest attach/capture integration validation:
 
 - `npm run phase10:smoke`

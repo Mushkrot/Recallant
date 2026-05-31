@@ -532,16 +532,22 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
     .join("");
 }
 
-function renderReviewActions(memory: Record<string, unknown>, projectId: unknown) {
+function renderReviewActions(
+  memory: Record<string, unknown>,
+  projectId: unknown,
+  sourceRefCount: number
+) {
   const safeActions = [
     ["accept", "Keep as usable memory"],
     ["reject", "Reject"],
     ["archive", "Archive"],
     ["unarchive", "Unarchive"],
     ["mark_stale", "Mark stale"],
-    ["promote_instruction", "Promote to rule"],
     ["demote_instruction", "Demote from rule"]
   ];
+  if (sourceRefCount > 0) {
+    safeActions.splice(5, 0, ["promote_instruction", "Promote to rule"]);
+  }
   const simpleForms = safeActions
     .map(
       ([action, label]) => `<form method="post" action="/review-action">
@@ -583,7 +589,11 @@ function renderReviewActions(memory: Record<string, unknown>, projectId: unknown
       <button type="submit">Merge duplicates into this memory</button>
     </form>
   </details>`;
-  return `${simpleForms}${editForm}${supersedeForm}`;
+  const promoteGuard =
+    sourceRefCount > 0
+      ? ""
+      : `<p class="action-note">Promotion requires visible source refs first.</p>`;
+  return `${simpleForms}${promoteGuard}${editForm}${supersedeForm}`;
 }
 
 function renderMemoryForgetResult(
@@ -698,7 +708,7 @@ function renderDetail(
     <h4>Recommended action</h4>
     <p>${escapeHtml(recommendedAction(memory))}</p>
     <h4>Actions</h4>
-    <div class="actions">${renderReviewActions(memory, projectId)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
+    <div class="actions">${renderReviewActions(memory, projectId, payload.source_refs?.length ?? 0)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -1267,6 +1277,7 @@ function renderDashboard(
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .actions span { border: 1px solid #c9d2df; border-radius: 6px; padding: 4px 7px; font-size: 12px; background: #f7fafb; }
     .actions form { margin: 0; }
+    .action-note { flex-basis: 100%; margin: 0; color: #7a4d18; font-size: 12px; line-height: 1.4; }
     .action-detail { width: 100%; }
     .action-detail form { display: grid; gap: 8px; margin-top: 8px; }
     .action-detail label { display: grid; gap: 4px; color: #4f5867; font-size: 12px; }
@@ -1484,14 +1495,11 @@ export function createRecallantHttpServer() {
     }
     if (request.method === "POST" && requestUrl.pathname === "/api/review-action") {
       const body = (await readJson(request)) as ReviewAgentMemoryInput;
-      write(
-        response,
-        200,
-        JSON.stringify(
-          await database.reviewAgentMemory({ ...body, actor_kind: body.actor_kind ?? "user" })
-        ),
-        "application/json"
-      );
+      const result = await database.reviewAgentMemory({
+        ...body,
+        actor_kind: body.actor_kind ?? "user"
+      });
+      write(response, result.ok === false ? 409 : 200, JSON.stringify(result), "application/json");
       return;
     }
     if (request.method === "POST" && requestUrl.pathname === "/review-action") {

@@ -197,6 +197,15 @@ The current Settings UI follow-up is complete for the first editable project-set
   `/health` is OK, and authenticated Review HTML shows `Edit project settings`, `Context budget`,
   `Enabled clients`, `Project aliases`, and `system_settings`.
 
+The current instruction-promotion guard follow-up is complete:
+
+- Review UI shows `Promote to rule` only when selected memory has visible source refs;
+- selected memories without source refs show `Promotion requires visible source refs first.`;
+- `reviewAgentMemory(action="promote_instruction")` returns `source_refs_required` for crafted
+  requests without source refs;
+- successful promotion still writes an `agent_memory_review_actions` row;
+- `npm run review-ui:smoke` verifies all of the above against an isolated database.
+
 Latest deployed checkpoint:
 
 - Commit `4700867 Add editable project settings UI` was pushed to `origin/main` and applied by

@@ -141,6 +141,14 @@ const duplicate = await db.createAgentMemory({
   created_by: "agent",
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate memory" }]
 });
+const noSourcePromotion = await db.createAgentMemory({
+  memory_type: "procedure",
+  scope: "project",
+  title: "Review UI no source promotion",
+  body: "This memory must not be promoted without visible source refs.",
+  created_by: "user",
+  source_refs: []
+});
 const forgetSecret = `REVIEW_UI_FORGET_SECRET_${randomUUID()}`;
 const forgettable = await db.createAgentMemory({
   memory_type: "decision",
@@ -526,6 +534,51 @@ try {
   const promoted = await apiReviewAction(ruleMemory.memory_id, "promote_instruction");
   if (promoted.status !== "accepted" || promoted.use_policy !== "instruction_grade") {
     throw new Error(`Promote action failed: ${JSON.stringify(promoted)}`);
+  }
+  const promotedDetail = await db.getAgentMemory(ruleMemory.memory_id);
+  if (!promotedDetail.review_actions.some((action) => action.action === "promote_instruction")) {
+    throw new Error(
+      `Promote action did not write review history: ${JSON.stringify(promotedDetail)}`
+    );
+  }
+  const blockedPromotion = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      memory_id: noSourcePromotion.memory_id,
+      action: "promote_instruction",
+      actor_kind: "user",
+      note: "review ui source-ref guard smoke"
+    })
+  });
+  const blockedPromotionJson = await blockedPromotion.json();
+  if (
+    blockedPromotion.status !== 409 ||
+    blockedPromotionJson.ok !== false ||
+    blockedPromotionJson.error_code !== "source_refs_required"
+  ) {
+    throw new Error(
+      `Promotion without source refs was not blocked: ${JSON.stringify(blockedPromotionJson)}`
+    );
+  }
+  const noSourceHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&memory_id=${noSourcePromotion.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const noSourceHtmlText = await noSourceHtml.text();
+  if (
+    noSourceHtml.status !== 200 ||
+    !noSourceHtmlText.includes("Promotion requires visible source refs first.") ||
+    noSourceHtmlText.includes('name="action" value="promote_instruction"')
+  ) {
+    throw new Error(
+      `No-source promotion UI guard failed: ${noSourceHtml.status} ${noSourceHtmlText}`
+    );
   }
   const demoted = await apiReviewAction(ruleMemory.memory_id, "demote_instruction");
   if (demoted.use_policy !== "recall_allowed") {

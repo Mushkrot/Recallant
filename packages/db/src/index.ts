@@ -1771,6 +1771,22 @@ export class RecallantDb {
       if (!previous) throw new Error(`Unknown memory_id: ${input.memory_id}`);
 
       const action = input.action === "approve" ? "accept" : input.action;
+      if (action === "promote_instruction") {
+        const sourceRefs = await client.query<{ count: string }>(
+          "SELECT count(*) AS count FROM agent_memory_source_refs WHERE memory_id = $1",
+          [input.memory_id]
+        );
+        if (Number(sourceRefs.rows[0]?.count ?? 0) === 0) {
+          return {
+            ok: false,
+            memory_id: input.memory_id,
+            status: previous.status,
+            use_policy: previous.use_policy,
+            error_code: "source_refs_required",
+            message: "Promotion to instruction_grade requires visible source refs."
+          };
+        }
+      }
       const updates: string[] = ["updated_at = now()"];
       const values: unknown[] = [input.memory_id];
       const set = (sql: string, value: unknown) => {
