@@ -219,6 +219,16 @@ The current duplicate-resolution follow-up is complete for canonical choice:
 - production deploy verification after restart passed: `recallant.service` is active, local
   `/health` is OK, and the authenticated Review route still renders `Conflicts / Duplicates`.
 
+The current conflict-resolution follow-up is complete for old/new Review UI handling:
+
+- selected conflict memories show `Conflict resolution` with older/newer record cards;
+- actions can use newer and supersede older, keep older and archive newer, or demote the selected
+  rule;
+- `supersede` and `merge` now move superseded records out of `instruction_grade` to preserve the
+  governed-memory lifecycle invariant;
+- `npm run review-ui:smoke` verifies the old/new detail and the use-newer supersede form against an
+  isolated database.
+
 Latest deployed checkpoint:
 
 - Commit `194435d Add duplicate canonical resolution UI` was pushed to `origin/main` and applied by

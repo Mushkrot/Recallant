@@ -151,6 +151,38 @@ const duplicatePeer = await db.createAgentMemory({
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate peer" }],
   metadata: { possible_duplicate: true, duplicate_group: "review-ui-smoke" }
 });
+const conflictOld = await db.createAgentMemory({
+  memory_type: "procedure",
+  scope: "project",
+  title: "Review UI old conflicting rule",
+  body: "Old rule says to keep the previous behavior.",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "old conflict" }],
+  metadata: {
+    possible_conflict: true,
+    conflict_group: "review-ui-conflict-smoke",
+    conflict_role: "old"
+  }
+});
+await db.reviewAgentMemory({
+  memory_id: conflictOld.memory_id,
+  action: "promote_instruction",
+  actor_kind: "user",
+  note: "review ui conflict old rule smoke"
+});
+const conflictNew = await db.createAgentMemory({
+  memory_type: "procedure",
+  scope: "project",
+  title: "Review UI new conflicting rule",
+  body: "New rule says to use the updated behavior.",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "new conflict" }],
+  metadata: {
+    possible_conflict: true,
+    conflict_group: "review-ui-conflict-smoke",
+    conflict_role: "new"
+  }
+});
 const noSourcePromotion = await db.createAgentMemory({
   memory_type: "procedure",
   scope: "project",
@@ -200,6 +232,8 @@ try {
     "Supersede / merge",
     "Duplicate resolution",
     "Keep this, merge other",
+    "Conflict resolution",
+    "Use newer, supersede older",
     "Forget forever",
     "AGENTS.md",
     importMemoryId,
@@ -639,6 +673,58 @@ try {
     duplicatePeerDetail.memory?.superseded_by !== duplicate.memory_id
   ) {
     throw new Error(`Duplicate peer was not merged: ${JSON.stringify(duplicatePeerDetail)}`);
+  }
+
+  const conflictResolutionHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&memory_id=${conflictNew.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const conflictResolutionText = await conflictResolutionHtml.text();
+  if (
+    conflictResolutionHtml.status !== 200 ||
+    !conflictResolutionText.includes("Conflict resolution") ||
+    !conflictResolutionText.includes("Older record") ||
+    !conflictResolutionText.includes("Review UI old conflicting rule") ||
+    !conflictResolutionText.includes("Newer record") ||
+    !conflictResolutionText.includes("Review UI new conflicting rule") ||
+    !conflictResolutionText.includes("Use newer, supersede older") ||
+    !conflictResolutionText.includes("Keep older, archive newer") ||
+    !conflictResolutionText.includes("Demote selected from rule")
+  ) {
+    throw new Error(
+      `Conflict resolution UI failed: ${conflictResolutionHtml.status} ${conflictResolutionText}`
+    );
+  }
+
+  const conflictUseNewerForm = await fetch(`${baseUrl}/review-action`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      memory_id: conflictOld.memory_id,
+      action: "supersede",
+      superseded_by: conflictNew.memory_id,
+      note: "review ui conflict resolution smoke"
+    })
+  });
+  if (
+    conflictUseNewerForm.status !== 303 ||
+    !String(conflictUseNewerForm.headers.get("location")).includes(conflictOld.memory_id)
+  ) {
+    throw new Error(`Conflict newer form failed: ${conflictUseNewerForm.status}`);
+  }
+  const conflictOldDetail = await db.getAgentMemory(conflictOld.memory_id);
+  if (
+    conflictOldDetail.memory?.status !== "superseded" ||
+    conflictOldDetail.memory?.superseded_by !== conflictNew.memory_id
+  ) {
+    throw new Error(`Conflict old record was not superseded: ${JSON.stringify(conflictOldDetail)}`);
   }
 
   const demoted = await apiReviewAction(ruleMemory.memory_id, "demote_instruction");

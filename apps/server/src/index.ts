@@ -724,6 +724,104 @@ function renderDuplicateResolution(
   </details>`;
 }
 
+function memoryRowId(row: Record<string, unknown>) {
+  return String(row.memory_id ?? row.id ?? "");
+}
+
+function isConflictCandidate(row: Record<string, unknown>) {
+  return /conflict|possible_conflict/i.test(JSON.stringify(row.metadata ?? {}));
+}
+
+function conflictRole(row: Record<string, unknown>) {
+  const role = String(asRecord(row.metadata).conflict_role ?? "").toLowerCase();
+  return role === "old" || role === "older"
+    ? "old"
+    : role === "new" || role === "newer"
+      ? "new"
+      : "";
+}
+
+function renderConflictRecord(label: string, row: Record<string, unknown>) {
+  return `<article>
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(sourcePath(row))}</strong>
+    <p>${escapeHtml(currentEffect(row))}</p>
+  </article>`;
+}
+
+function renderConflictResolution(
+  memory: Record<string, unknown>,
+  projectId: unknown,
+  conflictRows: Array<Record<string, unknown>>
+) {
+  const selectedId = memoryRowId(memory);
+  const selectedMetadata = asRecord(memory.metadata);
+  const conflictGroup = String(selectedMetadata.conflict_group ?? "");
+  const selectedRow: Record<string, unknown> = {
+    ...memory,
+    memory_id: selectedId
+  };
+  const selectedLooksConflict =
+    isConflictCandidate(selectedRow) || conflictRows.some((row) => memoryRowId(row) === selectedId);
+  const peers = conflictRows.filter((row) => {
+    const peerId = memoryRowId(row);
+    if (!peerId || peerId === selectedId || !isConflictCandidate(row)) return false;
+    if (!conflictGroup) return true;
+    return String(asRecord(row.metadata).conflict_group ?? "") === conflictGroup;
+  });
+  if (!selectedLooksConflict || peers.length === 0) return "";
+  const related: Array<Record<string, unknown>> = [selectedRow, ...peers];
+  const oldRow =
+    related.find((row) => conflictRole(row) === "old") ??
+    [...related].sort(
+      (left, right) =>
+        new Date(String(left.updated_at ?? 0)).getTime() -
+        new Date(String(right.updated_at ?? 0)).getTime()
+    )[0];
+  const newRow =
+    related.find((row) => conflictRole(row) === "new") ??
+    [...related].sort(
+      (left, right) =>
+        new Date(String(right.updated_at ?? 0)).getTime() -
+        new Date(String(left.updated_at ?? 0)).getTime()
+    )[0];
+  const oldId = oldRow ? memoryRowId(oldRow) : "";
+  const newId = newRow ? memoryRowId(newRow) : "";
+  if (!oldRow || !newRow || !oldId || !newId || oldId === newId) return "";
+  return `<details class="action-detail">
+    <summary>Conflict resolution</summary>
+    <p>Compare the older and newer records, then choose the active guidance. The losing memory is marked through the same review policy path.</p>
+    <div class="conflict-compare">
+      ${renderConflictRecord("Older record", oldRow)}
+      ${renderConflictRecord("Newer record", newRow)}
+    </div>
+    <div class="conflict-actions">
+      <form method="post" action="/review-action">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="memory_id" value="${escapeHtml(oldId)}" />
+        <input type="hidden" name="action" value="supersede" />
+        <input type="hidden" name="superseded_by" value="${escapeHtml(newId)}" />
+        <input type="hidden" name="note" value="Owner resolved conflict by using newer memory from Review UI" />
+        <button type="submit">Use newer, supersede older</button>
+      </form>
+      <form method="post" action="/review-action">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="memory_id" value="${escapeHtml(newId)}" />
+        <input type="hidden" name="action" value="archive" />
+        <input type="hidden" name="note" value="Owner resolved conflict by keeping older memory from Review UI" />
+        <button type="submit">Keep older, archive newer</button>
+      </form>
+      <form method="post" action="/review-action">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="memory_id" value="${escapeHtml(selectedId)}" />
+        <input type="hidden" name="action" value="demote_instruction" />
+        <input type="hidden" name="note" value="Owner demoted conflicting rule from Review UI" />
+        <button type="submit">Demote selected from rule</button>
+      </form>
+    </div>
+  </details>`;
+}
+
 function renderDetail(
   detail: unknown,
   availableActions: unknown,
@@ -758,6 +856,7 @@ function renderDetail(
     <h4>Actions</h4>
     <div class="actions">${renderReviewActions(memory, projectId, payload.source_refs?.length ?? 0)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
     ${renderDuplicateResolution(memory, projectId, duplicateRows)}
+    ${renderConflictResolution(memory, projectId, duplicateRows)}
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -1339,6 +1438,13 @@ function renderDashboard(
     .duplicate-options strong { display: block; font-size: 13px; margin-bottom: 5px; overflow-wrap: anywhere; }
     .duplicate-options p { margin: 0 0 8px; color: #4f5867; font-size: 12px; line-height: 1.4; }
     .duplicate-options form { display: inline-block; margin: 0 6px 6px 0; }
+    .conflict-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+    .conflict-compare article { border: 1px solid #e1e7ef; border-radius: 7px; padding: 8px; background: #fbfcfe; }
+    .conflict-compare span { display: block; color: #7a4d18; font-size: 12px; font-weight: 650; margin-bottom: 5px; }
+    .conflict-compare strong { display: block; font-size: 13px; margin-bottom: 5px; overflow-wrap: anywhere; }
+    .conflict-compare p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .conflict-actions form { margin: 0; }
     button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #f2f6fb; }
     button.danger { border-color: #b77f62; color: #8a3c15; }

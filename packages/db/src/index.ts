@@ -1817,6 +1817,7 @@ export class RecallantDb {
         set("use_policy", "recall_allowed");
       } else if (action === "supersede") {
         set("status", "superseded");
+        set("use_policy", "evidence_only");
         set("superseded_by", input.superseded_by ?? null);
       } else if (action === "edit") {
         if (input.patch?.title !== undefined) set("title", input.patch.title);
@@ -1832,7 +1833,10 @@ export class RecallantDb {
           await client.query(
             `
               UPDATE agent_memories
-              SET status = 'superseded', superseded_by = $1, updated_at = now()
+              SET status = 'superseded',
+                  use_policy = 'evidence_only',
+                  superseded_by = $1,
+                  updated_at = now()
               WHERE id = $2
             `,
             [input.memory_id, mergeId]

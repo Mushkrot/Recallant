@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, and duplicate canonical resolution are implemented, deployed, and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, UI permanent-forget, project settings edit forms, instruction promotion source-ref guard, duplicate canonical resolution, and conflict old/new resolution are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or conflict old/new resolution views.
-Last updated: 2026-05-31T07:33:53Z.
+Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer dry-run/profile smoke.
+Last updated: 2026-05-31T07:44:25Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -96,6 +96,9 @@ Last updated: 2026-05-31T07:33:53Z.
 - Duplicate candidate detail now shows canonical-choice actions. The owner can keep the selected
   memory and merge a peer, or use another peer and supersede the selected memory, without copying
   UUIDs by hand.
+- Conflict candidate detail now shows old/new records and actions to use newer, keep older/archive
+  newer, or demote the selected rule. Superseded memories now drop `instruction_grade` so lifecycle
+  policy stays schema-valid.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -161,6 +164,9 @@ Last updated: 2026-05-31T07:33:53Z.
   recallant.service`, local `/health`, and authenticated Review route check for
   `Conflicts / Duplicates` all passed. Conditional canonical controls remain covered by isolated
   DB smoke because production has no active duplicate fixture.
+- `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
+  conflict old/new detail visibility, supersede/demote/archive action visibility, and use-newer
+  supersede form coverage
 
 ## Open Questions
 

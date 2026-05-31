@@ -388,6 +388,16 @@ production service was restarted after this server-rendered UI change; the live 
 healthy, while the conditional canonical controls are covered in isolated DB smoke because
 production currently has no active duplicate fixture.
 
+Latest Conflict resolution validation:
+
+- `npm run review-ui:smoke`
+
+Conflict candidate detail now renders an old/new comparison and policy-path actions to use newer
+and supersede older, keep older and archive newer, or demote the selected rule. The smoke suite
+creates an old/new conflict pair, verifies the browser detail, and submits the use-newer form. This
+also fixed the lifecycle invariant for superseded rules: `supersede` and `merge` now move superseded
+records out of `instruction_grade`.
+
 Latest attach/capture integration validation:
 
 - `npm run phase10:smoke`
