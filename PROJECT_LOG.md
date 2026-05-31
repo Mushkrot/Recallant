@@ -2,11 +2,10 @@
 
 ## Current Session
 
-Status: Latest contract-hardening slice is implemented, full `smoke:core` passed on a clean dev database, and live `recallant doctor` now reports `production_readiness.ready=true`.
-Current focus: commit and push the production-readiness follow-up checkpoint.
-Next step: continue only from documented follow-ups; deploy/restart stays on the accepted controlled service path.
-Last updated: 2026-05-31T10:56:17Z.
-
+Status: Target-aware onboarding and PRD/TEST acceptance closure are complete.
+Current focus: Full v1 acceptance surface is green; full clean `smoke:core` and production-facing checks passed after commits `ac3db30`, `cfc4ab2`, and `bfe15ae`.
+Next step: Continue with product polish, richer UX/management flows, or the next real-world pilot; stale spec-checkbox closure is no longer the active work.
+Last updated: 2026-05-31T11:30:34.826Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
