@@ -123,6 +123,12 @@ await callTool(5, "memory_append_turn", {
 });
 
 const unrelatedProjectId = randomUUID();
+const scopedDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId,
+  projectPath: process.cwd()
+});
 const unrelatedDb = new RecallantDb({
   databaseUrl,
   developerId,
@@ -160,6 +166,49 @@ const unrelated = await unrelatedDb.appendTurn({
   text: "secret_unrelated_scope_token should be excluded from project-scoped retrieval.",
   dedup_key: `phase5-unrelated-${randomUUID()}`
 });
+
+const scopedImports = [
+  {
+    token: "environment_scope_exclusion_token",
+    scope_kind: "environment",
+    scope_id: "server:other-instance",
+    audience: [{ kind: "context_pack", id: null }],
+    result_class: "environment_fact"
+  },
+  {
+    token: "client_adapter_scope_exclusion_token",
+    scope_kind: "client_adapter",
+    scope_id: "claude_code",
+    audience: [{ kind: "specific_client", id: "claude_code" }],
+    result_class: "startup_instruction"
+  },
+  {
+    token: "connector_scope_exclusion_token",
+    scope_kind: "connector_account",
+    scope_id: "google-drive:personal",
+    audience: [{ kind: "connector", id: "google-drive" }],
+    result_class: "connector_account_binding"
+  }
+];
+const scopedResults = new Map();
+for (const scopedImport of scopedImports) {
+  const result = await scopedDb.importSource({
+    project_path: process.cwd(),
+    source_path: `phase5/${scopedImport.scope_kind}.md`,
+    source_type: "smoke_fixture",
+    source_sha256: randomUUID(),
+    import_text: `${scopedImport.token} is a deliberately unrelated scoped retrieval fixture.`,
+    bounded_excerpt: scopedImport.token,
+    result_class: scopedImport.result_class,
+    scope_kind: scopedImport.scope_kind,
+    scope_id: scopedImport.scope_id,
+    audience: scopedImport.audience,
+    risk: "low",
+    risks: [],
+    secret_references: []
+  });
+  scopedResults.set(scopedImport.token, result);
+}
 
 const lexical = await callTool(6, "memory_search", {
   session_id: started.session_id,
@@ -210,7 +259,38 @@ if (excluded.hits.some((hit) => hit.source_event_id === unrelated.event_id)) {
   throw new Error(`Project-scoped retrieval leaked unrelated project: ${JSON.stringify(excluded)}`);
 }
 
-const broad = await callTool(10, "memory_search", {
+for (const [index, scopedImport] of scopedImports.entries()) {
+  const hiddenByDefault = await callTool(10 + index * 2, "memory_search", {
+    session_id: started.session_id,
+    query: scopedImport.token,
+    mode: "lexical_only",
+    top_k: 5,
+    max_chars_total: 2000
+  });
+  if (hiddenByDefault.hits.length !== 0) {
+    throw new Error(
+      `Default retrieval leaked ${scopedImport.scope_kind}/${scopedImport.audience[0].kind}: ${JSON.stringify(hiddenByDefault)}`
+    );
+  }
+
+  const explicitScoped = await callTool(11 + index * 2, "memory_search", {
+    session_id: started.session_id,
+    query: scopedImport.token,
+    mode: "lexical_only",
+    scope_kind: scopedImport.scope_kind,
+    audience: scopedImport.audience[0].kind,
+    top_k: 5,
+    max_chars_total: 2000
+  });
+  const imported = scopedResults.get(scopedImport.token);
+  if (!explicitScoped.hits.some((hit) => imported.chunk_ids.includes(hit.chunk_id))) {
+    throw new Error(
+      `Explicit ${scopedImport.scope_kind}/${scopedImport.audience[0].kind} retrieval failed: ${JSON.stringify(explicitScoped)}`
+    );
+  }
+}
+
+const broad = await callTool(20, "memory_search", {
   session_id: started.session_id,
   query: "project",
   mode: "hybrid",
@@ -241,6 +321,7 @@ try {
     throw new Error(`Retrieval access/model audit failed: ${JSON.stringify(row)}`);
   }
 } finally {
+  await scopedDb.close();
   await unrelatedDb.close();
   await client.end();
 }

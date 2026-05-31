@@ -672,6 +672,11 @@ Latest contract hardening checkpoint:
 - Phase 3 smoke now also covers Cursor, Claude Code, and Windsurf session-start contract parity,
   developer-default capture policy resolution, and the full session/project/developer/default
   capture precedence path.
+- Phase 5 retrieval smoke now explicitly covers the golden retrieval contract: rare-token lexical
+  hits, paraphrase vector hits, bounded response text, unrelated-project exclusion, and
+  ADR-0040-style operational binding isolation. Default project raw search now excludes
+  environment, client-adapter, and connector-account chunks unless the caller requests the matching
+  `scope_kind`/`audience`.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

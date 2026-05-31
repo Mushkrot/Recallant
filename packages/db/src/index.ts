@@ -2812,6 +2812,10 @@ export class RecallantDb {
     if (input.scopeKind) {
       params.push(input.scopeKind);
       clauses.push(`c.scope_kind = $${input.startIndex + params.length - 1}`);
+    } else if (input.scope === "project") {
+      clauses.push(
+        "(c.scope = 'developer' OR coalesce(c.scope_kind, 'project') IN ('project', 'repo', 'subproject'))"
+      );
     }
     if (input.audience) {
       params.push(input.audience);
@@ -2821,6 +2825,14 @@ export class RecallantDb {
           FROM jsonb_array_elements(coalesce(c.audience, '[]'::jsonb)) AS audience_item
           WHERE audience_item->>'kind' = $${input.startIndex + params.length - 1}
         )`
+      );
+    } else {
+      clauses.push(
+        `(c.audience IS NULL OR c.audience = '[]'::jsonb OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(coalesce(c.audience, '[]'::jsonb)) AS audience_item
+          WHERE audience_item->>'kind' = 'all_agents'
+        ))`
       );
     }
     return { whereSql: clauses.join(" AND "), params };

@@ -59,10 +59,10 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 
 Prepare a fixture of three synthetic events with overlapping lexical and semantic content.
 
-- [ ] Rare-token query returns the correct chunk through lexical path.
-- [ ] Paraphrase query returns the semantically nearest chunk through vector path.
-- [ ] With configured fixture cap such as `max_chars_total=2000`, total excerpts + metadata in the tool response never exceed that configured cap.
-- [ ] Scope/audience fixture excludes unrelated project/environment/client-adapter/connector memories before ranking.
+- [x] Rare-token query returns the correct chunk through lexical path.
+- [x] Paraphrase query returns the semantically nearest chunk through vector path.
+- [x] With configured fixture cap such as `max_chars_total=2000`, total excerpts + metadata in the tool response never exceed that configured cap.
+- [x] Scope/audience fixture excludes unrelated project/environment/client-adapter/connector memories before ranking.
 
 ## Phase 6
 
