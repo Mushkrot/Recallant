@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance agent capture loop passed for the first production-ready slice.
-Current focus: first local cleanup follow-up implemented; preparing verification and commit.
+Status: Product Acceptance and first detached local-cleanup slice are implemented, verified, committed, pushed, and deployed.
+Current focus: choose the next follow-up slice.
 Next step: package fresh-server onboarding or deepen owner-facing Management UI actions.
-Last updated: 2026-05-31T06:18:00Z.
+Last updated: 2026-05-31T06:27:00Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -111,6 +111,9 @@ Last updated: 2026-05-31T06:18:00Z.
   `/health`, authenticated `/api/review-dashboard`, and Review HTML readiness check all passed
 - `npm run local-cleanup:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
 - `npm run review-ui:smoke` against the same isolated DB; passed with local cleanup command visible
+- production deploy verification after local cleanup restart: `systemctl is-active
+  recallant.service`, local `/health`, authenticated `/api/review-dashboard`, and Review HTML local
+  cleanup check all passed
 
 ## Open Questions
 

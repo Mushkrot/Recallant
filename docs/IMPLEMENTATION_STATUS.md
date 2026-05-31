@@ -290,6 +290,10 @@ Latest local cleanup validation:
 - `npm run build`
 - `npm run local-cleanup:smoke`
 - `npm run review-ui:smoke`
+- Controlled `recallant.service` restart
+- Local `/health`
+- Authenticated `/api/review-dashboard`
+- Authenticated `/review` HTML readiness check
 
 The local cleanup smoke verifies that confirmed local cleanup is blocked while the project is still
 active, becomes available after confirmed detach, removes only `.recallant/config`,
