@@ -175,10 +175,15 @@ The current Review permanent-forget follow-up is complete for selected governed 
 - confirmation redacts the governed memory body/title and source quotes, archives it, sets
   `do_not_use`, and writes a redacted `erasure_requests` receipt;
 - `npm run review-ui:smoke` verifies the API path, browser form path, confirmation gate, redaction,
-  and absence of erased secret text in the receipt/rendered confirmation page.
+  and absence of erased secret text in the receipt/rendered confirmation page;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and authenticated Review HTML shows `Forget forever`, `/memory-forget`, and
+  `Dry-run forget forever`.
 
 Latest deployed checkpoint:
 
+- Commit `fe93e12 Add Review UI permanent forget flow` was pushed to `origin/main` and applied by
+  controlled `recallant.service` restart.
 - Commit `c33982f Enable full review action controls` was pushed to `origin/main` and applied by
   controlled `recallant.service` restart.
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.

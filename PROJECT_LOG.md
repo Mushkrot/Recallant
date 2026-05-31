@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, and UI permanent-forget dry-run/confirm are implemented and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, and UI permanent-forget dry-run/confirm are implemented, deployed, and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
 Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer settings edit coverage.
-Last updated: 2026-05-31T06:55:55Z.
+Last updated: 2026-05-31T07:01:50Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -131,6 +131,9 @@ Last updated: 2026-05-31T06:55:55Z.
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   permanent-forget API/form dry-run, confirmation gate, governed-memory redaction, source quote
   clearing, and safe erasure receipt coverage
+- production deploy verification after permanent-forget restart: `systemctl is-active
+  recallant.service`, local `/health`, and authenticated Review HTML check for `Forget forever`,
+  `/memory-forget`, and `Dry-run forget forever` all passed
 
 ## Open Questions
 
