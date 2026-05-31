@@ -125,6 +125,22 @@ await db.reviewAgentMemory({
   actor_kind: "user",
   note: "review ui smoke"
 });
+const editable = await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Review UI editable memory",
+  body: "Review UI should edit this memory through a browser form.",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "editable memory" }]
+});
+const duplicate = await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Review UI duplicate memory",
+  body: "Review UI should merge this duplicate into another memory.",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate memory" }]
+});
 
 const server = createRecallantHttpServer();
 server.listen(0, "127.0.0.1");
@@ -153,6 +169,9 @@ try {
     !htmlText.includes("Evidence excerpts") ||
     !htmlText.includes("Recommended action") ||
     !htmlText.includes("Technical details") ||
+    !htmlText.includes("Promote to rule") ||
+    !htmlText.includes("Edit memory") ||
+    !htmlText.includes("Supersede / merge") ||
     !htmlText.includes("AGENTS.md") ||
     !htmlText.includes(importMemoryId) ||
     !htmlText.includes(candidate.memory_id) ||
@@ -424,6 +443,140 @@ try {
   const acceptedJson = await accepted.json();
   if (accepted.status !== 200 || acceptedJson.status !== "accepted") {
     throw new Error(`Review action API smoke failed: ${JSON.stringify(acceptedJson)}`);
+  }
+
+  async function createReviewActionMemory(title) {
+    return db.createAgentMemory({
+      memory_type: "decision",
+      scope: "project",
+      title,
+      body: `${title} body.`,
+      created_by: "agent",
+      source_refs: [{ source_kind: "event", source_id: event.event_id, quote: title }]
+    });
+  }
+
+  async function apiReviewAction(memoryId, action, extra = {}) {
+    const response = await fetch(`${baseUrl}/api/review-action`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        memory_id: memoryId,
+        action,
+        actor_kind: "user",
+        note: `review ui ${action} matrix smoke`,
+        ...extra
+      })
+    });
+    const payload = await response.json();
+    if (response.status !== 200 || payload.ok !== true) {
+      throw new Error(`Review action ${action} failed: ${JSON.stringify(payload)}`);
+    }
+    return payload;
+  }
+
+  const rejectedMemory = await createReviewActionMemory("Review UI reject action");
+  const rejected = await apiReviewAction(rejectedMemory.memory_id, "reject");
+  if (rejected.status !== "rejected" || rejected.use_policy !== "do_not_use") {
+    throw new Error(`Reject action did not set do_not_use: ${JSON.stringify(rejected)}`);
+  }
+
+  const archivedMemory = await createReviewActionMemory("Review UI archive action");
+  const archived = await apiReviewAction(archivedMemory.memory_id, "archive");
+  if (archived.status !== "archived") {
+    throw new Error(`Archive action failed: ${JSON.stringify(archived)}`);
+  }
+  const unarchived = await apiReviewAction(archivedMemory.memory_id, "unarchive");
+  if (unarchived.status !== "accepted") {
+    throw new Error(`Unarchive action failed: ${JSON.stringify(unarchived)}`);
+  }
+
+  const staleMemory = await createReviewActionMemory("Review UI stale action");
+  const stale = await apiReviewAction(staleMemory.memory_id, "mark_stale");
+  if (stale.status !== "stale" || stale.use_policy !== "evidence_only") {
+    throw new Error(`Mark stale action failed: ${JSON.stringify(stale)}`);
+  }
+
+  const ruleMemory = await createReviewActionMemory("Review UI promote action");
+  const promoted = await apiReviewAction(ruleMemory.memory_id, "promote_instruction");
+  if (promoted.status !== "accepted" || promoted.use_policy !== "instruction_grade") {
+    throw new Error(`Promote action failed: ${JSON.stringify(promoted)}`);
+  }
+  const demoted = await apiReviewAction(ruleMemory.memory_id, "demote_instruction");
+  if (demoted.use_policy !== "recall_allowed") {
+    throw new Error(`Demote action failed: ${JSON.stringify(demoted)}`);
+  }
+
+  const supersededMemory = await createReviewActionMemory("Review UI supersede action");
+  const superseded = await apiReviewAction(supersededMemory.memory_id, "supersede", {
+    superseded_by: ruleMemory.memory_id
+  });
+  if (superseded.status !== "superseded") {
+    throw new Error(`Supersede action failed: ${JSON.stringify(superseded)}`);
+  }
+
+  const editForm = await fetch(`${baseUrl}/review-action`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      memory_id: editable.memory_id,
+      action: "edit",
+      title: "Review UI edited memory",
+      body: "The browser review form updated this memory body.",
+      note: "review ui edit form smoke"
+    })
+  });
+  if (
+    editForm.status !== 303 ||
+    !String(editForm.headers.get("location")).includes(editable.memory_id)
+  ) {
+    throw new Error(`Review action edit form failed: ${editForm.status}`);
+  }
+  const editedDetail = await db.getAgentMemory(editable.memory_id);
+  if (
+    editedDetail.memory?.title !== "Review UI edited memory" ||
+    editedDetail.memory?.body !== "The browser review form updated this memory body." ||
+    editedDetail.source_refs.length !== 1 ||
+    !editedDetail.review_actions.some((action) => action.action === "edit")
+  ) {
+    throw new Error(`Review action edit did not preserve/update detail: ${JSON.stringify(editedDetail)}`);
+  }
+
+  const mergeForm = await fetch(`${baseUrl}/review-action`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      memory_id: editable.memory_id,
+      action: "merge",
+      merge_memory_ids: duplicate.memory_id,
+      note: "review ui merge form smoke"
+    })
+  });
+  if (
+    mergeForm.status !== 303 ||
+    !String(mergeForm.headers.get("location")).includes(editable.memory_id)
+  ) {
+    throw new Error(`Review action merge form failed: ${mergeForm.status}`);
+  }
+  const duplicateDetail = await db.getAgentMemory(duplicate.memory_id);
+  if (
+    duplicateDetail.memory?.status !== "superseded" ||
+    duplicateDetail.memory?.superseded_by !== editable.memory_id
+  ) {
+    throw new Error(`Review action merge did not supersede duplicate: ${JSON.stringify(duplicateDetail)}`);
   }
 
   const blockedSetting = await fetch(`${baseUrl}/api/project-setting`, {

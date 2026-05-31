@@ -122,7 +122,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Management UI does not expose a full raw memory browser, graph explorer, broad analytics suite, or public SaaS dashboard in v1.
 - [ ] Browser/UI clients cannot read provider API keys or raw prompts from cost/model-call records.
 - [ ] Memory detail view shows body, status, use policy, confidence, source refs, related records, and review action history.
-- [ ] UI accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede actions update the same database state as `memory_review_agent_memory`; approve may remain as a UI label/alias if needed.
+- [x] UI accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede actions update the same database state as `memory_review_agent_memory`; approve may remain as a UI label/alias if needed.
 - [ ] UI permanent-forget flow performs dry-run, shows affected counts/scope, requires confirmation, and writes a redacted erasure receipt.
 - [ ] UI promotion to `instruction_grade` requires visible source refs and writes a review action.
 - [ ] Duplicate view allows choosing a canonical memory and marking the others merged/superseded/archived.

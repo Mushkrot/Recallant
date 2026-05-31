@@ -484,9 +484,12 @@ function renderReviewActions(memory: Record<string, unknown>, projectId: unknown
     ["accept", "Keep as usable memory"],
     ["reject", "Reject"],
     ["archive", "Archive"],
-    ["mark_stale", "Mark stale"]
+    ["unarchive", "Unarchive"],
+    ["mark_stale", "Mark stale"],
+    ["promote_instruction", "Promote to rule"],
+    ["demote_instruction", "Demote from rule"]
   ];
-  return safeActions
+  const simpleForms = safeActions
     .map(
       ([action, label]) => `<form method="post" action="/review-action">
         <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
@@ -496,6 +499,38 @@ function renderReviewActions(memory: Record<string, unknown>, projectId: unknown
       </form>`
     )
     .join("");
+  const editForm = `<details class="action-detail">
+    <summary>Edit memory</summary>
+    <form method="post" action="/review-action">
+      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+      <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+      <input type="hidden" name="action" value="edit" />
+      <label>Title <input name="title" value="${escapeHtml(memory.title)}" /></label>
+      <label>Body <textarea name="body" rows="4">${escapeHtml(memory.body)}</textarea></label>
+      <label>Note <input name="note" value="Owner edited memory from Review UI" /></label>
+      <button type="submit">Save edit</button>
+    </form>
+  </details>`;
+  const supersedeForm = `<details class="action-detail">
+    <summary>Supersede / merge</summary>
+    <form method="post" action="/review-action">
+      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+      <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+      <input type="hidden" name="action" value="supersede" />
+      <label>Superseded by memory id <input name="superseded_by" /></label>
+      <label>Note <input name="note" value="Owner superseded memory from Review UI" /></label>
+      <button type="submit">Mark superseded</button>
+    </form>
+    <form method="post" action="/review-action">
+      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+      <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
+      <input type="hidden" name="action" value="merge" />
+      <label>Merge memory ids <input name="merge_memory_ids" placeholder="id1, id2" /></label>
+      <label>Note <input name="note" value="Owner merged duplicate memories from Review UI" /></label>
+      <button type="submit">Merge duplicates into this memory</button>
+    </form>
+  </details>`;
+  return `${simpleForms}${editForm}${supersedeForm}`;
 }
 
 function renderDetail(detail: unknown, availableActions: unknown, projectId: unknown) {
@@ -550,11 +585,8 @@ function renderDetail(detail: unknown, availableActions: unknown, projectId: unk
       ])}
     </details>
     <details>
-      <summary>Advanced actions</summary>
-      <div class="actions disabled">${actions
-        .filter((action) => !["accept", "reject", "archive", "mark_stale"].includes(action))
-        .map((action) => `<span>${escapeHtml(action)}</span>`)
-        .join("")}</div>
+      <summary>Available action keys</summary>
+      <div class="actions disabled">${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join("")}</div>
     </details>
   </article>`;
 }
@@ -1166,10 +1198,26 @@ export function createRecallantHttpServer() {
     }
     if (request.method === "POST" && requestUrl.pathname === "/review-action") {
       const body = await readForm(request);
+      const action = String(body.action ?? "");
+      const patch =
+        action === "edit"
+          ? {
+              title: optionalInput(body.title),
+              body: optionalInput(body.body)
+            }
+          : undefined;
+      const mergeMemoryIds = optionalInput(body.merge_memory_ids)
+        ?.split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
       const result = await database.reviewAgentMemory({
         memory_id: String(body.memory_id ?? ""),
-        action: String(body.action ?? ""),
-        actor_kind: "user"
+        action,
+        actor_kind: "user",
+        note: optionalInput(body.note),
+        superseded_by: optionalInput(body.superseded_by),
+        merge_memory_ids: mergeMemoryIds,
+        patch
       });
       const location = reviewPath(body.project_id, result.memory_id);
       write(response, 303, "See other", "text/plain", { location });

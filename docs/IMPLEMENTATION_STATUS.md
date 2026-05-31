@@ -83,6 +83,10 @@ Current implemented slices include:
   chat builds the dry-run command for that sandbox project instead of blindly using the open
   project. If the sandbox target is missing or ambiguous, chat refuses to build a risky command and
   asks the owner to clarify the target.
+- Review action controls are now executable for the full governed-memory action set instead of
+  showing advanced actions as disabled labels. Browser/API paths route through
+  `reviewAgentMemory` for accept, reject, archive, unarchive, mark stale, promote instruction,
+  demote instruction, edit, merge, and supersede, and the smoke suite checks the resulting DB state.
 - Repo contract sync for `PROJECT_LOG.md` after checkpoint writes when the target repo log already exists.
 - Offline spool workflow with append-only JSONL records, stable dedup keys, raw artifact pointers, dry-run sync, idempotent DB sync, manifest mapping, context-pack/closeout status visibility, and prune only after confirmed sync.
 - CLI-backed agent capture runtime first slice: `recallant agent-start`, `agent-event`,
@@ -311,6 +315,14 @@ Latest onboarding validation:
 The onboarding smoke installs the CLI wrapper into a temporary prefix, then uses that installed
 command from a clean project to run `lint-context`, ordinary `recallant attach .`, `agent-start`,
 decision capture, and closeout against an isolated temporary Postgres database.
+
+Latest Review action validation:
+
+- `npm run review-ui:smoke`
+
+The Review UI smoke now verifies visible browser controls for advanced actions and checks that
+accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede all write through the
+same DB review policy path.
 
 Latest attach/capture integration validation:
 

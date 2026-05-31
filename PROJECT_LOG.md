@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, and installed-wrapper onboarding smoke are implemented and verified.
-Current focus: commit onboarding smoke/docs and continue to the next follow-up slice.
-Next step: deepen owner-facing Management UI actions or add a full installer dry-run/profile smoke.
-Last updated: 2026-05-31T06:33:00Z.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, and full Review action controls are implemented and verified.
+Current focus: commit Review action UI coverage and continue closing the full v1 contract.
+Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing missing permanent-forget UI or full installer profile smoke.
+Last updated: 2026-05-31T06:45:00Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -81,6 +81,9 @@ Last updated: 2026-05-31T06:33:00Z.
   backups.
 - `npm run onboarding:smoke` installs the CLI wrapper into a temporary prefix and verifies the
   installed `recallant` command can attach a clean project and run the capture runtime.
+- Review UI advanced action controls now execute real actions instead of showing disabled labels:
+  edit, merge, supersede, promote/demote instruction, unarchive, and the basic accept/reject/archive
+  actions all route through the same DB policy path.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -117,6 +120,8 @@ Last updated: 2026-05-31T06:33:00Z.
   recallant.service`, local `/health`, authenticated `/api/review-dashboard`, and Review HTML local
   cleanup check all passed
 - `npm run onboarding:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
+- `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
+  full review action matrix coverage
 
 ## Open Questions
 

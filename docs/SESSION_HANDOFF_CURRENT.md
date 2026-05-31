@@ -155,6 +155,15 @@ The current installed-wrapper onboarding follow-up is complete for the first saf
   capture, and closeout against an isolated temporary database;
 - this does not yet exercise full systemd/Docker server installation on a fresh non-owner host.
 
+The current Review action follow-up is complete for the governed-memory action set:
+
+- Review detail now exposes real browser controls for accept, reject, archive, unarchive, mark
+  stale, promote instruction, demote instruction, edit, merge, and supersede;
+- `/review-action` form posts and `/api/review-action` JSON posts both route through
+  `reviewAgentMemory`;
+- `npm run review-ui:smoke` verifies visible advanced controls and DB state for the full action
+  matrix.
+
 Latest deployed checkpoint:
 
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
@@ -203,8 +212,9 @@ Latest QA correction checkpoint:
   independently.
 
 The next required target is no longer the Product Acceptance loop; that loop is green for the first
-slice. Richer Management UI action flows, a full installer dry-run/profile smoke, or a separate
-explicit workflow for deleting sandbox copy directories are now the highest-value follow-ups.
+slice. Permanent-forget UI, richer Management UI action flows, a full installer dry-run/profile
+smoke, or a separate explicit workflow for deleting sandbox copy directories are now the
+highest-value follow-ups.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

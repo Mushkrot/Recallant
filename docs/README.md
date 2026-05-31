@@ -8,12 +8,14 @@ Historical note: this project was originally drafted under the working name **Ag
 
 → [QUICKSTART.md](QUICKSTART.md) describes how to connect a project and start using Recallant.
 
-Current operator note: Pre-Pilot Readiness, the first copied-project pilot, first autonomous
-attach/detach slices, first controlled cross-project recall slice, one-command owner-server CLI
-install/attach UX, and AI-backed Management UI/chat with deterministic safety gates have first
-slices. The main product loop is not complete until the agent capture acceptance test passes:
-attached projects must start Recallant-backed sessions, read context, write decisions/actions/tests/
-checkpoints, and recall that memory in a later session without the owner acting as QA.
+Current operator note: Pre-Pilot Readiness, the first copied-project pilot, autonomous
+attach/detach, controlled cross-project recall, one-command owner-server CLI install/attach UX,
+AI-backed Management UI/chat with deterministic safety gates, detached local cleanup, and installed
+CLI onboarding have first slices. The Product Acceptance agent-capture loop now passes for the
+first production-ready slice: attached projects start Recallant-backed sessions, read context, write
+decisions/actions/tests/checkpoints, close out, and recall that memory in a later session without
+the owner acting as QA. The broader goal remains the full documented v1 product, so unresolved
+TEST_CONTRACT/PRD requirements still need requirement-by-requirement verification and closure.
 
 ## Required Reading Order For Implementers
 
