@@ -215,10 +215,14 @@ The current duplicate-resolution follow-up is complete for canonical choice:
 - the owner can choose `Keep this, merge other` or `Use other, supersede this`;
 - those forms post to the same `/review-action` merge/supersede policy path;
 - `npm run review-ui:smoke` verifies the detail controls and that choosing selected memory as
-  canonical marks the peer `superseded`.
+  canonical marks the peer `superseded`;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and the authenticated Review route still renders `Conflicts / Duplicates`.
 
 Latest deployed checkpoint:
 
+- Commit `194435d Add duplicate canonical resolution UI` was pushed to `origin/main` and applied by
+  controlled `recallant.service` restart.
 - Commit `505a143 Require source refs for instruction promotion` was pushed to `origin/main` and
   applied by controlled `recallant.service` restart.
 - Commit `4700867 Add editable project settings UI` was pushed to `origin/main` and applied by

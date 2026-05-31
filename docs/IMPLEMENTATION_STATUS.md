@@ -376,11 +376,17 @@ for a memory with visible evidence excerpts.
 Latest Duplicate resolution validation:
 
 - `npm run review-ui:smoke`
+- Controlled `recallant.service` restart
+- Local `/health`
+- Authenticated Review route check
 
 Duplicate candidate detail now renders canonical-choice actions from the dashboard's
 duplicate/conflict candidate list. The owner can keep the selected memory and merge a peer, or use a
 peer as canonical and supersede the selected memory, without hand-copying memory ids. The smoke
-suite verifies the browser detail and a canonical merge form that supersedes the peer.
+suite verifies the browser detail and a canonical merge form that supersedes the peer. The
+production service was restarted after this server-rendered UI change; the live Review route is
+healthy, while the conditional canonical controls are covered in isolated DB smoke because
+production currently has no active duplicate fixture.
 
 Latest attach/capture integration validation:
 
