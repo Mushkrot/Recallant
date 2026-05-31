@@ -242,6 +242,67 @@ if (context.sections?.checkpoint === undefined || context.sections?.binding_rule
   throw new Error(`context preview failed: ${JSON.stringify(context)}`);
 }
 
+const exitIntent = run([
+  "closeout-intent",
+  "--project-dir",
+  projectDir,
+  "--has-active-session",
+  "--text",
+  "Exit"
+]);
+assert(
+  exitIntent.closeout_trigger === true &&
+    exitIntent.closeout_intent === "manual_exit" &&
+    exitIntent.confirmation_required === false,
+  `Exit closeout intent failed: ${JSON.stringify(exitIntent)}`
+);
+const russianIntent = run([
+  "closeout-intent",
+  "--project-dir",
+  projectDir,
+  "--has-active-session",
+  "--text",
+  "Закрой сессию"
+]);
+assert(
+  russianIntent.closeout_trigger === true &&
+    russianIntent.closeout_intent === "manual_exit" &&
+    russianIntent.language === "ru",
+  `Russian closeout intent failed: ${JSON.stringify(russianIntent)}`
+);
+const ambiguousIntent = run([
+  "closeout-intent",
+  "--project-dir",
+  projectDir,
+  "--text",
+  "Давай вернемся к этому позже"
+]);
+assert(
+  ambiguousIntent.confirmation_required === true &&
+    ambiguousIntent.closeout_trigger === false &&
+    ambiguousIntent.understanding_source === "confirmation_required",
+  `Ambiguous closeout intent did not ask confirmation: ${JSON.stringify(ambiguousIntent)}`
+);
+const riskyIntentRaw = runRaw([
+  "closeout-intent",
+  "--project-dir",
+  projectDir,
+  "--has-active-session",
+  "--text",
+  "Save and stop, then delete the project"
+]);
+assert(
+  riskyIntentRaw.status === 2,
+  `Risky closeout intent did not exit 2: ${riskyIntentRaw.stdout}`
+);
+const riskyIntent = JSON.parse(riskyIntentRaw.stdout);
+assert(
+  riskyIntent.closeout_trigger === true &&
+    riskyIntent.confirmation_required === true &&
+    riskyIntent.destructive_or_sensitive === true,
+  `Risky closeout intent did not require confirmation: ${JSON.stringify(riskyIntent)}`
+);
+
 const ownerOpsDir = await mkdtemp(join(tmpdir(), "recallant-phase7-owner-ops-"));
 const portsFile = join(ownerOpsDir, "PORTS.yaml");
 const securityPath = join(ownerOpsDir, "SECURITY");
@@ -257,15 +318,55 @@ if (
   doctor.project_config?.present !== true ||
   doctor.local_model?.starts_service !== false ||
   doctor.local_model?.provider !== "ollama" ||
+  !Array.isArray(doctor.local_model?.expected_models) ||
+  !Array.isArray(doctor.local_model?.missing_models) ||
+  doctor.local_model?.fallback_route !== "active_agent_or_defer" ||
+  doctor.model_routes?.local_model?.route_class !== "local_model" ||
+  doctor.model_routes?.active_agent?.before_paid_api !== true ||
+  doctor.model_routes?.subscription_worker?.limit_behavior?.silent_paid_api_fallthrough !== false ||
   doctor.model_routes?.paid_api_provider?.requires_approval !== true ||
+  doctor.model_routes?.paid_api_provider?.default_provider !== "openai" ||
+  doctor.model_routes?.paid_api_provider?.default_mode !== "confirm_each" ||
+  doctor.model_routes?.paid_api_provider?.default_models?.gemini_cost !==
+    "gemini/gemini-2.5-flash-lite" ||
+  doctor.model_routes?.paid_api_provider?.default_models?.gemini_balanced !==
+    "gemini/gemini-2.5-flash" ||
+  doctor.model_routes?.paid_api_provider?.default_models?.claude_cheap !==
+    "anthropic/claude-haiku-4-5" ||
+  !doctor.model_routes?.paid_api_provider?.explicit_opt_in_required_for?.includes(
+    "gemini/gemini-3.5-flash"
+  ) ||
   doctor.model_routes?.subscription_worker?.enabled !== false ||
   doctor.paid_api_mode !== "confirm_each" ||
+  doctor.policy?.paid_api_requires_approval !== true ||
+  doctor.policy?.auto_with_caps_requires_explicit_enablement !== true ||
+  doctor.policy?.browser_automation_allowed !== false ||
   doctor.policy?.hidden_api_routes_allowed !== false ||
+  doctor.policy?.limit_bypass_routes_allowed !== false ||
+  doctor.policy?.preview_models_require_opt_in !== true ||
+  doctor.policy?.gemini_3_5_flash_requires_opt_in !== true ||
+  doctor.policy?.claude_sonnet_opus_require_quality_profile !== true ||
   doctor.owner_server_deployment?.ports_file?.registered !== true ||
   doctor.owner_server_deployment?.security_baseline?.must_consult_before_exposure !== true ||
   !doctor.owner_server_deployment?.warnings?.some((warning) => warning.includes("SECURITY"))
 ) {
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
+}
+
+const unreachableDoctor = run(["doctor", "--project-dir", projectDir], {
+  RECALLANT_PORTS_FILE: portsFile,
+  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_PORT: "3005",
+  RECALLANT_OLLAMA_URL: "http://127.0.0.1:1",
+  RECALLANT_EXPECTED_OLLAMA_MODELS: "nomic-embed-text,gpt-oss:20b"
+});
+if (
+  unreachableDoctor.local_model?.reachable !== false ||
+  unreachableDoctor.local_model?.starts_service !== false ||
+  unreachableDoctor.local_model?.missing_models?.length !== 2 ||
+  !unreachableDoctor.local_model?.error
+) {
+  throw new Error(`doctor unavailable Ollama state failed: ${JSON.stringify(unreachableDoctor)}`);
 }
 
 const client = new pg.Client({ connectionString: databaseUrl });

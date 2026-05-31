@@ -162,13 +162,13 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [ ] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
 - [x] `recallant lint-context` verifies bootstrap files did not become duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
 - [ ] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
-- [ ] `recallant doctor` checks connectivity for Postgres, configured local model provider/Ollama, and `.recallant/config`.
-- [ ] `recallant doctor` reports whether Ollama/local-model capability is reachable, which endpoint is configured, which expected models are missing, and which fallback route applies.
-- [ ] Owner-server deployment profile validates that planned Recallant service ports are present in `/ai/PORTS.yaml` before daemon/service start.
-- [ ] Owner-server deployment profile surfaces `/ai/SECURITY` as the security baseline to consult for public exposure, Cloudflare, firewall, service, or secret changes.
-- [ ] `recallant doctor` or equivalent diagnostics show effective model routes and whether local, active-agent, subscription-worker, and paid API routes are enabled/disabled.
+- [x] `recallant doctor` checks connectivity for Postgres, configured local model provider/Ollama, and `.recallant/config`.
+- [x] `recallant doctor` reports whether Ollama/local-model capability is reachable, which endpoint is configured, which expected models are missing, and which fallback route applies.
+- [x] Owner-server deployment profile validates that planned Recallant service ports are present in `/ai/PORTS.yaml` before daemon/service start.
+- [x] Owner-server deployment profile surfaces `/ai/SECURITY` as the security baseline to consult for public exposure, Cloudflare, firewall, service, or secret changes.
+- [x] `recallant doctor` or equivalent diagnostics show effective model routes and whether local, active-agent, subscription-worker, and paid API routes are enabled/disabled.
 - [ ] Cost / Paid API management view shows model-call audit, estimated cost, pending approvals, and confirms default `paid_api_mode=confirm_each`.
-- [ ] Closeout intent handling follows [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md): known trigger phrases plus model-routed classification for ambiguous cases.
+- [x] Closeout intent handling follows [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md): known trigger phrases plus model-routed classification for ambiguous cases.
 - [ ] Normal closeout calls `memory_closeout`; abnormal interruption recovery starts at the next `memory_start_session`.
 
 **Gate:** `TEST_CONTRACT.md` Phase 7 checks pass.

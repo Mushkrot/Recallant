@@ -198,9 +198,10 @@ const closeout = await callTool(8, "memory_closeout", {
 if (
   closeout.report_required !== true ||
   closeout.spool_sync_status !== "unsynced" ||
-  !closeout.warnings?.some((warning) => warning.includes("unsynced"))
+  !closeout.warnings?.some((warning) => warning.includes("unsynced")) ||
+  !closeout.warnings?.some((warning) => warning.includes("requiring review"))
 ) {
-  throw new Error(`Closeout did not warn about unsynced spool: ${JSON.stringify(closeout)}`);
+  throw new Error(`Closeout did not report required attention: ${JSON.stringify(closeout)}`);
 }
 if (closeout.created_memory_ids?.length !== 1 || closeout.needs_review_ids?.length !== 1) {
   throw new Error(`Closeout did not create governed-memory candidate: ${JSON.stringify(closeout)}`);
@@ -267,7 +268,24 @@ try {
         (SELECT status FROM sessions WHERE id = $6) AS unclosed_status,
         (SELECT status FROM sessions WHERE id = $7) AS recovery_status,
         (SELECT last_heartbeat_at IS NOT NULL FROM sessions WHERE id = $1) AS has_heartbeat,
-        (SELECT count(*)::int FROM checkpoints WHERE project_id = $5) AS checkpoint_count
+        (SELECT count(*)::int FROM checkpoints WHERE project_id = $5) AS checkpoint_count,
+        (SELECT payload->>'current_status' FROM checkpoints WHERE project_id = $5) AS checkpoint_status,
+        (SELECT payload->>'next_step' FROM checkpoints WHERE project_id = $5) AS checkpoint_next_step,
+        (
+          SELECT count(*)::int
+          FROM agent_memories
+          WHERE id = ANY($8::uuid[])
+            AND project_id = $5
+            AND status IN ('candidate', 'needs_review')
+            AND metadata->>'created_from' = 'memory_closeout'
+        ) AS closeout_memory_count,
+        (
+          SELECT count(*)::int
+          FROM agent_memory_source_refs
+          WHERE memory_id = ANY($8::uuid[])
+            AND source_kind = 'checkpoint'
+            AND source_id = $1::text
+        ) AS closeout_source_ref_count
     `,
     [
       started.session_id,
@@ -276,7 +294,8 @@ try {
       lightEvent.event_id,
       projectId,
       unclosed.session_id,
-      recovery.session_id
+      recovery.session_id,
+      closeout.created_memory_ids
     ]
   );
   const row = checks.rows[0];
@@ -293,7 +312,11 @@ try {
     row.unclosed_status !== "interrupted" ||
     row.recovery_status !== "closed" ||
     row.has_heartbeat !== true ||
-    row.checkpoint_count !== 1
+    row.checkpoint_count !== 1 ||
+    row.checkpoint_status !== "phase3 recovery smoke complete" ||
+    row.checkpoint_next_step !== "continue implementation" ||
+    row.closeout_memory_count !== 1 ||
+    row.closeout_source_ref_count !== 1
   ) {
     throw new Error(`Unexpected database state: ${JSON.stringify(row)}`);
   }

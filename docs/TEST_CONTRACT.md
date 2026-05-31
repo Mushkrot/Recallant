@@ -149,43 +149,44 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] `recallant import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.
 - [x] `recallant import` of `.env.example` stores variable names/meanings only and never raw secret values.
 - [x] `recallant import` of client-specific docs such as `CLAUDE.md` defaults to client-adapter/specific-client audience rather than universal all-agent instruction.
-- [ ] Closeout intent recognizer treats configured Russian/English closeout phrases and "Exit" as closeout triggers when context supports it.
-- [ ] `memory_closeout` marks the session closed, updates checkpoint, creates/updates governed-memory candidates, and returns a `PROJECT_LOG.md` update payload.
-- [ ] Successful warning-free `memory_closeout` returns `report_required=false`.
-- [ ] `memory_closeout` returns `report_required=true` and warnings when spool is unsynced, conflicts exist, `candidate`/`needs_review` records are created, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
-- [ ] Ambiguous closeout wording uses model routing or asks for confirmation; risky/non-routine actions require confirmation.
+- [x] Closeout intent recognizer treats configured Russian/English closeout phrases and "Exit" as closeout triggers when context supports it.
+- [x] `memory_closeout` marks the session closed, updates checkpoint, creates/updates governed-memory candidates, and returns a `PROJECT_LOG.md` update payload.
+- [x] Successful warning-free `memory_closeout` returns `report_required=false`.
+- [x] `memory_closeout` returns `report_required=true` and warnings when spool is unsynced or `candidate`/`needs_review` records are created.
+- [ ] `memory_closeout` returns `report_required=true` and warnings when conflicts exist, writes fail, repo sync is incomplete, extraction confidence is low, or server/model/provider errors occur.
+- [x] Ambiguous closeout wording uses model routing or asks for confirmation; risky/non-routine actions require confirmation.
 - [x] `recallant lint-context` passes on fresh bootstrap and fails on a fixture with a large duplicated historical log in `AGENTS.md`.
 - [x] `recallant lint-context` applies configured context policy/profile rather than hard-coded universal file-size limits.
 - [x] `recallant lint-context` accepts an explicit large-project override with reason, but still fails on duplicated history, secrets, or adapter rule duplication.
-- [ ] Startup fixture restores context through checkpoint + governed memories without reading long docs or archive logs.
-- [ ] Startup fixture uses `memory_start_session` followed by `memory_get_context_pack` as the normal automatic path.
+- [x] Startup fixture restores context through checkpoint + governed memories without reading long docs or archive logs.
+- [x] Startup fixture uses `memory_start_session` followed by `memory_get_context_pack` as the normal automatic path.
 - [ ] `recallant context` or equivalent preview returns the same core pack sections as `memory_get_context_pack` for the same project/session policy.
 - [x] Startup broad query fixture such as `memory_search(query="project")` is warned/rejected by context-budget lint or policy tests.
-- [ ] `recallant doctor` returns OK when Postgres and configured Ollama/local provider are available and returns a specific error/status when each is unavailable.
-- [ ] `recallant doctor` reports the configured Ollama/local-model endpoint, reachability, expected/missing models, and fallback route without starting a duplicate Ollama stack.
+- [x] `recallant doctor` returns OK when Postgres and configured Ollama/local provider are available and returns a specific error/status when each is unavailable.
+- [x] `recallant doctor` reports the configured Ollama/local-model endpoint, reachability, expected/missing models, and fallback route without starting a duplicate Ollama stack.
 - [x] Owner-server deployment check verifies planned Recallant service ports are registered in `/ai/PORTS.yaml` before daemon/service start.
 - [x] Owner-server deployment check warns that `/ai/SECURITY` must be consulted before exposure/firewall/Cloudflare/service/secret changes.
-- [ ] `recallant doctor` or equivalent diagnostics shows effective model routes for `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`, and marks disabled routes clearly.
-- [ ] Default powerful-model escalation is subscription-first/API-last: active agent or supported subscription worker before paid API where available.
-- [ ] Default paid API profile routes through OpenAI unless project/session settings explicitly select Gemini or Claude.
-- [ ] If subscription route reports `rate_limited` or `exhausted`, Recallant defers/downgrades/asks according to policy and does not silently fall through to paid API.
-- [ ] Default `paid_api_mode=confirm_each`; every direct paid API request requires explicit approval before provider call.
+- [x] `recallant doctor` or equivalent diagnostics shows effective model routes for `local_model`, `active_agent`, `subscription_worker`, and `paid_api_provider`, and marks disabled routes clearly.
+- [x] Default powerful-model escalation is subscription-first/API-last: active agent or supported subscription worker before paid API where available.
+- [x] Default paid API profile routes through OpenAI unless project/session settings explicitly select Gemini or Claude.
+- [x] If subscription route reports `rate_limited` or `exhausted`, Recallant defers/downgrades/asks according to policy and does not silently fall through to paid API.
+- [x] Default `paid_api_mode=confirm_each`; every direct paid API request requires explicit approval before provider call.
 - [ ] Denied/expired paid API approval defers or downgrades the task according to policy without creating a paid provider call.
-- [ ] `auto_with_caps` is rejected unless explicitly enabled for the project/task/profile and visible in settings/cost dashboard.
-- [ ] Browser automation, scraping, hidden API routes, and limit-bypass route configs are rejected or fail policy checks.
-- [ ] Preview/experimental model IDs are rejected or warned unless the project/session explicitly enables preview use.
-- [ ] Default Gemini cost/speed profiles route to `gemini-2.5-flash-lite` or `gemini-2.5-flash`, not `gemini-3.5-flash`.
-- [ ] `gemini-3.5-flash` requires explicit project/session opt-in or an experiment/quality profile.
-- [ ] Default cheap Claude profile routes to Haiku; Sonnet/Opus require explicit quality profile.
+- [x] `auto_with_caps` is rejected unless explicitly enabled for the project/task/profile and visible in settings/cost dashboard.
+- [x] Browser automation, scraping, hidden API routes, and limit-bypass route configs are rejected or fail policy checks.
+- [x] Preview/experimental model IDs are rejected or warned unless the project/session explicitly enables preview use.
+- [x] Default Gemini cost/speed profiles route to `gemini-2.5-flash-lite` or `gemini-2.5-flash`, not `gemini-3.5-flash`.
+- [x] `gemini-3.5-flash` requires explicit project/session opt-in or an experiment/quality profile.
+- [x] Default cheap Claude profile routes to Haiku; Sonnet/Opus require explicit quality profile.
 
 ## Offline spool
 
-- [ ] When the server is unavailable, local spool append creates a JSONL/NDJSON record with stable dedup key.
-- [ ] Local spool can include raw artifact pointer/hash/metadata records for large evidence and sync them to server `raw_artifacts`.
-- [ ] `recallant sync-spool --dry-run` shows unsynced records without writing to the server.
-- [ ] `recallant sync-spool` uploads records, creates server `event_id`, and stores local-to-server mapping.
-- [ ] Re-running `recallant sync-spool` does not create duplicates.
-- [ ] `recallant prune-spool --synced` deletes/archives only confirmed synced records.
+- [x] When the server is unavailable, local spool append creates a JSONL/NDJSON record with stable dedup key.
+- [x] Local spool can include raw artifact pointer/hash/metadata records for large evidence and sync them to server `raw_artifacts`.
+- [x] `recallant sync-spool --dry-run` shows unsynced records without writing to the server.
+- [x] `recallant sync-spool` uploads records, creates server `event_id`, and stores local-to-server mapping.
+- [x] Re-running `recallant sync-spool` does not create duplicates.
+- [x] `recallant prune-spool --synced` deletes/archives only confirmed synced records.
 
 ## Phase 8
 
@@ -265,7 +266,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] After backup, autopilot can normalize agent/startup files by replacing old local-history startup flows with Recallant startup flow and shrinking history/handoff sections when confidence is high.
 - [x] Autopilot preserves important project rules in local startup files or migrates them to project-local memories/candidates; it does not silently delete them.
 - [x] `PROJECT_LOG.md` after attach is compact agent-readable fallback/checkpoint, not a long history file.
-- [ ] `memory_set_checkpoint` and `memory_closeout` continue to update compact `PROJECT_LOG.md`.
+- [x] `memory_set_checkpoint` and `memory_closeout` continue to update compact `PROJECT_LOG.md`.
 - [x] Production-sensitive detection uses explicit flags/settings and automatic hints such as deploy configs, production compose/systemd, public domains, billing, real env refs, Cloudflare/DNS/security/deploy references.
 - [x] Production-sensitive project with requested `--mode autopilot` downgrades to `guided` unless production-safe autopilot is explicitly approved.
 - [x] Production-safe autopilot still blocks raw secrets, destructive actions, service restarts, firewall/security/public exposure/deploy changes, paid API enablement, erasure, and active connector/capability binding without separate confirmation.
@@ -308,11 +309,11 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 ## Cross-client smoke
 
-- [ ] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.
+- [x] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.
 
 ## Repo contract sync
 
-- [ ] After `memory_set_checkpoint`, fields `current_focus` and `next_step` are reflected in `PROJECT_LOG.md` according to [REPO_CONTRACT.md](REPO_CONTRACT.md) within the configured repo-sync freshness budget, or async reason is documented and test-profile polling is allowed.
+- [x] After `memory_set_checkpoint`, fields `current_focus` and `next_step` are reflected in `PROJECT_LOG.md` according to [REPO_CONTRACT.md](REPO_CONTRACT.md) within the configured repo-sync freshness budget, or async reason is documented and test-profile polling is allowed.
 
 ## Fixtures location
 

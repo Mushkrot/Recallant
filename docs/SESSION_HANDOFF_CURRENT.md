@@ -312,6 +312,20 @@ slice. Permanent-forget UI, richer Management UI action flows, remaining CLI ini
 contract gaps, or a separate explicit workflow for deleting sandbox copy directories are now the
 highest-value follow-ups.
 
+Current contract-hardening checkpoint:
+
+- `recallant closeout-intent` is implemented as a read-only CLI helper for configured Russian and
+  English closeout phrases, `Exit`, ambiguous pause wording, and risky/non-routine wording.
+- `memory_closeout` now warns when closeout-created governed-memory candidates require review.
+- `recallant doctor` now exposes richer model-route policy for local model, active-agent,
+  subscription-worker, and paid API routes, including disabled/confirmation-gated states and
+  explicit opt-in boundaries for preview/expensive models.
+- Targeted verification passed for this slice: `npm run build`, `npm run phase7:smoke`, and
+  `npm run phase3:smoke`.
+- Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures, exact
+  `recallant context`/MCP parity, denied/expired paid API approval behavior, and the broader
+  backup/security/cleanup rows still need explicit smoke-backed closure.
+
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 
 - Sandbox copy: `/ai/recallant-pilots/gutendocx-20260528T161238Z`

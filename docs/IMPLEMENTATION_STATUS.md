@@ -638,13 +638,36 @@ Latest manual UI cleanup follow-up:
   form, confirmation through the HTML form, and verifies that the detached sandbox project no
   longer appears in the active project list.
 
+Latest contract hardening checkpoint:
+
+- The CLI now exposes `recallant closeout-intent`, a read-only helper that recognizes configured
+  Russian/English closeout phrases plus `Exit`, checks whether active session context exists, and
+  forces confirmation for ambiguous or risky wording instead of calling `memory_closeout`
+  implicitly.
+- MCP `memory_closeout` now adds an explicit warning when closeout-created governed-memory
+  candidates require review, so normal quiet closeout and attention-required closeout are
+  distinguishable by `report_required`.
+- `recallant doctor` now reports richer local-first/subscription-first/API-last model route policy:
+  enabled route classes, disabled subscription worker, paid API `confirm_each`, OpenAI default paid
+  provider, Gemini Flash-Lite/Flash and Claude Haiku cheap route defaults, explicit opt-in for
+  preview/expensive models, and forbidden browser/scraping/hidden/limit-bypass routes.
+- Phase 7 smoke covers closeout intent recognition, ambiguous/risky confirmation behavior, doctor
+  local-model unavailable status, missing expected models, fallback route, owner-server checks, and
+  model-route policy output.
+- Phase 3 smoke now verifies closeout session closure, checkpoint state, governed-memory candidate
+  persistence/source refs, unsynced-spool warning, and review-needed closeout warning.
+- `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
+  covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
 attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
 path and AI-backed Management Chat baseline are also implemented. The attach path has now been
 regression-tested against the production-env host-project-id binding that exists on the owner
-server. Continue with richer Management UI actions, optional sandbox local-cleanup hardening, or a
+server. Current contract-hardening work is focused on closing remaining unchecked `TEST_CONTRACT.md`
+rows with explicit smoke coverage rather than broad claims. Continue with the next unchecked
+contract rows, richer Management UI actions, optional sandbox local-cleanup hardening, or a
 server-side cleanup/repair flow for any sandbox that was attached before this fix.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be

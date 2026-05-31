@@ -854,6 +854,11 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
             );
           }
         }
+        if (needsReviewIds.length > 0) {
+          warnings.push(
+            `Closeout created ${needsReviewIds.length} governed-memory candidate(s) requiring review.`
+          );
+        }
         let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
         try {
           projectLogUpdate = await syncProjectLog(args.checkpoint_payload as JsonObject);

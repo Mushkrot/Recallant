@@ -229,6 +229,134 @@ function dedupHash(prefix: string, payload: Record<string, unknown>) {
   return `${prefix}:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
 }
 
+const closeoutTriggers = [
+  { phrase: "exit", intent: "manual_exit", language: "en", confidence: 0.98 },
+  { phrase: "quit", intent: "manual_exit", language: "en", confidence: 0.95 },
+  { phrase: "close out", intent: "task_complete", language: "en", confidence: 0.94 },
+  { phrase: "closeout", intent: "task_complete", language: "en", confidence: 0.94 },
+  { phrase: "wrap up", intent: "task_complete", language: "en", confidence: 0.9 },
+  { phrase: "end session", intent: "manual_exit", language: "en", confidence: 0.93 },
+  { phrase: "finish session", intent: "task_complete", language: "en", confidence: 0.9 },
+  { phrase: "pause here", intent: "pause", language: "en", confidence: 0.9 },
+  { phrase: "save and stop", intent: "pause", language: "en", confidence: 0.92 },
+  { phrase: "закрой сессию", intent: "manual_exit", language: "ru", confidence: 0.97 },
+  { phrase: "закрыть сессию", intent: "manual_exit", language: "ru", confidence: 0.95 },
+  { phrase: "заверши сессию", intent: "task_complete", language: "ru", confidence: 0.95 },
+  { phrase: "завершить сессию", intent: "task_complete", language: "ru", confidence: 0.95 },
+  { phrase: "закрой работу", intent: "task_complete", language: "ru", confidence: 0.9 },
+  { phrase: "заканчиваем", intent: "task_complete", language: "ru", confidence: 0.9 },
+  { phrase: "пауза", intent: "pause", language: "ru", confidence: 0.86 },
+  { phrase: "сохрани и закончи", intent: "pause", language: "ru", confidence: 0.92 }
+] as const;
+
+const ambiguousCloseoutPhrases = [
+  "later",
+  "tomorrow",
+  "next time",
+  "continue later",
+  "вернемся",
+  "потом",
+  "позже",
+  "завтра",
+  "в следующий раз"
+];
+
+const riskyCloseoutActionPhrases = [
+  "delete",
+  "erase",
+  "forget forever",
+  "deploy",
+  "restart",
+  "firewall",
+  "public",
+  "paid api",
+  "secret",
+  "удал",
+  "навсегда",
+  "деплой",
+  "перезапу",
+  "публич",
+  "секрет",
+  "платн"
+];
+
+function normalizeIntentMessage(message: string) {
+  return message.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function classifyCloseoutIntent(message: string, hasActiveSession: boolean) {
+  const normalized = normalizeIntentMessage(message);
+  const language = /[а-яё]/iu.test(message) ? "ru" : "en";
+  const risky = riskyCloseoutActionPhrases.some((phrase) => normalized.includes(phrase));
+  const trigger = closeoutTriggers.find((entry) => normalized.includes(entry.phrase));
+  const ambiguous = ambiguousCloseoutPhrases.some((phrase) => normalized.includes(phrase));
+  const modelRouting = {
+    default_order: [
+      "rules",
+      "local_model",
+      "active_agent",
+      "subscription_worker",
+      "paid_api_provider"
+    ],
+    paid_api_requires_confirmation: true,
+    paid_api_used: false
+  };
+  if (trigger) {
+    return {
+      ok: true,
+      action: "closeout_intent",
+      language: trigger.language,
+      closeout_trigger: hasActiveSession,
+      can_run_closeout: hasActiveSession,
+      closeout_intent: trigger.intent,
+      confidence: trigger.confidence,
+      confirmation_required: risky || !hasActiveSession,
+      destructive_or_sensitive: risky,
+      understanding_source: "rules",
+      reason: hasActiveSession
+        ? "Configured closeout phrase matched while a session is active."
+        : "Configured closeout phrase matched, but no active session context is available.",
+      model_routing: modelRouting
+    };
+  }
+  if (ambiguous) {
+    return {
+      ok: true,
+      action: "closeout_intent",
+      language,
+      closeout_trigger: false,
+      can_run_closeout: false,
+      closeout_intent: null,
+      confidence: 0.45,
+      confirmation_required: true,
+      destructive_or_sensitive: risky,
+      understanding_source: "confirmation_required",
+      reason:
+        "Wording may mean pause/closeout, but is ambiguous. Ask the owner to confirm before calling memory_closeout.",
+      model_routing: {
+        ...modelRouting,
+        next_route: "local_model_or_active_agent_if_available"
+      }
+    };
+  }
+  return {
+    ok: true,
+    action: "closeout_intent",
+    language,
+    closeout_trigger: false,
+    can_run_closeout: false,
+    closeout_intent: null,
+    confidence: message.trim() ? 0.3 : 0,
+    confirmation_required: risky,
+    destructive_or_sensitive: risky,
+    understanding_source: "rules",
+    reason: risky
+      ? "Risky/non-routine wording requires confirmation before any action."
+      : "No configured closeout phrase matched.",
+    model_routing: modelRouting
+  };
+}
+
 function eventKindForAgentKind(kind: string) {
   const normalized = kind.trim().toLowerCase();
   if (normalized === "test" || normalized === "verification") return "tool_result";
@@ -790,6 +918,25 @@ async function runContext(argv: readonly string[]) {
   }
 }
 
+async function runCloseoutIntent(argv: readonly string[]) {
+  const text = parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ");
+  const dir = projectDir(argv);
+  const state = await readAgentSessionState(dir);
+  const hasActiveSession =
+    argv.includes("--has-active-session") ||
+    (state?.status === "active" && typeof state.session_id === "string");
+  const result = {
+    ...classifyCloseoutIntent(text, hasActiveSession),
+    project_dir: dir,
+    active_session_id:
+      state?.status === "active" && typeof state.session_id === "string" ? state.session_id : null
+  };
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (result.confirmation_required && result.closeout_trigger) {
+    process.exitCode = 2;
+  }
+}
+
 async function checkOllama() {
   const url = process.env.RECALLANT_OLLAMA_URL ?? "http://localhost:11434";
   const expectedModels = (
@@ -912,14 +1059,45 @@ async function runDoctor(argv: readonly string[]) {
         },
         local_model: await checkOllama(),
         model_routes: {
-          local_model: { enabled: true, provider: "ollama", route_class: "local" },
-          active_agent: { enabled: true, route_class: "active_agent" },
-          subscription_worker: { enabled: false, route_class: "subscription_worker" },
+          local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
+          active_agent: {
+            enabled: true,
+            route_class: "active_agent",
+            before_paid_api: true
+          },
+          subscription_worker: {
+            enabled: false,
+            route_class: "subscription_worker",
+            before_paid_api: true,
+            limit_behavior: {
+              rate_limited: "defer_or_downgrade_or_ask",
+              exhausted: "defer_or_downgrade_or_ask",
+              silent_paid_api_fallthrough: false
+            }
+          },
           paid_api_provider: {
             enabled: false,
             route_class: "paid_api_provider",
             default_provider: "openai",
-            requires_approval: true
+            requires_approval: true,
+            default_mode: "confirm_each",
+            denied_or_expired_behavior: "defer_or_downgrade_without_provider_call",
+            auto_with_caps: {
+              enabled: false,
+              requires_explicit_project_task_profile: true
+            },
+            default_models: {
+              openai_baseline: "openai/gpt-5.4-mini",
+              gemini_cost: "gemini/gemini-2.5-flash-lite",
+              gemini_balanced: "gemini/gemini-2.5-flash",
+              claude_cheap: "anthropic/claude-haiku-4-5"
+            },
+            explicit_opt_in_required_for: [
+              "preview_models",
+              "gemini/gemini-3.5-flash",
+              "claude-sonnet",
+              "claude-opus"
+            ]
           },
           escalation_order: [
             "local_model",
@@ -931,8 +1109,14 @@ async function runDoctor(argv: readonly string[]) {
         paid_api_mode: "confirm_each",
         policy: {
           paid_api_requires_approval: true,
+          auto_with_caps_requires_explicit_enablement: true,
           browser_automation_allowed: false,
+          scraping_allowed: false,
           hidden_api_routes_allowed: false,
+          limit_bypass_routes_allowed: false,
+          preview_models_require_opt_in: true,
+          gemini_3_5_flash_requires_opt_in: true,
+          claude_sonnet_opus_require_quality_profile: true,
           starts_local_services: false
         },
         owner_server_deployment: await checkOwnerServerDeployment(),
@@ -2030,6 +2214,7 @@ async function main(argv: readonly string[]) {
   if (command === "import") return runImport(argv);
   if (command === "lint-context") return runLintContext(argv);
   if (command === "context") return runContext(argv);
+  if (command === "closeout-intent") return runCloseoutIntent(argv);
   if (command === "backup") return runBackup(argv);
   if (command === "backup-verify") return runBackupVerify(argv);
   if (command === "restore-plan") return runRestorePlan(argv);
@@ -2044,7 +2229,7 @@ async function main(argv: readonly string[]) {
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|detach|local-cleanup|init|discover|import|lint-context|context|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|detach|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }
