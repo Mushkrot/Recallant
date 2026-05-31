@@ -18,8 +18,8 @@ capture-active readiness in the Review UI/API, and detach safely without touchin
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next
-work is to deepen owner-facing Management UI action flows, package the install/onboarding story for a
-fresh non-owner server profile, or extend local sandbox cleanup beyond the first safe
+work is to deepen owner-facing Management UI action flows, add a full installer dry-run/profile
+smoke for non-owner Linux servers, or extend local sandbox cleanup beyond the first safe
 pointer/runtime-artifact slice.
 
 Operational note from 2026-05-28: a live Cloudflare `502` on `recallant.unicloud.ca` was traced to
@@ -147,6 +147,14 @@ The current local cleanup follow-up is complete for the first safe slice:
 - `AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, source files, local attach backups, and the sandbox
   copy directory are preserved.
 
+The current installed-wrapper onboarding follow-up is complete for the first safe slice:
+
+- `npm run onboarding:smoke` installs `recallant` into a temporary prefix through
+  `scripts/install-recallant-cli.sh`;
+- the installed wrapper runs `lint-context`, ordinary `recallant attach .`, `agent-start`, decision
+  capture, and closeout against an isolated temporary database;
+- this does not yet exercise full systemd/Docker server installation on a fresh non-owner host.
+
 Latest deployed checkpoint:
 
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
@@ -195,8 +203,8 @@ Latest QA correction checkpoint:
   independently.
 
 The next required target is no longer the Product Acceptance loop; that loop is green for the first
-slice. Richer Management UI action flows, fresh-server packaging, or a separate explicit workflow
-for deleting sandbox copy directories are now the highest-value follow-ups.
+slice. Richer Management UI action flows, a full installer dry-run/profile smoke, or a separate
+explicit workflow for deleting sandbox copy directories are now the highest-value follow-ups.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

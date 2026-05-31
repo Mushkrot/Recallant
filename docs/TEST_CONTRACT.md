@@ -142,6 +142,8 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] `recallant init --target codex` creates or updates thin `AGENTS.md` with a `Memory (Recallant)` section.
 - [ ] `recallant init --target codex` creates `PROJECT_LOG.md` if missing.
 - [ ] `recallant init --target codex` prints the ready MCP config block for Codex.
+- [x] Installed CLI wrapper smoke can install `recallant` into a temporary prefix and use that
+  command to run ordinary `recallant attach .`, `agent-start`, decision capture, and closeout.
 - [ ] `recallant init --target codex` may print import candidates, but does not create `events.kind=import_batch` and does not run import without explicit `recallant import ...`.
 - [ ] `recallant discover --dry-run` shows project/server/secret-reference/import candidates without creating active memories or instruction-grade records.
 - [ ] `recallant import --dry-run` shows source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts without writing durable import rows.

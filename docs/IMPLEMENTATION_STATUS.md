@@ -102,6 +102,9 @@ Current implemented slices include:
 - Local cleanup after detach: `recallant local-cleanup` dry-runs and confirms removal of local
   Recallant pointer/runtime files only after a project is detached or sandbox-cleaned. It preserves
   `AGENTS.md`, `PROJECT_LOG.md`, source files, and attach backups.
+- Installed-wrapper onboarding smoke: a temporary `PREFIX` install of `scripts/install-recallant-cli.sh`
+  runs the installed `recallant` command through `lint-context`, ordinary `recallant attach .`,
+  `agent-start`, decision capture, and closeout against an isolated database.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 
@@ -220,9 +223,10 @@ Completed Product Acceptance work:
 Next useful work:
 
 1. Deepen owner-facing Management UI action flows beyond the first implementation slice.
-2. Package the install/onboarding story for a fresh non-owner server profile.
-3. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
+2. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
    pointer/runtime cleanup slice.
+3. Add a full installer dry-run/profile smoke for non-owner Linux servers, beyond the current CLI
+   wrapper smoke.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -299,6 +303,14 @@ The local cleanup smoke verifies that confirmed local cleanup is blocked while t
 active, becomes available after confirmed detach, removes only `.recallant/config`,
 `.recallant/codex-mcp.json`, and `.recallant/current-session.json`, and preserves bootstrap files
 and local attach backups.
+
+Latest onboarding validation:
+
+- `npm run onboarding:smoke`
+
+The onboarding smoke installs the CLI wrapper into a temporary prefix, then uses that installed
+command from a clean project to run `lint-context`, ordinary `recallant attach .`, `agent-start`,
+decision capture, and closeout against an isolated temporary Postgres database.
 
 Latest attach/capture integration validation:
 

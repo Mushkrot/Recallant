@@ -108,6 +108,19 @@ recallant attach .
 `--target codex` and `--mode autopilot` are the defaults for the current v1 operator workflow. A
 normal new project should not require additional flags.
 
+After attach, generated `AGENTS.md` and `PROJECT_LOG.md` tell agents to start real work through the
+capture runtime:
+
+```bash
+recallant agent-start --task-hint "<current task>"
+recallant agent-event --kind decision --text "<important owner/project decision>"
+recallant agent-checkpoint --summary "<where the project stands>"
+recallant agent-closeout --summary "<what changed and what is next>"
+```
+
+Agents normally use MCP tools directly when available. These CLI commands are the fallback path that
+keeps a normal installed `recallant` command useful even before every client integration is polished.
+
 For a disposable test/sandbox project:
 
 ```bash
@@ -165,6 +178,19 @@ recallant detach --project-id <project-id> --mode live --confirm
 
 Ordinary detach is not permanent erasure. Sensitive or wrong memory must use the separate confirmed
 forget workflow.
+
+After detach, optional local cleanup can remove Recallant pointer/runtime files from a sandbox copy
+without touching project source files:
+
+```bash
+recallant local-cleanup --project-dir /path/to/sandbox --dry-run
+recallant local-cleanup --project-dir /path/to/sandbox --confirm
+```
+
+Confirmed local cleanup is blocked until the project is already detached or sandbox-cleaned in
+Recallant. It removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
+`.recallant/current-session.json`; `AGENTS.md`, `PROJECT_LOG.md`, source files, and attach backups
+remain in place.
 
 ### Ask for examples from other projects
 

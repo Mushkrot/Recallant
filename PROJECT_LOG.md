@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance and first detached local-cleanup slice are implemented, verified, committed, pushed, and deployed.
-Current focus: choose the next follow-up slice.
-Next step: package fresh-server onboarding or deepen owner-facing Management UI actions.
-Last updated: 2026-05-31T06:27:00Z.
+Status: Product Acceptance, detached local cleanup, and installed-wrapper onboarding smoke are implemented and verified.
+Current focus: commit onboarding smoke/docs and continue to the next follow-up slice.
+Next step: deepen owner-facing Management UI actions or add a full installer dry-run/profile smoke.
+Last updated: 2026-05-31T06:33:00Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -79,6 +79,8 @@ Last updated: 2026-05-31T06:27:00Z.
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach
   backups.
+- `npm run onboarding:smoke` installs the CLI wrapper into a temporary prefix and verifies the
+  installed `recallant` command can attach a clean project and run the capture runtime.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -114,6 +116,7 @@ Last updated: 2026-05-31T06:27:00Z.
 - production deploy verification after local cleanup restart: `systemctl is-active
   recallant.service`, local `/health`, authenticated `/api/review-dashboard`, and Review HTML local
   cleanup check all passed
+- `npm run onboarding:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
 
 ## Open Questions
 
