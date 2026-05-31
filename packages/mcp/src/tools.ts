@@ -128,10 +128,12 @@ async function syncProjectLog(payload: JsonObject) {
 
 Status: ${String(payload.current_status ?? "checkpoint updated")}
 Current focus: ${String(payload.current_focus ?? "")}
-Next step: ${String(payload.next_step ?? "")}`;
+Next step: ${String(payload.next_step ?? "")}
+`;
   const questions = `## Open Questions
 
-${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).join("\n") : "- None recorded."}`;
+${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).join("\n") : "- None recorded."}
+`;
   const fallback = `# Project Log
 
 ${currentSession}
@@ -852,6 +854,16 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
             );
           }
         }
+        let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
+        try {
+          projectLogUpdate = await syncProjectLog(args.checkpoint_payload as JsonObject);
+        } catch (error) {
+          projectLogUpdate = {
+            status: "failed",
+            reason: error instanceof Error ? error.message : String(error)
+          };
+          warnings.push(`Failed to update PROJECT_LOG.md: ${projectLogUpdate.reason}`);
+        }
         return {
           ok: true,
           session_id: args.session_id,
@@ -864,10 +876,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
             needsReviewIds.length > 0 ||
             warnings.length > 0,
           warnings,
-          project_log_update: {
-            required: true,
-            suggested_payload: args.checkpoint_payload
-          }
+          project_log_update: projectLogUpdate
         };
       }
       return stubResponse("memory_closeout", {

@@ -169,6 +169,7 @@ if (
   attach.writes_database !== true ||
   attach.imported.length < 5 ||
   attach.startup_smoke?.status !== "ok" ||
+  attach.startup_smoke?.session_closed !== true ||
   attach.review_visibility?.status !== "ok" ||
   attach.review_visibility?.project_visible !== true ||
   !attach.backup?.manifest_path ||
@@ -262,6 +263,7 @@ try {
       SELECT
         (SELECT count(*)::int FROM projects WHERE id = $1) AS project_count,
         (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events,
+        (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND client_kind = 'recallant-attach' AND status = 'active') AS active_attach_sessions,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND created_by = 'system' AND metadata->>'attach_bootstrap' = 'true') AS starter_memories,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND use_policy = 'instruction_grade') AS instruction_grade,
         (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND excerpt LIKE '%fixture-secret-value%') AS leaked_raw_artifacts,
@@ -273,6 +275,7 @@ try {
   if (
     row.project_count !== 1 ||
     row.import_events < 5 ||
+    row.active_attach_sessions !== 0 ||
     row.starter_memories !== 1 ||
     row.instruction_grade !== 0 ||
     row.leaked_raw_artifacts !== 0 ||

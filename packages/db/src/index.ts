@@ -1468,12 +1468,33 @@ export class RecallantDb {
       ]);
       await this.insertDedup(client, context.projectId, input.dedup_key, event.id);
 
+      const chunkIds = capturedText
+        ? await this.insertChunks(client, {
+            projectId: context.projectId,
+            developerId: context.developerId,
+            eventId: event.id,
+            text: capturedText
+          })
+        : [];
+      const embeddingResult =
+        chunkIds.length > 0
+          ? await this.embedChunks(client, {
+              developerId: context.developerId,
+              projectId: context.projectId,
+              sessionId: input.session_id ?? null,
+              chunkIds,
+              texts: chunkText(capturedText ?? "")
+            })
+          : { status: "skipped", reason: "empty_event_text" };
+
       return {
         event_id: event.id,
+        chunk_ids: chunkIds,
         raw_artifact_ids: rawArtifactIds,
         status: "created",
         capture_profile: policy.profile,
-        captured_text_chars: capturedText?.length ?? 0
+        captured_text_chars: capturedText?.length ?? 0,
+        embedding: embeddingResult
       };
     });
   }

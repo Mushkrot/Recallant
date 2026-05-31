@@ -379,6 +379,25 @@ Latest QA correction checkpoint:
   `superseded`, and successfully attached `/ai/test_project_1` as sandbox project
   `9f7bca40-f763-4cb2-846b-909729882c51`.
 
+Latest `/ai/test_project_1` autonomous E2E validation:
+
+- A real installed-wrapper MCP smoke was run from `/ai/test_project_1`, using the generated
+  `.recallant/codex-mcp.json` project/developer binding and the server env loaded by the installed
+  `recallant` command.
+- Verified: `memory_start_session`, `memory_get_context_pack`, `memory_append_event`,
+  `memory_create_agent_memory`, `memory_search`, `memory_recall_agent_memories`,
+  `memory_cross_project_recall`, and `memory_closeout`.
+- Two product gaps were found and fixed: `memory_append_event` now indexes captured event text into
+  chunks/embeddings so workflow evidence is searchable, and `memory_closeout` now syncs
+  `PROJECT_LOG.md` through the same repo-native compact checkpoint path as `memory_set_checkpoint`.
+- Attach startup smoke now closes its internal `recallant-attach` session instead of leaving false
+  active sessions behind.
+- Phase 3 smoke was isolated to a temporary project path so repo tests no longer mutate
+  `/ai/recallant/PROJECT_LOG.md` when closeout sync is enabled.
+- Verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  `npm run phase3:smoke`, `npm run phase10:smoke`, `npm run repo-contract:smoke`, and production
+  E2E smoke against `/ai/test_project_1`.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10

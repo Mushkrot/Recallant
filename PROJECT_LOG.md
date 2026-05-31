@@ -2,12 +2,11 @@
 
 ## Current Session
 
-Status: QA-found attach identity bug fixed, stale-config handling fixed, and production sandbox
-repair completed.
-Current focus: make the one-command project onboarding path trustworthy without using the owner as
-manual QA.
-Next step: commit/push this fix, then continue with real agent context-pack testing for
-`/ai/test_project_1` or richer owner-facing Management UI actions.
+Status: test_project_1 autonomous E2E validation complete; product gaps fixed.
+Current focus: keep the new-project onboarding path reliable through real MCP/context/capture
+smoke coverage.
+Next step: commit/push the E2E fixes, restart Recallant service, then continue with richer
+Management UI action flows or real-agent manual inspection if desired.
 
 ## Active Constraints
 
@@ -51,8 +50,7 @@ Next step: commit/push this fix, then continue with real agent context-pack test
 
 ## Open Questions
 
-- Whether to open a real agent session in `/ai/test_project_1` and verify the context-pack workflow
-  end to end.
+- Whether to keep or later clean up the sandbox E2E memories/events in `/ai/test_project_1`.
 - Whether to implement local sandbox file cleanup after confirmed detach next.
 - How far to deepen Management UI action flows before attaching a live production-sensitive project.
 

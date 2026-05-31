@@ -148,6 +148,13 @@ Latest QA correction checkpoint:
   `name=recallant`, `primary_path=/ai/recallant`; archived the two wrong attach-bootstrap memories
   on that project; closed two wrong `recallant-attach` sessions as `superseded`; attached
   `/ai/test_project_1` as sandbox project `9f7bca40-f763-4cb2-846b-909729882c51`.
+- Autonomous E2E validation on `/ai/test_project_1` then exercised the real installed
+  `recallant mcp-server` path from inside the project folder. It verified startup/context pack,
+  workflow event capture, governed memory creation, lexical search, governed-memory recall,
+  same-project cross-project boundary, closeout, and `PROJECT_LOG.md` sync.
+- Fixes from that validation: `memory_append_event` indexes captured text into chunks/embeddings,
+  `memory_closeout` updates `PROJECT_LOG.md`, attach startup smoke closes its internal session, and
+  Phase 3 smoke no longer mutates the Recallant repo log.
 - Do not ask the owner to run attach as QA until the agent has already run the equivalent scenario
   independently.
 
@@ -157,8 +164,8 @@ The next useful targets are:
   proposals;
 - optionally add local sandbox-file cleanup after confirmed detach, still gated by dry-run and
   confirmation.
-- optionally continue by opening/testing `/ai/test_project_1` with a real agent context-pack flow,
-  or add richer Management UI action flows.
+- optionally continue by inspecting the `/ai/test_project_1` UI state, cleaning sandbox E2E test
+  data through the governed detach/cleanup path, or adding richer Management UI action flows.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

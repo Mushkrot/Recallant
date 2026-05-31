@@ -633,9 +633,22 @@ async function runStartupSmoke(input: { database: RecallantDb; projectDir: strin
       unsynced_count: 0
     }
   });
+  await input.database.closeout(
+    String(started.session_id),
+    {
+      current_status: "attach startup smoke complete",
+      current_focus: "Recallant-backed project work",
+      next_step:
+        "start the next agent session with memory_start_session and memory_get_context_pack",
+      open_questions: []
+    },
+    "closeout",
+    { status: "not_checked", record_count: 0, unsynced_count: 0 }
+  );
   return {
     status: "ok",
     session_id: started.session_id,
+    session_closed: true,
     has_checkpoint_section: pack.sections?.checkpoint !== undefined,
     has_binding_rules_section: pack.sections?.binding_rules !== undefined
   };

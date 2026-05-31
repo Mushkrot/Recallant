@@ -92,7 +92,7 @@ try {
   await waitForResponse(1);
   send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 
-  await callTool(2, "memory_start_session", {
+  const started = await callTool(2, "memory_start_session", {
     client_kind: "codex",
     client_version: "smoke",
     project_path: projectDir,
@@ -122,9 +122,38 @@ try {
     !projectLog.includes("Current focus: repo checkpoint mirror") ||
     !projectLog.includes("Next step: continue implementation") ||
     !projectLog.includes("- How often should async sync retry?") ||
+    !projectLog.includes("Next step: continue implementation\n\n## Open Questions") ||
     !projectLog.includes("- Preserve this note.")
   ) {
     throw new Error(`PROJECT_LOG.md was not synced correctly:\n${projectLog}`);
+  }
+
+  const closeoutCheckpoint = {
+    current_status: "repo contract closeout synced",
+    current_focus: "repo closeout mirror",
+    next_step: "continue closeout implementation",
+    open_questions: []
+  };
+  const closeout = await callTool(5, "memory_closeout", {
+    session_id: started.session_id,
+    closeout_intent: "task_complete",
+    summary: "Repo contract closeout sync smoke complete.",
+    checkpoint_payload: closeoutCheckpoint,
+    governed_memory_candidates: [],
+    artifact_refs: []
+  });
+  if (closeout.ok !== true || closeout.project_log_update?.status !== "updated") {
+    throw new Error(`Closeout repo sync failed: ${JSON.stringify(closeout)}`);
+  }
+  const closeoutProjectLog = await readFile(projectLogPath, "utf8");
+  if (
+    !closeoutProjectLog.includes("Status: repo contract closeout synced") ||
+    !closeoutProjectLog.includes("Current focus: repo closeout mirror") ||
+    !closeoutProjectLog.includes("Next step: continue closeout implementation") ||
+    !closeoutProjectLog.includes("Next step: continue closeout implementation\n\n## Open Questions") ||
+    !closeoutProjectLog.includes("- Preserve this note.")
+  ) {
+    throw new Error(`PROJECT_LOG.md was not closeout-synced correctly:\n${closeoutProjectLog}`);
   }
 } finally {
   child.stdin.end();

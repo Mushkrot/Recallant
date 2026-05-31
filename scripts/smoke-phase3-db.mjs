@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import pg from "pg";
 
@@ -10,6 +13,7 @@ const databaseUrl =
 
 const developerId = randomUUID();
 const projectId = randomUUID();
+const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase3-db-"));
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -18,7 +22,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
+    RECALLANT_PROJECT_PATH: projectDir
   },
   stdio: ["pipe", "pipe", "pipe"]
 });
@@ -74,7 +78,7 @@ send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectDir,
   session_label: "phase3-smoke",
   resume_policy: "normal"
 });
@@ -138,6 +142,9 @@ const workflowEvent = await callTool(6, "memory_append_event", {
 if (workflowEvent.capture_profile !== "detailed" || workflowEvent.captured_text_chars !== 8000) {
   throw new Error(`Project capture profile was not applied: ${JSON.stringify(workflowEvent)}`);
 }
+if (!workflowEvent.chunk_ids?.length || workflowEvent.embedding?.status === "skipped") {
+  throw new Error(`Workflow event text was not indexed: ${JSON.stringify(workflowEvent)}`);
+}
 
 await client.query(
   `
@@ -157,6 +164,9 @@ const lightEvent = await callTool(7, "memory_append_event", {
 });
 if (lightEvent.capture_profile !== "light" || lightEvent.captured_text_chars !== 500) {
   throw new Error(`Session capture override was not applied: ${JSON.stringify(lightEvent)}`);
+}
+if (!lightEvent.chunk_ids?.length || lightEvent.embedding?.status === "skipped") {
+  throw new Error(`Light workflow event text was not indexed: ${JSON.stringify(lightEvent)}`);
 }
 
 const closeout = await callTool(8, "memory_closeout", {
@@ -208,14 +218,14 @@ await client.query(
 const unclosed = await callTool(9, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectDir,
   session_label: "phase3-unclosed",
   resume_policy: "normal"
 });
 const recovery = await callTool(10, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectDir,
   session_label: "phase3-recovery",
   resume_policy: "normal"
 });
@@ -247,6 +257,8 @@ try {
       SELECT
         (SELECT count(*)::int FROM events WHERE session_id = $1) AS event_count,
         (SELECT count(*)::int FROM chunks WHERE source_event_id = $2) AS chunk_count,
+        (SELECT count(*)::int FROM chunks WHERE source_event_id = $3) AS workflow_chunk_count,
+        (SELECT count(*)::int FROM chunks WHERE source_event_id = $4) AS light_chunk_count,
         (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = $3) AS raw_artifact_count,
         (SELECT payload->'capture'->>'profile' FROM events WHERE id = $2) AS turn_profile,
         (SELECT payload->'capture'->>'profile' FROM events WHERE id = $3) AS workflow_profile,
@@ -271,6 +283,8 @@ try {
   if (
     row.event_count !== 3 ||
     row.chunk_count < 1 ||
+    row.workflow_chunk_count < 1 ||
+    row.light_chunk_count < 1 ||
     row.raw_artifact_count !== 1 ||
     row.turn_profile !== "standard" ||
     row.workflow_profile !== "detailed" ||
