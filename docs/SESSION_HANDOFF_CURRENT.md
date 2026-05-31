@@ -162,10 +162,15 @@ The current Review action follow-up is complete for the governed-memory action s
 - `/review-action` form posts and `/api/review-action` JSON posts both route through
   `reviewAgentMemory`;
 - `npm run review-ui:smoke` verifies visible advanced controls and DB state for the full action
-  matrix.
+  matrix;
+- production deploy verification after restart passed: `recallant.service` is active, local
+  `/health` is OK, and authenticated Review HTML shows `Promote to rule`, `Edit memory`, and
+  `Supersede / merge`.
 
 Latest deployed checkpoint:
 
+- Commit `c33982f Enable full review action controls` was pushed to `origin/main` and applied by
+  controlled `recallant.service` restart.
 - Commit `e562a7e Improve Recallant onboarding and AI chat` was pushed to `origin/main`.
 - `/usr/local/bin/recallant` is installed on the owner server.
 - `recallant doctor` passed through the installed CLI with Postgres reachable, Ollama reachable,

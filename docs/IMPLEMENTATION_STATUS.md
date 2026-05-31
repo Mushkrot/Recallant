@@ -319,10 +319,15 @@ decision capture, and closeout against an isolated temporary Postgres database.
 Latest Review action validation:
 
 - `npm run review-ui:smoke`
+- Controlled `recallant.service` restart
+- Local `/health`
+- Authenticated Review HTML action-control check
 
 The Review UI smoke now verifies visible browser controls for advanced actions and checks that
 accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede all write through the
-same DB review policy path.
+same DB review policy path. The production service was restarted after this server-rendered UI
+change, and the live authenticated Review page shows `Promote to rule`, `Edit memory`, and
+`Supersede / merge`.
 
 Latest attach/capture integration validation:
 

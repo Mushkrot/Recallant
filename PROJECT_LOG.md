@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, and full Review action controls are implemented and verified.
-Current focus: commit Review action UI coverage and continue closing the full v1 contract.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, and full Review action controls are implemented, deployed, and verified.
+Current focus: continue closing the full v1 contract requirement by requirement.
 Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing missing permanent-forget UI or full installer profile smoke.
-Last updated: 2026-05-31T06:45:00Z.
+Last updated: 2026-05-31T06:45:29Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -122,6 +122,9 @@ Last updated: 2026-05-31T06:45:00Z.
 - `npm run onboarding:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed
 - `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
   full review action matrix coverage
+- production deploy verification after Review action restart: `systemctl is-active
+  recallant.service`, local `/health`, and authenticated Review HTML check for `Promote to rule`,
+  `Edit memory`, and `Supersede / merge` all passed
 
 ## Open Questions
 
