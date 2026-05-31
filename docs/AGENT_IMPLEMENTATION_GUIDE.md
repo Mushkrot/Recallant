@@ -86,11 +86,11 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 
 **Deliverables:**
 
-- [ ] Embedding provider call is configurable and writes `embeddings`.
-- [ ] Cold start/missing provider handling returns explicit `UNAVAILABLE` or configured fallback with a clear message.
-- [ ] Initial model router settings from [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md) and [ADR-0031-subscription-first-api-last-model-escalation.md](ADR-0031-subscription-first-api-last-model-escalation.md): local embeddings default, active-agent route, subscription-worker route placeholder, OpenAI paid API baseline route, optional Gemini/Claude cheap route placeholders, Gemini embedding fallback candidates, and explicit quality/experiment placeholders for expensive models.
-- [ ] Provider/worker adapters can be stubbed initially, but route config and `model_calls` audit must already preserve route class/provider/model/purpose/routing reason/limit status/cost or confirmation metadata.
-- [ ] Default paid API path creates approval requests and does not call paid providers until approval is recorded.
+- [x] Embedding provider call is configurable and writes `embeddings`.
+- [x] Cold start/missing provider handling returns explicit `UNAVAILABLE` or configured fallback with a clear message.
+- [x] Initial model router settings from [ADR-0023-baseline-model-portfolio-and-provider-switching.md](ADR-0023-baseline-model-portfolio-and-provider-switching.md) and [ADR-0031-subscription-first-api-last-model-escalation.md](ADR-0031-subscription-first-api-last-model-escalation.md): local embeddings default, active-agent route, subscription-worker route placeholder, OpenAI paid API baseline route, optional Gemini/Claude cheap route placeholders, Gemini embedding fallback candidates, and explicit quality/experiment placeholders for expensive models.
+- [x] Provider/worker adapters can be stubbed initially, but route config and `model_calls` audit must already preserve route class/provider/model/purpose/routing reason/limit status/cost or confirmation metadata.
+- [x] Default paid API path creates approval requests and does not call paid providers until approval is recorded.
 
 **Gate:** `memory_search` vector leg works on a golden set of at least three documents.
 

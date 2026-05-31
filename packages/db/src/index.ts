@@ -3415,6 +3415,43 @@ export class RecallantDb {
     }
 
     if (route.routeClass === "paid_api_provider") {
+      const blockedDecision = await this.findBlockingPaidApiDecision(client, {
+        developerId: input.developerId,
+        projectId: input.projectId,
+        route,
+        purpose: "chunk_embedding"
+      });
+      if (blockedDecision) {
+        await this.recordModelCall(client, {
+          developerId: input.developerId,
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          route,
+          purpose: "chunk_embedding",
+          status: "cancelled",
+          confirmationStatus: "denied",
+          approvalRequestId: blockedDecision.id,
+          errorCode: `paid_api_approval_${blockedDecision.status}`,
+          metadata: {
+            text_count: input.texts.length,
+            blocked_before_provider_call: true,
+            decision_status: blockedDecision.status,
+            fallback_behavior: "defer_or_downgrade_without_provider_call"
+          }
+        });
+        await client.query(
+          "UPDATE chunks SET embed_status = 'pending' WHERE id = ANY($1::uuid[])",
+          [input.chunkIds]
+        );
+        return {
+          status: "deferred",
+          reason: `paid_api_approval_${blockedDecision.status}`,
+          provider: route.provider,
+          model: route.model,
+          approval_request_id: blockedDecision.id,
+          fallback_behavior: "defer_or_downgrade_without_provider_call"
+        };
+      }
       const approval = await this.createPaidApiApproval(client, {
         developerId: input.developerId,
         projectId: input.projectId,
@@ -3554,6 +3591,33 @@ export class RecallantDb {
       metadata: { text_count: input.texts.length }
     });
     return { status: "embedded", provider: route.provider, model: route.model, dims: route.dims };
+  }
+
+  private async findBlockingPaidApiDecision(
+    client: Pick<Pool | PoolClient, "query">,
+    input: {
+      developerId: string;
+      projectId: string;
+      route: EmbeddingRoute;
+      purpose: string;
+    }
+  ) {
+    const result = await client.query<{ id: string; status: "denied" | "expired" }>(
+      `
+        SELECT id, status
+        FROM paid_api_approval_requests
+        WHERE developer_id = $1
+          AND project_id = $2
+          AND purpose = $3
+          AND provider = $4
+          AND model = $5
+          AND status IN ('denied', 'expired')
+        ORDER BY coalesce(decided_at, expires_at, created_at) DESC
+        LIMIT 1
+      `,
+      [input.developerId, input.projectId, input.purpose, input.route.provider, input.route.model]
+    );
+    return result.rows[0] ?? null;
   }
 
   private async createPaidApiApproval(

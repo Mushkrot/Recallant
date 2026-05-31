@@ -322,12 +322,13 @@ Current contract-hardening checkpoint:
   explicit opt-in boundaries for preview/expensive models.
 - `recallant context --session-id <id>` now previews the same active-session context pack path as
   MCP `memory_get_context_pack`; Phase 6 smoke compares the core pack sections for parity.
+- Paid API embedding routes now defer after a denied/expired approval without creating a second
+  approval or provider call; Phase 4 smoke covers the denied-approval branch.
 - Targeted verification passed for this slice: `npm run build`, `npm run phase7:smoke`, and
   `npm run phase3:smoke`; follow-up parity verification passed with
-  `npm run phase6:smoke:graph`.
-- Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures, exact
-  denied/expired paid API approval behavior, and the broader backup/security/cleanup rows still
-  need explicit smoke-backed closure.
+  `npm run phase6:smoke:graph`; paid-approval verification passed with `npm run phase4:smoke`.
+- Keep going from `docs/TEST_CONTRACT.md`: remaining closeout error-report fixtures and the
+  broader backup/security/cleanup rows still need explicit smoke-backed closure.
 
 The GutenDocx copied-project pilot is complete for the first real-project sandbox checkpoint:
 

@@ -171,7 +171,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Default paid API profile routes through OpenAI unless project/session settings explicitly select Gemini or Claude.
 - [x] If subscription route reports `rate_limited` or `exhausted`, Recallant defers/downgrades/asks according to policy and does not silently fall through to paid API.
 - [x] Default `paid_api_mode=confirm_each`; every direct paid API request requires explicit approval before provider call.
-- [ ] Denied/expired paid API approval defers or downgrades the task according to policy without creating a paid provider call.
+- [x] Denied/expired paid API approval defers or downgrades the task according to policy without creating a paid provider call.
 - [x] `auto_with_caps` is rejected unless explicitly enabled for the project/task/profile and visible in settings/cost dashboard.
 - [x] Browser automation, scraping, hidden API routes, and limit-bypass route configs are rejected or fail policy checks.
 - [x] Preview/experimental model IDs are rejected or warned unless the project/session explicitly enables preview use.

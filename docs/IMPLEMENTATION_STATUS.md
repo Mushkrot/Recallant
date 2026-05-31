@@ -660,6 +660,10 @@ Latest contract hardening checkpoint:
   policy as MCP `memory_get_context_pack`; Phase 6 graph/context smoke compares checkpoint,
   binding-rules, working-memory, and suggested-fetch sections between CLI and MCP for the same
   session.
+- Paid API embedding routing now respects denied/expired approval decisions: a repeated paid-route
+  attempt records a cancelled model call with `confirmation_status=denied`, reuses the existing
+  approval id, leaves chunks pending/deferred, and does not create a provider call or a new approval
+  request. Phase 4 smoke covers this denied-approval path.
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 

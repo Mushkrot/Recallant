@@ -241,6 +241,28 @@ if (
 ) {
   throw new Error(`Paid API approval path failed: ${JSON.stringify(paidAppend)}`);
 }
+await client.query(
+  `
+    UPDATE paid_api_approval_requests
+    SET status = 'denied', decided_by = 'smoke', decision_note = 'phase4 denied approval smoke', decided_at = now()
+    WHERE id = $1
+  `,
+  [paidAppend.embedding.approval_request_id]
+);
+const deniedPaidAppend = await paidDb.appendTurn({
+  session_id: paidSession.session_id,
+  client_kind: "codex",
+  role: "user",
+  text: "denied paid approval should defer or downgrade without provider call",
+  dedup_key: `phase4-paid-denied-${randomUUID()}`
+});
+if (
+  deniedPaidAppend.embedding?.status !== "deferred" ||
+  deniedPaidAppend.embedding?.reason !== "paid_api_approval_denied" ||
+  deniedPaidAppend.embedding?.approval_request_id !== paidAppend.embedding.approval_request_id
+) {
+  throw new Error(`Denied paid API approval path failed: ${JSON.stringify(deniedPaidAppend)}`);
+}
 
 try {
   const checks = await client.query(
@@ -250,8 +272,10 @@ try {
         (SELECT count(*)::int FROM model_calls WHERE project_id = $1 AND provider = 'deterministic' AND status = 'success') AS deterministic_calls,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $3 AND provider = 'ollama' AND model = 'nomic-embed-text') AS default_ollama_calls,
         (SELECT count(*)::int FROM system_settings WHERE key = 'embedding_fallback_candidates' AND value::text LIKE '%openai%' AND value::text LIKE '%gemini%') AS fallback_settings,
-        (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $2 AND provider = 'openai' AND status = 'pending') AS paid_approval_count,
+        (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $2 AND provider = 'openai') AS paid_approval_count,
+        (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $2 AND provider = 'openai' AND status = 'denied') AS denied_paid_approval_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $2 AND provider = 'openai' AND confirmation_status = 'required_pending' AND status = 'cancelled') AS blocked_paid_calls,
+        (SELECT count(*)::int FROM model_calls WHERE project_id = $2 AND provider = 'openai' AND confirmation_status = 'denied' AND status = 'cancelled' AND error_code = 'paid_api_approval_denied') AS denied_paid_calls,
         (SELECT count(*)::int FROM embeddings e JOIN chunks c ON c.id = e.chunk_id WHERE c.project_id = $2) AS paid_embedding_count
     `,
     [projectId, paidProjectId, defaultProjectId]
@@ -263,7 +287,9 @@ try {
     row.default_ollama_calls < 1 ||
     row.fallback_settings !== 1 ||
     row.paid_approval_count !== 1 ||
+    row.denied_paid_approval_count !== 1 ||
     row.blocked_paid_calls !== 1 ||
+    row.denied_paid_calls !== 1 ||
     row.paid_embedding_count !== 0
   ) {
     throw new Error(`Unexpected Phase 4 database state: ${JSON.stringify(row)}`);
