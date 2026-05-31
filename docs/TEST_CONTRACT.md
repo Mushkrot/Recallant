@@ -14,7 +14,7 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 - [ ] `raw_artifacts` table exists and links large raw evidence to `events`.
 - [ ] `sessions` table includes heartbeat fields: `last_heartbeat_at`, `heartbeat_status`, and `heartbeat_metadata`.
 - [ ] Tables for governed memory exist: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.
-- [ ] Erasure workflow storage exists: `erasure_requests` or equivalent redacted receipt storage.
+- [x] Erasure workflow storage exists: `erasure_requests` or equivalent redacted receipt storage.
 - [ ] Chunk/governed-memory/import-result storage can represent ADR-0040 `scope_kind`, `scope_id`, and audience metadata; `project|developer` remains only the compatibility/default subset.
 - [ ] Settings tables exist: `system_settings`, `developer_settings`, `project_settings`, `session_overrides`, `client_adapter_settings`, `settings_audit_events`.
 
@@ -91,10 +91,10 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] `memory_get_context_pack` distinguishes `instruction_grade` binding rules from ordinary working memories.
 - [ ] `memory_get_context_pack` does not import historical docs or read all project files.
 - [ ] `memory_get_context_pack` does not return full raw artifact content; it returns only bounded excerpts/source refs when evidence is included.
-- [ ] `memory_forget(..., dry_run=true)` returns affected counts and warnings without changing data.
-- [ ] `memory_forget` without required confirmation does not erase content and returns `pending_confirmation` or equivalent.
+- [x] `memory_forget(..., dry_run=true)` returns affected counts and warnings without changing data.
+- [x] `memory_forget` without required confirmation does not erase content and returns `pending_confirmation` or equivalent.
 - [ ] Confirmed `memory_forget` removes/redacts target content from chunks, embeddings, governed memory body/source quotes, derived summaries/indexes, context-pack output, and UI/list responses.
-- [ ] Erasure receipt contains safe ids/counts/status only and does not contain the erased content.
+- [x] Erasure receipt contains safe ids/counts/status only and does not contain the erased content.
 
 ## Phase 6.5 — Review UI
 
@@ -123,7 +123,7 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [ ] Browser/UI clients cannot read provider API keys or raw prompts from cost/model-call records.
 - [ ] Memory detail view shows body, status, use policy, confidence, source refs, related records, and review action history.
 - [x] UI accept/reject/archive/unarchive/mark-stale/promote/demote/edit/merge/supersede actions update the same database state as `memory_review_agent_memory`; approve may remain as a UI label/alias if needed.
-- [ ] UI permanent-forget flow performs dry-run, shows affected counts/scope, requires confirmation, and writes a redacted erasure receipt.
+- [x] UI permanent-forget flow performs dry-run, shows affected counts/scope, requires confirmation, and writes a redacted erasure receipt.
 - [ ] UI promotion to `instruction_grade` requires visible source refs and writes a review action.
 - [ ] Duplicate view allows choosing a canonical memory and marking the others merged/superseded/archived.
 - [ ] Conflict view shows old/new records and can apply a supersede/demote/archive resolution.

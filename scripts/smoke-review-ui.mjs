@@ -141,6 +141,15 @@ const duplicate = await db.createAgentMemory({
   created_by: "agent",
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "duplicate memory" }]
 });
+const forgetSecret = `REVIEW_UI_FORGET_SECRET_${randomUUID()}`;
+const forgettable = await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Review UI forget forever memory",
+  body: `This memory contains ${forgetSecret} and must be redacted by forget forever.`,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: forgetSecret }]
+});
 
 const server = createRecallantHttpServer();
 server.listen(0, "127.0.0.1");
@@ -172,6 +181,7 @@ try {
     !htmlText.includes("Promote to rule") ||
     !htmlText.includes("Edit memory") ||
     !htmlText.includes("Supersede / merge") ||
+    !htmlText.includes("Forget forever") ||
     !htmlText.includes("AGENTS.md") ||
     !htmlText.includes(importMemoryId) ||
     !htmlText.includes(candidate.memory_id) ||
@@ -577,6 +587,105 @@ try {
     duplicateDetail.memory?.superseded_by !== editable.memory_id
   ) {
     throw new Error(`Review action merge did not supersede duplicate: ${JSON.stringify(duplicateDetail)}`);
+  }
+
+  const forgetDryRunApi = await fetch(`${baseUrl}/api/memory-forget`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      target: { kind: "agent_memory", id: forgettable.memory_id, selector: {} },
+      reason: "review ui forget dry-run smoke",
+      dry_run: false,
+      confirmation: { confirmed: false }
+    })
+  });
+  const forgetDryRunApiJson = await forgetDryRunApi.json();
+  if (
+    forgetDryRunApi.status !== 200 ||
+    forgetDryRunApiJson.status !== "pending_confirmation" ||
+    forgetDryRunApiJson.requires_confirmation !== true ||
+    forgetDryRunApiJson.affected?.agent_memories !== 1
+  ) {
+    throw new Error(`Memory forget API dry-run failed: ${JSON.stringify(forgetDryRunApiJson)}`);
+  }
+  const afterForgetDryRun = await db.getAgentMemory(forgettable.memory_id);
+  if (!String(afterForgetDryRun.memory?.body).includes(forgetSecret)) {
+    throw new Error(`Memory forget dry-run changed content: ${JSON.stringify(afterForgetDryRun)}`);
+  }
+
+  const forgetDryRunForm = await fetch(`${baseUrl}/memory-forget`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      target_kind: "agent_memory",
+      target_id: forgettable.memory_id,
+      reason: "review ui forget form smoke"
+    })
+  });
+  const forgetDryRunFormHtml = await forgetDryRunForm.text();
+  if (
+    forgetDryRunForm.status !== 200 ||
+    !forgetDryRunFormHtml.includes("Dry-run complete. Nothing was erased.") ||
+    !forgetDryRunFormHtml.includes("Confirm forget forever") ||
+    !forgetDryRunFormHtml.includes(forgettable.memory_id)
+  ) {
+    throw new Error(
+      `Memory forget form dry-run failed: ${forgetDryRunForm.status} ${forgetDryRunFormHtml}`
+    );
+  }
+
+  const forgetConfirmForm = await fetch(`${baseUrl}/memory-forget`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      target_kind: "agent_memory",
+      target_id: forgettable.memory_id,
+      reason: "review ui confirmed forget smoke",
+      confirm: "true"
+    })
+  });
+  const forgetConfirmFormHtml = await forgetConfirmForm.text();
+  if (
+    forgetConfirmForm.status !== 200 ||
+    !forgetConfirmFormHtml.includes("Forget forever complete. Recallant content was redacted.") ||
+    !forgetConfirmFormHtml.includes("Redacted receipt") ||
+    forgetConfirmFormHtml.includes(forgetSecret)
+  ) {
+    throw new Error(
+      `Memory forget form confirmation failed: ${forgetConfirmForm.status} ${forgetConfirmFormHtml}`
+    );
+  }
+  const forgottenDetail = await db.getAgentMemory(forgettable.memory_id);
+  if (
+    forgottenDetail.memory?.title !== "[REDACTED]" ||
+    forgottenDetail.memory?.body !== "[REDACTED]" ||
+    forgottenDetail.memory?.status !== "archived" ||
+    forgottenDetail.memory?.use_policy !== "do_not_use" ||
+    forgottenDetail.source_refs.some((ref) => ref.quote !== null)
+  ) {
+    throw new Error(`Memory forget did not redact governed memory: ${JSON.stringify(forgottenDetail)}`);
+  }
+  const erasureReceipt = await db.pool.query(
+    "SELECT target_selector, redacted_receipt FROM erasure_requests WHERE target_selector->>'id' = $1",
+    [forgettable.memory_id]
+  );
+  if (
+    erasureReceipt.rowCount !== 1 ||
+    JSON.stringify(erasureReceipt.rows).includes(forgetSecret) ||
+    erasureReceipt.rows[0]?.redacted_receipt?.content_redacted !== true
+  ) {
+    throw new Error(`Erasure receipt is unsafe or missing: ${JSON.stringify(erasureReceipt.rows)}`);
   }
 
   const blockedSetting = await fetch(`${baseUrl}/api/project-setting`, {

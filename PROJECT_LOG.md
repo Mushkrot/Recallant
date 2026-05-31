@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, and full Review action controls are implemented, deployed, and verified.
+Status: Product Acceptance, detached local cleanup, installed-wrapper onboarding, Review action controls, and UI permanent-forget dry-run/confirm are implemented and verified.
 Current focus: continue closing the full v1 contract requirement by requirement.
-Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing missing permanent-forget UI or full installer profile smoke.
-Last updated: 2026-05-31T06:45:29Z.
+Next step: continue requirement-by-requirement closure from TEST_CONTRACT, prioritizing full installer profile smoke or richer settings edit coverage.
+Last updated: 2026-05-31T06:55:55Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -84,6 +84,9 @@ Last updated: 2026-05-31T06:45:29Z.
 - Review UI advanced action controls now execute real actions instead of showing disabled labels:
   edit, merge, supersede, promote/demote instruction, unarchive, and the basic accept/reject/archive
   actions all route through the same DB policy path.
+- Review UI permanent-forget now has a separate selected-memory flow: dry-run first, explicit
+  confirm second, governed-memory redaction on confirm, and redacted receipt display without erased
+  content.
 - `npm run phase10:smoke`
 - real installed-wrapper attach from `/tmp/recallant-new-project-smoke` against isolated dev
   Postgres with production-like host project env binding
@@ -125,6 +128,9 @@ Last updated: 2026-05-31T06:45:29Z.
 - production deploy verification after Review action restart: `systemctl is-active
   recallant.service`, local `/health`, and authenticated Review HTML check for `Promote to rule`,
   `Edit memory`, and `Supersede / merge` all passed
+- `npm run review-ui:smoke` against isolated temporary Postgres on `127.0.0.1:55433`; passed with
+  permanent-forget API/form dry-run, confirmation gate, governed-memory redaction, source quote
+  clearing, and safe erasure receipt coverage
 
 ## Open Questions
 

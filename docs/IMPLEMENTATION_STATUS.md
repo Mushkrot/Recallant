@@ -329,6 +329,16 @@ same DB review policy path. The production service was restarted after this serv
 change, and the live authenticated Review page shows `Promote to rule`, `Edit memory`, and
 `Supersede / merge`.
 
+Latest Review permanent-forget validation:
+
+- `npm run review-ui:smoke`
+
+The Review UI now exposes `Forget forever` only as a separate selected-memory flow. The smoke suite
+verifies `/api/memory-forget` returns `pending_confirmation` without confirmation, the browser form
+shows affected counts after dry-run, confirmed forget redacts the governed memory and source quotes,
+and the `erasure_requests` receipt contains only safe ids/counts/status rather than the erased
+content.
+
 Latest attach/capture integration validation:
 
 - `npm run phase10:smoke`

@@ -167,6 +167,16 @@ The current Review action follow-up is complete for the governed-memory action s
   `/health` is OK, and authenticated Review HTML shows `Promote to rule`, `Edit memory`, and
   `Supersede / merge`.
 
+The current Review permanent-forget follow-up is complete for selected governed memories:
+
+- Review detail exposes `Forget forever` as a separate dangerous flow from ordinary project detach;
+- `/api/memory-forget` and `/memory-forget` both route through `memory_forget`/`database.forget`;
+- dry-run returns affected counts and leaves content unchanged;
+- confirmation redacts the governed memory body/title and source quotes, archives it, sets
+  `do_not_use`, and writes a redacted `erasure_requests` receipt;
+- `npm run review-ui:smoke` verifies the API path, browser form path, confirmation gate, redaction,
+  and absence of erased secret text in the receipt/rendered confirmation page.
+
 Latest deployed checkpoint:
 
 - Commit `c33982f Enable full review action controls` was pushed to `origin/main` and applied by

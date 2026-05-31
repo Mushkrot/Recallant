@@ -5,6 +5,7 @@ import { getRecallantCoreInfo } from "@recallant/core";
 import {
   createRecallantDbFromEnv,
   recallantDatabasePackage,
+  type ForgetInput,
   type ProjectSettingInput,
   type ReviewAgentMemoryInput
 } from "@recallant/db";
@@ -22,6 +23,15 @@ type ChatRenderState = {
 
 type DetachRenderState = {
   result?: Record<string, unknown>;
+};
+
+type MemoryForgetRenderState = {
+  result?: Record<string, unknown>;
+  target?: {
+    kind?: string | null;
+    id?: string | null;
+  };
+  reason?: string | null;
 };
 
 export function describeServerBoundary() {
@@ -221,6 +231,26 @@ async function readForm(request: IncomingMessage) {
 function optionalInput(value: unknown) {
   const normalized = String(value ?? "").trim();
   return normalized ? normalized : null;
+}
+
+function buildForgetInput(body: Record<string, unknown>): ForgetInput {
+  const target = asRecord(body.target);
+  const confirmation = asRecord(body.confirmation);
+  const confirmed = confirmation.confirmed === true || body.confirm === "true";
+  return {
+    target: {
+      kind: optionalInput(target.kind) ?? optionalInput(body.target_kind) ?? "agent_memory",
+      id:
+        optionalInput(target.id) ?? optionalInput(body.target_id) ?? optionalInput(body.memory_id),
+      selector: asRecord(target.selector)
+    },
+    reason: optionalInput(body.reason) ?? "Review UI forget forever",
+    dry_run: confirmed ? false : true,
+    confirmation: {
+      confirmed,
+      confirmation_token: optionalInput(confirmation.confirmation_token)
+    }
+  };
 }
 
 function reviewPath(projectId: unknown, memoryId?: unknown) {
@@ -533,7 +563,93 @@ function renderReviewActions(memory: Record<string, unknown>, projectId: unknown
   return `${simpleForms}${editForm}${supersedeForm}`;
 }
 
-function renderDetail(detail: unknown, availableActions: unknown, projectId: unknown) {
+function renderMemoryForgetResult(
+  memory: Record<string, unknown>,
+  projectId: unknown,
+  memoryForget?: MemoryForgetRenderState
+) {
+  if (!memoryForget?.result) return "";
+  const targetId = String(memoryForget.target?.id ?? "");
+  if (targetId && targetId !== String(memory.id ?? "")) return "";
+  const result = memoryForget.result;
+  const affected = asRecord(result.affected);
+  const receipt = asRecord(result.redacted_receipt);
+  const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
+  const needsConfirmation = result.status !== "completed";
+  const reason =
+    memoryForget.reason ?? "Sensitive or wrong memory cleanup requested from Review UI";
+  return `<article class="forget-result">
+    <strong>${escapeHtml(
+      needsConfirmation
+        ? "Dry-run complete. Nothing was erased."
+        : "Forget forever complete. Recallant content was redacted."
+    )}</strong>
+    <p>${escapeHtml(
+      needsConfirmation
+        ? "Review the affected Recallant records. Confirm only if this memory is sensitive, wrong, or must never be recalled again."
+        : "This is not ordinary cleanup. The receipt below contains only safe ids, counts, and status."
+    )}</p>
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(affected.agent_memories ?? 0)}</strong> memories</span>
+      <span><strong>${escapeHtml(affected.chunks ?? 0)}</strong> chunks</span>
+      <span><strong>${escapeHtml(affected.embeddings ?? 0)}</strong> embeddings</span>
+      <span><strong>${escapeHtml(affected.events ?? 0)}</strong> events</span>
+    </div>
+    ${
+      warnings.length > 0
+        ? `<ul class="attention-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+        : ""
+    }
+    ${
+      needsConfirmation
+        ? `<form class="confirm-form" method="post" action="/memory-forget">
+            <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+            <input type="hidden" name="target_kind" value="agent_memory" />
+            <input type="hidden" name="target_id" value="${escapeHtml(memory.id)}" />
+            <input type="hidden" name="reason" value="${escapeHtml(reason)}" />
+            <input type="hidden" name="confirm" value="true" />
+            <button class="danger" type="submit">Confirm forget forever</button>
+          </form>`
+        : `<details>
+            <summary>Redacted receipt</summary>
+            <pre>${escapeHtml(
+              formatDisplayValue({
+                erasure_id: result.erasure_id,
+                status: result.status,
+                receipt
+              })
+            )}</pre>
+          </details>`
+    }
+  </article>`;
+}
+
+function renderMemoryForgetAction(
+  memory: Record<string, unknown>,
+  projectId: unknown,
+  memoryForget?: MemoryForgetRenderState
+) {
+  const defaultReason = "Sensitive or wrong memory cleanup requested from Review UI";
+  return `<details class="action-detail danger-zone">
+    <summary>Forget forever</summary>
+    <p>Only use this for sensitive or wrong memory. Ordinary project detach hides a project from Recallant; this redacts the selected memory so agents cannot recall it.</p>
+    ${renderMemoryForgetResult(memory, projectId, memoryForget)}
+    <form method="post" action="/memory-forget">
+      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+      <input type="hidden" name="target_kind" value="agent_memory" />
+      <input type="hidden" name="target_id" value="${escapeHtml(memory.id)}" />
+      <label>Reason <textarea name="reason" rows="3">${escapeHtml(defaultReason)}</textarea></label>
+      <button type="submit">Dry-run forget forever</button>
+    </form>
+  </details>`;
+}
+
+function renderDetail(
+  detail: unknown,
+  availableActions: unknown,
+  projectId: unknown,
+  memoryForget?: MemoryForgetRenderState
+) {
   if (!detail || typeof detail !== "object") {
     return `<p class="empty">No selected memory.</p>`;
   }
@@ -559,7 +675,7 @@ function renderDetail(detail: unknown, availableActions: unknown, projectId: unk
     <h4>Recommended action</h4>
     <p>${escapeHtml(recommendedAction(memory))}</p>
     <h4>Actions</h4>
-    <div class="actions">${renderReviewActions(memory, projectId)}</div>
+    <div class="actions">${renderReviewActions(memory, projectId)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -914,10 +1030,15 @@ function actionKindLabel(
 
 function renderDashboard(
   data: ReviewDashboardData,
-  state?: { chat?: ChatRenderState; detach?: DetachRenderState }
+  state?: {
+    chat?: ChatRenderState;
+    detach?: DetachRenderState;
+    memoryForget?: MemoryForgetRenderState;
+  }
 ) {
   const chat = state?.chat;
   const detach = state?.detach;
+  const memoryForget = state?.memoryForget;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -985,8 +1106,16 @@ function renderDashboard(
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .actions span { border: 1px solid #c9d2df; border-radius: 6px; padding: 4px 7px; font-size: 12px; background: #f7fafb; }
     .actions form { margin: 0; }
+    .action-detail { width: 100%; }
+    .action-detail form { display: grid; gap: 8px; margin-top: 8px; }
+    .action-detail label { display: grid; gap: 4px; color: #4f5867; font-size: 12px; }
+    .action-detail input, .action-detail textarea { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; }
+    .danger-zone p, .forget-result p { margin: 8px 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .forget-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fbfcfe; }
+    .forget-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
     button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #f2f6fb; }
+    button.danger { border-color: #b77f62; color: #8a3c15; }
     .actions.disabled span { color: #788292; background: #f9fafb; }
     .setting { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .setting:first-child { border-top: 0; }
@@ -1074,7 +1203,7 @@ function renderDashboard(
     <aside class="right-rail">
       <section class="panel">
         <h2>Selected Detail</h2>
-        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id)}
+        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget)}
       </section>
       <section class="panel">
         <h2>Cost / Paid API</h2>
@@ -1221,6 +1350,41 @@ export function createRecallantHttpServer() {
       });
       const location = reviewPath(body.project_id, result.memory_id);
       write(response, 303, "See other", "text/plain", { location });
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/memory-forget") {
+      const body = (await readJson(request)) as Record<string, unknown>;
+      write(
+        response,
+        200,
+        JSON.stringify(await database.forget(buildForgetInput(body))),
+        "application/json"
+      );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/memory-forget") {
+      const body = await readForm(request);
+      const result = await database.forget(buildForgetInput(body));
+      const targetId = optionalInput(body.target_id) ?? optionalInput(body.memory_id);
+      const targetKind = optionalInput(body.target_kind) ?? "agent_memory";
+      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+      const forgetDashboard = await database.getReviewDashboard({
+        project_id: projectId,
+        selected_memory_id: targetId
+      });
+      write(
+        response,
+        200,
+        renderDashboard(forgetDashboard, {
+          memoryForget: {
+            result: result as Record<string, unknown>,
+            target: { kind: targetKind, id: targetId },
+            reason: optionalInput(body.reason)
+          }
+        }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
       return;
     }
     if (request.method === "POST" && requestUrl.pathname === "/api/project-detach") {
