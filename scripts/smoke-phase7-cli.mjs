@@ -80,9 +80,16 @@ function isUuid(value) {
 
 const dryRun = run(["init", "--target", "codex", "--dry-run", "--project-dir", projectDir]);
 await assertMissing(join(projectDir, ".recallant", "config"), "Dry run created .recallant/config");
+await assertMissing(join(projectDir, ".gitignore"), "Dry run created .gitignore");
 await assertMissing(join(projectDir, "AGENTS.md"), "Dry run created AGENTS.md");
 await assertMissing(join(projectDir, "PROJECT_LOG.md"), "Dry run created PROJECT_LOG.md");
-if (dryRun.capture_profile !== "standard" || dryRun.import_candidates.length < 2) {
+if (
+  dryRun.capture_profile !== "standard" ||
+  dryRun.import_candidates.length < 2 ||
+  dryRun.target !== "codex" ||
+  dryRun.target_config?.config_file !== ".recallant/codex-mcp.json" ||
+  !dryRun.files.includes(".recallant/codex-mcp.json")
+) {
   throw new Error(`Unexpected init dry-run plan: ${JSON.stringify(dryRun)}`);
 }
 
@@ -92,6 +99,31 @@ assert(
   defaultInit.capture_profile === "standard" && isUuid(defaultInit.project_id),
   `Default init did not report standard profile/valid id: ${JSON.stringify(defaultInit)}`
 );
+assert(
+  await stat(join(defaultProjectDir, ".recallant", "codex-mcp.json")).then(
+    () => true,
+    () => false
+  ),
+  "Codex init did not write .recallant/codex-mcp.json"
+);
+
+const genericProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-generic-"));
+const genericInit = run(["init", "--target", "generic", "--project-dir", genericProjectDir]);
+const genericMcp = JSON.parse(
+  await readFile(join(genericProjectDir, ".recallant", "generic-mcp.json"), "utf8")
+);
+await assertMissing(
+  join(genericProjectDir, ".recallant", "codex-mcp.json"),
+  "Generic init wrote a Codex-specific MCP file"
+);
+if (
+  genericInit.target !== "generic" ||
+  genericInit.target_config?.config_file !== ".recallant/generic-mcp.json" ||
+  genericInit.target_config?.client_specific !== true ||
+  !JSON.stringify(genericMcp).includes("recallant")
+) {
+  throw new Error(`Generic init failed: ${JSON.stringify({ genericInit, genericMcp })}`);
+}
 
 const init = run([
   "init",
@@ -103,8 +135,12 @@ const init = run([
   projectDir
 ]);
 const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
+const codexMcp = JSON.parse(
+  await readFile(join(projectDir, ".recallant", "codex-mcp.json"), "utf8")
+);
 const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
+const gitignore = await readFile(join(projectDir, ".gitignore"), "utf8");
 if (
   config.project_id !== init.project_id ||
   !isUuid(config.project_id) ||
@@ -115,12 +151,16 @@ if (
   !agents.includes("memory_get_context_pack") ||
   !agents.includes("memory_create_agent_memory") ||
   agents.includes("memory_promote") ||
+  !gitignore.includes(".recallant/") ||
   !projectLog.includes("Current focus: project onboarding") ||
   init.capture_profile !== "detailed" ||
+  init.target_config?.format !== "codex_mcp_json" ||
+  init.target_config?.config_file !== ".recallant/codex-mcp.json" ||
+  !JSON.stringify(codexMcp).includes("recallant") ||
   !JSON.stringify(init.mcp_config).includes("recallant")
 ) {
   throw new Error(
-    `Init output/files failed: ${JSON.stringify({ init, config, agents, projectLog })}`
+    `Init output/files failed: ${JSON.stringify({ init, config, agents, projectLog, gitignore })}`
   );
 }
 

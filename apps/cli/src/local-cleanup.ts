@@ -1,6 +1,7 @@
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createRecallantDbFromEnv } from "@recallant/db";
+import { generatedMcpConfigFiles } from "./client-targets.js";
 
 type LocalCleanupConfig = {
   project_id?: string;
@@ -92,8 +93,13 @@ async function plannedChanges(projectDir: string, includeBackups: boolean) {
     },
     {
       action: "remove_path",
-      path: ".recallant/codex-mcp.json",
+      path: generatedMcpConfigFiles[0],
       reason: "Generated local MCP hint for this project."
+    },
+    {
+      action: "remove_path",
+      path: generatedMcpConfigFiles[1],
+      reason: "Generated generic local MCP hint for this project."
     },
     {
       action: "remove_path",

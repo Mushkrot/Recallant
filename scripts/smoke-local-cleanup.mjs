@@ -75,6 +75,7 @@ const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox"])
 if (attach.status !== "attached" || !attach.backup?.path) {
   throw new Error(`Attach did not prepare cleanup fixture: ${JSON.stringify(attach)}`);
 }
+await writeFile(join(projectDir, ".recallant", "generic-mcp.json"), "{}\n");
 
 const start = runJson([
   "agent-start",
@@ -98,7 +99,9 @@ if (closeout.closeout?.report_required !== false) {
 
 const activeDryRun = runJson(["local-cleanup", "--project-dir", projectDir, "--dry-run"]);
 if (activeDryRun.status !== "blocked_until_detach" || activeDryRun.writes_files !== false) {
-  throw new Error(`active local cleanup dry-run should be blocked: ${JSON.stringify(activeDryRun)}`);
+  throw new Error(
+    `active local cleanup dry-run should be blocked: ${JSON.stringify(activeDryRun)}`
+  );
 }
 runBlocked(["local-cleanup", "--project-dir", projectDir, "--confirm"]);
 
@@ -119,7 +122,10 @@ if (
   detachedDryRun.status !== "ready_for_confirmation" ||
   !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/config") ||
   !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/codex-mcp.json") ||
-  !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/current-session.json")
+  !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/generic-mcp.json") ||
+  !detachedDryRun.planned_changes.some(
+    (change) => change.path === ".recallant/current-session.json"
+  )
 ) {
   throw new Error(`detached local cleanup dry-run failed: ${JSON.stringify(detachedDryRun)}`);
 }
@@ -130,6 +136,7 @@ if (
   cleanup.removed_paths.length < 3 ||
   (await exists(join(projectDir, ".recallant", "config"))) ||
   (await exists(join(projectDir, ".recallant", "codex-mcp.json"))) ||
+  (await exists(join(projectDir, ".recallant", "generic-mcp.json"))) ||
   (await exists(join(projectDir, ".recallant", "current-session.json")))
 ) {
   throw new Error(`confirmed local cleanup failed: ${JSON.stringify(cleanup)}`);
@@ -153,7 +160,9 @@ const backupDryRun = runJson([
   "--dry-run"
 ]);
 if (!backupDryRun.planned_changes.some((change) => change.path === ".recallant/backups")) {
-  throw new Error(`include-backups dry-run did not report backups: ${JSON.stringify(backupDryRun)}`);
+  throw new Error(
+    `include-backups dry-run did not report backups: ${JSON.stringify(backupDryRun)}`
+  );
 }
 
 process.stdout.write("Local cleanup smoke passed\n");

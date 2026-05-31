@@ -350,8 +350,8 @@ Latest local cleanup validation:
 
 The local cleanup smoke verifies that confirmed local cleanup is blocked while the project is still
 active, becomes available after confirmed detach, removes only `.recallant/config`,
-`.recallant/codex-mcp.json`, and `.recallant/current-session.json`, and preserves bootstrap files
-and local attach backups.
+`.recallant/codex-mcp.json`, `.recallant/generic-mcp.json`, and
+`.recallant/current-session.json`, and preserves bootstrap files and local attach backups.
 
 Latest onboarding validation:
 
@@ -735,16 +735,30 @@ Latest contract hardening checkpoint:
 - `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
   covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
 
+Latest target-aware onboarding checkpoint:
+
+- CLI target generation is now shared across `init` and `attach` through a target config helper.
+  `--target codex` writes `.recallant/codex-mcp.json`; `--target generic` writes
+  `.recallant/generic-mcp.json`; unknown targets fail validation instead of silently producing a
+  misleading Codex config.
+- `recallant init` now writes the target MCP hint file and `.gitignore` entry, matching the
+  documented lower-level new-project path.
+- `recallant local-cleanup` removes both generated MCP hint files when they exist, still only after
+  detach/sandbox-cleaned policy allows local cleanup.
+- [CLIENT_SETUP.md](CLIENT_SETUP.md) now covers Codex, Cursor, Claude Code, Windsurf, and generic
+  MCP clients with official references and Recallant env/config guidance.
+- Verification for this checkpoint: `npm run build`, `npm run lint`, `npm run format:check`,
+  `npm run phase7:smoke`, `npm run phase10:smoke`, and `npm run local-cleanup:smoke`.
+
 ## Current Boundary
 
 The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
 attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
-path and AI-backed Management Chat baseline are also implemented. The attach path has now been
-regression-tested against the production-env host-project-id binding that exists on the owner
-server. Current contract-hardening work is focused on closing remaining unchecked `TEST_CONTRACT.md`
-rows with explicit smoke coverage rather than broad claims. Continue with the next unchecked
-contract rows, richer Management UI actions, optional sandbox local-cleanup hardening, or a
-server-side cleanup/repair flow for any sandbox that was attached before this fix.
+path, AI-backed Management Chat baseline, target-aware `codex`/`generic` MCP config generation, and
+multi-client startup docs are also implemented. The attach path has now been regression-tested
+against the production-env host-project-id binding that exists on the owner server. Continue with
+PRD requirement-by-requirement closure, richer Management UI actions, optional sandbox local-cleanup
+hardening, or a server-side cleanup/repair flow for any sandbox that was attached before this fix.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

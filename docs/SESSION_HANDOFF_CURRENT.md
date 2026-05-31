@@ -9,11 +9,12 @@ This is the current handoff for the next Recallant session. Start here after rea
 Recallant is deployed on the owner server, the GutenDocx copied-project sandbox pilot is complete,
 and the first product-UX readiness pass is deployed. Phase 10 has working first slices for
 autonomous project attach/detach, controlled cross-project recall, one-command project onboarding,
-AI-backed Management Chat, and owner-confirmed developer-wide rules. The Product Acceptance agent
-capture scenario now passes for the first production-ready slice: a clean project can run ordinary
-`recallant attach .`, start a Recallant-backed session, read context, write
-decisions/actions/tests/checkpoints, close out, recall that memory in a later session, show
-capture-active readiness in the Review UI/API, and detach safely without touching project files.
+AI-backed Management Chat, owner-confirmed developer-wide rules, target-aware `codex`/`generic`
+MCP config generation, and multi-client startup documentation. The Product Acceptance agent capture
+scenario now passes for the first production-ready slice: a clean project can run ordinary
+`recallant attach .`, start a Recallant-backed session, read context, write decisions/actions/tests/
+checkpoints, close out, recall that memory in a later session, show capture-active readiness in the
+Review UI/API, and detach safely without touching project files.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
@@ -47,12 +48,13 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 4. Read `docs/WORKING_CONTEXT.md`.
 5. Read `docs/PRE_PILOT_READINESS.md`.
 6. Read `docs/AUTONOMOUS_ATTACH.md`.
-7. Read `docs/CROSS_PROJECT_RECALL.md`.
-8. Read `docs/IMPLEMENTATION_STATUS.md`.
-9. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
-10. Run `git status --short --branch`.
-11. Run `git log --oneline -8`.
-12. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
+7. Read `docs/CLIENT_SETUP.md`.
+8. Read `docs/CROSS_PROJECT_RECALL.md`.
+9. Read `docs/IMPLEMENTATION_STATUS.md`.
+10. Skim `docs/TASK_GRAPH.md`, `docs/AGENT_IMPLEMENTATION_GUIDE.md`, and `docs/TEST_CONTRACT.md` for the relevant gate.
+11. Run `git status --short --branch`.
+12. Run `git log --oneline -8`.
+13. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
 
 ## Active Work Order
 
@@ -149,8 +151,9 @@ The current local cleanup follow-up is complete for the first safe slice:
   that can be removed after detach;
 - confirmed local cleanup is policy-blocked until the project is already `detached` or
   `sandbox_cleaned` in Recallant;
-- confirmed cleanup removes `.recallant/config`, `.recallant/codex-mcp.json`, and
-  `.recallant/current-session.json`;
+- confirmed cleanup removes Recallant local pointer/runtime files, including `.recallant/config`,
+  `.recallant/codex-mcp.json`, `.recallant/generic-mcp.json`, and
+  `.recallant/current-session.json` when present;
 - `AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, source files, local attach backups, and the sandbox
   copy directory are preserved.
 
@@ -315,9 +318,23 @@ Latest QA correction checkpoint:
   independently.
 
 The next required target is no longer the Product Acceptance loop or the TEST_CONTRACT gap list;
-those are green for the first production-ready slice. Richer Management UI action flows, a separate
-explicit workflow for deleting sandbox copy directories, target-aware `generic` startup generation,
-and three-client startup documentation are now the highest-value follow-ups.
+those are green for the first production-ready slice. Richer Management UI action flows, PRD
+requirement-by-requirement closure, and a separate explicit workflow for deleting sandbox copy
+directories are now the highest-value follow-ups.
+
+Latest target-aware onboarding checkpoint:
+
+- `recallant init` now validates/normalizes `--target`, writes the target MCP hint file, and includes
+  `.gitignore` in the generated project files. `--target codex` writes
+  `.recallant/codex-mcp.json`; `--target generic` writes `.recallant/generic-mcp.json`.
+- `recallant attach` now uses the same target-aware generator. Codex keeps the Codex hint; generic
+  writes the generic MCP stdio hint and does not create a Codex-specific file.
+- `recallant local-cleanup` now removes both generated MCP hint files when present, after the same
+  detach/sandbox-cleaned policy gate.
+- [CLIENT_SETUP.md](CLIENT_SETUP.md) documents Codex, Cursor, Claude Code, Windsurf, and generic MCP
+  startup paths with official references and Recallant env/config guidance.
+- Verification for this slice: `npm run build`, `npm run lint`, `npm run format:check`,
+  `npm run phase7:smoke`, `npm run phase10:smoke`, and `npm run local-cleanup:smoke`.
 
 Previous contract-hardening checkpoint:
 

@@ -18,6 +18,7 @@ import {
   readImportTextForCandidate
 } from "./discovery.js";
 import { runAttach } from "./attach.js";
+import { clientTargetConfig } from "./client-targets.js";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 
@@ -453,22 +454,6 @@ function configJson(projectId: string, serverUrl: string) {
   return `${JSON.stringify({ project_id: projectId, recallant_server_url: serverUrl }, null, 2)}\n`;
 }
 
-function codexMcpConfig(projectId: string, developerId: string) {
-  return {
-    mcpServers: {
-      recallant: {
-        command: "recallant",
-        args: ["mcp-server"],
-        env: {
-          RECALLANT_PROJECT_ID: projectId,
-          RECALLANT_DEVELOPER_ID: developerId,
-          RECALLANT_DATABASE_URL: "${RECALLANT_DATABASE_URL}"
-        }
-      }
-    }
-  };
-}
-
 async function readOptional(path: string) {
   try {
     return await readFile(path, "utf8");
@@ -491,6 +476,15 @@ function upsertMemorySection(existing: string | null) {
   const pattern = /## Memory \(Recallant\)[\s\S]*?(?=\n## |\n# |$)/;
   if (pattern.test(existing)) return existing.replace(pattern, memorySection.trimEnd());
   return `${existing.trimEnd()}\n\n${memorySection}`;
+}
+
+async function upsertGitignore(projectDir: string) {
+  const path = join(projectDir, ".gitignore");
+  const existing = await readOptional(path);
+  if (existing === null) return ".recallant/\n";
+  const lines = existing.split("\n").map((line) => line.trim());
+  if (lines.includes(".recallant/") || lines.includes(".recallant")) return existing;
+  return `${existing.trimEnd()}\n.recallant/\n`;
 }
 
 function projectLog(projectName: string) {
@@ -648,17 +642,25 @@ async function runInit(argv: readonly string[]) {
   const options = parseInitOptions(argv);
   const projectId = randomUUID();
   const developerId = process.env.RECALLANT_DEVELOPER_ID ?? randomUUID();
+  const targetConfig = clientTargetConfig(options.target, projectId, developerId);
   const plan = {
     action: "init",
-    target: options.target,
+    target: targetConfig.target,
     dry_run: options.dryRun,
     project_dir: options.projectDir,
     project_id: projectId,
     developer_id: developerId,
     capture_profile: options.captureProfile,
-    files: [".recallant/config", "AGENTS.md", "PROJECT_LOG.md"],
+    files: [
+      ".recallant/config",
+      targetConfig.config_file,
+      ".gitignore",
+      "AGENTS.md",
+      "PROJECT_LOG.md"
+    ],
     import_candidates: await detectImportCandidates(options.projectDir),
-    mcp_config: codexMcpConfig(projectId, developerId)
+    target_config: targetConfig,
+    mcp_config: targetConfig.mcp_config
   };
 
   if (options.dryRun) {
@@ -670,6 +672,14 @@ async function runInit(argv: readonly string[]) {
   await writeFile(
     join(options.projectDir, ".recallant", "config"),
     configJson(projectId, options.serverUrl)
+  );
+  await writeFile(
+    join(options.projectDir, targetConfig.config_file),
+    `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`
+  );
+  await writeFile(
+    join(options.projectDir, ".gitignore"),
+    await upsertGitignore(options.projectDir)
   );
   const agentsPath = join(options.projectDir, "AGENTS.md");
   await writeFile(agentsPath, upsertMemorySection(await readOptional(agentsPath)));

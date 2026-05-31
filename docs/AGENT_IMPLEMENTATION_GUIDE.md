@@ -154,13 +154,13 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
   3. writes `.recallant/config` into the project root with `project_id` and `recallant_server_url`;
   4. creates or updates a thin `AGENTS.md` section named `Memory (Recallant)`;
   5. creates `PROJECT_LOG.md` if missing;
-  6. prints the MCP configuration block for the target client;
+  6. writes and prints the MCP configuration block for the target client;
   7. may show import candidates, but does not create import events or run imports without explicit `recallant import ...`.
 - [x] `recallant discover` follows [ADR-0038](ADR-0038-environment-discovery-and-portable-instance.md) and [ADR-0039](ADR-0039-v1-import-workflow.md): scan candidates without silently importing or promoting them.
 - [x] `recallant import --dry-run` previews source refs, hashes, result classes, provisional scope/audience, high-risk assignments, and conflicts before durable writes.
 - [x] `--dry-run` shows the plan without changes.
 - [x] `--capture-profile light|standard|detailed|custom` overrides the automatic init default.
-- [ ] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
+- [x] Target-aware generation for at least `codex` and `generic`; other targets may be added incrementally.
 - [x] `recallant lint-context` verifies bootstrap files did not become duplicated context dumps and applies the configurable context policy from [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md), including project overrides.
 - [x] `recallant context` or equivalent preview command calls the same Context Pack Builder used by `memory_get_context_pack`.
 - [x] `recallant doctor` checks connectivity for Postgres, configured local model provider/Ollama, and `.recallant/config`.
@@ -185,7 +185,7 @@ This guide implements the v1 full coding-agent memory core defined in [ADR-0025-
 - [x] Restore verification command/job: restore into temporary DB/location and run basic read checks without touching production.
 - [x] Backup target abstraction allows future SSH/Tailscale replication to a second backup server, even if the initial implementation writes only to local Recallant-server storage.
 - [x] Export/restore design preserves portability metadata and supports remapping/rebinding of project paths, secret references, connector/account bindings, and environment facts per ADR-0038.
-- [ ] Startup documentation for at least three clients with official external links and Recallant env/config guidance.
+- [x] Startup documentation for at least three clients with official external links and Recallant env/config guidance in [CLIENT_SETUP.md](CLIENT_SETUP.md).
 
 **Gate:** full `TEST_CONTRACT.md` green.
 

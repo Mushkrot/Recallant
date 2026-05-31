@@ -122,8 +122,8 @@ A new or existing project must connect to Recallant without manually copying rul
 
 **Acceptance:**
 
-- [ ] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, and the required MCP/config output for Codex.
-- [ ] `recallant init --dry-run` shows a plan without making changes.
+- [x] `recallant init --target codex` creates `.recallant/config`, thin `AGENTS.md`, `PROJECT_LOG.md`, `.gitignore`, and the required MCP/config output for Codex.
+- [x] `recallant init --dry-run` shows a plan without making changes.
 - [ ] `recallant attach <project-dir> --mode manual|guided|autopilot` is the product-level workflow that can coordinate init, discovery, import, lint, context preview, diagnostics, and reporting.
 - [ ] If mode is omitted, `attach` defaults to `autopilot` unless production-sensitive detection downgrades it.
 - [ ] `manual` mode preserves the old cautious workflow: discovery is read-only, dry-run writes nothing, and durable imports require explicit selected commands.

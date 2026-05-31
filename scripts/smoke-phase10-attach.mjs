@@ -197,6 +197,7 @@ const backupManifest = JSON.parse(await readFile(attach.backup.manifest_path, "u
 
 if (
   config.project_id !== attach.project_id ||
+  attach.target_config?.config_file !== ".recallant/codex-mcp.json" ||
   !JSON.stringify(mcpConfig).includes("recallant") ||
   !agents.includes("Always keep the fixture formatter deterministic.") ||
   !agents.includes("memory_start_session") ||
@@ -225,6 +226,22 @@ if (
       backupManifest
     })}`
   );
+}
+
+const genericProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase10-generic-"));
+await writeFile(join(genericProjectDir, "README.md"), "# Generic Attach Fixture\n");
+const genericAttach = runJson(["attach", genericProjectDir, "--target", "generic", "--sandbox"]);
+const genericMcpConfig = JSON.parse(
+  await readFile(join(genericProjectDir, ".recallant", "generic-mcp.json"), "utf8")
+);
+if (
+  genericAttach.target !== "generic" ||
+  genericAttach.target_config?.config_file !== ".recallant/generic-mcp.json" ||
+  genericAttach.target_config?.client_specific !== true ||
+  !JSON.stringify(genericMcpConfig).includes("recallant") ||
+  (await exists(join(genericProjectDir, ".recallant", "codex-mcp.json")))
+) {
+  throw new Error(`Generic attach failed: ${JSON.stringify({ genericAttach, genericMcpConfig })}`);
 }
 
 const rerun = runJson(["attach", projectDir, "--target", "codex", "--sandbox"]);

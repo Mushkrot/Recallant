@@ -8,6 +8,7 @@ import {
   readImportTextForCandidate,
   redactSecretValues
 } from "./discovery.js";
+import { clientTargetConfig } from "./client-targets.js";
 
 type AttachMode = "manual" | "guided" | "autopilot";
 
@@ -124,22 +125,6 @@ function projectName(projectDir: string) {
 
 function configJson(projectId: string, serverUrl: string) {
   return `${JSON.stringify({ project_id: projectId, recallant_server_url: serverUrl }, null, 2)}\n`;
-}
-
-function codexMcpConfig(projectId: string, developerId: string) {
-  return {
-    mcpServers: {
-      recallant: {
-        command: "recallant",
-        args: ["mcp-server"],
-        env: {
-          RECALLANT_PROJECT_ID: projectId,
-          RECALLANT_DEVELOPER_ID: developerId,
-          RECALLANT_DATABASE_URL: "${RECALLANT_DATABASE_URL}"
-        }
-      }
-    }
-  };
 }
 
 async function readOptional(path: string) {
@@ -735,6 +720,7 @@ export async function runAttach(argv: readonly string[]) {
         developerId: process.env.RECALLANT_DEVELOPER_ID ?? randomUUID(),
         source: existingConfigResult.config?.project_id ? "existing_config" : "planned"
       };
+  const targetConfig = clientTargetConfig(options.target, identity.projectId, identity.developerId);
   const importTextByPath = new Map<string, string>();
   for (const candidate of importCandidates) {
     importTextByPath.set(
@@ -749,7 +735,7 @@ export async function runAttach(argv: readonly string[]) {
   const existingProjectLog = await readOptional(projectLogPath);
   const changedFiles = [
     ".recallant/config",
-    ".recallant/codex-mcp.json",
+    targetConfig.config_file,
     ".gitignore",
     "AGENTS.md",
     "PROJECT_LOG.md"
@@ -778,7 +764,8 @@ export async function runAttach(argv: readonly string[]) {
       : confirmationRequired
         ? "needs_confirmation"
         : "plan_only",
-    target: options.target,
+    target: targetConfig.target,
+    target_config: targetConfig,
     project_dir: options.projectDir,
     project_id: identity.projectId,
     project_id_source: identity.source,
@@ -845,8 +832,8 @@ export async function runAttach(argv: readonly string[]) {
       configJson(identity.projectId, options.serverUrl)
     );
     await writeFile(
-      join(options.projectDir, ".recallant", "codex-mcp.json"),
-      `${JSON.stringify(codexMcpConfig(identity.projectId, identity.developerId), null, 2)}\n`
+      join(options.projectDir, targetConfig.config_file),
+      `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`
     );
     await writeFile(
       join(options.projectDir, ".gitignore"),
