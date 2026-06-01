@@ -227,8 +227,12 @@ Acceptance:
   are implemented.
 - Done: `npm run connect:smoke` verifies sandbox attach, Codex dry-run/
   idempotency, actual connect, and Claude Code/generic fallback dry-run.
+- Done: `recallant doctor --require-capture` now fails with exit code 2 when
+  the selected project is only registered or capture is partial, and passes only
+  when Recallant sees context read, memory write, and checkpoint evidence from
+  local session state or dashboard readiness.
 - Remaining: safe global/client config writers, local backups for global config,
-  hook install, fail-soft hook capture/spooling, and `doctor --require-capture`.
+  hook install, and fail-soft hook capture/spooling.
 
 ## Stage 5 - More Real Pilots
 

@@ -538,6 +538,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - Non-Codex clients currently use the generic MCP config fallback.
 - This slice does not write global client config or install hooks yet.
 - `npm run connect:smoke` and full `npm run smoke:core` passed.
+- Follow-up Stage 4 gate: `recallant doctor --require-capture` now reports
+  `capture_readiness` and exits with status 2 until the project has context read, memory write, and
+  checkpoint evidence. `connect:smoke` verifies failure before capture and success after
+  agent-start/agent-event/agent-checkpoint.
 
 Latest validation for the Workbench/source/chat follow-up slice:
 
@@ -549,6 +553,8 @@ Latest validation for the Workbench/source/chat follow-up slice:
 - `npm run review-ui:playwright`
 - `npm run project-sources:smoke`
 - `npm run product-acceptance:smoke`
+- `npm run connect:smoke`
+- `npm run phase7:smoke`
 
 Next autonomous work after this checkpoint:
 
@@ -557,7 +563,7 @@ Next autonomous work after this checkpoint:
 - Stage 3: continue source-aware context-pack provenance, richer source health/status, and
   search/review source filters.
 - Stage 4: add real client/global config writers where safe, local backups for global/client files,
-  hook installation where supported, fail-soft capture spooling, and `doctor --require-capture`.
+  hook installation where supported, and fail-soft hook capture/spooling.
 - Stage 5: run the next real pilot report against the improved Workbench/source UI, including what
   was attached, what was remembered, what was recalled later, and cleanup proof.
 

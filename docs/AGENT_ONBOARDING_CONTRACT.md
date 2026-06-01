@@ -95,6 +95,10 @@ Every implementation checkpoint that claims onboarding/capture readiness must pa
 attached project, start capture, write a unique owner decision, close out, start a new session, and
 prove that the unique decision returns through Recallant context.
 
+`recallant doctor --require-capture --project-dir <project>` is the quick readiness gate for normal
+project work. It must fail before real capture has happened and pass only after Recallant has proof
+of context read, memory write, and checkpoint evidence. A plain `doctor` remains informational.
+
 ## Cross-Project Recall Contract
 
 Agents may use other projects as source-linked examples when the current task needs a prior pattern,

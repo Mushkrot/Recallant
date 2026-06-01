@@ -359,6 +359,8 @@ const doctor = run(["doctor", "--project-dir", projectDir], {
 if (
   doctor.postgres?.reachable !== true ||
   doctor.project_config?.present !== true ||
+  doctor.capture_readiness?.required !== false ||
+  typeof doctor.capture_readiness?.ready !== "boolean" ||
   doctor.local_model?.starts_service !== false ||
   doctor.local_model?.provider !== "ollama" ||
   !Array.isArray(doctor.local_model?.expected_models) ||

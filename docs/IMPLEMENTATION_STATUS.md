@@ -344,6 +344,9 @@ Stage 4 first slice is now implemented:
   4 slice.
 - `npm run connect:smoke` covers sandbox attach, Codex dry-run/idempotency, actual connect, and
   Claude Code/generic fallback dry-run.
+- `recallant doctor --require-capture` now reports `capture_readiness` and exits with status 2
+  when the project lacks proof of context read, memory write, and checkpoint. After agent-start,
+  agent-event, and agent-checkpoint, the same gate passes and reports `capture_active`.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -389,6 +392,9 @@ Latest Workbench validation on 2026-06-01:
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`
 - Stage 4 connect validation: `npm run connect:smoke` and full `npm run smoke:core`
+- Stage 4 follow-up validation: `npm run connect:smoke` now covers failing
+  `doctor --require-capture` before capture and passing it after real capture; `npm run
+  phase7:smoke` verifies ordinary doctor output still includes non-required capture readiness
 
 Latest contract-hardening validation on 2026-05-31:
 

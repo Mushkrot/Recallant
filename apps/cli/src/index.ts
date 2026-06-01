@@ -586,6 +586,84 @@ function captureStatusFromState(state: AgentSessionState | null) {
   return state.status === "active" ? "session_started" : "not_observed";
 }
 
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function checkCaptureReadiness(input: {
+  projectDir: string;
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>> | null;
+}) {
+  const config = await readProjectConfig(input.projectDir);
+  const localState = await readAgentSessionState(input.projectDir).catch(() => null);
+  const localStatus = captureStatusFromState(localState);
+  let databaseReadiness: Record<string, unknown> | null = null;
+  let databaseError: string | null = null;
+  if (config?.project_id && input.database) {
+    try {
+      const dashboard = await input.database.getReviewDashboard({ project_id: config.project_id });
+      const readiness = objectValue(dashboard.project_readiness);
+      const dbReady = Boolean(
+        readiness.last_context_read_at &&
+        readiness.last_memory_write_at &&
+        readiness.checkpoint_updated_at
+      );
+      databaseReadiness = {
+        ready: dbReady,
+        project_registered: Boolean(readiness.project_registered),
+        last_context_read_at: readiness.last_context_read_at ?? null,
+        last_memory_write_at: readiness.last_memory_write_at ?? null,
+        checkpoint_updated_at: readiness.checkpoint_updated_at ?? null,
+        capture_event_count: readiness.capture_event_count ?? 0,
+        captured_decision_count: readiness.captured_decision_count ?? 0,
+        active_sessions: readiness.active_sessions ?? 0,
+        interrupted_sessions: readiness.interrupted_sessions ?? 0
+      };
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const localReady = localStatus === "capture_active";
+  const databaseReady = databaseReadiness?.ready === true;
+  const ready = localReady || databaseReady;
+  const missing: string[] = [];
+  if (!config?.project_id) missing.push("project config");
+  if (!localReady && !databaseReady) missing.push("context read + memory write + checkpoint");
+  if (!input.database && !localReady) missing.push("database connection or local capture state");
+  return {
+    required: false,
+    ready,
+    status: ready
+      ? "capture_active"
+      : localStatus === "capture_partial" || localStatus === "session_started"
+        ? "capture_partial"
+        : config?.project_id
+          ? "registered_only"
+          : "not_attached",
+    missing,
+    project_config: {
+      present: Boolean(config?.project_id),
+      project_id: config?.project_id ?? null,
+      recallant_server_url: config?.recallant_server_url ?? null
+    },
+    local_state: localState
+      ? {
+          status: localState.status,
+          capture_status: localStatus,
+          session_id: localState.session_id,
+          last_context_read_at: localState.last_context_read_at ?? null,
+          last_memory_write_at: localState.last_memory_write_at ?? null,
+          last_checkpoint_at: localState.last_checkpoint_at ?? null,
+          updated_at: localState.updated_at
+        }
+      : { status: "missing", capture_status: "not_observed" },
+    database_readiness: databaseReadiness,
+    database_error: databaseError
+  };
+}
+
 async function readProjectContextProfile(projectDir: string) {
   if (!process.env.RECALLANT_DATABASE_URL) return null;
   const config = await readProjectConfig(projectDir);
@@ -1231,99 +1309,107 @@ async function checkProductionReadiness(postgresReachable: boolean) {
 async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const requireCapture = argv.includes("--require-capture");
   let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
-  if (database) {
-    try {
-      await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
-      postgres = { configured: true, reachable: true };
-    } catch {
-      postgres = { configured: true, reachable: false };
-    } finally {
+  try {
+    if (database) {
+      try {
+        await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
+        postgres = { configured: true, reachable: true };
+      } catch {
+        postgres = { configured: true, reachable: false };
+      }
+    }
+    const captureReadiness = await checkCaptureReadiness({ projectDir, database });
+    const result = {
+      ...describeCliBoundary(),
+      postgres,
+      project_config: {
+        path: join(projectDir, ".recallant", "config"),
+        present: (await readOptional(join(projectDir, ".recallant", "config"))) !== null
+      },
+      capture_readiness: {
+        ...captureReadiness,
+        required: requireCapture
+      },
+      local_model: await checkOllama(),
+      model_routes: {
+        local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
+        active_agent: {
+          enabled: true,
+          route_class: "active_agent",
+          before_paid_api: true
+        },
+        subscription_worker: {
+          enabled: false,
+          route_class: "subscription_worker",
+          before_paid_api: true,
+          limit_behavior: {
+            rate_limited: "defer_or_downgrade_or_ask",
+            exhausted: "defer_or_downgrade_or_ask",
+            silent_paid_api_fallthrough: false
+          }
+        },
+        paid_api_provider: {
+          enabled: false,
+          route_class: "paid_api_provider",
+          default_provider: "openai",
+          requires_approval: true,
+          default_mode: "confirm_each",
+          denied_or_expired_behavior: "defer_or_downgrade_without_provider_call",
+          auto_with_caps: {
+            enabled: false,
+            requires_explicit_project_task_profile: true
+          },
+          default_models: {
+            openai_baseline: "openai/gpt-5.4-mini",
+            gemini_cost: "gemini/gemini-2.5-flash-lite",
+            gemini_balanced: "gemini/gemini-2.5-flash",
+            claude_cheap: "anthropic/claude-haiku-4-5"
+          },
+          explicit_opt_in_required_for: [
+            "preview_models",
+            "gemini/gemini-3.5-flash",
+            "claude-sonnet",
+            "claude-opus"
+          ]
+        },
+        escalation_order: [
+          "local_model",
+          "active_agent",
+          "subscription_worker",
+          "paid_api_provider"
+        ]
+      },
+      paid_api_mode: "confirm_each",
+      policy: {
+        paid_api_requires_approval: true,
+        auto_with_caps_requires_explicit_enablement: true,
+        browser_automation_allowed: false,
+        scraping_allowed: false,
+        hidden_api_routes_allowed: false,
+        limit_bypass_routes_allowed: false,
+        preview_models_require_opt_in: true,
+        gemini_3_5_flash_requires_opt_in: true,
+        claude_sonnet_opus_require_quality_profile: true,
+        starts_local_services: false
+      },
+      owner_server_deployment: await checkOwnerServerDeployment(),
+      production_readiness: await checkProductionReadiness(postgres.reachable),
+      owner_server_notes: [
+        "/ai/PORTS.yaml must be checked before service start",
+        "/ai/SECURITY must be consulted before public exposure"
+      ]
+    };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (requireCapture && !captureReadiness.ready) {
+      process.exitCode = 2;
+    }
+  } finally {
+    if (database) {
       await database.close();
     }
   }
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        ...describeCliBoundary(),
-        postgres,
-        project_config: {
-          path: join(projectDir, ".recallant", "config"),
-          present: (await readOptional(join(projectDir, ".recallant", "config"))) !== null
-        },
-        local_model: await checkOllama(),
-        model_routes: {
-          local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
-          active_agent: {
-            enabled: true,
-            route_class: "active_agent",
-            before_paid_api: true
-          },
-          subscription_worker: {
-            enabled: false,
-            route_class: "subscription_worker",
-            before_paid_api: true,
-            limit_behavior: {
-              rate_limited: "defer_or_downgrade_or_ask",
-              exhausted: "defer_or_downgrade_or_ask",
-              silent_paid_api_fallthrough: false
-            }
-          },
-          paid_api_provider: {
-            enabled: false,
-            route_class: "paid_api_provider",
-            default_provider: "openai",
-            requires_approval: true,
-            default_mode: "confirm_each",
-            denied_or_expired_behavior: "defer_or_downgrade_without_provider_call",
-            auto_with_caps: {
-              enabled: false,
-              requires_explicit_project_task_profile: true
-            },
-            default_models: {
-              openai_baseline: "openai/gpt-5.4-mini",
-              gemini_cost: "gemini/gemini-2.5-flash-lite",
-              gemini_balanced: "gemini/gemini-2.5-flash",
-              claude_cheap: "anthropic/claude-haiku-4-5"
-            },
-            explicit_opt_in_required_for: [
-              "preview_models",
-              "gemini/gemini-3.5-flash",
-              "claude-sonnet",
-              "claude-opus"
-            ]
-          },
-          escalation_order: [
-            "local_model",
-            "active_agent",
-            "subscription_worker",
-            "paid_api_provider"
-          ]
-        },
-        paid_api_mode: "confirm_each",
-        policy: {
-          paid_api_requires_approval: true,
-          auto_with_caps_requires_explicit_enablement: true,
-          browser_automation_allowed: false,
-          scraping_allowed: false,
-          hidden_api_routes_allowed: false,
-          limit_bypass_routes_allowed: false,
-          preview_models_require_opt_in: true,
-          gemini_3_5_flash_requires_opt_in: true,
-          claude_sonnet_opus_require_quality_profile: true,
-          starts_local_services: false
-        },
-        owner_server_deployment: await checkOwnerServerDeployment(),
-        production_readiness: await checkProductionReadiness(postgres.reachable),
-        owner_server_notes: [
-          "/ai/PORTS.yaml must be checked before service start",
-          "/ai/SECURITY must be consulted before public exposure"
-        ]
-      },
-      null,
-      2
-    )}\n`
-  );
 }
 
 async function snapshotTables(client: pg.Client) {
