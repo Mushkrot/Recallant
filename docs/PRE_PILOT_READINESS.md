@@ -1,10 +1,12 @@
 # Pre-Pilot Readiness
 
-Last updated: 2026-05-28.
+Last updated: 2026-06-01.
 
 This was the active plan for preparing Recallant for its first real project pilot. The first copied
-project pilot has now completed; the next active product-readiness layer is Phase 10 autonomous
-attach and controlled cross-project recall.
+project pilot has now completed, and the first Phase 10 autonomous attach, controlled
+cross-project recall, and cleanup slices have passed. The current product-readiness work is the
+post-acceptance development plan in
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md).
 
 The owner wants Recallant to be as close as practical to a finished working product before attaching it to an existing working project. Do not connect a live project as the next step. First complete this readiness plan, then run a pilot on a duplicated project copy, then decide whether to onboard a real project.
 

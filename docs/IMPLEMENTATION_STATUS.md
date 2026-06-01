@@ -788,14 +788,14 @@ Latest production-facing verification:
 
 ## Current Boundary
 
-The accepted production deployment profile, Pre-Pilot copied-project readiness, and first Phase 10
-attach/detach/cross-project recall slices have been implemented. The user-facing install/attach
+The accepted production deployment profile, Pre-Pilot copied-project readiness, first Phase 10
+attach/detach/cross-project recall slices, Product Acceptance smoke, user-facing install/attach
 path, AI-backed Management Chat baseline, target-aware `codex`/`generic` MCP config generation, and
-multi-client startup docs are also implemented. The attach path has now been regression-tested
-against the production-env host-project-id binding that exists on the owner server, and the PRD /
-TEST_CONTRACT acceptance rows are synchronized and green. Continue with production deploy
-verification, richer Management UI actions, optional sandbox local-cleanup hardening, or a
-server-side cleanup/repair flow for any sandbox that was attached before this fix.
+multi-client startup docs are implemented. The PRD / TEST_CONTRACT acceptance rows are synchronized
+and green for the first production-ready coding-agent slice. Continue from
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md): human workbench quality,
+AI-native management, project sources/memory spaces, client connect/hooks, more pilots, broader
+memory-domain design, and packaging/public readiness.
 
 Continue autonomously unless the next step requires a new owner decision, secrets that cannot be
 generated safely on the server, public exposure beyond `recallant.unicloud.ca` behind Cloudflare

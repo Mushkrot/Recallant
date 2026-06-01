@@ -1,10 +1,10 @@
 # Pilot Sandbox Workflow
 
-Last updated: 2026-05-28.
+Last updated: 2026-06-01.
 
 Use this workflow for copied-project pilots. The first GutenDocx copied-project pilot has completed.
-This manual workflow remains useful for cautious testing; Phase 10 should wrap the same safety checks
-inside `recallant attach --mode manual|guided|autopilot`.
+This manual workflow remains useful for cautious testing; the first Phase 10 attach slice now wraps
+the same safety checks inside `recallant attach --mode manual|guided|autopilot`.
 
 ## Recommended Sandbox Root
 
