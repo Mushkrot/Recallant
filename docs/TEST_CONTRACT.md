@@ -133,6 +133,9 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Review UI/admin API is not publicly exposed by default in the local/server test profile.
 - [x] Review UI/admin API requires Recallant auth/session/token even when bound to localhost/Tailnet.
 - [x] Browser/UI clients cannot read provider API keys or secret env values.
+- [x] Owner-server browser QA tooling is available on demand: global Playwright runs headless with
+  shared browser binaries under `/ai/playwright/browsers`, creates no service/listener, and can
+  capture screenshots for future Workbench layout tests.
 
 ## Phase 7
 

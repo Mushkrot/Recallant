@@ -73,8 +73,11 @@ Acceptance:
   capture state, memory-space source, and sharing/isolation policy.
 - Done: `npm run review-ui:smoke` verifies the Workbench layout contract and
   activity/capture fields.
-- Remaining: install or build a real screenshot/Playwright harness for
-  pixel-level desktop/mobile checks.
+- Done: server-wide Playwright `1.60.0` QA tooling is installed as an on-demand
+  CLI on the owner server, with shared browser binaries under
+  `/ai/playwright/browsers` and no service/listener.
+- Remaining: build Recallant-specific desktop/mobile screenshot/layout tests
+  that use the server Playwright tooling.
 
 ## Stage 2 - AI-Native Management Layer
 

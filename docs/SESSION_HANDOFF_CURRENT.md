@@ -16,6 +16,12 @@ scenario now passes for the first production-ready slice: a clean project can ru
 checkpoints, close out, recall that memory in a later session, show capture-active readiness in the
 Review UI/API, and detach safely without touching project files.
 
+Server-wide Playwright QA is now installed for Recallant Workbench and other browser UI checks:
+`/usr/local/bin/playwright` wraps the global Playwright CLI, uses shared browser binaries under
+`/ai/playwright/browsers`, and writes optional reports/screenshots under `/ai/playwright/reports`.
+It is an on-demand QA tool only; there is no `playwright*` systemd unit, no Playwright listener, and
+the installation is recorded in `/ai/SECURITY` plus `/ai/PORTS.yaml` with `ports: []`.
+
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
 live `/ai/gutendocx` project yet unless the owner explicitly chooses that next step. The safer next

@@ -79,6 +79,12 @@ Current implemented slices include:
   becomes useful, chat answers are capped in their own scroll area instead of pushing the whole
   page down, cost records are summarized with technical rows collapsed, and Russian risky-action
   chat responses no longer show English confirmation/action labels.
+- Server-wide Playwright QA tooling: global Playwright `1.60.0` is installed as an on-demand CLI on
+  the owner server. `/usr/local/bin/playwright` uses shared browser binaries under
+  `/ai/playwright/browsers`, with optional screenshots/reports under `/ai/playwright/reports`.
+  It is not a service, has no listener, and is documented in `/ai/SECURITY` plus
+  `/ai/PORTS.yaml` as `ports: []`. This enables future Recallant Workbench screenshot/layout QA
+  without making Playwright a runtime dependency.
 - Management chat target-safety pass: sandbox cleanup wording is now treated as a target-selection
   signal. If the open project is not the sandbox and exactly one sandbox/pilot project is visible,
   chat builds the dry-run command for that sandbox project instead of blindly using the open

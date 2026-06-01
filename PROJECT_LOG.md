@@ -2,10 +2,13 @@
 
 ## Current Session
 
-Status: Documentation alignment is complete after the human-centered Recallant direction update.
-Current focus: Docs now state the current truth: first production-ready coding-agent slice is green; Recallant is external memory for the owner and AI agents; projects are logical memory spaces with attached sources; future work follows the post-acceptance development plan.
-Next step: Continue implementation from `docs/DEVELOPMENT_PLAN_2026-06-01.md`, starting with human workbench quality and AI-native management.
-Last updated: 2026-06-01T14:50:53Z.
+Status: Server-wide Playwright QA tooling is installed for Recallant Workbench and other UI
+projects.
+Current focus: Recallant can now add real headless screenshot/layout QA on the owner server without
+requiring a desktop session or owner manual inspection.
+Next step: Add Recallant project-level Playwright screenshot/layout tests for the Workbench UI and
+wire them into the UI QA gate.
+Last updated: 2026-06-01T21:51:21Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -15,6 +18,10 @@ Last updated: 2026-06-01T14:50:53Z.
   changes still require owner participation.
 - On the owner server, consult `/ai/SECURITY` and `/ai/PORTS.yaml` before exposure/service/security
   changes.
+- Server-wide Playwright is available as an on-demand QA CLI at `/usr/local/bin/playwright`. It uses
+  shared browser binaries under `/ai/playwright/browsers`, writes optional reports under
+  `/ai/playwright/reports`, is not a systemd service, and should leave no listener or browser
+  process after tests finish.
 
 ## Recent Decisions
 
@@ -54,6 +61,8 @@ Last updated: 2026-06-01T14:50:53Z.
   or third-party model routers.
 - The forward plan after the green acceptance surface is documented in
   `docs/DEVELOPMENT_PLAN_2026-06-01.md`.
+- Playwright is accepted as the server-level visual QA layer for Workbench/browser UI checks. It is a
+  dev/QA tool, not a Recallant runtime dependency.
 
 ## Verification
 
