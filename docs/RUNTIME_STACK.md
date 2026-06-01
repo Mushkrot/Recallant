@@ -96,6 +96,7 @@ Observed current upstream stack patterns:
 - **Open Brain / OB1:** TypeScript/Deno/Supabase Edge Functions for core MCP/API surfaces, SQL schemas, plus JavaScript/Python/supporting assets in integrations and tooling.
 - **MF0-1984:** JavaScript/Node/Express/Vite single-language app with SQLite; no Python runtime in the core.
 - **MemPalace:** Python-first package and MCP server, with a small website/frontend layer.
+- **AgentMemory:** TypeScript/Node npm package with bundled build artifacts, MCP shim, hook scripts, client connect adapters, and a pinned iii-engine runtime.
 - **CaviraOSS/OpenMemory:** explicit Python + Node/TypeScript SDK/server ecosystem.
 - **Journey / Journey Kits:** workflow registry/API/kit format; relevant as packaging/onboarding layer rather than memory runtime. Public docs expose target-aware install and `kit.md`, not a memory-core runtime to copy.
 
@@ -104,6 +105,7 @@ Reference evidence:
 - OB1 `server/deno.json` imports `@hono/mcp`, `@modelcontextprotocol/sdk`, `hono`, `zod`, and `@supabase/supabase-js`.
 - MF0 `package.json` runs `node --env-file=.env server/api.mjs`, Vite, and SQLite/Postgres-related Node packages.
 - MemPalace `pyproject.toml` defines Python package entrypoints `mempalace` and `mempalace-mcp`, with Chroma as backend plugin.
+- AgentMemory `package.json` exposes the `agentmemory` CLI, TypeScript source, an MCP shim package, hook scripts, and connect adapters for several clients.
 - OpenMemory has both `packages/openmemory-js/package.json` and `packages/openmemory-py/pyproject.toml`.
 - Journey public site/API positions kits as installable agent workflows, not as a memory server runtime.
 

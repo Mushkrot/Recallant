@@ -4,6 +4,9 @@ Policy: **borrow proven ideas**, but own Recallant's contracts and schema. At th
 
 Current detailed research snapshot: [UPSTREAM_RESEARCH_2026-05-19.md](UPSTREAM_RESEARCH_2026-05-19.md).
 
+AgentMemory supplemental review:
+[UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md).
+
 Implementation-facing local review: [UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md](UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md).
 
 Important: Recallant architecture is not a license to copy upstream blindly. The SHAs below are research snapshots for reproducible analysis; they do not mean code should be transplanted without adaptation.
@@ -22,9 +25,10 @@ Before implementation, selected upstream repositories should be cloned or inspec
 |-------|----------------------------|--------------|
 | Governance / trust | OB1 | Provenance, review status, instruction-grade gates, source refs, recall traces, audit |
 | Raw evidence / workbench capture | MF0 | Preserve conversation/workflow evidence according to capture profile, use raw artifact pointers for large payloads, then derive summaries/memories |
+| Mandatory client capture | AgentMemory + MemPalace | Use hooks/connectors to prove agents actually start Recallant-backed sessions, capture prompts/tools/checkpoints, and close out without owner QA |
 | Review and long-term hygiene | OB1 + MF0 | Governed review model plus richer owner-facing UI, duplicate/conflict/rule management |
 | Memory graph / visual navigation | MF0 | Use as UX inspiration; map into Recallant-owned graph/data contracts |
-| Project onboarding/package | Journey + owner prior agent-bootstrap sketch + MF0 export/import | `recallant init`, thin repo files, future kit/profile export/import |
+| Project onboarding/package | Journey + AgentMemory + owner prior agent-bootstrap sketch + MF0 export/import | `recallant attach`, client `connect`, thin repo files, future kit/profile export/import |
 | Final contracts | Recallant | `DATA_MODEL.md`, `MCP_SPEC.md`, `INGESTION.md`, `MEMORY_MANAGEMENT.md`, `RETRIEVAL.md` |
 
 ## 1. NateBJones-Projects / OB1 (Open Brain)
@@ -111,7 +115,37 @@ Journey is not a memory engine foundation. It is relevant because Recallant need
 
 **Architecture decision:** do not use Journey as Recallant's memory foundation; use it to shape `recallant init`, future kit export, resolver hints, preflight, verification, and template versioning.
 
-## 6. OpenMemory by CaviraOSS (`CaviraOSS/OpenMemory`) — optional
+## 6. AgentMemory (`rohitg00/agentmemory`)
+
+**Role:** strong reference for **client connection UX, hook-based automatic
+capture, skill packaging, live viewer/replay, sandboxed retrieval benchmarks,
+and practical diagnostics**.
+
+AgentMemory is close to Recallant's owner-facing promise: coding agents should
+remember what happened without the owner manually saving everything. Its
+strongest lesson is not the storage model; it is the layer that makes many
+agents actually produce memory events.
+
+| Take | Skip |
+|------|------|
+| `connect <agent>` adapter pattern with detection, dry-run, backups, idempotent config merge, and clear MCP-only versus hook-enabled status | Treating client/global wiring as a replacement for Recallant project attach |
+| Codex/Claude/OpenCode hook payload mapping for SessionStart, UserPromptSubmit, PostToolUse, PreCompact, Stop, and related lifecycle events | Filesystem basename as authoritative project identity |
+| Native skills that teach agents when to recall, remember, recap, forget, and hand off | Large default MCP tool surface as Recallant's v1 API shape |
+| Live viewer/replay and capture visibility ideas | Replacing Recallant Review UI/governance with raw observation browsing |
+| Sandboxed eval harness with grep/BM25/hybrid comparison and commit-pinned scorecards | Benchmark claims without reproducing on Recallant workloads |
+| Cost-aware defaults: no hidden LLM compression or repeated context injection unless explicitly enabled | Automatic hard deletion/TTL semantics that bypass Recallant erasure policy |
+| `AGENT_ID` role tagging as input to Recallant scope/audience/client-adapter modelling | All-project shared memory by default |
+
+**Supplemental research snapshot:** `main` at
+`fd9e3bd42d6208a33f0ee9de1442fdbb60eab106`, package version `0.9.24`.
+
+**Implementation review:** see
+[UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md).
+
+**Implementation code pin:** not selected yet; record only if implementation
+code is adapted.
+
+## 7. OpenMemory by CaviraOSS (`CaviraOSS/OpenMemory`) — optional
 
 This was not part of the original "three", but it is useful for ideas around cognitive sectors, temporal facts, salience/decay/reinforcement, waypoints, SDK ergonomics, connectors, and explainable traces. Its README currently says the project is being rewritten; use it as prior art, not as a stable foundation.
 
@@ -128,13 +162,13 @@ This was not part of the original "three", but it is useful for ideas around cog
 
 **Implementation code pin:** not selected yet; record only if implementation code is adapted.
 
-## 7. OpenMemory by Mem0 (`mem0ai/mem0/openmemory`) — historical / do not build on directly
+## 8. OpenMemory by Mem0 (`mem0ai/mem0/openmemory`) — historical / do not build on directly
 
 This is a separate project from CaviraOSS/OpenMemory. Its README now says OpenMemory is being sunset and recommends Mem0 self-hosted instead. Keep it as historical prior art for local MCP memory UX and dashboard onboarding, but do not use the sunset package as Recallant foundation.
 
 **Research snapshot:** parent repo `843ab82905f7f04ca27ad7e73083e68bfab06c2d`.
 
-## 8. Reuse checklist (agents must complete)
+## 9. Reuse checklist (agents must complete)
 
 - [x] Pinned SHAs recorded above for implementation review
 - [x] Local upstream inspection performed before Phase 0; see [UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md](UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md)

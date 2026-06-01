@@ -12,13 +12,16 @@ Current working direction: **Open Brain / OB1 is the preferred architectural fou
 
 ## Source Snapshot
 
-Official sources were refreshed on 2026-05-19.
+Official sources were refreshed on 2026-05-19. AgentMemory was added as a
+supplemental source on 2026-06-01 after it appeared as a new relevant
+reference project.
 
 | Project | Official source | Snapshot revision / state | Reuse assumption |
 |---|---|---:|---|
 | Open Brain / OB1 | `https://github.com/NateBJones-Projects/OB1` | `main` at `151a8d1c922ffadad08399508efe46b207a5894e` | May be used/adapted as needed; evaluate only technical fit |
 | MemPalace | `https://github.com/MemPalace/mempalace`, `https://mempalaceofficial.com` | `develop` at `1b94f4efb4949765d6965936476c236df13fd108`; latest release observed `v3.3.5` | May be used/adapted as needed; evaluate only technical fit |
 | MF0-1984 | `https://github.com/PavelMuntyan/MF0-1984` | `main` at `9722af674bef7b85350617607db5dffd5e4ae6fe`; app version `1.9.28` | May be used/adapted as needed; evaluate only technical fit |
+| AgentMemory | `https://github.com/rohitg00/agentmemory` | `main` at `fd9e3bd42d6208a33f0ee9de1442fdbb60eab106`; package version `0.9.24` | May be used/adapted as a client-connect/hook-capture/eval reference |
 | OpenMemory by CaviraOSS | `https://github.com/CaviraOSS/OpenMemory`, `https://openmemory.cavira.app` | `main` at `de39bcd74c7d0a73982def1c052d0b69ecefd7f6`; README says project is being rewritten | May be used/adapted as needed; evaluate only technical fit |
 | OpenMemory by Mem0 | `https://github.com/mem0ai/mem0/tree/main/openmemory`, `https://mem0.ai/blog/introducing-openmemory-mcp` | parent repo `main` at `843ab82905f7f04ca27ad7e73083e68bfab06c2d`; OpenMemory README says it is being sunset | May be used/adapted as needed; evaluate only technical fit |
 | agent-bootstrap | owner's prior local prototype/sketch, external folder not required after transfer | `57d9b3f Initial bootstrap v1` | idea source only; not an external implemented upstream to copy |
@@ -39,6 +42,7 @@ The other projects should be mined for subsystem-level wins:
 
 - MemPalace: verbatim capture, hooks/sweep, temporal KG, hybrid retrieval, repair/recovery.
 - MF0-1984: Memory Tree UX, graph hygiene, keeper pipelines, project export/import, server-side provider proxy.
+- AgentMemory: multi-agent `connect` adapters, lifecycle hooks, skills, viewer/replay, sandboxed eval harnesses, and capture-active diagnostics.
 - CaviraOSS/OpenMemory: salience/decay/reinforcement, temporal facts, connectors, explainable traces.
 - Mem0 OpenMemory: historical local MCP onboarding ideas only.
 - agent-bootstrap: owner's early repo-contract sketch for durable handoff files; treat as prior Recallant thinking, not as a mature external upstream.
@@ -163,6 +167,74 @@ What not to take directly:
 - Product-specific SQLite schema as Recallant core.
 - UI modes (`Intro`, `Access`, `Rules`) as required Recallant concepts.
 - Any code path that bakes MF0 product-specific modes into Recallant core instead of treating them as optional UX/pipeline ideas.
+
+## AgentMemory
+
+Supplemental positioning as of 2026-06-01: a local-first persistent memory
+runtime for AI coding agents, powered by `iii-engine`, with broad MCP/plugin
+coverage across Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Copilot CLI,
+Hermes, OpenClaw, and other clients.
+
+AgentMemory is especially relevant because it solves a practical problem that
+Recallant must solve before it can be called fully automatic: it wires the
+agent client itself, not only a project directory. Its `connect <agent>` command
+updates client config, optional hooks, backups, and diagnostics. For Codex it
+can write MCP config to `~/.codex/config.toml` and, when requested, install a
+global hooks workaround in `~/.codex/hooks.json`.
+
+Core system:
+
+- npm package `@agentmemory/agentmemory`, CLI command `agentmemory`, and
+  standalone MCP shim `@agentmemory/mcp`.
+- Local server defaults around ports `3111` REST/MCP HTTP, `3112` streams,
+  `3113` viewer, and `49134` engine worker bus.
+- Client adapters under `src/cli/connect` for many agent hosts.
+- Hook scripts for session start, prompt submit, pre/post tool use,
+  pre-compaction, stop/session-end, subagent events, notifications, and other
+  client-specific lifecycle events.
+- Storage uses iii KV scopes plus search/vector indexes rather than
+  Postgres/pgvector.
+- Search combines BM25, optional vector embeddings, graph expansion, RRF
+  fusion, session diversification, and optional reranking.
+- Context generation composes project profile, pinned slots, lessons, summaries,
+  and important observations under a token budget.
+- Privacy filtering redacts common secret/API-key/token patterns before store.
+- Viewer/replay surfaces recent observations and timeline playback.
+- Eval harnesses compare grep/vector/agentmemory adapters on LongMemEval and a
+  coding-agent-life corpus in isolated sandboxes.
+
+What to take into Recallant:
+
+- Dedicated `recallant connect <client>` layer, separate from
+  `recallant attach .`.
+- Idempotent config merge with user-file backups, dry-run, detection, and clear
+  reporting.
+- Hook payload mapping for SessionStart, UserPromptSubmit, PostToolUse,
+  PreCompact, Stop, and client-specific equivalents.
+- Capture-active diagnostics that distinguish a registered project from a
+  project whose agent is actually writing memory.
+- Native skills/kit packaging so agents know when to call Recallant tools.
+- Replay/timeline UI and traceable "what was captured" status.
+- Sandboxed retrieval benchmarks with grep/BM25 baselines and commit-pinned
+  scorecards.
+- Cost-aware defaults: avoid hidden per-tool context injection or LLM
+  compression unless explicitly enabled.
+- `AGENT_ID`-style role tagging as input to Recallant's scope/audience model.
+
+What not to take directly:
+
+- Do not adopt iii-engine as Recallant runtime or replace the Postgres source
+  of truth.
+- Do not replace Recallant project registry and attach/detach lifecycle with
+  filesystem basename project detection.
+- Do not expose a 50+ tool MCP surface as the v1 default.
+- Do not copy automatic TTL/hard-delete semantics; Recallant keeps conservative
+  retention and explicit permanent erasure.
+- Do not treat all-project shared memory as the default. Recallant keeps
+  controlled cross-project recall.
+- Do not enable hidden startup/pre-tool context injection by default.
+
+Detailed review: [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md).
 
 ## OpenMemory by CaviraOSS
 
@@ -328,6 +400,8 @@ All systems eventually need isolation:
 - OB1 uses workspace/project/channel in agent memory sidecars.
 - OpenMemory has user_id/project_id.
 - MemPalace uses wings and per-project diaries.
+- AgentMemory uses a project string derived from env/Git/cwd, which is easy to
+  onboard but weaker than a durable project registry.
 - Recallant already has developer/project scope; keep it central.
 
 ### 6. Hooks and file contracts are both needed
@@ -338,12 +412,14 @@ Recallant should support:
 
 - MCP append/writeback during normal work
 - explicit session close/checkpoint
-- optional hooks/watchers for transcript capture
+- optional hooks/watchers for transcript capture, with AgentMemory as the
+  strongest current adapter reference
 - repo-native `PROJECT_LOG.md` fallback via `agent-bootstrap`.
 
 ### 7. Tool surface must stay small
 
-MemPalace shows what a powerful large tool surface looks like, but Recallant should not expose 29 tools in v1.
+MemPalace and AgentMemory show what powerful large tool surfaces look like, but
+Recallant should not expose dozens of tools in v1.
 
 Keep v1 compact:
 
@@ -371,6 +447,8 @@ Not final at low-level design, but updated by ADR-0004, ADR-0005, ADR-0016, ADR-
 9. **Hybrid retrieval** should combine Postgres lexical search, vector search, decay/salience, and bounded graph expansion.
 10. **Hooks/watchers** should be optional ingest paths after MCP append is working.
 11. **Review UI/admin** is v1 for governed-memory inbox/rules/conflicts/duplicates/source inspection; broader dashboards remain non-v1, except the later required Cost / Paid API dashboard from ADR-0032.
+12. **Client connect and hook capture** need a dedicated layer beyond project
+    attach. AgentMemory is the clearest reference for this.
 
 ## Follow-up Implementation Topics
 

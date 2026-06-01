@@ -10,6 +10,7 @@ Other reviewed systems remain active inputs:
 
 - MemPalace for verbatim capture, hooks/sweep, temporal KG, hybrid retrieval, and recovery posture.
 - MF0-1984 for workbench/Memory Tree UX, graph hygiene, keeper pipelines, and export/import patterns.
+- AgentMemory for client `connect` adapters, hook-based automatic capture, native skills, viewer/replay, capture-active diagnostics, and sandboxed retrieval evals.
 - OpenMemory for salience/decay/reinforcement, temporal facts, connectors, and explainable recall traces.
 - Journey / Journey Kits for packaging reusable workflows, install targets, preflight checks, resolver hints, shared context, and outcome/learning loops.
 

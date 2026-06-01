@@ -19,7 +19,8 @@ Current architectural bias:
 
 - **Open Brain / OB1** is the preferred foundation.
 - Accepted synthesis: combine OB1 governance with MF0 workbench/raw-capture/Memory Tree/Keeper ideas; Recallant owns the bridge through managed hybrid capture profiles, Review UI, context-budget policy, and local-server-first deployment.
-- Other reviewed systems remain active sources of subsystem ideas: MemPalace, OpenMemory, and Journey. `agent-bootstrap` is the owner's earlier personal sketch and remains useful as repo-contract inspiration, not as an external mature upstream.
+- Other reviewed systems remain active sources of subsystem ideas: MemPalace, AgentMemory, OpenMemory, and Journey. `agent-bootstrap` is the owner's earlier personal sketch and remains useful as repo-contract inspiration, not as an external mature upstream.
+- `rohitg00/agentmemory` is a reference for client `connect` adapters, hook-based automatic capture, skills, viewer/replay, capture-active diagnostics, and sandboxed retrieval evals. It does not replace Recallant's governed Postgres/project-lifecycle architecture.
 - Matthew Berman's **Journey / Journey Kits** is a reference for packaging and distributing reusable agent workflows.
 - Governed agent memory is part of v1, not a deferred phase-2 enhancement.
 - Owner-facing compact Review UI workbench for governed memory is part of v1, not a deferred nice-to-have.

@@ -55,13 +55,14 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 31. [SECURITY.md](SECURITY.md) — threats and safety rules.
 32. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
 33. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
-34. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
-35. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
-36. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant attach`, lower-level `init`, client connection, cross-project search.
-37. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
-38. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
-39. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
-40. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
+34. [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental AgentMemory reference review for client connect, hooks, skills, viewer/replay, and evals.
+35. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
+36. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
+37. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant attach`, lower-level `init`, client connection, cross-project search.
+38. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
+39. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
+40. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
+41. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
 
 ## ADR (Architecture Decision Records)
 
@@ -113,6 +114,7 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 ## Upstream research snapshots
 
 - [UPSTREAM_RESEARCH_2026-05-19.md](UPSTREAM_RESEARCH_2026-05-19.md) — current working snapshot of Open Brain / OB1, MemPalace, MF0-1984, OpenMemory, Journey, and the owner-authored `agent-bootstrap` sketch before the architecture rebuild.
+- [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental review of `rohitg00/agentmemory` as a client-connect, hook-capture, skills, viewer/replay, and eval-harness reference.
 
 Raw research dumps and old chat-derived notes are kept under [archive/README.md](archive/README.md). They are evidence, not canonical reading material.
 

@@ -207,6 +207,15 @@ The current Review permanent-forget follow-up is complete for selected governed 
   `/health` is OK, and authenticated Review HTML shows `Forget forever`, `/memory-forget`, and
   `Dry-run forget forever`.
 
+The current upstream reference set now includes `rohitg00/agentmemory` as of 2026-06-01:
+
+- local snapshot `.upstream/agentmemory` at `fd9e3bd42d6208a33f0ee9de1442fdbb60eab106`;
+- package version `0.9.24`;
+- added documentation: `docs/UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md`;
+- key lesson: AgentMemory is the strongest reference for client `connect`, hooks, native skills,
+  viewer/replay, capture-active diagnostics, and sandboxed retrieval evals, but it does not replace
+  Recallant's governed Postgres/project-lifecycle architecture.
+
 The current Settings UI follow-up is complete for the first editable project-settings slice:
 
 - Settings now shows browser forms for capture profile, context budget profile, review sensitivity,

@@ -19,7 +19,7 @@ Accepted refinement: Codex is the first adapter and working scenario, not the pr
 - **Open Brain / OB1 is the preferred architectural foundation.**
 - The accepted architecture direction is an **OB1/MF0 synthesis**: OB1 provides the governance backbone; MF0 provides workbench/raw-capture/Memory Tree/Keeper ideas; Recallant owns the integration layer.
 - Accepted refinement: raw workflow evidence is the lower factual foundation, while governed memory is the upper behavior layer. Recallant stores enough raw/session/tool evidence to recover, audit, reprocess, and review work, but agents normally receive bounded Context Packs and governed memories rather than raw archive dumps.
-- Recallant should still mine MemPalace, OpenMemory, and Journey for the best subsystem ideas. `agent-bootstrap` is different: it is the owner's earlier personal sketch/prototype for the same problem, useful as prior Recallant thinking and repo-contract inspiration, but not an external implemented upstream.
+- Recallant should still mine MemPalace, AgentMemory, OpenMemory, and Journey for the best subsystem ideas. `agent-bootstrap` is different: it is the owner's earlier personal sketch/prototype for the same problem, useful as prior Recallant thinking and repo-contract inspiration, but not an external implemented upstream.
 - Licensing is not a selection criterion at this stage for external upstream projects; all listed external projects may be used/adapted as needed where technically suitable.
 - Architecture is not fully finalized, but future work should not reopen a neutral "which project wins" contest unless new evidence invalidates the direction.
 - Matthew Berman's **Journey / Journey Kits** is now an upstream reference for packaging, installing, versioning, and distributing agent workflows. It is not the primary memory engine; see ADR-0008.
@@ -70,6 +70,7 @@ Start from OB1's architecture, then graft in stronger subsystem patterns. The mo
 Additional upstream donors remain:
 
 - MemPalace: verbatim capture, pre-compaction/session hooks, message sweep, temporal KG, hybrid retrieval, repair/recovery.
+- AgentMemory: client `connect` adapters, hook-based automatic capture, native skills, live viewer/replay, capture-active diagnostics, and sandboxed retrieval evals.
 - CaviraOSS/OpenMemory: salience, decay, reinforcement, temporal facts, connectors, explainable traces.
 - agent-bootstrap: owner-authored early sketch for `AGENTS.md`, `PROJECT_LOG.md`, durable repo handoff, and repo-native fallback contracts; use for ideas, not as proof of a complete implementation.
 - Journey / Journey Kits: workflow packaging, install targets, preflight checks, resolver hints, versioning, outcome/learning feedback loops.
