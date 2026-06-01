@@ -2,13 +2,12 @@
 
 ## Current Session
 
-Status: Server-wide Playwright QA tooling is installed for Recallant Workbench and other UI
-projects.
-Current focus: Recallant can now add real headless screenshot/layout QA on the owner server without
-requiring a desktop session or owner manual inspection.
-Next step: Add Recallant project-level Playwright screenshot/layout tests for the Workbench UI and
-wire them into the UI QA gate.
-Last updated: 2026-06-01T21:51:21Z.
+Status: Recallant Workbench now has a project-level Playwright screenshot/layout smoke.
+Current focus: UI QA can open a real headless Chromium browser, check desktop/mobile layout, submit
+Ask Recallant messages, and save screenshots without owner manual inspection.
+Next step: Use `npm run review-ui:playwright` as the browser-level gate for future Workbench UI
+changes, alongside `npm run review-ui:smoke`.
+Last updated: 2026-06-01T22:09:53Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -63,6 +62,10 @@ Last updated: 2026-06-01T21:51:21Z.
   `docs/DEVELOPMENT_PLAN_2026-06-01.md`.
 - Playwright is accepted as the server-level visual QA layer for Workbench/browser UI checks. It is a
   dev/QA tool, not a Recallant runtime dependency.
+- Recallant-specific browser QA is implemented as `npm run review-ui:playwright`. It starts a local
+  authenticated Recallant Workbench fixture on a random localhost port, checks desktop and mobile
+  layout in headless Chromium, submits long chat answers, verifies no horizontal overflow, and writes
+  screenshots under `/ai/playwright/reports`.
 
 ## Verification
 
@@ -70,6 +73,13 @@ Last updated: 2026-06-01T21:51:21Z.
 - `npm run lint`
 - `npm run format:check`
 - `npm run review-ui:smoke`
+- `npm run review-ui:playwright`
+- Playwright screenshots written to:
+  - `/ai/playwright/reports/recallant-workbench-desktop.png`
+  - `/ai/playwright/reports/recallant-workbench-desktop-chat.png`
+  - `/ai/playwright/reports/recallant-workbench-mobile-chat.png`
+- Host process/socket checks after Playwright smoke found no remaining `playwright`/browser process
+  and no Playwright-related listener.
 - isolated temporary Postgres on `127.0.0.1:55432` for Review UI smoke, then container removed
 - live `/project-detach` dry-run for `gutendocx-20260528T161238Z` after service restart; confirm
   button, selected project name/path, 18 active chunks, and 5 active memories rendered; project

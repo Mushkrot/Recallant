@@ -21,6 +21,10 @@ Server-wide Playwright QA is now installed for Recallant Workbench and other bro
 `/ai/playwright/browsers`, and writes optional reports/screenshots under `/ai/playwright/reports`.
 It is an on-demand QA tool only; there is no `playwright*` systemd unit, no Playwright listener, and
 the installation is recorded in `/ai/SECURITY` plus `/ai/PORTS.yaml` with `ports: []`.
+Recallant-specific browser QA is now implemented as `npm run review-ui:playwright`; it starts a
+local authenticated Workbench fixture, checks desktop/mobile layout and Ask Recallant readability in
+headless Chromium, writes screenshots under `/ai/playwright/reports`, and closes the browser/server
+after the run.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the

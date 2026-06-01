@@ -76,8 +76,10 @@ Acceptance:
 - Done: server-wide Playwright `1.60.0` QA tooling is installed as an on-demand
   CLI on the owner server, with shared browser binaries under
   `/ai/playwright/browsers` and no service/listener.
-- Remaining: build Recallant-specific desktop/mobile screenshot/layout tests
-  that use the server Playwright tooling.
+- Done: `npm run review-ui:playwright` runs a Recallant-specific headless
+  browser smoke against a local authenticated Workbench fixture, verifies
+  desktop/mobile overflow and Ask Recallant placement/readability, and saves
+  screenshots under `/ai/playwright/reports`.
 
 ## Stage 2 - AI-Native Management Layer
 

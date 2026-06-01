@@ -85,6 +85,11 @@ Current implemented slices include:
   It is not a service, has no listener, and is documented in `/ai/SECURITY` plus
   `/ai/PORTS.yaml` as `ports: []`. This enables future Recallant Workbench screenshot/layout QA
   without making Playwright a runtime dependency.
+- Recallant Workbench Playwright smoke: `npm run review-ui:playwright` starts a local authenticated
+  Workbench fixture on a random localhost port, verifies auth, desktop no-horizontal-scroll, central
+  Ask Recallant placement, long Russian chat-answer readability, mobile no-horizontal-scroll, and
+  mobile chat readability. It saves screenshots to `/ai/playwright/reports` and closes the browser
+  and server after the run.
 - Management chat target-safety pass: sandbox cleanup wording is now treated as a target-selection
   signal. If the open project is not the sandbox and exactly one sandbox/pilot project is visible,
   chat builds the dry-run command for that sandbox project instead of blindly using the open

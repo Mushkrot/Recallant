@@ -136,6 +136,9 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 - [x] Owner-server browser QA tooling is available on demand: global Playwright runs headless with
   shared browser binaries under `/ai/playwright/browsers`, creates no service/listener, and can
   capture screenshots for future Workbench layout tests.
+- [x] Recallant Workbench has a project-level browser smoke: `npm run review-ui:playwright` verifies
+  authenticated desktop/mobile layout, central Ask Recallant placement, long chat answer readability,
+  and no horizontal overflow, then saves screenshots under `/ai/playwright/reports`.
 
 ## Phase 7
 
