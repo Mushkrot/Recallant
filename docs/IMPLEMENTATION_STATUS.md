@@ -72,6 +72,10 @@ Current implemented slices include:
   in the owner's language, summarizes project status in plain language, explains review/settings/
   cost/context-pack/cross-project recall topics, and converts cleanup/destructive/sensitive requests
   into dry-run plus confirmation-required action proposals without executing them directly.
+- Management Chat AI-path smoke: `npm run management-chat-ai:smoke` verifies the local-AI
+  interpreter route through a mock Ollama endpoint, including colloquial Russian sandbox cleanup,
+  ambiguous sandbox-target clarification without a runnable risky command, and developer-wide rule
+  creation from non-exact wording.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.
@@ -394,6 +398,8 @@ Latest Workbench validation on 2026-06-01:
 - Stage 2 Management Chat result-type validation used the same checks plus the strengthened
   `npm run review-ui:smoke` result-type, project-connection, memory-summary, rule-diagnostics,
   cross-project lookup, and policy-block assertions
+- Stage 2 AI-path validation: `npm run management-chat-ai:smoke` passed against a mock Ollama
+  endpoint and verified semantic interpretation plus server-policy gating
 - Stage 3 source-binding validation: clean `make db-reset`, `npm run schema:smoke`,
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`

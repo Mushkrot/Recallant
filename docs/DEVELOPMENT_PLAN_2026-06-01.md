@@ -137,8 +137,13 @@ Acceptance:
   check whether a project is actually recording, show what the agent remembered,
   explain why a rule is not applying, and route Google Drive/example lookup
   requests to controlled cross-project recall guidance.
-- Remaining: broaden live local-AI semantic tests beyond deterministic fallback
-  and strengthen multi-project clarification UX.
+- Done: `npm run management-chat-ai:smoke` runs the Management Chat interpreter
+  through a mock Ollama endpoint to prove the local-AI path handles meaning that
+  deterministic keywords do not cover: colloquial Russian sandbox cleanup,
+  ambiguous sandbox targets, and developer-wide rule capture from non-exact
+  wording.
+- Remaining: broaden live local-AI semantic tests against real installed models
+  and continue improving multi-project clarification UX.
 
 ## Stage 3 - Project Sources And Memory Spaces
 

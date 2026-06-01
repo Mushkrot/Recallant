@@ -502,6 +502,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   block result types.
 - The chat fallback now recognizes common owner questions about project connection/capture status,
   what the agent remembered, why a rule is not applying, and Google Drive/example lookups.
+- Follow-up AI-path validation: `npm run management-chat-ai:smoke` uses a mock Ollama endpoint to
+  verify local-AI semantic interpretation for colloquial Russian sandbox cleanup, ambiguous sandbox
+  target clarification, and developer-wide rule creation from non-exact wording.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 
@@ -567,6 +570,7 @@ Latest validation for the Workbench/source/chat follow-up slice:
 - `git diff --check`
 - `npm run review-ui:smoke`
 - `npm run review-ui:playwright`
+- `npm run management-chat-ai:smoke`
 - `npm run project-sources:smoke`
 - `npm run product-acceptance:smoke`
 - `npm run connect:smoke`
