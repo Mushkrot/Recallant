@@ -575,6 +575,17 @@ async function readProjectConfig(projectDir: string) {
   }
 }
 
+function captureStatusFromState(state: AgentSessionState | null) {
+  if (!state) return "not_observed";
+  if (state.last_context_read_at && state.last_memory_write_at && state.last_checkpoint_at) {
+    return "capture_active";
+  }
+  if (state.last_context_read_at || state.last_memory_write_at || state.last_checkpoint_at) {
+    return "capture_partial";
+  }
+  return state.status === "active" ? "session_started" : "not_observed";
+}
+
 async function readProjectContextProfile(projectDir: string) {
   if (!process.env.RECALLANT_DATABASE_URL) return null;
   const config = await readProjectConfig(projectDir);
@@ -2383,6 +2394,96 @@ async function runPruneSpool(argv: readonly string[]) {
   );
 }
 
+async function resolveConnectDeveloperId(input: { projectId: string }) {
+  if (process.env.RECALLANT_DEVELOPER_ID) return process.env.RECALLANT_DEVELOPER_ID;
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    throw new Error(
+      "VALIDATION_ERROR: connect requires RECALLANT_DEVELOPER_ID or RECALLANT_DATABASE_URL"
+    );
+  }
+  try {
+    const binding = await database.getProjectBinding(input.projectId);
+    if (!binding) {
+      throw new Error(
+        `VALIDATION_ERROR: project ${input.projectId} is not registered in Recallant`
+      );
+    }
+    return binding.developer_id;
+  } finally {
+    await database.close();
+  }
+}
+
+async function runConnect(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
+  const dryRun = argv.includes("--dry-run");
+  const config = await readProjectConfig(dir);
+  if (!config?.project_id) {
+    throw new Error(
+      "VALIDATION_ERROR: connect requires an attached project with .recallant/config"
+    );
+  }
+  const developerId = await resolveConnectDeveloperId({
+    projectId: config.project_id
+  });
+  const targetConfig = clientTargetConfig(target, config.project_id, developerId);
+  const targetPath = join(dir, targetConfig.config_file);
+  const desired = `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`;
+  const existing = await readOptional(targetPath);
+  const same = existing === desired;
+  const state = await readAgentSessionState(dir);
+  const backupPath =
+    existing && !same
+      ? join(
+          recallantDir(dir),
+          "backups",
+          `connect-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+          targetConfig.config_file.replace(/[\\/]/g, "__")
+        )
+      : null;
+  const plannedChanges = same
+    ? [{ action: "no_change", path: targetConfig.config_file }]
+    : [
+        ...(backupPath ? [{ action: "backup_file", path: backupPath }] : []),
+        { action: "write_file", path: targetConfig.config_file }
+      ];
+  if (!dryRun && !same) {
+    if (backupPath && existing !== null) {
+      await mkdir(backupPath.split("/").slice(0, -1).join("/"), { recursive: true });
+      await writeFile(backupPath, existing);
+    }
+    await mkdir(join(dir, targetConfig.config_file).split("/").slice(0, -1).join("/"), {
+      recursive: true
+    });
+    await writeFile(targetPath, desired);
+  }
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "connect",
+        dry_run: dryRun,
+        client: targetConfig.target,
+        project_id: config.project_id,
+        developer_id: developerId,
+        connection_status: "mcp_only",
+        hook_status: "not_installed",
+        capture_status: captureStatusFromState(state),
+        writes_files: !dryRun && !same,
+        writes_global_config: false,
+        planned_changes: plannedChanges,
+        config_file: targetConfig.config_file,
+        setup_hint: targetConfig.setup_hint,
+        mcp_config: targetConfig.mcp_config
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 function parseProjectSourceKind(raw: string | undefined): ProjectSourceKind {
   const value = raw ?? "workspace_path";
   const allowed: ProjectSourceKind[] = [
@@ -2554,6 +2655,7 @@ async function main(argv: readonly string[]) {
   }
   if (command === "doctor") return runDoctor(argv);
   if (command === "attach") return runAttach(argv);
+  if (command === "connect") return runConnect(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
   if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
   if (command === "source" || command === "project-source") return runSourceCommand(argv);
@@ -2579,7 +2681,7 @@ async function main(argv: readonly string[]) {
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|connect|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

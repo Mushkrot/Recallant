@@ -307,6 +307,19 @@ recallant.service`, local `/health`, and authenticated Review route check for
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`.
 
+## 2026-06-01 Stage 4 Connect CLI First Slice
+
+- Added `recallant connect <client>` as a separate lifecycle command from `attach`.
+- First slice manages project-local MCP config and reports:
+  `connection_status=mcp_only`, `hook_status=not_installed`, and `capture_status`.
+- `connect --dry-run` shows exact planned file changes and does not write files.
+- `connect` is idempotent. Since `attach` still writes `.recallant/codex-mcp.json` for
+  compatibility, `connect codex` normally reports `no_change` after attach.
+- Non-Codex clients currently use the generic MCP config fallback.
+- The command does not write global client config or install hooks yet; that remains the next Stage
+  4 implementation slice.
+- Added `npm run connect:smoke`; targeted smoke and full `npm run smoke:core` passed.
+
 ## Open Questions
 
 - None recorded.

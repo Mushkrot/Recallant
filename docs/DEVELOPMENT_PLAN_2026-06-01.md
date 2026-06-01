@@ -189,6 +189,24 @@ Acceptance:
 - Product Acceptance covers at least Codex deeply and one additional client
   enough to prove the universal path.
 
+2026-06-01 first implementation slice:
+
+- Done: `recallant connect <client>` exists as a separate command from
+  `attach`.
+- Done: first slice writes/verifies project-local MCP config and reports
+  `connection_status=mcp_only`, `hook_status=not_installed`, and
+  `capture_status`.
+- Done: `connect --dry-run` shows exact planned file changes and writes
+  nothing.
+- Done: Codex connect is idempotent after attach because attach still creates
+  `.recallant/codex-mcp.json` for compatibility.
+- Done: non-Codex clients use the generic MCP fallback until dedicated writers
+  are implemented.
+- Done: `npm run connect:smoke` verifies sandbox attach, Codex dry-run/
+  idempotency, actual connect, and Claude Code/generic fallback dry-run.
+- Remaining: safe global/client config writers, local backups for global config,
+  hook install, fail-soft hook capture/spooling, and `doctor --require-capture`.
+
 ## Stage 5 - More Real Pilots
 
 Goal: validate Recallant against realistic projects without risking production

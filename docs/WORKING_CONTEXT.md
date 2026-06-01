@@ -17,6 +17,9 @@ documents, future connectors, and virtual/manual topics are sources attached to 
 The first physical source-binding slice is implemented: `project_sources` stores attached sources,
 folder-backed project registration creates a primary `workspace_path` source, and the CLI exposes
 `memory-space create|list` plus `source attach|list|detach`.
+The first client-connect slice is implemented: `recallant connect <client>` is separate from
+`attach`, verifies/writes project-local MCP config, reports MCP-only versus hook status, and remains
+idempotent for Codex after attach.
 
 Current daily workflow is mostly **Codex-first**, but Recallant must stay multi-client-ready because switching between agents may return later and MCP keeps the architecture portable.
 

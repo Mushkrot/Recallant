@@ -305,6 +305,20 @@ Stage 3 first slice is now implemented:
   bindings, source detach, automatic primary workspace source creation, and dashboard source
   visibility.
 
+Stage 4 first slice is now implemented:
+
+- Added `recallant connect <client>` as a separate lifecycle command from `recallant attach`.
+- The first implementation writes or verifies project-local MCP config and reports
+  `connection_status=mcp_only`, `hook_status=not_installed`, and capture observation state.
+- `connect --dry-run` reports exact planned file changes and writes nothing.
+- `connect` is idempotent. For Codex, `attach` already creates `.recallant/codex-mcp.json` for
+  compatibility, so `connect codex` normally reports `no_change`; non-Codex clients use the generic
+  MCP fallback until dedicated global/client config writers are added.
+- The command does not write global client config or install hooks yet. That remains the next Stage
+  4 slice.
+- `npm run connect:smoke` covers sandbox attach, Codex dry-run/idempotency, actual connect, and
+  Claude Code/generic fallback dry-run.
+
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
 ## Recent Commit Checkpoints
@@ -341,6 +355,7 @@ Latest Workbench validation on 2026-06-01:
 - Stage 3 source-binding validation: clean `make db-reset`, `npm run schema:smoke`,
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`
+- Stage 4 connect validation: `npm run connect:smoke` and full `npm run smoke:core`
 
 Latest contract-hardening validation on 2026-05-31:
 

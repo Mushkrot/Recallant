@@ -315,6 +315,14 @@ Prepare a fixture of three synthetic events with overlapping lexical and semanti
 
 - [x] Two MCP clients, for example Cursor plus another client, with the same `RECALLANT_PROJECT_ID`: append in A, search in B finds the same fact by query.
 
+## Client Connect Smoke
+
+- [x] `recallant connect <client> --dry-run` reports exact planned file changes and writes nothing.
+- [x] `recallant connect codex` is idempotent after attach and reports MCP-only, hook status, and
+  capture observation state.
+- [x] A non-Codex target such as Claude Code uses the generic MCP fallback until dedicated client
+  config writers are implemented.
+
 ## Repo contract sync
 
 - [x] After `memory_set_checkpoint`, fields `current_focus` and `next_step` are reflected in `PROJECT_LOG.md` according to [REPO_CONTRACT.md](REPO_CONTRACT.md) within the configured repo-sync freshness budget, or async reason is documented and test-profile polling is allowed.

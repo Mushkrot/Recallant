@@ -504,12 +504,26 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   dashboard source visibility.
 - Full `npm run smoke:core` passed after the Stage 3 source-binding migration and CLI/API changes.
 
+2026-06-01 Stage 4 Connect CLI first slice is implemented.
+
+- `recallant connect <client>` now exists as a separate lifecycle command from `attach`.
+- It writes or verifies project-local MCP config and reports `connection_status=mcp_only`,
+  `hook_status=not_installed`, and capture observation state.
+- `connect --dry-run` reports exact planned file changes and writes nothing.
+- Codex connect is idempotent after attach because attach still creates `.recallant/codex-mcp.json`
+  for compatibility.
+- Non-Codex clients currently use the generic MCP config fallback.
+- This slice does not write global client config or install hooks yet.
+- `npm run connect:smoke` and full `npm run smoke:core` passed.
+
 Next autonomous work after this checkpoint:
 
 - Stage 2: continue strengthening AI-native intent coverage and clarification flows while keeping
   server policy as the execution authority.
 - Stage 3: continue source-aware context-pack provenance, richer source health/status, and UI flows
   for creating/attaching sources directly from the Workbench.
+- Stage 4: add real client/global config writers where safe, local backups for global/client files,
+  hook installation where supported, fail-soft capture spooling, and `doctor --require-capture`.
 - Add a real Playwright/screenshot harness when dependency/tooling work is appropriate; current UI
   visual regression coverage is the strengthened smoke layout contract.
 
