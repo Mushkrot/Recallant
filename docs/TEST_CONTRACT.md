@@ -11,6 +11,8 @@ No phase in [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) is co
 - [x] `migrate up` succeeds on an empty Postgres database.
 - [x] Extension `vector` exists.
 - [x] `projects` table includes `parent_project_id`, `project_kind`, and `memory_domain`.
+- [x] `project_sources` table exists for memory-space source bindings and includes
+  `source_kind`, `label`, `uri`, `is_primary`, `status`, and safe `metadata`.
 - [x] `raw_artifacts` table exists and links large raw evidence to `events`.
 - [x] `sessions` table includes heartbeat fields: `last_heartbeat_at`, `heartbeat_status`, and `heartbeat_metadata`.
 - [x] Tables for governed memory exist: `agent_memories`, `agent_memory_source_refs`, `agent_memory_review_actions`, `recall_traces`.

@@ -286,6 +286,25 @@ Stage 2 first slice is now implemented:
   creation, cleanup dry-run, paid/public/connector/global-setting confirmation gates, and secret
   policy blocking.
 
+Stage 3 first slice is now implemented:
+
+- The database schema now includes `project_sources` as the source-binding layer for logical memory
+  spaces.
+- `projects.primary_path` remains the compatibility/display fallback.
+- `ensureProject` and `registerProject` now create or refresh a primary `workspace_path` source when
+  a folder-backed project is used.
+- DB APIs now support creating a memory space with zero sources, attaching/listing/detaching
+  sources, and listing memory spaces with source bindings.
+- CLI first slice:
+  - `recallant memory-space create|list`
+  - `recallant source attach|list|detach`
+- The Workbench Memory Spaces view uses attached sources when available and still works against an
+  older schema by falling back to `primary_path`.
+- Detaching one source marks the source detached without deleting the memory space or its memories.
+- `npm run project-sources:smoke` covers a virtual memory space with zero sources, multiple source
+  bindings, source detach, automatic primary workspace source creation, and dashboard source
+  visibility.
+
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
 ## Recent Commit Checkpoints
@@ -319,6 +338,9 @@ Latest Workbench validation on 2026-06-01:
   dangerous setting confirmation, review actions, cleanup/detach, and forget-forever coverage
 - Stage 2 Management Chat result-type validation used the same checks plus the strengthened
   `npm run review-ui:smoke` result-type and policy-block assertions
+- Stage 3 source-binding validation: clean `make db-reset`, `npm run schema:smoke`,
+  `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
+  `npm run smoke:core`
 
 Latest contract-hardening validation on 2026-05-31:
 

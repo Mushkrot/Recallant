@@ -145,6 +145,23 @@ Acceptance:
 - Detaching a source does not erase the project memory.
 - Agents can ask "which source did this come from?" and get a clear answer.
 
+2026-06-01 first implementation slice:
+
+- Done: `project_sources` table exists in the initial schema.
+- Done: folder-backed `ensureProject` / `registerProject` create or refresh a
+  primary `workspace_path` source.
+- Done: DB APIs can create memory spaces with zero sources, attach/list/detach
+  sources, and list memory spaces with source bindings.
+- Done: CLI first slice supports `recallant memory-space create|list` and
+  `recallant source attach|list|detach`.
+- Done: Workbench Memory Spaces shows attached sources when available and falls
+  back to `primary_path` when running against an older schema.
+- Done: `npm run project-sources:smoke` verifies zero-source virtual memory
+  space creation, multiple sources, source detach without memory deletion, and
+  dashboard source visibility.
+- Remaining: source-aware context-pack provenance, source health/status, richer
+  Workbench source-management forms, and search/review source filters.
+
 ## Stage 4 - Client Connect And Hook Capture
 
 Goal: make agents automatically use Recallant, not merely have a generated MCP

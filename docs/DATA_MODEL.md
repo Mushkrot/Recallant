@@ -52,6 +52,11 @@ architecture should support multiple sources attached to one project memory spac
 folder/repo/server/document/connector/manual binding, not a separate project unless the owner wants
 separate memory isolation.
 
+Implementation status: first slice implemented on 2026-06-01. `project_sources` exists in the
+initial schema, folder-backed project registration creates a primary `workspace_path` source, and
+the CLI exposes first source-management commands. `projects.primary_path` remains the compatibility
+fallback.
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | `project_source_id` |

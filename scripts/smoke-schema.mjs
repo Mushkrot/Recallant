@@ -40,6 +40,17 @@ try {
   const projects = await tableColumns("projects");
   requireColumns("projects", projects, ["parent_project_id", "project_kind", "memory_domain"]);
 
+  const projectSources = await tableColumns("project_sources");
+  requireColumns("project_sources", projectSources, [
+    "project_id",
+    "source_kind",
+    "label",
+    "uri",
+    "is_primary",
+    "status",
+    "metadata"
+  ]);
+
   const rawArtifacts = await tableColumns("raw_artifacts");
   requireColumns("raw_artifacts", rawArtifacts, [
     "source_event_id",
@@ -72,7 +83,8 @@ try {
     "project_settings",
     "session_overrides",
     "client_adapter_settings",
-    "settings_audit_events"
+    "settings_audit_events",
+    "project_sources"
   ];
   const tables = await client.query(
     `

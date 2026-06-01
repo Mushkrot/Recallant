@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { createRecallantDbFromEnv } from "@recallant/db";
-import type { JsonObject, RawArtifactInput } from "@recallant/db";
+import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
 import {
@@ -118,7 +118,16 @@ function positionalArgs(argv: readonly string[]) {
     "--title",
     "--context-profile",
     "--override-reason",
-    "--reason"
+    "--reason",
+    "--name",
+    "--project-kind",
+    "--memory-domain",
+    "--primary-path",
+    "--project-id",
+    "--source-kind",
+    "--source-id",
+    "--label",
+    "--uri"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -2374,6 +2383,168 @@ async function runPruneSpool(argv: readonly string[]) {
   );
 }
 
+function parseProjectSourceKind(raw: string | undefined): ProjectSourceKind {
+  const value = raw ?? "workspace_path";
+  const allowed: ProjectSourceKind[] = [
+    "workspace_path",
+    "repo",
+    "server_path",
+    "document_collection",
+    "connector",
+    "manual",
+    "virtual",
+    "other"
+  ];
+  if (!allowed.includes(value as ProjectSourceKind)) {
+    throw new Error(`VALIDATION_ERROR: invalid source kind ${value}`);
+  }
+  return value as ProjectSourceKind;
+}
+
+function parseProjectKind(raw: string | undefined) {
+  const value = raw ?? "other";
+  const allowed = ["repo", "subproject", "workspace", "personal_domain", "other"];
+  if (!allowed.includes(value)) throw new Error(`VALIDATION_ERROR: invalid project kind ${value}`);
+  return value as "repo" | "subproject" | "workspace" | "personal_domain" | "other";
+}
+
+async function runMemorySpace(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for memory-space commands");
+  try {
+    if (subcommand === "create") {
+      const name =
+        parseFlag(argv, "--name") ?? positionalArgs(argv).find((arg) => arg !== "create");
+      if (!name) throw new Error("VALIDATION_ERROR: memory-space create requires --name");
+      const primaryPath = parseFlag(argv, "--primary-path");
+      const space = await database.createMemorySpace({
+        name,
+        projectKind: parseProjectKind(parseFlag(argv, "--project-kind")),
+        memoryDomain: parseFlag(argv, "--memory-domain") ?? "agent_work",
+        primaryPath: primaryPath ? resolve(primaryPath) : null
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_create",
+            memory_space: space,
+            writes_database: true
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const spaces = await database.listMemorySpaces();
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_list",
+            count: spaces.length,
+            memory_spaces: spaces
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: memory-space supports create|list");
+  } finally {
+    await database.close();
+  }
+}
+
+async function runSourceCommand(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for source commands");
+  try {
+    if (subcommand === "attach") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId) throw new Error("VALIDATION_ERROR: source attach requires --project-id");
+      const sourceKind = parseProjectSourceKind(parseFlag(argv, "--source-kind"));
+      const rawUri = parseFlag(argv, "--uri");
+      const uri =
+        rawUri && ["workspace_path", "server_path"].includes(sourceKind) ? resolve(rawUri) : rawUri;
+      const label =
+        parseFlag(argv, "--label") ??
+        (uri ? uri.split("/").filter(Boolean).at(-1) : undefined) ??
+        `${sourceKind} source`;
+      const source = await database.attachProjectSource({
+        project_id: projectId,
+        source_kind: sourceKind,
+        label,
+        uri: uri ?? null,
+        is_primary: argv.includes("--primary"),
+        status: "active",
+        metadata: { created_by: "recallant-cli" }
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "source_attach",
+            source,
+            writes_database: true
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId) throw new Error("VALIDATION_ERROR: source list requires --project-id");
+      const sources = await database.listProjectSources(projectId);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "source_list",
+            project_id: projectId,
+            count: sources.length,
+            sources
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "detach") {
+      const sourceId = parseFlag(argv, "--source-id");
+      if (!sourceId) throw new Error("VALIDATION_ERROR: source detach requires --source-id");
+      const source = await database.detachProjectSource({
+        source_id: sourceId,
+        reason: parseFlag(argv, "--reason") ?? "recallant source detach"
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: Boolean(source),
+            action: "source_detach",
+            source,
+            writes_database: Boolean(source)
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: source supports attach|list|detach");
+  } finally {
+    await database.close();
+  }
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
@@ -2384,6 +2555,8 @@ async function main(argv: readonly string[]) {
   if (command === "doctor") return runDoctor(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
+  if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
+  if (command === "source" || command === "project-source") return runSourceCommand(argv);
   if (command === "local-cleanup" || command === "sandbox-local-cleanup")
     return runLocalCleanup(argv);
   if (command === "init") return runInit(argv);
@@ -2406,7 +2579,7 @@ async function main(argv: readonly string[]) {
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|detach|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

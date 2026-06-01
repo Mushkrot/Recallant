@@ -351,6 +351,7 @@ try {
     "Memory Spaces",
     "Activity / Replay",
     "Project Actions",
+    "1 active source",
     "Import Candidates",
     "Selected Detail",
     "Evidence excerpts",
@@ -471,7 +472,12 @@ try {
     !Array.isArray(json.recent_activity) ||
     !json.recent_activity.some((row) => row.activity_kind === "context_read") ||
     !json.recent_activity.some((row) => row.activity_kind === "memory_write") ||
-    !json.projects.some((project) => project.project_id === projectId && project.last_context_read_at) ||
+    !json.projects.some(
+      (project) =>
+        project.project_id === projectId &&
+        project.last_context_read_at &&
+        project.sources?.some((source) => source.source_kind === "workspace_path")
+    ) ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"
     ) ||

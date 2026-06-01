@@ -482,12 +482,34 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   paid/public/connector/global-setting confirmation, sandbox cleanup targeting, and secret policy
   block result types.
 
+2026-06-01 Stage 3 Project Sources first slice is implemented.
+
+- The schema now includes `project_sources` as the physical source-binding table.
+- `projects.primary_path` remains a compatibility/display fallback.
+- `ensureProject` and `registerProject` create or refresh a primary `workspace_path` source for
+  folder-backed projects.
+- DB APIs now support:
+  - creating a memory space with zero sources;
+  - attaching a source to a memory space;
+  - listing sources;
+  - detaching one source without deleting memory space memory;
+  - listing memory spaces with source bindings.
+- CLI first slice:
+  - `recallant memory-space create|list`
+  - `recallant source attach|list|detach`
+- Workbench Memory Spaces shows attached source information when available and falls back safely to
+  `primary_path`.
+- `npm run project-sources:smoke` verifies virtual memory space creation, zero-source state,
+  multiple source bindings, source detach, automatic primary workspace source creation, and
+  dashboard source visibility.
+- Full `npm run smoke:core` passed after the Stage 3 source-binding migration and CLI/API changes.
+
 Next autonomous work after this checkpoint:
 
 - Stage 2: continue strengthening AI-native intent coverage and clarification flows while keeping
   server policy as the execution authority.
-- Stage 3: implement the physical `project_sources` binding layer, memory spaces with zero or
-  multiple sources, and source-aware CLI/UI flows.
+- Stage 3: continue source-aware context-pack provenance, richer source health/status, and UI flows
+  for creating/attaching sources directly from the Workbench.
 - Add a real Playwright/screenshot harness when dependency/tooling work is appropriate; current UI
   visual regression coverage is the strengthened smoke layout contract.
 

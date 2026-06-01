@@ -287,6 +287,26 @@ recallant.service`, local `/health`, and authenticated Review route check for
   `git diff --check`, and `npm run review-ui:smoke` against the dev Postgres service on
   `127.0.0.1:15433`.
 
+## 2026-06-01 Stage 3 Project Sources Checkpoint
+
+- Added the `project_sources` table as the physical source-binding layer for memory spaces.
+- `projects.primary_path` remains the compatibility/display fallback.
+- `ensureProject` and `registerProject` now create or refresh a primary `workspace_path` source for
+  folder-backed projects.
+- Added DB methods for creating memory spaces, attaching/listing/detaching project sources, and
+  listing memory spaces with sources.
+- Added CLI commands:
+  - `recallant memory-space create|list`
+  - `recallant source attach|list|detach`
+- Workbench Memory Spaces now shows attached source information when available, with a safe fallback
+  to `primary_path`.
+- Added `npm run project-sources:smoke`; it verifies virtual memory spaces with zero sources,
+  multiple source bindings, detach-without-delete, automatic primary workspace source creation, and
+  dashboard source visibility.
+- Verification passed so far: clean `make db-reset`, `npm run schema:smoke`,
+  `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
+  `npm run smoke:core`.
+
 ## Open Questions
 
 - None recorded.

@@ -14,6 +14,9 @@ Accepted refinement as of 2026-06-01: Recallant should be understood as external
 owner, accessed through agents. Coding-agent memory is the first domain, not the final boundary. A
 project is a logical memory space, not necessarily a folder; folders, repositories, server paths,
 documents, future connectors, and virtual/manual topics are sources attached to that memory space.
+The first physical source-binding slice is implemented: `project_sources` stores attached sources,
+folder-backed project registration creates a primary `workspace_path` source, and the CLI exposes
+`memory-space create|list` plus `source attach|list|detach`.
 
 Current daily workflow is mostly **Codex-first**, but Recallant must stay multi-client-ready because switching between agents may return later and MCP keeps the architecture portable.
 

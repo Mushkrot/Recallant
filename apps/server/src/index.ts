@@ -964,10 +964,42 @@ function captureState(row: Record<string, unknown>) {
 }
 
 function sourceLabel(row: Record<string, unknown>) {
+  const sources = Array.isArray(row.sources) ? (row.sources as Array<Record<string, unknown>>) : [];
+  const primarySource =
+    sources.find((source) => source.is_primary === true && source.status === "active") ??
+    sources.find((source) => source.status === "active") ??
+    sources[0];
+  if (primarySource) {
+    return `${sourceKindLabel(primarySource.source_kind)}: ${String(primarySource.label ?? primarySource.uri ?? "Unnamed source")}`;
+  }
   const path = row.primary_path;
   if (path) return `Workspace folder: ${String(path)}`;
   if (row.project_kind === "personal_domain") return "Virtual personal memory space";
   return "No attached source is recorded yet";
+}
+
+function sourceKindLabel(value: unknown) {
+  const labels: Record<string, string> = {
+    workspace_path: "Workspace folder",
+    repo: "Repository",
+    server_path: "Server path",
+    document_collection: "Document collection",
+    connector: "Connector",
+    manual: "Manual source",
+    virtual: "Virtual source",
+    other: "Source"
+  };
+  return labels[String(value ?? "")] ?? "Source";
+}
+
+function attachedSourceSummary(row: Record<string, unknown>) {
+  const sources = Array.isArray(row.sources) ? (row.sources as Array<Record<string, unknown>>) : [];
+  if (sources.length === 0) return "No attached sources yet";
+  const active = sources.filter((source) => source.status === "active");
+  const detached = sources.filter((source) => source.status === "detached");
+  const parts = [`${active.length} active source${active.length === 1 ? "" : "s"}`];
+  if (detached.length > 0) parts.push(`${detached.length} detached`);
+  return parts.join(", ");
 }
 
 function sharingPolicy(row: Record<string, unknown>) {
@@ -995,6 +1027,7 @@ function renderMemorySpaces(data: ReviewDashboardData) {
               <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
             </div>
             <p>${escapeHtml(sourceLabel(row))}</p>
+            <p>${escapeHtml(attachedSourceSummary(row))}</p>
             <p>${escapeHtml(sharingPolicy(row))}</p>
             <div class="metrics">
               <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
@@ -1007,7 +1040,8 @@ function renderMemorySpaces(data: ReviewDashboardData) {
                 ["project_id", row.project_id],
                 ["project_kind", row.project_kind],
                 ["memory_domain", row.memory_domain],
-                ["primary_path", row.primary_path]
+                ["primary_path", row.primary_path],
+                ["sources", row.sources]
               ])}
             </details>
           </article>

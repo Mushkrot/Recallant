@@ -238,6 +238,28 @@ type ProjectContext = {
   projectId: string;
 };
 
+export type ProjectSourceKind =
+  | "workspace_path"
+  | "repo"
+  | "server_path"
+  | "document_collection"
+  | "connector"
+  | "manual"
+  | "virtual"
+  | "other";
+
+export type ProjectSourceStatus = "active" | "detached" | "archived" | "needs_review";
+
+export type ProjectSourceInput = {
+  project_id: string;
+  source_kind: ProjectSourceKind;
+  label: string;
+  uri?: string | null;
+  is_primary?: boolean;
+  status?: ProjectSourceStatus;
+  metadata?: JsonObject | null;
+};
+
 type CaptureProfile = "light" | "standard" | "detailed" | "custom";
 
 type CapturePolicy = {
@@ -652,6 +674,97 @@ export class RecallantDb {
     await this.pool.end();
   }
 
+  private async upsertProjectSource(
+    client: PoolClient,
+    input: ProjectSourceInput,
+    options: { failSoftIfMissing?: boolean } = {}
+  ) {
+    try {
+      if (input.is_primary) {
+        await client.query(
+          `
+            UPDATE project_sources
+            SET is_primary = false, updated_at = now()
+            WHERE project_id = $1
+              AND status = 'active'
+              AND is_primary = true
+              AND NOT (source_kind = $2 AND uri IS NOT DISTINCT FROM $3)
+          `,
+          [input.project_id, input.source_kind, input.uri ?? null]
+        );
+      }
+      const updated = await client.query(
+        `
+          UPDATE project_sources
+          SET label = $4,
+              is_primary = $5,
+              status = $6,
+              metadata = $7,
+              updated_at = now()
+          WHERE project_id = $1
+            AND source_kind = $2
+            AND uri IS NOT DISTINCT FROM $3
+          RETURNING id, project_id, source_kind, label, uri, is_primary, status, metadata, created_at, updated_at
+        `,
+        [
+          input.project_id,
+          input.source_kind,
+          input.uri ?? null,
+          input.label,
+          input.is_primary === true,
+          input.status ?? "active",
+          JSON.stringify(input.metadata ?? {})
+        ]
+      );
+      if (updated.rows[0]) return updated.rows[0];
+      const inserted = await client.query(
+        `
+          INSERT INTO project_sources (
+            project_id, source_kind, label, uri, is_primary, status, metadata
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id, project_id, source_kind, label, uri, is_primary, status, metadata, created_at, updated_at
+        `,
+        [
+          input.project_id,
+          input.source_kind,
+          input.label,
+          input.uri ?? null,
+          input.is_primary === true,
+          input.status ?? "active",
+          JSON.stringify(input.metadata ?? {})
+        ]
+      );
+      return inserted.rows[0] ?? null;
+    } catch (error) {
+      if (options.failSoftIfMissing && (error as { code?: string }).code === "42P01") return null;
+      throw error;
+    }
+  }
+
+  private async upsertPrimaryWorkspaceSource(
+    client: PoolClient,
+    input: { projectId: string; projectPath: string | null; label: string; source: string }
+  ) {
+    if (!input.projectPath) return null;
+    return this.upsertProjectSource(
+      client,
+      {
+        project_id: input.projectId,
+        source_kind: "workspace_path",
+        label: input.label,
+        uri: input.projectPath,
+        is_primary: true,
+        status: "active",
+        metadata: {
+          compatibility_primary_path: true,
+          created_by: input.source
+        }
+      },
+      { failSoftIfMissing: true }
+    );
+  }
+
   async ensureProject(projectPath?: string | null): Promise<ProjectContext> {
     const developerId = this.config.developerId ?? this.fallbackDeveloperId;
     const primaryPath = projectPath ?? this.config.projectPath ?? process.cwd();
@@ -706,6 +819,12 @@ export class RecallantDb {
         [projectId, developerId, projectName, primaryPath]
       );
       await this.ensureDefaultModelSettings(client);
+      await this.upsertPrimaryWorkspaceSource(client, {
+        projectId,
+        projectPath: primaryPath,
+        label: projectName,
+        source: "ensureProject"
+      });
 
       const context = { developerId, projectId };
       if (usesConfiguredProjectBinding) {
@@ -745,6 +864,12 @@ export class RecallantDb {
         `,
         [input.projectId, developerId, projectName, input.projectPath]
       );
+      await this.upsertPrimaryWorkspaceSource(client, {
+        projectId: input.projectId,
+        projectPath: input.projectPath,
+        label: projectName,
+        source: "registerProject"
+      });
       await this.ensureDefaultModelSettings(client);
       await client.query(
         `
@@ -799,6 +924,132 @@ export class RecallantDb {
       );
     });
     return { developerId, projectId: input.projectId };
+  }
+
+  async createMemorySpace(input: {
+    name: string;
+    developerId?: string;
+    projectKind?: "repo" | "subproject" | "workspace" | "personal_domain" | "other";
+    memoryDomain?: string;
+    primaryPath?: string | null;
+  }) {
+    const developerId = input.developerId ?? this.config.developerId ?? this.fallbackDeveloperId;
+    const projectId = randomUUID();
+    const projectKind = input.projectKind ?? (input.primaryPath ? "repo" : "other");
+    const memoryDomain = input.memoryDomain ?? "agent_work";
+    await withTransaction(this.pool, async (client) => {
+      await client.query(
+        `
+          INSERT INTO developers (id, name)
+          VALUES ($1, $2)
+          ON CONFLICT (id) DO UPDATE SET updated_at = now()
+        `,
+        [developerId, "Recallant Developer"]
+      );
+      await client.query(
+        `
+          INSERT INTO projects (id, developer_id, name, primary_path, project_kind, memory_domain)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [projectId, developerId, input.name, input.primaryPath ?? null, projectKind, memoryDomain]
+      );
+      await this.ensureDefaultModelSettings(client);
+      if (input.primaryPath) {
+        await this.upsertPrimaryWorkspaceSource(client, {
+          projectId,
+          projectPath: input.primaryPath,
+          label: input.name,
+          source: "createMemorySpace"
+        });
+      }
+    });
+    return {
+      project_id: projectId,
+      developer_id: developerId,
+      name: input.name,
+      project_kind: projectKind,
+      memory_domain: memoryDomain,
+      primary_path: input.primaryPath ?? null
+    };
+  }
+
+  async attachProjectSource(input: ProjectSourceInput) {
+    return withTransaction(this.pool, async (client) => this.upsertProjectSource(client, input));
+  }
+
+  async listProjectSources(projectId: string) {
+    const result = await this.pool.query(
+      `
+        SELECT id, project_id, source_kind, label, uri, is_primary, status, metadata,
+               created_at, updated_at
+        FROM project_sources
+        WHERE project_id = $1
+        ORDER BY is_primary DESC, status, source_kind, label
+      `,
+      [projectId]
+    );
+    return result.rows;
+  }
+
+  async detachProjectSource(input: { source_id: string; reason?: string | null }) {
+    const result = await this.pool.query(
+      `
+        UPDATE project_sources
+        SET status = 'detached',
+            is_primary = false,
+            metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, project_id, source_kind, label, uri, is_primary, status, metadata,
+                  created_at, updated_at
+      `,
+      [
+        input.source_id,
+        JSON.stringify({
+          detached_at: new Date().toISOString(),
+          detach_reason: input.reason ?? "recallant source detach"
+        })
+      ]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listMemorySpaces() {
+    const context = await this.ensureProject();
+    const result = await this.pool.query(
+      `
+        SELECT
+          p.id AS project_id,
+          p.name,
+          p.primary_path,
+          p.project_kind,
+          p.memory_domain,
+          p.updated_at,
+          coalesce(
+            jsonb_agg(
+              jsonb_build_object(
+                'source_id', ps.id,
+                'source_kind', ps.source_kind,
+                'label', ps.label,
+                'uri', ps.uri,
+                'is_primary', ps.is_primary,
+                'status', ps.status,
+                'metadata', ps.metadata,
+                'updated_at', ps.updated_at
+              )
+              ORDER BY ps.is_primary DESC, ps.status, ps.source_kind, ps.label
+            ) FILTER (WHERE ps.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS sources
+        FROM projects p
+        LEFT JOIN project_sources ps ON ps.project_id = p.id
+        WHERE p.developer_id = $1
+        GROUP BY p.id
+        ORDER BY p.updated_at DESC
+      `,
+      [context.developerId]
+    );
+    return result.rows;
   }
 
   async getProjectBinding(projectId: string) {
@@ -2669,6 +2920,34 @@ export class RecallantDb {
       `,
       [context.developerId]
     );
+    const projectIds = projects.rows.map((project) => project.project_id);
+    const sourcesByProject = new Map<string, unknown[]>();
+    if (projectIds.length > 0) {
+      try {
+        const sourceRows = await this.pool.query(
+          `
+            SELECT id AS source_id, project_id, source_kind, label, uri, is_primary, status,
+                   metadata, created_at, updated_at
+            FROM project_sources
+            WHERE project_id = ANY($1::uuid[])
+            ORDER BY is_primary DESC, status, source_kind, label
+          `,
+          [projectIds]
+        );
+        for (const source of sourceRows.rows) {
+          const key = String(source.project_id);
+          const rows = sourcesByProject.get(key) ?? [];
+          rows.push(source);
+          sourcesByProject.set(key, rows);
+        }
+      } catch (error) {
+        if ((error as { code?: string }).code !== "42P01") throw error;
+      }
+    }
+    projects.rows = projects.rows.map((project) => ({
+      ...project,
+      sources: sourcesByProject.get(String(project.project_id)) ?? []
+    }));
     const currentProject =
       projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
     const ruleMemoryDomain =

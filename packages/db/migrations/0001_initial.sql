@@ -22,6 +22,32 @@ CREATE TABLE projects (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE project_sources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_kind TEXT NOT NULL CHECK (
+    source_kind IN (
+      'workspace_path',
+      'repo',
+      'server_path',
+      'document_collection',
+      'connector',
+      'manual',
+      'virtual',
+      'other'
+    )
+  ),
+  label TEXT NOT NULL,
+  uri TEXT,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (
+    status IN ('active', 'detached', 'archived', 'needs_review')
+  ),
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -359,6 +385,9 @@ CREATE TABLE settings_audit_events (
 
 CREATE INDEX idx_projects_developer_parent ON projects (developer_id, parent_project_id);
 CREATE INDEX idx_projects_developer_domain_kind ON projects (developer_id, memory_domain, project_kind);
+CREATE INDEX idx_project_sources_project_status ON project_sources (project_id, status, is_primary DESC);
+CREATE INDEX idx_project_sources_kind_uri ON project_sources (source_kind, uri) WHERE uri IS NOT NULL;
+CREATE UNIQUE INDEX idx_project_sources_one_primary ON project_sources (project_id) WHERE is_primary = true AND status = 'active';
 
 CREATE INDEX idx_sessions_project_status_seen ON sessions (project_id, status, last_seen_at DESC);
 
