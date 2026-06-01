@@ -270,6 +270,23 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - A real Playwright/screenshot harness is not yet installed in the repo; the current UI regression
   guard is the strengthened HTML/CSS/API smoke contract.
 
+## 2026-06-01 Stage 2 Management Chat Result-Type Checkpoint
+
+- Management Chat API responses now include `result_type` with one of:
+  `read_only_answer`, `safe_action`, `dry_run_required`, `confirmation_required`,
+  `blocked_by_policy`, or `needs_clarification`.
+- Existing `intent`, `confirmation_required`, `destructive_or_sensitive`, facts, and proposed-action
+  fields remain in place for compatibility.
+- Ask Recallant now shows the result type as a human-readable badge in the response.
+- Requests to reveal raw secrets, passwords, tokens, or API keys are `blocked_by_policy`; they do
+  not become confirmable actions.
+- `scripts/smoke-review-ui.mjs` verifies result types for read-only Russian chat, developer-wide
+  rule creation, cleanup dry-run, paid/public/connector/global-setting confirmation gates, sandbox
+  cleanup targeting, and secret policy blocking.
+- Verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  `git diff --check`, and `npm run review-ui:smoke` against the dev Postgres service on
+  `127.0.0.1:15433`.
+
 ## Open Questions
 
 - None recorded.

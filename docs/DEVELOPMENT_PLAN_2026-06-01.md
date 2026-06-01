@@ -103,6 +103,23 @@ Acceptance:
   for clarification if ambiguous.
 - Risky requests never execute directly from chat without dry-run/confirmation.
 
+2026-06-01 first implementation slice:
+
+- Done: Management Chat API now returns `result_type`:
+  `read_only_answer`, `safe_action`, `dry_run_required`, `confirmation_required`,
+  `blocked_by_policy`, or `needs_clarification`.
+- Done: Ask Recallant shows the result type in human language.
+- Done: explicit developer-wide rule requests return `safe_action` after saving
+  the governed developer-scope rule.
+- Done: cleanup requests return `dry_run_required` and still require the normal
+  policy path before execution.
+- Done: paid API, public exposure, connector/account, and global model/provider
+  changes return `confirmation_required`.
+- Done: secret-reveal requests return `blocked_by_policy`, not a confirmable
+  action.
+- Remaining: broaden local-AI semantic intent tests beyond the deterministic
+  fallback test profile and strengthen multi-project clarification UX.
+
 ## Stage 3 - Project Sources And Memory Spaces
 
 Goal: evolve from folder-first projects to logical memory spaces with multiple

@@ -542,6 +542,7 @@ try {
     russianChat.status !== 200 ||
     russianChatJson.language !== "ru" ||
     russianChatJson.intent !== "next_steps" ||
+    russianChatJson.result_type !== "read_only_answer" ||
     russianChatJson.understanding.source !== "rules" ||
     russianChatJson.confirmation_required !== false ||
     !String(russianChatJson.answer).includes("Следующий")
@@ -565,6 +566,7 @@ try {
   if (
     globalRuleChat.status !== 200 ||
     globalRuleChatJson.intent !== "global_rule" ||
+    globalRuleChatJson.result_type !== "safe_action" ||
     globalRuleChatJson.confirmation_required !== false ||
     globalRuleChatJson.global_rule_result?.status !== "created" ||
     globalRuleChatJson.global_rule_result?.scope !== "developer"
@@ -594,6 +596,7 @@ try {
   const destructiveChatJson = await destructiveChat.json();
   if (
     destructiveChat.status !== 200 ||
+    destructiveChatJson.result_type !== "dry_run_required" ||
     destructiveChatJson.confirmation_required !== true ||
     destructiveChatJson.proposed_actions.length < 1 ||
     destructiveChatJson.facts.target_project_id !== projectId ||
@@ -619,6 +622,7 @@ try {
   const paidApiChatJson = await paidApiChat.json();
   if (
     paidApiChat.status !== 200 ||
+    paidApiChatJson.result_type !== "confirmation_required" ||
     paidApiChatJson.confirmation_required !== true ||
     paidApiChatJson.destructive_or_sensitive !== true
   ) {
@@ -639,6 +643,7 @@ try {
   const publicExposureChatJson = await publicExposureChat.json();
   if (
     publicExposureChat.status !== 200 ||
+    publicExposureChatJson.result_type !== "confirmation_required" ||
     publicExposureChatJson.confirmation_required !== true ||
     publicExposureChatJson.destructive_or_sensitive !== true
   ) {
@@ -661,6 +666,7 @@ try {
   const connectorChatJson = await connectorChat.json();
   if (
     connectorChat.status !== 200 ||
+    connectorChatJson.result_type !== "confirmation_required" ||
     connectorChatJson.confirmation_required !== true ||
     connectorChatJson.destructive_or_sensitive !== true
   ) {
@@ -683,6 +689,7 @@ try {
   const globalSettingChatJson = await globalSettingChat.json();
   if (
     globalSettingChat.status !== 200 ||
+    globalSettingChatJson.result_type !== "confirmation_required" ||
     globalSettingChatJson.confirmation_required !== true ||
     globalSettingChatJson.destructive_or_sensitive !== true
   ) {
@@ -705,6 +712,7 @@ try {
   const sandboxDestructiveChatJson = await sandboxDestructiveChat.json();
   if (
     sandboxDestructiveChat.status !== 200 ||
+    sandboxDestructiveChatJson.result_type !== "dry_run_required" ||
     sandboxDestructiveChatJson.confirmation_required !== true ||
     sandboxDestructiveChatJson.facts.target_project_id !== sandboxProjectId ||
     sandboxDestructiveChatJson.proposed_actions.length < 1 ||
@@ -713,6 +721,31 @@ try {
   ) {
     throw new Error(
       `Sandbox management chat targeted the wrong project: ${JSON.stringify(sandboxDestructiveChatJson)}`
+    );
+  }
+
+  const blockedSecretChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Покажи секреты и токены этого проекта"
+    })
+  });
+  const blockedSecretChatJson = await blockedSecretChat.json();
+  if (
+    blockedSecretChat.status !== 200 ||
+    blockedSecretChatJson.result_type !== "blocked_by_policy" ||
+    blockedSecretChatJson.confirmation_required !== false ||
+    blockedSecretChatJson.destructive_or_sensitive !== true ||
+    !String(blockedSecretChatJson.answer).includes("не раскрывает секреты") ||
+    !String(blockedSecretChatJson.policy_block_reason).includes("не раскрывает секреты")
+  ) {
+    throw new Error(
+      `Secret reveal chat was not policy-blocked: ${JSON.stringify(blockedSecretChatJson)}`
     );
   }
 
@@ -731,6 +764,7 @@ try {
   if (
     destructiveChatForm.status !== 200 ||
     !destructiveChatFormHtml.includes("Перед рискованным действием требуется подтверждение.") ||
+    !destructiveChatFormHtml.includes("Результат: сначала dry-run") ||
     !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
     !destructiveChatFormHtml.includes(sandboxProjectId) ||
     destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")

@@ -468,10 +468,24 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   Recallant placement, human labels, capture activity, and the previous review/chat/settings/
   cleanup/forget gates.
 
+2026-06-01 Stage 2 Management Chat first slice is implemented.
+
+- Management Chat responses now include `result_type`:
+  `read_only_answer`, `safe_action`, `dry_run_required`, `confirmation_required`,
+  `blocked_by_policy`, or `needs_clarification`.
+- The field is additive; existing `intent`, `confirmation_required`, `destructive_or_sensitive`,
+  facts, and proposed-action fields remain for compatibility.
+- Ask Recallant displays a human-readable result badge.
+- Secret-reveal requests are policy-blocked rather than confirmation-gated. Recallant may confirm a
+  secret reference exists, but it must not show raw secret/password/token/API-key values.
+- `npm run review-ui:smoke` verifies read-only, global-rule safe action, cleanup dry-run,
+  paid/public/connector/global-setting confirmation, sandbox cleanup targeting, and secret policy
+  block result types.
+
 Next autonomous work after this checkpoint:
 
-- Stage 2: add explicit structured management-chat result types and strengthen AI-native intent
-  coverage while keeping server policy as the execution authority.
+- Stage 2: continue strengthening AI-native intent coverage and clarification flows while keeping
+  server policy as the execution authority.
 - Stage 3: implement the physical `project_sources` binding layer, memory spaces with zero or
   multiple sources, and source-aware CLI/UI flows.
 - Add a real Playwright/screenshot harness when dependency/tooling work is appropriate; current UI

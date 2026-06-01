@@ -270,6 +270,22 @@ Stage 1 first slice is now implemented:
   central Ask Recallant placement, human labels, capture activity fields, and hidden technical
   detail boundaries. A true Playwright screenshot harness is still a future infrastructure slice.
 
+Stage 2 first slice is now implemented:
+
+- Management Chat responses now include a stable `result_type` field:
+  `read_only_answer`, `safe_action`, `dry_run_required`, `confirmation_required`,
+  `blocked_by_policy`, or `needs_clarification`.
+- The API keeps the existing `intent`, `confirmation_required`, `destructive_or_sensitive`, facts,
+  and proposed-action fields for compatibility.
+- Ask Recallant displays the result type in human language, so the owner can distinguish a plain
+  answer, an executed safe write, a dry-run requirement, a confirmation gate, a policy block, or a
+  clarification request without reading JSON.
+- Secret-reveal requests are now policy-blocked instead of converted into a confirmable action.
+  Recallant can verify that a secret reference exists, but it does not print raw secret values.
+- `npm run review-ui:smoke` covers result types for read-only Russian chat, developer-wide rule
+  creation, cleanup dry-run, paid/public/connector/global-setting confirmation gates, and secret
+  policy blocking.
+
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
 ## Recent Commit Checkpoints
@@ -301,6 +317,8 @@ Latest Workbench validation on 2026-06-01:
 - `npm run review-ui:smoke` against the dev Postgres service on `127.0.0.1:15433`; passed with
   Workbench layout contract, Activity / Replay, Memory Spaces, central Ask Recallant placement,
   dangerous setting confirmation, review actions, cleanup/detach, and forget-forever coverage
+- Stage 2 Management Chat result-type validation used the same checks plus the strengthened
+  `npm run review-ui:smoke` result-type and policy-block assertions
 
 Latest contract-hardening validation on 2026-05-31:
 

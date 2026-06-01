@@ -1490,7 +1490,7 @@ function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState)
               : chat.response.understanding.source === "local_ai"
                 ? `Understood by local AI${chat.response.understanding.model ? `: ${chat.response.understanding.model}` : ""}.`
                 : "Understood by safe local rules; AI model unavailable."
-          )}</p>
+          )} <span class="chat-result">${escapeHtml(resultTypeLabel(chat.response.result_type, chat.response.language))}</span></p>
           ${renderTextBlock(chat.response.answer)}
           ${
             chat.response.confirmation_required
@@ -1535,6 +1535,32 @@ function actionKindLabel(
     confirmation_required: "требуется подтверждение"
   };
   return labels[kind];
+}
+
+function resultTypeLabel(
+  resultType: ManagementChatResponse["result_type"],
+  language: ManagementChatResponse["language"]
+) {
+  if (language === "ru") {
+    const labels: Record<ManagementChatResponse["result_type"], string> = {
+      read_only_answer: "Результат: безопасный ответ",
+      safe_action: "Результат: безопасное действие выполнено",
+      dry_run_required: "Результат: сначала dry-run",
+      confirmation_required: "Результат: требуется подтверждение",
+      blocked_by_policy: "Результат: заблокировано политикой",
+      needs_clarification: "Результат: нужно уточнение"
+    };
+    return labels[resultType];
+  }
+  const labels: Record<ManagementChatResponse["result_type"], string> = {
+    read_only_answer: "Result: read-only answer",
+    safe_action: "Result: safe action completed",
+    dry_run_required: "Result: dry-run required",
+    confirmation_required: "Result: confirmation required",
+    blocked_by_policy: "Result: blocked by policy",
+    needs_clarification: "Result: clarification needed"
+  };
+  return labels[resultType];
 }
 
 function renderDashboard(
@@ -1694,6 +1720,7 @@ function renderDashboard(
     .chat-actions p { margin: 6px 0; color: #4f5867; }
     .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
     .chat-understanding { margin: 0 0 8px; color: #667085; font-size: 12px; }
+    .chat-result { display: inline-flex; margin-left: 6px; border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; }
     .activity-list { display: grid; gap: 9px; }
     .activity-item { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; border-top: 1px solid #e5e9f0; padding-top: 9px; }
     .activity-item:first-child { border-top: 0; padding-top: 0; }

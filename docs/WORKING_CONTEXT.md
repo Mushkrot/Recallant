@@ -234,15 +234,18 @@ Pre-pilot and Phase 10 decision as of 2026-05-28:
   functional natural-language management chat API/form, plain-language "What Needs Attention" and
   project-action summaries, human-readable setting summaries, Russian answer coverage, and
   confirmation-gated cleanup/destructive/sensitive proposals instead of direct chat execution.
-  The chat panel has been moved into the left rail with a capped answer scroll area so long answers
-  do not push the whole page downward and unused left-side space is put to work.
+  Ask Recallant now lives in the central Workbench area with a wider capped answer scroll area, so
+  long answers remain readable instead of being squeezed into a side rail.
   Sandbox cleanup wording is target-aware so chat does not blindly propose a dry-run against the
   open project when the owner clearly asked for a sandbox project.
   The chat now uses the configured local Ollama model for intent/language/target/global-rule
   extraction when available and visibly falls back to deterministic rules when the model is
-  unavailable. Deterministic policy still owns risky actions. Owner-explicit low-risk "save this
-  rule for all projects" requests now create developer-scope `instruction_grade` memories so future
-  context packs include them across projects.
+  unavailable. Responses now include `result_type` (`read_only_answer`, `safe_action`,
+  `dry_run_required`, `confirmation_required`, `blocked_by_policy`, or `needs_clarification`) and
+  the UI shows that result in owner-facing language. Deterministic policy still owns risky actions.
+  Owner-explicit low-risk "save this rule for all projects" requests now create developer-scope
+  `instruction_grade` memories so future context packs include them across projects. Requests to
+  reveal raw secrets are policy-blocked, not confirmation-gated.
 - Product install/onboarding UX now has an owner-server baseline: `scripts/install-recallant.sh`
   installs the server profile, `scripts/install-recallant-cli.sh` installs a global `recallant`
   wrapper, CLI commands auto-load `/opt/secure-configs/recallant.env` when present, and ordinary

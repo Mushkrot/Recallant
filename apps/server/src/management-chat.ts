@@ -47,9 +47,18 @@ export type ManagementChatAction = {
   reason: string;
 };
 
+export type ManagementChatResultType =
+  | "read_only_answer"
+  | "safe_action"
+  | "dry_run_required"
+  | "confirmation_required"
+  | "blocked_by_policy"
+  | "needs_clarification";
+
 export type ManagementChatResponse = {
   language: ManagementChatLanguage;
   intent: ManagementChatIntent;
+  result_type: ManagementChatResultType;
   understanding: {
     source: "local_ai" | "rules";
     model?: string;
@@ -60,6 +69,7 @@ export type ManagementChatResponse = {
   answer: string;
   confirmation_required: boolean;
   destructive_or_sensitive: boolean;
+  policy_block_reason?: string;
   global_rule_result?: {
     status: "created" | "needs_review" | "skipped";
     memory_id?: string;
@@ -115,10 +125,13 @@ export async function buildManagementChatResponse(input: {
   const intent = interpretation.intent;
   const targetProject = resolveTargetProject(message, dashboard, interpretation);
   const facts = dashboardFacts(dashboard, targetProject);
+  const policyBlockReason = blockedByPolicyReason(message, language);
   const destructiveOrSensitive =
-    isDestructiveOrSensitive(message, intent) || interpretation.destructive_or_sensitive;
+    Boolean(policyBlockReason) ||
+    isDestructiveOrSensitive(message, intent) ||
+    interpretation.destructive_or_sensitive;
   const globalRuleResult =
-    intent === "global_rule"
+    intent === "global_rule" && !policyBlockReason
       ? await maybeCreateGlobalRule({
           message,
           dashboard,
@@ -128,7 +141,15 @@ export async function buildManagementChatResponse(input: {
         })
       : undefined;
   const confirmationRequired =
-    destructiveOrSensitive || globalRuleResult?.status === "needs_review";
+    !policyBlockReason && (destructiveOrSensitive || globalRuleResult?.status === "needs_review");
+  const resultType = resultTypeForIntent({
+    intent,
+    targetProject,
+    destructiveOrSensitive,
+    confirmationRequired,
+    policyBlockReason,
+    globalRuleResult
+  });
   const proposedActions = actionsForIntent(
     intent,
     dashboard,
@@ -136,7 +157,8 @@ export async function buildManagementChatResponse(input: {
     targetProject,
     language,
     destructiveOrSensitive,
-    globalRuleResult
+    globalRuleResult,
+    policyBlockReason
   );
   const answer = answerForIntent(
     intent,
@@ -144,11 +166,13 @@ export async function buildManagementChatResponse(input: {
     language,
     destructiveOrSensitive,
     interpretation,
-    globalRuleResult
+    globalRuleResult,
+    policyBlockReason
   );
   return {
     language,
     intent,
+    result_type: resultType,
     understanding: {
       source: interpretation.source,
       model: interpretation.model,
@@ -159,6 +183,7 @@ export async function buildManagementChatResponse(input: {
     answer,
     confirmation_required: confirmationRequired,
     destructive_or_sensitive: destructiveOrSensitive,
+    policy_block_reason: policyBlockReason,
     global_rule_result: globalRuleResult,
     facts,
     proposed_actions: proposedActions
@@ -455,6 +480,80 @@ function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent)
   ]);
 }
 
+function blockedByPolicyReason(message: string, language: ManagementChatLanguage) {
+  const asksToRevealSecret =
+    includesAny(message, [
+      "show secret",
+      "print secret",
+      "read secret",
+      "reveal secret",
+      "show password",
+      "print password",
+      "read password",
+      "show token",
+      "print token",
+      "read token",
+      "show api key",
+      "print api key",
+      "read api key",
+      "покажи секрет",
+      "выведи секрет",
+      "прочитай секрет",
+      "раскрой секрет",
+      "покажи пароль",
+      "выведи пароль",
+      "прочитай пароль",
+      "покажи токен",
+      "выведи токен",
+      "прочитай токен",
+      "покажи api key",
+      "выведи api key"
+    ]) ||
+    (includesAny(message, [
+      "secret",
+      "password",
+      "token",
+      "api key",
+      "секрет",
+      "пароль",
+      "токен"
+    ]) &&
+      includesAny(message, [
+        "show",
+        "print",
+        "read",
+        "reveal",
+        "покажи",
+        "выведи",
+        "прочитай",
+        "раскрой"
+      ]));
+  if (!asksToRevealSecret) return undefined;
+  return language === "ru"
+    ? "Recallant не раскрывает секреты, пароли, токены или API keys из памяти или настроек. Можно проверить, что ссылка на секрет существует, но не показывать значение."
+    : "Recallant does not reveal secrets, passwords, tokens, or API keys from memory or settings. It can verify that a secret reference exists, but it must not show the value.";
+}
+
+function resultTypeForIntent(input: {
+  intent: ManagementChatIntent;
+  targetProject: ChatTargetProject;
+  destructiveOrSensitive: boolean;
+  confirmationRequired: boolean;
+  policyBlockReason?: string;
+  globalRuleResult?: ManagementChatResponse["global_rule_result"];
+}): ManagementChatResultType {
+  if (input.policyBlockReason) return "blocked_by_policy";
+  if (input.targetProject.ambiguous && input.destructiveOrSensitive) return "needs_clarification";
+  if (input.intent === "global_rule") {
+    if (input.globalRuleResult?.status === "created") return "safe_action";
+    if (input.globalRuleResult?.status === "needs_review") return "confirmation_required";
+    return "needs_clarification";
+  }
+  if (input.destructiveOrSensitive && input.intent === "cleanup") return "dry_run_required";
+  if (input.confirmationRequired) return "confirmation_required";
+  return "read_only_answer";
+}
+
 function asNumber(value: unknown) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -672,11 +771,26 @@ function answerForIntent(
   language: ManagementChatLanguage,
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
-  globalRuleResult?: ManagementChatResponse["global_rule_result"]
+  globalRuleResult?: ManagementChatResponse["global_rule_result"],
+  policyBlockReason?: string
 ) {
   if (language === "ru")
-    return answerRu(intent, facts, destructiveOrSensitive, interpretation, globalRuleResult);
-  return answerEn(intent, facts, destructiveOrSensitive, interpretation, globalRuleResult);
+    return answerRu(
+      intent,
+      facts,
+      destructiveOrSensitive,
+      interpretation,
+      globalRuleResult,
+      policyBlockReason
+    );
+  return answerEn(
+    intent,
+    facts,
+    destructiveOrSensitive,
+    interpretation,
+    globalRuleResult,
+    policyBlockReason
+  );
 }
 
 function targetLineRu(facts: ManagementChatResponse["facts"]) {
@@ -704,9 +818,13 @@ function answerRu(
   facts: ManagementChatResponse["facts"],
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
-  globalRuleResult?: ManagementChatResponse["global_rule_result"]
+  globalRuleResult?: ManagementChatResponse["global_rule_result"],
+  policyBlockReason?: string
 ) {
   const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
+  if (policyBlockReason) {
+    return `${baseline}\n\n${policyBlockReason}`;
+  }
   if (intent === "global_rule") {
     if (globalRuleResult?.status === "created") {
       return `${baseline}\n\nЯ понял это как правило для всех проектов и сохранил его как активное developer-wide правило. Новые агентские сессии в подключенных проектах будут получать его в стартовом Context Pack как обязательное правило.\n\nПравило: ${globalRuleResult.rule_text}`;
@@ -760,9 +878,13 @@ function answerEn(
   facts: ManagementChatResponse["facts"],
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
-  globalRuleResult?: ManagementChatResponse["global_rule_result"]
+  globalRuleResult?: ManagementChatResponse["global_rule_result"],
+  policyBlockReason?: string
 ) {
   const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
+  if (policyBlockReason) {
+    return `${baseline}\n\n${policyBlockReason}`;
+  }
   if (intent === "global_rule") {
     if (globalRuleResult?.status === "created") {
       return `${baseline}\n\nI understood this as a rule for all projects and saved it as an active developer-wide rule. New agent sessions in connected projects will receive it in the startup Context Pack as binding guidance.\n\nRule: ${globalRuleResult.rule_text}`;
@@ -818,8 +940,18 @@ function actionsForIntent(
   targetProject: ChatTargetProject,
   language: ManagementChatLanguage,
   destructiveOrSensitive: boolean,
-  globalRuleResult?: ManagementChatResponse["global_rule_result"]
+  globalRuleResult?: ManagementChatResponse["global_rule_result"],
+  policyBlockReason?: string
 ): ManagementChatAction[] {
+  if (policyBlockReason) {
+    return [
+      {
+        label: language === "ru" ? "Проверить только наличие ссылки" : "Check reference only",
+        kind: "read_only",
+        reason: policyBlockReason
+      }
+    ];
+  }
   if (intent === "global_rule") {
     return [
       {
