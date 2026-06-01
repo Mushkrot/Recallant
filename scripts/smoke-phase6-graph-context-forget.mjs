@@ -243,12 +243,16 @@ const pack = await callTool(10, "memory_get_context_pack", {
   include_recovery: true,
   max_chars_total: 3000
 });
+const packRule = pack.sections?.binding_rules?.find(
+  (memory) => memory.memory_id === rule.memory_id
+);
+const packWorkingMemory = pack.sections?.working_memories?.find(
+  (memory) => memory.memory_id === workingMemory.memory_id
+);
 if (
   pack.sections?.checkpoint?.payload?.current_focus !== "context pack" ||
-  !pack.sections?.binding_rules?.some((memory) => memory.memory_id === rule.memory_id) ||
-  !pack.sections?.working_memories?.some(
-    (memory) => memory.memory_id === workingMemory.memory_id
-  ) ||
+  !packRule ||
+  !packWorkingMemory ||
   pack.sections?.working_memories?.some((memory) => memory.memory_id === rule.memory_id) ||
   !Array.isArray(pack.sections?.recovery) ||
   pack.sections.recovery.length === 0 ||
@@ -259,6 +263,20 @@ if (
 const serializedPack = JSON.stringify(pack);
 if (serializedPack.includes(rawSentinel) || serializedPack.includes("HISTORICAL_DOC_SENTINEL")) {
   throw new Error(`Context pack leaked raw artifact or historical project file: ${serializedPack}`);
+}
+if (
+  !packRule.source_refs?.some((sourceRef) => sourceRef.source_id === alpha.event_id) ||
+  packRule.provenance?.primary_source_kind !== "event" ||
+  !String(packRule.provenance?.summary ?? "").includes("event") ||
+  !packWorkingMemory.source_refs?.some((sourceRef) => sourceRef.source_id === alpha.event_id) ||
+  packWorkingMemory.provenance?.source_count !== 1
+) {
+  throw new Error(
+    `Context pack did not include source provenance for governed memories: ${JSON.stringify({
+      packRule,
+      packWorkingMemory
+    })}`
+  );
 }
 
 const mcpPreviewPack = await callTool(11, "memory_get_context_pack", {

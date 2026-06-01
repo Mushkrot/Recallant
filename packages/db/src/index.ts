@@ -1562,11 +1562,25 @@ export class RecallantDb {
     );
     const rules = await this.pool.query(
       `
-        SELECT id AS memory_id, title, body, scope, scope_kind, scope_id, use_policy
-        FROM agent_memories
-        WHERE developer_id = $1 AND (project_id = $2 OR scope = 'developer')
-          AND status = 'accepted' AND use_policy = 'instruction_grade'
-        ORDER BY updated_at DESC
+        SELECT
+          m.id AS memory_id,
+          m.title,
+          m.body,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.use_policy,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE m.developer_id = $1 AND (m.project_id = $2 OR m.scope = 'developer')
+          AND m.status = 'accepted' AND m.use_policy = 'instruction_grade'
+        GROUP BY m.id
+        ORDER BY m.updated_at DESC
         LIMIT 8
       `,
       [context.developerId, context.projectId]
@@ -1598,7 +1612,7 @@ export class RecallantDb {
       sections: {
         checkpoint,
         recovery: input.include_recovery === false ? [] : recovery.rows,
-        binding_rules: rules.rows,
+        binding_rules: rules.rows.map((memory) => this.withSourceProvenance(memory)),
         working_memories: working.memories.filter(
           (memory: { use_policy?: string }) => memory.use_policy !== "instruction_grade"
         ),
@@ -2392,43 +2406,61 @@ export class RecallantDb {
     );
     const values: unknown[] = [context.developerId, context.projectId, input.query, statuses];
     const clauses = [
-      "developer_id = $1::uuid",
-      "(project_id = $2::uuid OR scope = 'developer')",
-      "status = ANY($4::text[])",
-      "use_policy <> 'do_not_use'"
+      "m.developer_id = $1::uuid",
+      "(m.project_id = $2::uuid OR m.scope = 'developer')",
+      "m.status = ANY($4::text[])",
+      "m.use_policy <> 'do_not_use'"
     ];
     if (terms.length > 0) {
       clauses.push("$3::text IS NOT NULL");
       const termClauses = terms.map((term) => {
         values.push(term);
-        return `(title ILIKE '%' || $${values.length} || '%' OR body ILIKE '%' || $${values.length} || '%' OR memory_type ILIKE '%' || $${values.length} || '%')`;
+        return `(m.title ILIKE '%' || $${values.length} || '%' OR m.body ILIKE '%' || $${values.length} || '%' OR m.memory_type ILIKE '%' || $${values.length} || '%')`;
       });
       clauses.push(`(${termClauses.join(" OR ")})`);
     } else {
       clauses.push(
-        "(title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%' OR memory_type ILIKE '%' || $3 || '%')"
+        "(m.title ILIKE '%' || $3 || '%' OR m.body ILIKE '%' || $3 || '%' OR m.memory_type ILIKE '%' || $3 || '%')"
       );
     }
-    if (!input.include_candidates) clauses.push("status <> 'candidate'");
-    if (!input.include_needs_review) clauses.push("status <> 'needs_review'");
-    if (!input.include_stale) clauses.push("status <> 'stale'");
+    if (!input.include_candidates) clauses.push("m.status <> 'candidate'");
+    if (!input.include_needs_review) clauses.push("m.status <> 'needs_review'");
+    if (!input.include_stale) clauses.push("m.status <> 'stale'");
     if (input.memory_types && input.memory_types.length > 0) {
       values.push(input.memory_types);
-      clauses.push(`memory_type = ANY($${values.length}::text[])`);
+      clauses.push(`m.memory_type = ANY($${values.length}::text[])`);
     }
     if (input.scope_kind) {
       values.push(input.scope_kind);
-      clauses.push(`scope_kind = $${values.length}`);
+      clauses.push(`m.scope_kind = $${values.length}`);
     }
     const result = await this.pool.query(
       `
-        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
-               scope_id, audience, confidence, updated_at
-        FROM agent_memories
+        SELECT
+          m.id AS memory_id,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.audience,
+          m.confidence,
+          m.updated_at,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
         WHERE ${clauses.join(" AND ")}
+        GROUP BY m.id
         ORDER BY
-          CASE use_policy WHEN 'instruction_grade' THEN 0 WHEN 'recall_allowed' THEN 1 ELSE 2 END,
-          updated_at DESC
+          CASE m.use_policy WHEN 'instruction_grade' THEN 0 WHEN 'recall_allowed' THEN 1 ELSE 2 END,
+          m.updated_at DESC
         LIMIT $${values.length + 1}::int
       `,
       [...values, input.top_k ?? 8]
@@ -2440,7 +2472,7 @@ export class RecallantDb {
       if (usedChars >= maxChars) break;
       const body = String(row.body ?? "");
       const remaining = maxChars - usedChars;
-      memories.push({ ...row, body: body.slice(0, remaining) });
+      memories.push(this.withSourceProvenance({ ...row, body: body.slice(0, remaining) }));
       usedChars += Math.min(body.length, remaining);
     }
     const trace = await this.pool.query<{ id: string }>(
@@ -3522,6 +3554,44 @@ export class RecallantDb {
       if (typeof sourcePath === "string" && sourcePath.length > 0) return sourcePath;
     }
     return null;
+  }
+
+  private sourceProvenanceFromRefs(sourceRefs: unknown[]) {
+    const first =
+      sourceRefs.find((sourceRef) => sourceRef && typeof sourceRef === "object") ?? null;
+    const sourcePath = this.sourcePathFromRefs(sourceRefs);
+    const firstRecord = first as Record<string, unknown> | null;
+    const primaryKind =
+      typeof firstRecord?.source_kind === "string" ? firstRecord.source_kind : null;
+    const primaryId = typeof firstRecord?.source_id === "string" ? firstRecord.source_id : null;
+    const primarySummary = primaryKind
+      ? `${primaryKind}${primaryId ? ` ${primaryId.slice(0, 8)}` : ""}`
+      : null;
+    return {
+      source_count: sourceRefs.length,
+      primary_source_kind: primaryKind,
+      primary_source_id: primaryId,
+      source_path: sourcePath,
+      summary: sourcePath
+        ? `From source ${sourcePath}`
+        : primarySummary
+          ? `From ${primarySummary}`
+          : "No source reference recorded"
+    };
+  }
+
+  private withSourceProvenance<T extends Record<string, unknown>>(row: T) {
+    const sourceRefs = Array.isArray(row.source_refs)
+      ? row.source_refs.map((sourceRef) => this.redactSourceRef(sourceRef))
+      : [];
+    return {
+      ...row,
+      source_refs: sourceRefs,
+      provenance: this.sourceProvenanceFromRefs(sourceRefs)
+    } as T & {
+      source_refs: unknown[];
+      provenance: ReturnType<RecallantDb["sourceProvenanceFromRefs"]>;
+    };
   }
 
   private async findProjectForManagement(input: DetachProjectInput) {

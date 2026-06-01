@@ -187,8 +187,10 @@ Acceptance:
 - Done: Workbench now includes browser forms to create a logical memory space,
   attach a source to the selected memory space, and detach one source without
   deleting the memory space or project files.
-- Remaining: source-aware context-pack provenance, richer source health/status,
-  and search/review source filters.
+- Done: context-pack binding rules and working memories now include redacted
+  `source_refs` plus compact `provenance` summaries, so agents can answer where
+  a fact/rule came from without loading raw artifact content.
+- Remaining: richer source health/status and search/review source filters.
 
 ## Stage 4 - Client Connect And Hook Capture
 

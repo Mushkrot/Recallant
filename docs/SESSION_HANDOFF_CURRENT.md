@@ -525,6 +525,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `primary_path`.
 - Workbench forms now create logical memory spaces, attach a source to the selected memory space,
   and detach one source without deleting the memory space, its memories, or project files.
+- Follow-up context-pack provenance: binding rules and working memories now include redacted
+  `source_refs` plus compact `provenance` summaries. Agents can tell where a context-pack fact or
+  rule came from without reading raw artifacts or old project history files.
 - `npm run project-sources:smoke` verifies virtual memory space creation, zero-source state,
   multiple source bindings, source detach, automatic primary workspace source creation, and
   dashboard source visibility.
@@ -580,8 +583,7 @@ Next autonomous work after this checkpoint:
 
 - Stage 2: continue strengthening live local-AI semantic tests and multi-project clarification
   flows while keeping server policy as the execution authority.
-- Stage 3: continue source-aware context-pack provenance, richer source health/status, and
-  search/review source filters.
+- Stage 3: continue richer source health/status and search/review source filters.
 - Stage 4: add real client/global config writers where safe, local backups for global/client files,
   hook installation where supported, and fail-soft hook capture/spooling.
 - Stage 5: run additional non-fixture real-world pilots after hook capture and source-health UI are

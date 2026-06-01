@@ -165,12 +165,33 @@ Builds the bounded startup context for an agent session. This is the canonical a
 }
 ```
 
+`sections.binding_rules[]` and `sections.working_memories[]` memory items include ordinary memory
+fields plus:
+
+```json
+{
+  "source_refs": [],
+  "provenance": {
+    "source_count": 1,
+    "primary_source_kind": "event",
+    "primary_source_id": "uuid",
+    "source_path": "AGENTS.md|null",
+    "summary": "From source AGENTS.md"
+  }
+}
+```
+
+`source_refs` are redacted before return. `provenance.summary` is a compact routing clue for agents;
+it is not a replacement for targeted evidence fetches when the task needs detail.
+
 **Policy:**
 
 - The tool composes checkpoint, governed-memory recall, recovery warnings, resolver hints, and optional narrow evidence search.
 - It must not import historical docs, read all project files, or return unbounded raw history.
 - If raw evidence is included, excerpts must include source refs.
 - Active `instruction_grade` memories must be distinguishable from ordinary working memories.
+- Binding rules and working memories must include enough source provenance for an agent to explain
+  where the memory came from without loading raw artifact content by default.
 - Scope/audience filtering follows ADR-0040; unresolved high-risk conflicts follow ADR-0041 and must appear as warnings rather than hidden choices.
 - If previous session/spool state is incomplete, the pack must include a visible warning rather than pretending context is complete.
 - For trivial sessions the pack may be small; "context pack" does not mean "large dump".

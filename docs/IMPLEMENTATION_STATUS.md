@@ -67,6 +67,9 @@ Current implemented slices include:
   source project/path/ref, status/use policy, applicability warning, and promotion policy. Default
   context packs still exclude unrelated project memory, and environment/capability output redacts
   secret-like values.
+- Context-pack provenance: `memory_get_context_pack` now includes redacted `source_refs` and compact
+  `provenance` summaries for binding rules and working memories, so agents can identify where a
+  fact/rule came from without loading raw artifacts or historical project files.
 - Review/Management UI chat first slice: the private Command Center now has a functional
   management chat API and form instead of a placeholder. It answers read-only operational questions
   in the owner's language, summarizes project status in plain language, explains review/settings/
@@ -403,6 +406,8 @@ Latest Workbench validation on 2026-06-01:
 - Stage 3 source-binding validation: clean `make db-reset`, `npm run schema:smoke`,
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`
+- Stage 3 context-pack provenance validation: `npm run phase6:smoke:graph` verifies binding-rule
+  and working-memory source refs/provenance while preserving raw-artifact/history-file leak guards
 - Stage 4 connect validation: `npm run connect:smoke` and full `npm run smoke:core`
 - Stage 4 follow-up validation: `npm run connect:smoke` now covers failing
   `doctor --require-capture` before capture and passing it after real capture; `npm run
