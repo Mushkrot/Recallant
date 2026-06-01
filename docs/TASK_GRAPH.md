@@ -17,9 +17,10 @@ flowchart TD
   P9[Phase 9 cleanup, analysis, erasure]
   PPR[Pre-Pilot Readiness]
   P10[Phase 10 autonomous attach and controlled cross-project recall]
+  P11[Post-acceptance human-centered evolution]
 
   P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P65 --> P7 --> P8 --> P9
-  P9 --> PPR --> P10
+  P9 --> PPR --> P10 --> P11
 ```
 
 Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 6.5 -> 7 -> 8 -> 9 -> Pre-Pilot -> 10`. All phases are required for the v1 core and first product-grade attach workflow.
@@ -39,8 +40,8 @@ prepared existing-project discovery, explicit import, Review UI import/action ha
 workflow, agent onboarding contract, and operational checks before any real working project is
 attached. See [PRE_PILOT_READINESS.md](PRE_PILOT_READINESS.md).
 
-Phase 10 is the next product-readiness layer after the first copied-project pilot. It composes the
-safe lower-level workflow into `recallant attach --mode manual|guided|autopilot`, adds governed
+Phase 10 is the product-readiness layer after the first copied-project pilot. It composes the safe
+lower-level workflow into `recallant attach --mode manual|guided|autopilot`, adds governed
 detach/delete, and makes controlled cross-project recall explicit. See
 [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 
@@ -50,3 +51,9 @@ Phase 10 implementation order:
    implementation slice.
 2. governed detach/cleanup. Complete for the first implementation slice.
 3. controlled cross-project recall. Complete for the first implementation slice.
+
+Post-acceptance human-centered evolution is now the active forward plan after the green Product
+Acceptance surface. It covers the professional human-readable workbench, AI-native management,
+logical memory spaces and project sources, client connect/hooks, additional pilots, broader memory
+domains, and packaging. See
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md).

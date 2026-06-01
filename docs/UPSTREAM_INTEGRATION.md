@@ -173,6 +173,9 @@ This is a separate project from CaviraOSS/OpenMemory. Its README now says OpenMe
 
 - [x] Pinned SHAs recorded above for implementation review
 - [x] Local upstream inspection performed before Phase 0; see [UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md](UPSTREAM_IMPLEMENTATION_REVIEW_2026-05-22.md)
-- [ ] List of reused/copied files with paths, if any
+- [x] List of reused/copied files with paths, if any: none. Upstream code has not been copied into
+  Recallant; upstreams are research and design references unless a future implementation pin says
+  otherwise.
 - [x] Boundary contracts documented before adapting code
-- [ ] Tests proving boundary contracts (`TEST_CONTRACT.md`)
+- [x] Tests proving boundary contracts: see [TEST_CONTRACT.md](TEST_CONTRACT.md) and
+  `npm run smoke:core`.

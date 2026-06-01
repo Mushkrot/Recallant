@@ -30,8 +30,8 @@ forces a safer workflow.
 The same project can be re-run in a different mode. Modes are workflow policies, not different data
 models.
 
-The first implementation slice should implement all three modes. `manual` and `guided` are not
-temporary scaffolding; they are permanent safety controls.
+The first implementation slice implements all three modes. `manual` and `guided` are not temporary
+scaffolding; they are permanent safety controls.
 
 ## Target commands
 

@@ -5,7 +5,7 @@
 **Doc version:** 1.0  
 **Primary executors:** AI coding agents (not assumed: dedicated human engineering team).
 
-**Status as of 2026-05-31:** v1 acceptance checkboxes in this PRD are synchronized with
+**Status as of 2026-06-01:** v1 acceptance checkboxes in this PRD are synchronized with
 [TEST_CONTRACT.md](TEST_CONTRACT.md). A PRD row is checked only when the corresponding contract
 surface has code, docs, or smoke-test coverage.
 

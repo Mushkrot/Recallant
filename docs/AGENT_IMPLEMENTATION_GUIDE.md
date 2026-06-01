@@ -219,13 +219,16 @@ layer needed before the first copied-project pilot:
 - agent onboarding contract,
 - production health and backup verification.
 
-Pre-Pilot Readiness has completed for the first copied-project pilot. Do not broadly connect real
-working projects through autopilot until Phase 10 attach/detach/cross-project gates pass; use manual
-or guided mode when the owner explicitly chooses a live project earlier.
+Pre-Pilot Readiness has completed for the first copied-project pilot. The first Phase 10
+attach/detach/cross-project gates now pass for the production-ready slice. Broad live-project
+onboarding should still follow the safety posture in [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md):
+the agent validates the attach/capture/closeout/recall path first, production-sensitive projects use
+`guided` unless production-safe autopilot is explicitly approved, and destructive/security/cost
+actions stay confirmation-gated.
 
 ## Phase 10 - Autonomous attach and controlled cross-project recall
 
-This is the next product-readiness layer after the copied-project pilot. It turns the safe lower-level
+This is the product-readiness layer after the copied-project pilot. It turns the safe lower-level
 building blocks into the owner-facing workflow described in
 [AUTONOMOUS_ATTACH.md](AUTONOMOUS_ATTACH.md) and [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 
@@ -288,6 +291,14 @@ building blocks into the owner-facing workflow described in
 
 **Gate:** Phase 10 checks in [TEST_CONTRACT.md](TEST_CONTRACT.md) pass, and a copied-project sandbox
 can be attached in all three modes without modifying or polluting the original project.
+
+## Post-acceptance development plan
+
+After Phase 10 and Product Acceptance are green for the first production-ready slice, continue with
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md). The next work is product
+evolution rather than stale contract-checkbox closure: human workbench quality, AI-native management,
+project source bindings, client connect/hooks, additional pilots, broader memory-domain design, and
+packaging/public-readiness.
 
 ## Parallelization rules
 

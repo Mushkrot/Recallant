@@ -2,10 +2,10 @@
 
 ## Current Session
 
-Status: Target-aware onboarding and PRD/TEST acceptance closure are complete.
-Current focus: Full v1 acceptance surface is green; full clean `smoke:core` and production-facing checks passed after commits `ac3db30`, `cfc4ab2`, and `bfe15ae`.
-Next step: Continue with product polish, richer UX/management flows, or the next real-world pilot; stale spec-checkbox closure is no longer the active work.
-Last updated: 2026-05-31T11:30:34.826Z.
+Status: Documentation alignment is complete after the human-centered Recallant direction update.
+Current focus: Docs now state the current truth: first production-ready coding-agent slice is green; Recallant is external memory for the owner and AI agents; projects are logical memory spaces with attached sources; future work follows the post-acceptance development plan.
+Next step: Continue implementation from `docs/DEVELOPMENT_PLAN_2026-06-01.md`, starting with human workbench quality and AI-native management.
+Last updated: 2026-06-01T14:50:53Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -45,6 +45,15 @@ Last updated: 2026-05-31T11:30:34.826Z.
   real owner-dependent blocker appears.
 - `docs/TEST_CONTRACT.md` has no remaining unchecked rows; do not reopen the full contract gap list
   unless a regression appears.
+- Recallant is now explicitly framed as external memory for the owner and AI agents. Coding-agent
+  memory is the first implemented domain, not the final product boundary.
+- A Recallant project is a logical memory space; folders, repos, server paths, documents,
+  connectors, and virtual/manual topics are sources attached to that memory space.
+- Model routing must support AI-first management interpretation while keeping local-first,
+  subscription-first, API-last behavior and explicit confirmation/cost/audit controls for paid API
+  or third-party model routers.
+- The forward plan after the green acceptance surface is documented in
+  `docs/DEVELOPMENT_PLAN_2026-06-01.md`.
 
 ## Verification
 
@@ -77,6 +86,8 @@ Last updated: 2026-05-31T11:30:34.826Z.
   `recallant attach .`, verifies the capture loop, confirms later recall, checks dashboard
   readiness, verifies no lingering active sessions, exercises offline spool sync, and safely
   detaches the test project without changing files.
+- Documentation alignment verification on 2026-06-01: `npm run format:check`, `npm run lint`, and
+  `git diff --check` passed.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

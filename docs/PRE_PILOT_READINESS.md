@@ -333,9 +333,11 @@ Pre-Pilot Readiness is complete when all of the following are true:
 
 Only after this exit gate should Recallant be connected to an existing real working project.
 
-The first copied-project pilot has now completed. The next product-readiness layer is not another
-manual import pilot; it is Phase 10 autonomous attach and controlled cross-project recall, with
-manual/guided modes preserved for cautious operation.
+The first copied-project pilot has now completed, and the first Phase 10 autonomous attach,
+controlled cross-project recall, and cleanup slices have passed. The current product-readiness work
+is post-acceptance product development: a clearer human workbench, stronger AI-native management,
+client connection/capture proof, and broader memory-space/source support, with manual/guided modes
+preserved for cautious operation.
 
 ## Explicitly Postponed Until After First Pilot
 

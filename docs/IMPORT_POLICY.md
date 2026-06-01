@@ -11,8 +11,10 @@ Decision status: v1 import workflow accepted. See [ADR-0013-closeout-intent-and-
 
 Attach modes are accepted in [ADR-0043-autonomous-project-attach-modes.md](ADR-0043-autonomous-project-attach-modes.md).
 
-Current implementation note: Pre-Pilot Readiness and the first copied-project pilot are complete.
-Phase 10 should implement attach modes before broad live-project onboarding.
+Current implementation note: Pre-Pilot Readiness, the first copied-project pilot, and the first
+Phase 10 attach/detach/cross-project slices are complete. Broad live-project onboarding should still
+use the documented safety posture: agent-run validation first, `guided` for production-sensitive
+projects, and explicit confirmation for destructive/security/cost changes.
 
 Core rule:
 

@@ -39,6 +39,7 @@ If a subscription-backed route hits limits, Recallant pauses, defers, downgrades
 | Hybrid rerank | local/simple scoring | active agent or subscription worker for hard queries; paid API only after approval by default |
 | Memory extraction from closeout | active agent when session is open; otherwise local LLM if good enough | subscription worker; paid API only after approval by default |
 | Ambiguous closeout/intent detection | local classifier/LLM | active agent/subscription worker; paid API only when ambiguity remains and approval is granted |
+| Management chat interpretation and action planning | local LLM when available | active agent/subscription worker for hard cases; paid API or third-party model router only after approval by default |
 | Quality-critical summary/checkpoint | active agent or local LLM if confidence is high | subscription worker; paid API for final quality pass only after approval by default |
 | Instruction/policy classification | local first | active agent/subscription worker if low confidence; paid API only after approval by default |
 | Long-session consolidation | local overnight job | subscription worker if quota is available; otherwise defer; paid API only after approval by default |
@@ -79,6 +80,8 @@ Paid API:
 - Gemini cheap/balanced Flash routes as optional alternatives,
 - Anthropic/Claude Haiku as an optional cheap/fast alternative,
 - Claude Sonnet/Opus and expensive Gemini routes only through explicit quality/experiment profiles,
+- third-party model routers such as NotDiamond-style routing services only through an explicit
+  provider adapter, with the same confirmation, cost, audit, and privacy controls as direct paid API,
 - other providers behind the same adapter contract when explicitly added.
 
 Provider names are examples. The architecture should keep a provider adapter layer so choices can change.

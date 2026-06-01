@@ -1,6 +1,6 @@
 # Current Session Handoff
 
-Last updated: 2026-05-31.
+Last updated: 2026-06-01.
 
 This is the current handoff for the next Recallant session. Start here after reading `AGENTS.md`.
 
@@ -229,6 +229,16 @@ and [HUMAN_MEMORY_AND_UI_DIRECTION.md](HUMAN_MEMORY_AND_UI_DIRECTION.md):
 - AI interpretation should be the normal path for semantic requests, while deterministic policy
   remains authoritative for secrets, deletion, paid API, public exposure, production changes, auth,
   storage, and audit.
+
+The current documentation alignment audit and forward plan are:
+
+- [DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md](DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md)
+- [DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md)
+
+Future implementation should not treat Phase 10 as still pending. The next work is the
+post-acceptance human-centered product evolution plan: human workbench quality, AI-native
+management, project sources/memory spaces, client connect/hooks, more pilots, broader memory-domain
+design, and packaging.
 
 The current Settings UI follow-up is complete for the first editable project-settings slice:
 

@@ -58,9 +58,12 @@ Managed memory includes explicit erasure. Archive/reject/supersede are normal go
 Scope boundary is explicit: v1 is the full working coding-agent memory core; broader personal-life capture, external connectors, specialized storage systems, and public packaging are future expansion paths. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 
 Implementation is authorized, the main local v1 implementation slices exist, the first owner-server
-production deployment is running, and the first copied-project sandbox pilot is complete. The active
-next architecture/implementation checkpoint is Phase 10: autonomous attach and controlled
-cross-project recall. The earlier documentation-first pause is retained as historical context in
+production deployment is running, the first copied-project sandbox pilot is complete, Phase 10 has
+first production-ready attach/detach/cross-project slices, and the Product Acceptance capture loop is
+green. The active next architecture/product checkpoint is the human-centered evolution plan in
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md): workbench quality, AI-native
+management, source bindings, client connect/hooks, pilots, broader memory domains, and packaging.
+The earlier documentation-first pause is retained as historical context in
 [ADR-0009-documentation-first-before-implementation.md](ADR-0009-documentation-first-before-implementation.md).
 
 ## 1. System context

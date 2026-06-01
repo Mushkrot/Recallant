@@ -2,7 +2,7 @@
 
 ## Status
 
-Working direction
+Accepted, refined by [ADR-0045](ADR-0045-human-centered-memory-and-workbench.md)
 
 ## Context
 

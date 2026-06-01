@@ -2,11 +2,13 @@
 
 ## Status
 
-Working direction
+Accepted, refined by [ADR-0018](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0045](ADR-0045-human-centered-memory-and-workbench.md)
 
 ## Context
 
-Recallant is still in architecture discovery. We have compared Open Brain / OB1, MemPalace, MF0-1984, OpenMemory variants, Journey, and the owner's earlier local `agent-bootstrap` sketch.
+Recallant has completed the initial architecture discovery and first production-ready coding-agent
+memory slice. The reviewed reference set includes Open Brain / OB1, MemPalace, MF0-1984,
+OpenMemory variants, Journey, AgentMemory, and the owner's earlier local `agent-bootstrap` sketch.
 
 The project owner currently prefers **Open Brain / OB1** as the main architectural foundation because its author and current design direction are considered the strongest architectural baseline among the reviewed projects.
 
@@ -26,6 +28,8 @@ Keep the following projects in the design loop as best-of-breed donors:
 
 - **MemPalace** for verbatim-first capture, pre-compaction/session hooks, message-level sweep, temporal KG operations, hybrid retrieval discipline, and repair/recovery posture.
 - **MF0-1984** for Memory Tree/workbench UX, graph hygiene operations, keeper pipelines, project export/import, and server-side LLM proxy patterns.
+- **AgentMemory** for client `connect` adapters, hook-based automatic capture, native skills,
+  viewer/replay, capture-active diagnostics, and sandboxed retrieval evals.
 - **CaviraOSS/OpenMemory** for salience/decay/reinforcement, temporal facts, user/project scoping, connector architecture, and explainable recall traces.
 - **Mem0 OpenMemory** only as historical prior art for local MCP memory onboarding, not as a foundation.
 - The owner's **agent-bootstrap** sketch for repository-contract ideas: `AGENTS.md`, `PROJECT_LOG.md`, and resumable project handoff conventions.
@@ -35,6 +39,11 @@ Journey has been evaluated as a possible foundation and remains a layer referenc
 
 The owner has also accepted a more precise OB1/MF0 synthesis: OB1 remains the governance/foundation backbone, while MF0 becomes the main donor for raw capture, local workbench, Memory Tree, Keeper-style pipelines, project profile export/import, and server-side provider proxy patterns. See [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md).
 
+The owner later clarified the broader product frame: Recallant is external memory for the owner and
+AI agents, while coding-agent memory is the first concrete domain. OB1 remains especially relevant
+because its original framing is closer to human external memory accessed through agents. See
+[ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md).
+
 ## Consequences
 
 - When specs conflict, start from OB1's architectural posture and adapt it to Recallant requirements before adopting competing patterns.
@@ -42,6 +51,8 @@ The owner has also accepted a more precise OB1/MF0 synthesis: OB1 remains the go
 - Do not discard a better mechanism just because it is outside OB1. If MemPalace, MF0, or OpenMemory has a stronger answer for a specific subsystem, document the subsystem-level adoption.
 - Keep Recallant's own contracts authoritative: `DATA_MODEL.md`, `MCP_SPEC.md`, `RETRIEVAL.md`, and `INGESTION.md` define the final implementation surface.
 - Treat MF0 as a first-class subsystem reference for workbench/capture/UI ideas, not as a replacement foundation and not as a schema to copy directly.
+- Treat AgentMemory as the first reference for client connection and capture verification, not as a
+  replacement for Recallant's governed project/source lifecycle.
 
 ## Implementation mapping notes
 

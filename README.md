@@ -2,7 +2,12 @@
 
 **Governed external memory for the owner and AI agents.**
 
-Recallant is a source-backed memory and context continuity platform for AI-assisted work. It preserves decisions, working context, evidence, checkpoints, and operating knowledge across sessions, tools, agent clients, projects, and future memory spaces.
+Recallant is a source-backed memory and context continuity platform for AI-assisted work. It
+preserves decisions, working context, evidence, checkpoints, and operating knowledge across
+sessions, tools, agent clients, projects, and broader memory spaces.
+
+In Recallant, a project is a logical memory space. It may be backed by a folder, repository, server
+path, document set, connector, or no folder at all.
 
 ## Documentation
 
@@ -32,10 +37,11 @@ notes.
 
 ## Status
 
-Recallant has a working local v1 implementation slice and an owner-server production deployment for
-the private Review UI, Postgres/pgvector, local Ollama, automated local backups, autonomous project
-attach/detach, controlled cross-project recall, and AI-backed management chat with deterministic
-safety gates.
+Recallant has a first production-ready coding-agent memory slice and an owner-server production
+deployment for the private Review UI, Postgres/pgvector, local Ollama, automated local backups,
+autonomous project attach/detach, controlled cross-project recall, and AI-backed management chat
+with deterministic safety gates. Current product work is tracked in
+[docs/DEVELOPMENT_PLAN_2026-06-01.md](docs/DEVELOPMENT_PLAN_2026-06-01.md).
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 

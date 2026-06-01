@@ -1,6 +1,6 @@
 # Working context snapshot
 
-Last updated: 2026-05-31.
+Last updated: 2026-06-01.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
@@ -340,15 +340,17 @@ Latest implementation checkpoints:
 Production deployment, the first UI cleanup, the GutenDocx sandbox pilot, local Ollama embedding
 readiness, and the first human-readable Review UI cleanup are complete.
 
-The active next product plan is to move from pre-pilot safety infrastructure into autonomous project
-attach and controlled cross-project recall:
+The current product plan is no longer Phase 10 implementation. Phase 10 first slices and the Product
+Acceptance capture loop are green. The forward plan is now
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md):
 
-- document and implement `recallant attach --mode manual|guided|autopilot`;
-- keep manual/guided modes available for cautious production work;
-- keep governed project detach/delete available so sandbox and attached project cleanup is
-  reversible and visible before any broad live-project onboarding;
-- keep explicit cross-project recall modes available for source-linked examples from other
-  projects;
+- professional human-readable workbench quality;
+- AI-native management chat and action planning;
+- project-as-memory-space source bindings;
+- client `connect` and hook capture;
+- additional sandbox/live pilots after agent-run validation;
+- broader external-memory domain design;
+- packaging and public-readiness after the private workflow is polished.
 
 Important: Questions 9, 12, and 13 are accepted in `ADR-0039`, `ADR-0040`, and `ADR-0041`. The later managed AI-native operations discussion is accepted in `ADR-0042`.
 
@@ -357,9 +359,9 @@ Next session should start here:
 1. Continue autonomously from the latest committed phase checkpoint and current `git status`; do not ask whether implementation is authorized.
 2. Read `PROJECT_LOG.md`, `docs/SESSION_HANDOFF_CURRENT.md`, `docs/AUTONOMOUS_ATTACH.md`, and
    `docs/CROSS_PROJECT_RECALL.md`.
-3. Start from the completed first Phase 10 attach/detach/cross-project checkpoint; the next useful
-   slice is owner-facing Management UI action quality, optional local sandbox cleanup, or an
-   owner-driven new sandbox attach test through `recallant attach . --sandbox`.
+3. Start from the completed first Phase 10 attach/detach/cross-project checkpoint and the
+   documentation alignment audit. The next useful slices are defined in
+   [DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md).
 4. Keep manual/guided modes available; do not make autopilot the only way to attach projects.
 5. Commit autonomously at coherent verified checkpoints so rollback remains easy.
 6. Keep `/ai/PORTS.yaml`, `/ai/SECURITY`, and Recallant docs synchronized after each material

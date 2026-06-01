@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-05-31.
+Last updated: 2026-06-01.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
@@ -123,6 +123,12 @@ Current implemented slices include:
   secret findings use live-vs-sandbox policy; and `recallant doctor` reports a structured
   production-readiness gate backed by real systemd backup timer state and a latest backup
   verification sidecar.
+- Human-centered documentation alignment: Recallant is now explicitly framed as external memory for
+  the owner and AI agents, with coding-agent memory as the first implemented domain; projects are
+  logical memory spaces that can have zero, one, or many attached sources; the UI direction is
+  professional human-readable language first, with technical details collapsed; and AI-first
+  interpretation is the normal path for semantic management while deterministic policy controls
+  risky execution.
 
 ## Accepted Production Deployment Plan
 
@@ -236,15 +242,16 @@ Completed Product Acceptance work:
 5. `/ai/recallant` live dogfood write + recall verification.
 6. Safe detach dry-run + confirmed detach in the acceptance smoke.
 
-Next useful work:
+Next useful work is now tracked in
+[DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md):
 
-1. Run full regression and deploy/restart only through the accepted controlled service path when the
-   owner wants this code live.
-2. Deepen owner-facing Management UI action flows beyond the first implementation slice.
-3. Deepen optional local sandbox-copy deletion or bootstrap restore workflows beyond the safe
-   pointer/runtime cleanup slice.
-4. Start the next sandbox/live-project pilot only after the agent has already run the equivalent
-   autonomous attach/capture/closeout/recall validation itself.
+1. Human Workbench Quality.
+2. AI-Native Management Layer.
+3. Project Sources And Memory Spaces.
+4. Client Connect And Hook Capture.
+5. More Real Pilots.
+6. Broader External Memory Domain Design.
+7. Product Packaging And Public Readiness.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -283,6 +290,15 @@ This validation covers the final `TEST_CONTRACT.md` closure pass: Review Inbox d
 critical/rule/cost panels, closeout warning paths, attach raw-secret policy, production-readiness
 doctor output, Phase 8 backup/security/error/search rows, Phase 9 archive/decay/cleanup rows,
 Product Acceptance, onboarding, installer, and cross-client smoke.
+
+Latest documentation-alignment validation on 2026-06-01:
+
+- `npm run format:check`
+- `npm run lint`
+- `git diff --check`
+- `git diff --cached --check`
+
+This validation is documentation-only and did not require runtime service restart.
 
 Latest production-readiness follow-up validation on 2026-05-31:
 
@@ -732,8 +748,9 @@ Latest contract hardening checkpoint:
   browser form paths, Russian answers, confirmation gating for destructive/paid/public/global-risk
   requests, dangerous setting gates including subscription/preview-model routes, secret-setting
   redaction in API and HTML, review actions, detach, and forget-forever forms.
-- `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark only the rows now
-  covered by smoke tests; remaining unimplemented closeout error-report fixtures stay open.
+- `TEST_CONTRACT.md` and `AGENT_IMPLEMENTATION_GUIDE.md` were updated to mark the rows covered by
+  smoke tests. Closeout warning/report-required fixtures are now represented in the green test
+  contract; future closeout work should add new rows rather than relying on this old gap note.
 
 Latest target-aware onboarding checkpoint:
 

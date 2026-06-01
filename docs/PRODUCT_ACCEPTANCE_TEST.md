@@ -1,10 +1,15 @@
 # Product Acceptance Test
 
-Last updated: 2026-05-31.
+Last updated: 2026-06-01.
 
 This file defines the non-negotiable product gate for Recallant. Component-level success is not
-enough. Recallant is not ready for ordinary use until the main agent-memory loop is proven
-end-to-end without the owner acting as QA.
+enough. Ordinary-use readiness requires the main agent-memory loop to be proven end-to-end without
+the owner acting as QA.
+
+Current status: the first production-ready coding-agent memory slice passed this gate through
+`npm run product-acceptance:smoke`. This does not make every future Recallant domain complete.
+New domains such as virtual memory spaces, personal external-memory workflows, new connectors, or
+additional client adapters must pass their own acceptance gates before being called ready.
 
 ## Main Acceptance Scenario
 
