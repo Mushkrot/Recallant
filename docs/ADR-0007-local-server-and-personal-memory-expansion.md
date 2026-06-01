@@ -8,6 +8,10 @@ Working direction
 
 The owner expects to run Recallant on a personal Linux server with a capable GPU. The same system may later expand beyond AI coding-agent memory into broader human external memory, closer to the original OB1 vision.
 
+The owner clarified that this expansion path is not a separate philosophical afterthought. Recallant
+is already being designed as external memory for the owner, accessed through agents. Coding-agent
+memory is the first practical domain and product proving ground.
+
 ## Decision
 
 Recallant should be **local/server-first** and **personal-memory extensible**.
@@ -23,7 +27,10 @@ For v1:
 For future expansion:
 
 - The data model should avoid hard-coding assumptions that every memory is a coding artifact.
-- Projects may represent repositories, subprojects, workspaces, or later personal domains.
+- Projects may represent repositories, subprojects, workspaces, servers, clients, research topics,
+  recurring processes, virtual topics, or later personal domains.
+- A project may have no folder, one folder, or multiple source bindings such as repositories,
+  server paths, documents, connectors, or manual/virtual sources.
 - Memory records should retain scope, provenance, review/use policy, and source refs so personal-life memory can use the same safety model.
 
 ## Consequences

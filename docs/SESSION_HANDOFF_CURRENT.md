@@ -216,6 +216,20 @@ The current upstream reference set now includes `rohitg00/agentmemory` as of 202
   viewer/replay, capture-active diagnostics, and sandboxed retrieval evals, but it does not replace
   Recallant's governed Postgres/project-lifecycle architecture.
 
+The current product framing refinement as of 2026-06-01 is documented in
+[ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md)
+and [HUMAN_MEMORY_AND_UI_DIRECTION.md](HUMAN_MEMORY_AND_UI_DIRECTION.md):
+
+- Recallant is external memory for the owner and AI agents, not only memory for coding agents.
+- Coding-agent memory remains the first concrete domain and acceptance path.
+- A project is a logical memory space; folders, repos, server paths, documents, connectors, and
+  virtual/manual topics are sources attached to that memory space.
+- The UI must speak professional human language by default and keep raw technical fields/JSON in
+  collapsed details.
+- AI interpretation should be the normal path for semantic requests, while deterministic policy
+  remains authoritative for secrets, deletion, paid API, public exposure, production changes, auth,
+  storage, and audit.
+
 The current Settings UI follow-up is complete for the first editable project-settings slice:
 
 - Settings now shows browser forms for capture profile, context budget profile, review sensitivity,

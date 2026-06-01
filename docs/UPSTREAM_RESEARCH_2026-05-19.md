@@ -395,14 +395,17 @@ Recallant should probably start with relations between chunks/events/memories an
 
 ### 5. Project scope matters
 
-All systems eventually need isolation:
+All systems eventually need isolation, but a Recallant project should be understood as a logical
+memory space rather than only a folder:
 
 - OB1 uses workspace/project/channel in agent memory sidecars.
 - OpenMemory has user_id/project_id.
 - MemPalace uses wings and per-project diaries.
 - AgentMemory uses a project string derived from env/Git/cwd, which is easy to
   onboard but weaker than a durable project registry.
-- Recallant already has developer/project scope; keep it central.
+- Recallant already has developer/project scope; keep it central, but evolve the model so one
+  project can have zero, one, or many attached sources such as folders, repos, server paths,
+  documents, connectors, and virtual/manual sources.
 
 ### 6. Hooks and file contracts are both needed
 
@@ -432,6 +435,19 @@ Keep v1 compact:
 
 Add richer tools only when the retrieval/writeback lifecycle proves they are needed.
 
+### 8. UI must be human-readable first
+
+The strongest upstream UI/product lessons are complementary:
+
+- OB1 best matches the larger human external-memory vision.
+- MF0 is the best workbench and memory-tree reference.
+- AgentMemory is the best live capture/replay and "is memory actually recording?" reference.
+- MemPalace helps search/archive/recovery.
+- Journey helps guided setup.
+
+Recallant should synthesize these into a professional private workbench. Default screens should use
+plain human language; technical schema terms and JSON values belong in collapsed details.
+
 ## Provisional Recallant Direction
 
 Not final at low-level design, but updated by ADR-0004, ADR-0005, ADR-0016, ADR-0017, and ADR-0018. Current best synthesis:
@@ -449,6 +465,10 @@ Not final at low-level design, but updated by ADR-0004, ADR-0005, ADR-0016, ADR-
 11. **Review UI/admin** is v1 for governed-memory inbox/rules/conflicts/duplicates/source inspection; broader dashboards remain non-v1, except the later required Cost / Paid API dashboard from ADR-0032.
 12. **Client connect and hook capture** need a dedicated layer beyond project
     attach. AgentMemory is the clearest reference for this.
+13. **Human external-memory framing** is the product frame. Coding-agent memory is the first domain,
+    but projects are logical memory spaces and may later include non-folder sources.
+14. **Professional human-readable UI language** is a product requirement, not polish. Default
+    screens should explain meaning, attention, risk, and recommended action before technical detail.
 
 ## Follow-up Implementation Topics
 

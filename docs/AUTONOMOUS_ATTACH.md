@@ -1,12 +1,18 @@
 # Autonomous Project Attach
 
-This document describes the target product workflow for connecting a project to Recallant.
+This document describes the target product workflow for connecting a folder/source to a Recallant
+project memory space.
 
 ## Purpose
 
 The owner should be able to open a folder, run one command or ask Recallant in natural language, and
-have the project become part of Recallant memory without hand-building agent docs, copying handoff
+have that folder become part of Recallant memory without hand-building agent docs, copying handoff
 files, or manually choosing every safe import.
+
+In the broader product model, a Recallant project is a logical memory space. A folder is one
+possible source attached to that space. A memory space may later have no folder, one folder, or
+multiple sources such as repositories, server paths, documents, connectors, or virtual/manual
+sources.
 
 Autonomous attach is the target everyday path, but Recallant must keep cautious modes available.
 

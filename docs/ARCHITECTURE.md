@@ -4,6 +4,13 @@
 
 Recallant uses **Open Brain / OB1 as the preferred architectural foundation**: Postgres/pgvector, remote MCP, multi-client memory, and governed agent-memory sidecars are the default starting point. This is a working direction, not a claim that every OB1 detail should be copied unchanged.
 
+Recallant's product frame is human-centered: it is an external memory for the owner, accessed and
+maintained through AI agents. Coding-agent memory is the first concrete domain, but the architecture
+must keep the broader personal/work memory path open. A "project" is a logical memory space; folders,
+repositories, server paths, documents, connectors, and virtual topics are sources attached to that
+space. See [ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md)
+and [HUMAN_MEMORY_AND_UI_DIRECTION.md](HUMAN_MEMORY_AND_UI_DIRECTION.md).
+
 The accepted direction is now an **OB1/MF0 synthesis**: OB1 supplies the governance backbone, while MF0 supplies important workbench/raw-capture/Memory Tree/Keeper ideas. Recallant owns the integration layer: managed hybrid capture, raw workflow evidence, project capture profiles, Review UI, context budget, and local-server-first deployment. See [ADR-0018-ob1-mf0-synthesis.md](ADR-0018-ob1-mf0-synthesis.md) and [ADR-0027-raw-workflow-evidence-foundation.md](ADR-0027-raw-workflow-evidence-foundation.md).
 
 Other reviewed systems remain active inputs:
@@ -18,7 +25,7 @@ See [ADR-0004-ob1-as-preferred-foundation.md](ADR-0004-ob1-as-preferred-foundati
 
 Codex is the first adapter and tested workflow, but Recallant is not Codex-specific. The core MCP tools, session lifecycle, closeout, recovery, storage, and Review UI are universal. See [ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md](ADR-0019-universal-mcp-core-codex-adapter-session-recovery.md).
 
-Review UI runs on the Recallant server. v1 uses a compact private workbench, not a minimal approval table, and the architecture should let it grow into a fuller management platform and later be exposed through a dedicated Cloudflare-managed subdomain if the owner chooses. See [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md) and [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md).
+Review UI runs on the Recallant server. v1 uses a compact private workbench, not a minimal approval table, and the architecture should let it grow into a fuller management platform and later be exposed through a dedicated Cloudflare-managed subdomain if the owner chooses. Default UI language must be professional and human-readable; raw schema terms and JSON belong in collapsed technical details, not the main owner workflow. See [ADR-0020-review-ui-on-recallant-server-management-platform-path.md](ADR-0020-review-ui-on-recallant-server-management-platform-path.md), [ADR-0033-compact-review-ui-workbench-in-v1.md](ADR-0033-compact-review-ui-workbench-in-v1.md), and [ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md).
 
 Settings live centrally on the Recallant server. Project repositories keep only pointer/config files; effective policy is resolved from session/project/developer/server settings. v1 exposes a controlled Settings UI for project workflow settings while keeping sensitive/server settings read-only or confirmation-gated. See [ADR-0022-centralized-settings-on-recallant-server.md](ADR-0022-centralized-settings-on-recallant-server.md), [ADR-0034-controlled-settings-ui-in-v1.md](ADR-0034-controlled-settings-ui-in-v1.md), and [SETTINGS.md](SETTINGS.md).
 
@@ -44,7 +51,7 @@ source-linked examples from other projects when the task calls for them. See
 [ADR-0044-controlled-cross-project-recall.md](ADR-0044-controlled-cross-project-recall.md) and
 [CROSS_PROJECT_RECALL.md](CROSS_PROJECT_RECALL.md).
 
-Recallant is a managed AI-native platform. The owner-facing management surface includes Review UI, controlled settings, Cost / Paid API, health/doctor status, cleanup, and natural-language chat. AI can propose extraction, cleanup, conflict explanations, and context plans, but deterministic server policy owns auth, storage, caps, audit, confirmation, and destructive operations. See [ADR-0042-managed-ai-native-platform-and-operations.md](ADR-0042-managed-ai-native-platform-and-operations.md) and [OPERATING_PRINCIPLES.md](OPERATING_PRINCIPLES.md).
+Recallant is a managed AI-native platform. The owner-facing management surface includes Review UI, controlled settings, Cost / Paid API, health/doctor status, cleanup, and natural-language chat. AI should be the normal path for semantic interpretation, memory-space/source classification, extraction, cleanup, conflict explanations, context plans, and plain-language answers. Deterministic server policy owns auth, storage, caps, audit, confirmation, paid API approval, secrets, public exposure, production changes, and destructive operations. See [ADR-0042-managed-ai-native-platform-and-operations.md](ADR-0042-managed-ai-native-platform-and-operations.md), [ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md), and [OPERATING_PRINCIPLES.md](OPERATING_PRINCIPLES.md).
 
 Managed memory includes explicit erasure. Archive/reject/supersede are normal governance actions; "forget forever" is a separate owner-confirmed workflow that removes target content and derived material from active recall, embeddings, summaries, context packs, search indexes, and UI surfaces.
 
@@ -194,10 +201,13 @@ This is the normal startup path. CLI/UI may preview the same pack, but they must
 
 ## 5. Multi-project routing
 
-- Every MCP session must know `project_id` through `.recallant/config`, environment, or client configuration.
+- Every MCP session must know `project_id` through `.recallant/config`, environment, source binding, or client configuration.
 - Mixing `project_id` values in one query is disallowed unless an explicit widening parameter is used.
 - `projects.parent_project_id` supports nested projects/workspaces, but default search stays scoped to the current project unless explicitly widened.
 - `memory_domain` keeps future personal-memory expansion from mixing into coding-agent memory by accident.
+- `projects.primary_path` is a compatibility/default source pointer. Future multi-source support
+  should use project source bindings so one memory space can include multiple folders, repos,
+  server paths, documents, connectors, or virtual/manual sources.
 - Project boundaries are not secrecy boundaries for the owner's current workflow. They are relevance boundaries: cross-project search is allowed when explicitly requested, but default recall should not pollute the active project context.
 - Cross-project hits must be labeled with source project, source ref, scope kind, status, use policy,
   and whether they are examples/evidence or binding guidance.

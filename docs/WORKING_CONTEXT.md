@@ -6,9 +6,14 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Current product intent
 
-Recallant is a **full-quality personal memory product for AI-assisted software work**, not a quick demo and not a thin RAG prototype. The project owner prefers spending more design and implementation effort if that produces a stronger durable system.
+Recallant is a **full-quality external memory product for the owner and AI agents**, not a quick demo and not a thin RAG prototype. The project owner prefers spending more design and implementation effort if that produces a stronger durable system.
 
-The core problem remains: AI coding work spans multiple clients, projects, sessions, and context compactions. The user needs one durable memory substrate that helps agents resume work, understand prior decisions, avoid repeating analysis, and carry important preferences/rules across projects.
+The first concrete problem remains AI-assisted software work: coding work spans multiple clients, projects, sessions, and context compactions. The user needs one durable memory substrate that helps agents resume work, understand prior decisions, avoid repeating analysis, and carry important preferences/rules across projects.
+
+Accepted refinement as of 2026-06-01: Recallant should be understood as external memory for the
+owner, accessed through agents. Coding-agent memory is the first domain, not the final boundary. A
+project is a logical memory space, not necessarily a folder; folders, repositories, server paths,
+documents, future connectors, and virtual/manual topics are sources attached to that memory space.
 
 Current daily workflow is mostly **Codex-first**, but Recallant must stay multi-client-ready because switching between agents may return later and MCP keeps the architecture portable.
 
@@ -23,6 +28,10 @@ Accepted refinement: Codex is the first adapter and working scenario, not the pr
 - Licensing is not a selection criterion at this stage for external upstream projects; all listed external projects may be used/adapted as needed where technically suitable.
 - Architecture is not fully finalized, but future work should not reopen a neutral "which project wins" contest unless new evidence invalidates the direction.
 - Matthew Berman's **Journey / Journey Kits** is now an upstream reference for packaging, installing, versioning, and distributing agent workflows. It is not the primary memory engine; see ADR-0008.
+- Owner-facing UI direction is now explicit: the management workbench must use professional
+  human-readable language by default, hide raw technical values in details/advanced views, and
+  borrow MF0 workbench ideas, OB1 human-memory framing, AgentMemory live capture/replay visibility,
+  MemPalace search/archive recovery, and Journey guided onboarding.
 
 ## Current v1 quality bar
 

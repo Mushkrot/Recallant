@@ -4,15 +4,19 @@ This document records cross-cutting product and engineering principles that shou
 
 ## 1. Product mission in plain language
 
-Recallant exists so AI agents remember where they are working, what is already known, which rules apply, where important settings live, and how to continue without forcing the owner to repeat the same context every session.
+Recallant exists so the owner and AI agents share a durable external memory. Agents should remember where they are working, what is already known, which rules apply, where important settings live, and how to continue without forcing the owner to repeat the same context every session.
 
-The platform is a shared memory and work navigator for agents, projects, servers, and future clients. It should make agents long-running participants in the owner's work, not one-off executors.
+The platform is a shared memory and work navigator for the owner, agents, projects, servers, and future clients. It should make agents long-running participants in the owner's work, not one-off executors.
+
+Coding-agent memory is the first concrete domain. The broader product is a human external-memory
+platform accessed through agents.
 
 ## 2. Core product functions
 
 Recallant must:
 
-- remember project context, decisions, rules, files, environment facts, and session handoffs;
+- remember project context, decisions, rules, files, environment facts, personal/work-domain facts,
+  and session handoffs;
 - share that context across Codex, Claude Code, Cursor, Windsurf, and future MCP-compatible agents;
 - attach projects through manual, guided, or autopilot workflows so the owner can choose between
   cautious control and autonomous setup;
@@ -26,6 +30,22 @@ Recallant must:
 - expose a private management UI and natural-language management chat for review, correction, cleanup, and diagnosis;
 - support backup/export/restore/remapping so an accumulated memory corpus can move to another server;
 - remain universal: the owner's `/ai` server layout is the first real deployment profile, not a hard-coded product assumption.
+
+## 2.0 Project means memory space
+
+A project is a logical memory space around a meaningful area of work or life. It is not inherently
+a folder.
+
+Examples include a code repository, a server/infrastructure area, a client, a research topic, a
+personal domain, a recurring process, or a virtual rule set with no local files at all.
+
+Folders, repositories, server paths, documents, connectors, and future chat/email/calendar/file
+sources are attachments to that memory space. `recallant attach .` is the first practical coding
+workflow, but it should be understood as "attach this folder as a source", not "a project is always
+this folder".
+
+The UI should use terms such as "memory space", "attached source", "project folder", and "shared
+rule" where they make the meaning clearer than internal schema terms.
 
 ## 2.1 Project attach and cross-project recall
 
@@ -105,6 +125,27 @@ Implementation baseline:
 - explicit owner requests such as "save this rule for all projects" may create developer-scope
   `instruction_grade` rules when low-risk, while risky/global changes go to Review.
 
+## 5.1 Human-readable workbench
+
+The management UI must be professional and human-readable by default. It is not a toy site, but it
+also must not feel like a raw database console.
+
+Default screens should explain:
+
+- what Recallant knows;
+- what needs the owner's attention;
+- what is safe and already working;
+- what action is recommended next;
+- what will happen if a cleanup, rule change, or detach action is confirmed.
+
+Do not make the owner decode internal terms such as `memory_type`, `scope_kind`, `use_policy`,
+`embedding_route`, `route_class`, or raw JSON on ordinary screens. Technical details should be
+available in collapsed advanced panels, API output, logs, or debug views.
+
+The best upstream UI lessons are: OB1 for human external-memory framing, MF0 for workbench and
+memory-tree ideas, AgentMemory for live capture/replay status, MemPalace for search/archive
+recovery, and Journey for guided onboarding.
+
 ## 6. AI-native, policy-governed
 
 Recallant should use AI capabilities wherever they materially improve the product:
@@ -114,11 +155,15 @@ Recallant should use AI capabilities wherever they materially improve the produc
 - conflict explanation;
 - context-pack planning;
 - intent detection;
+- memory-space/source classification;
+- plain-language explanations and answer generation;
 - source summarization;
 - review suggestions;
 - connector/account binding explanations.
 
-Deterministic code remains necessary for storage, auth, migrations, routing, caps, validation, audit, deletion, and safety. The product should feel intelligent, but its trust boundaries must be enforced by clear contracts.
+Deterministic code remains necessary for storage, auth, migrations, routing, caps, validation,
+audit, deletion, paid API approval, secret handling, production exposure, and safety. The product
+should feel intelligent, but its trust boundaries must be enforced by clear contracts.
 
 ## 7. Upstream reuse
 

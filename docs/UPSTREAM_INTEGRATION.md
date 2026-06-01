@@ -28,6 +28,7 @@ Before implementation, selected upstream repositories should be cloned or inspec
 | Mandatory client capture | AgentMemory + MemPalace | Use hooks/connectors to prove agents actually start Recallant-backed sessions, capture prompts/tools/checkpoints, and close out without owner QA |
 | Review and long-term hygiene | OB1 + MF0 | Governed review model plus richer owner-facing UI, duplicate/conflict/rule management |
 | Memory graph / visual navigation | MF0 | Use as UX inspiration; map into Recallant-owned graph/data contracts |
+| Human-readable workbench UI | MF0 + OB1 + AgentMemory + Journey | MF0 workbench/memory tree, OB1 human external-memory framing, AgentMemory live capture/replay status, Journey guided setup; keep technical schema terms collapsed |
 | Project onboarding/package | Journey + AgentMemory + owner prior agent-bootstrap sketch + MF0 export/import | `recallant attach`, client `connect`, thin repo files, future kit/profile export/import |
 | Final contracts | Recallant | `DATA_MODEL.md`, `MCP_SPEC.md`, `INGESTION.md`, `MEMORY_MANAGEMENT.md`, `RETRIEVAL.md` |
 
@@ -39,7 +40,7 @@ Before implementation, selected upstream repositories should be cloned or inspec
 |---------------------|------------------|
 | MCP connection patterns for Cursor / Claude Code from repo docs | Domain schema; replace with [DATA_MODEL.md](DATA_MODEL.md) |
 | Getting started and env layout ideas | Any shortcut without strict `project_id` |
-| pgvector migration examples | "One human brain" semantics; refocus as **agent memory** |
+| pgvector migration examples | Copying "one brain" semantics without Recallant's project/source isolation; adapt as owner external memory plus governed project scopes |
 | Agent Memory sidecars: provenance, review, recall traces, source refs, use policy | Direct code transfer without adaptation to Recallant scope/contracts |
 | Compact structured write-back and unsafe raw-dump blocking | Treating OB1's selective capture stance as enough for Recallant raw evidence needs |
 

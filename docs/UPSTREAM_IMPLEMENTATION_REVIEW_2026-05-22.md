@@ -269,6 +269,10 @@ Implementation impact:
 - Failing MCP clients by writing logs or dependency noise to stdout.
 - Equating "client config written" with "capture active"; the product gate must
   verify a real captured event and later recall.
+- Treating a project as only a folder; folder attach is one source-binding path
+  for a broader memory space.
+- Shipping a UI that exposes schema fields, acronyms, raw JSON, or variable
+  names as the primary owner-facing language.
 
 ## Decisions before Phase 0
 
@@ -279,4 +283,8 @@ Implementation impact:
 - In the client-integration layer, use AgentMemory as the main reference for
   `connect`, hook install, capture-active diagnostics, skills, viewer/replay,
   and sandboxed recall evaluation.
+- In the owner-facing workbench, use MF0 for workbench/memory-tree inspiration,
+  OB1 for human external-memory framing, AgentMemory for live capture/replay
+  visibility, MemPalace for search/archive recovery, and Journey for guided
+  onboarding reports.
 - Add tests from the beginning for the upstream-derived invariants: instruction-grade gating, unsafe writeback rejection, project isolation, retrieval floor, deterministic dedup, and bounded context.

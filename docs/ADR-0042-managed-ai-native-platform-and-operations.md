@@ -12,6 +12,11 @@ The owner confirmed several cross-cutting requirements after the core memory/gov
 - the system needs self-cleaning mechanisms as the corpus grows;
 - the primary management experience should be natural-language chat, with UI controls as supporting surfaces;
 - Recallant should lean heavily on AI/LLM capabilities while retaining deterministic safety boundaries;
+- the product should act as external memory for the owner through agents, not only as memory for
+  coding agents;
+- "project" should mean a logical memory space, not necessarily a folder;
+- the management UI should use professional human-readable language and keep technical identifiers
+  out of default screens;
 - implementation should learn from upstream projects before rebuilding known patterns;
 - code, docs, comments, and public artifacts must be English and professionally structured;
 - the owner's server already has shared infrastructure such as Ollama, `/ai/SECURITY`, `/ai/PORTS.yaml`, and `/opt/secure-configs/.env`;
@@ -20,6 +25,14 @@ The owner confirmed several cross-cutting requirements after the core memory/gov
 ## Decision
 
 Recallant is a **managed AI-native memory platform**.
+
+It is human-centered: the owner accesses and maintains long-term memory through AI agents and the
+private management workbench. Coding-agent memory is the first domain, while broader personal/work
+memory remains an explicit expansion path.
+
+Projects are logical memory spaces. A folder attach is one source-binding workflow, not the
+definition of a project. A project can later contain several folders, repositories, server paths,
+documents, connectors, or virtual/manual sources.
 
 ### Managed memory
 
@@ -39,9 +52,22 @@ The Review UI/management platform must include a natural-language command/chat s
 
 Actions that affect deletion, secrets, public exposure, model cost, global rules, or long-term behavior still require policy checks and confirmation.
 
+### Human-readable workbench language
+
+Default UI screens must explain state and actions in professional human language. Internal schema
+terms, acronyms, route names, variable names, raw JSON, and model/provider identifiers should be
+collapsed into technical details unless they are the user's explicit focus.
+
+The workbench should first answer: what needs attention, what is working, what Recallant captured,
+what action is recommended, and what will happen if the owner confirms.
+
 ### AI-native but governed
 
-Recallant should use AI for extraction, review suggestions, cleanup clustering, conflict explanation, context planning, and intent classification. Deterministic code remains authoritative for storage, auth, migrations, policy enforcement, caps, audit, and destructive operations.
+Recallant should use AI for extraction, review suggestions, cleanup clustering, conflict
+explanation, context planning, memory-space/source classification, plain-language explanation, and
+intent classification. Deterministic code remains authoritative for storage, auth, migrations,
+policy enforcement, caps, audit, paid API approval, secret handling, production exposure, and
+destructive operations.
 
 ### Upstream study before implementation
 

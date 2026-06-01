@@ -7,9 +7,10 @@ Terms and stable identifiers. Code and APIs should use the same names defined he
 | Term | Definition |
 |------|------------|
 | **Developer** | Owner of one or more projects. Top-level memory hierarchy. Identifier: `developer_id` (UUID). v1 may use one developer per Recallant instance. |
-| **Project** | Logical memory isolation unit, usually 1:1 with a git repository root on disk. May have a parent project for subproject/workspace hierarchy. Belongs to `developer_id`. Identifier: `project_id` (UUID). |
+| **Project** | Logical memory space around a meaningful area of work or life. It may be a repository, server, client, research topic, personal domain, recurring process, or virtual topic with no folder. Belongs to `developer_id`. Identifier: `project_id` (UUID). |
 | **MemoryDomain** | High-level memory domain: `agent_work` for coding-agent workflow now; future domains can cover broader personal memory. |
-| **Workspace** | Physical path on the user's machine associated with `project_id`. It can change; ingest stores it as metadata, not as a primary key. |
+| **Workspace** | Physical path on a user's machine associated with `project_id`. It is one possible source binding, not the project identity. It can change; ingest stores it as metadata, not as a primary key. |
+| **ProjectSource** | Folder, repository, server path, document collection, connector, or virtual/manual source attached to a Project memory space. v1 primarily uses workspace paths; the architecture allows multiple sources per project. |
 | **Session** | Continuous working period of one CLI/client with the user. Identifier: `session_id` (UUID). |
 | **Heartbeat** | Lightweight session liveness update for long-running/idle tasks. Updates session metadata only and does not create raw memory events. |
 | **Turn** | One user or assistant message inside a `session_id`. Immutable after normal write to the raw layer; explicit erasure is a separate exception. |
@@ -97,6 +98,17 @@ Terms and stable identifiers. Code and APIs should use the same names defined he
 - `subproject`: child project inside a larger workspace/product.
 - `workspace`: umbrella workspace grouping multiple repos/projects.
 - `personal_domain`: future non-coding personal memory domain.
+- `other`: explicit extension point.
+
+### `project_source_kind`
+
+- `workspace_path`: local or server folder/path.
+- `repo`: repository binding.
+- `server_path`: server/runtime path or deployment location.
+- `document_collection`: folder or external document collection.
+- `connector`: future connector source such as Drive, Gmail, Calendar, GitHub, browser, or similar.
+- `manual`: owner/agent-created memory source with no live external binding.
+- `virtual`: conceptual memory source with no attached files.
 - `other`: explicit extension point.
 
 ### `attach_mode`

@@ -19,11 +19,17 @@ Use **Option B: compact working UI** for v1.
 
 v1 UI must be a usable private workbench, not a demo list. It should remain compact, but it must support real daily/weekly owner work.
 
+The workbench must be professional and human-readable. The owner should not need to understand
+database field names, acronyms, route names, or JSON structures to decide what to do. Default
+panels should explain state, risk, recommendation, and effect in normal language. Technical values
+remain available through collapsed details or advanced views.
+
 Required v1 areas:
 
 1. **Project navigation**
    - project list or selector,
-   - current project/scope/domain/capture profile,
+   - memory spaces and attached sources, not only folders,
+   - current project/scope/domain/capture profile in plain language,
    - entrypoints to project Review and Settings.
 
 2. **Review Inbox / Command Center**
@@ -74,6 +80,7 @@ Required v1 areas:
    - ask questions about memory, projects, context packs, health, and settings,
    - request cleanup or review actions in plain language,
    - respond in the user's language by default,
+   - use AI interpretation as the normal path when available,
    - convert risky requests into confirmation-gated action plans.
 
 9. **Cleanup / Forget**
@@ -86,6 +93,14 @@ Required v1 areas:
 v1 UI should not include a full raw memory browser, visual graph explorer, personal-life memory UI, full backup console, or broad analytics suite.
 
 It should be implemented with a layout and API shape that can grow into the later Recallant management platform without redesign.
+
+Visual/function references:
+
+- OB1 for human external-memory framing and trust/review dashboard ideas.
+- MF0 for workbench, memory-tree, context-building, and project profile ideas.
+- AgentMemory for live capture status and session replay/timeline visibility.
+- MemPalace for search/archive/recovery workflows.
+- Journey for guided onboarding and clear setup outcome reports.
 
 Natural-language chat does not bypass the bounded v1 UI scope. It is a safer command surface over the same Review/Settings/Cost/Cleanup APIs, not a separate uncontrolled agent with direct database access.
 

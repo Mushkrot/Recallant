@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD)
 
 **Product name:** Recallant  
-**Tagline:** Governed memory for AI agents  
+**Tagline:** Governed external memory for the owner and AI agents
 **Doc version:** 1.0  
 **Primary executors:** AI coding agents (not assumed: dedicated human engineering team).
 
@@ -17,6 +17,13 @@ Historical note: the project was originally drafted as **Agent Memory Platform (
 
 Current architectural bias:
 
+- Recallant is a human-centered external-memory platform accessed through AI agents. Coding-agent
+  memory is the first concrete domain, not the final product boundary.
+- A project is a logical memory space, not necessarily a filesystem folder. Folder attach remains
+  the first practical coding workflow, but folders, repositories, servers, documents, connectors,
+  and virtual/personal domains are all source bindings to memory spaces. See
+  [ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md)
+  and [HUMAN_MEMORY_AND_UI_DIRECTION.md](HUMAN_MEMORY_AND_UI_DIRECTION.md).
 - **Open Brain / OB1** is the preferred foundation.
 - Accepted synthesis: combine OB1 governance with MF0 workbench/raw-capture/Memory Tree/Keeper ideas; Recallant owns the bridge through managed hybrid capture profiles, Review UI, context-budget policy, and local-server-first deployment.
 - Other reviewed systems remain active sources of subsystem ideas: MemPalace, AgentMemory, OpenMemory, and Journey. `agent-bootstrap` is the owner's earlier personal sketch and remains useful as repo-contract inspiration, not as an external mature upstream.
@@ -32,9 +39,10 @@ Current architectural bias:
 - Settings UI is controlled in v1: project workflow settings are editable; sensitive/global/server settings are read-only or confirmation-gated.
 - Memory must be managed, correctable, self-cleaning, and erasable through explicit owner workflows. Archive/reject/supersede are normal governance actions; "forget forever" is a separate owner-confirmed erasure workflow that removes content and derived material from active memory.
 - The management experience should be natural-language first. The Review UI remains important for inspection and control, but the owner should be able to query and direct the system in plain language and have Recallant respond in the user's language.
+- The management UI should be professional and human-readable by default. It must avoid forcing the owner through raw field names, acronyms, variable names, JSON blobs, or unclear technical labels on ordinary screens. Technical values remain available in collapsed advanced/details areas.
 - Project attach should become autonomous for everyday use, with explicit `manual`, `guided`, and `autopilot` modes so the owner can choose more cautious workflows for production-sensitive projects.
 - Project memories are isolated by default but can be reused through controlled cross-project recall. Agents may ask for source-linked examples from other projects, but unrelated project memory must not silently become current-project rules.
-- Recallant should use AI/LLM capabilities heavily for extraction, cleanup suggestions, conflict explanation, context-pack planning, and intent detection, while deterministic server policy remains authoritative for safety, storage, auth, audit, cost, and destructive operations.
+- Recallant should use AI/LLM capabilities heavily for extraction, cleanup suggestions, conflict explanation, context-pack planning, intent detection, routing, and plain-language answers, while deterministic server policy remains authoritative for safety, storage, auth, audit, cost, and destructive operations.
 - Model routing is configurable and provider-switchable. Local models are the default for core recall; stronger reasoning is subscription-first/API-last; paid API requires explicit confirmation by default; OpenAI is the baseline paid API profile only when paid API is approved; Gemini and Claude cheap models are optional paid API routes by task, project, and budget.
 - v1 is a full working core for coding-agent memory, not a throwaway MVP. Broader personal-life memory, passive capture, large blob/object storage, specialized vector/graph databases, and public product packaging are designed for as future expansion, not first implementation scope. See [ADR-0025-v1-core-and-expansion-boundary.md](ADR-0025-v1-core-and-expansion-boundary.md).
 - Practical backup/restore is part of v1: Postgres + raw artifacts + manifest + restore verification, with a future path to a second backup server.
@@ -59,6 +67,10 @@ During AI-assisted coding, the same project directory may be opened in different
 - as memory grows, stale/duplicate/conflicting records can degrade agent behavior.
 
 Recallant needs to provide external long-term memory with selective retrieval, one shared store for supported clients, explicit checkpoints, governed memory hygiene, and safe management workflows.
+
+The broader product problem is the same beyond coding: the owner has many long-running areas of
+life/work where useful context is spread across agents, folders, servers, documents, chats, and
+future connectors. Recallant must model these as memory spaces even when no single folder exists.
 
 ## 2. Goals
 

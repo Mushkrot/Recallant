@@ -1,6 +1,6 @@
 # Recallant Documentation Pack
 
-This directory is the **single source of implementation specification** for Recallant: a long-term governed-memory platform for AI agents such as Codex, Cursor, Windsurf, Claude Code, and compatible MCP clients. The expected implementers are **AI coding agents** following these documents.
+This directory is the **single source of implementation specification** for Recallant: a long-term governed external-memory platform for the owner and AI agents such as Codex, Cursor, Windsurf, Claude Code, and compatible MCP clients. The expected implementers are **AI coding agents** following these documents.
 
 Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
 
@@ -33,36 +33,37 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 9. [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md) — current resume point for the next session.
 10. [PAIN_POINTS_2026-05-19.md](PAIN_POINTS_2026-05-19.md) — owner pain points and requirements extracted from discussion.
 11. [OPERATING_PRINCIPLES.md](OPERATING_PRINCIPLES.md) — product/engineering principles, managed memory, natural-language control, server safety.
-12. [PRD.md](PRD.md) — goals, scope, and success criteria.
-13. [NON_GOALS.md](NON_GOALS.md) — explicit non-goals.
-14. [GLOSSARY.md](GLOSSARY.md) — terms and stable identifiers.
-15. [ARCHITECTURE.md](ARCHITECTURE.md) — components and data flows.
-16. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — Recallant server topology on Linux/Tailscale/private networks.
-17. [SETTINGS.md](SETTINGS.md) — server/developer/project/session/client settings architecture.
-18. [RUNTIME_STACK.md](RUNTIME_STACK.md) — TypeScript/Python tradeoffs and controlled hybrid runtime.
-19. [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md) — Postgres/domain/schema boundaries and future splits.
-20. [BACKUP_RESTORE.md](BACKUP_RESTORE.md) — practical backup/restore policy and restore verification.
-21. [MODEL_ROUTING.md](MODEL_ROUTING.md) — local and cloud models, routing, fallback.
-22. [DATA_MODEL.md](DATA_MODEL.md) — canonical database schema.
-23. [INGESTION.md](INGESTION.md) — how events enter the system.
-24. [IMPORT_POLICY.md](IMPORT_POLICY.md) — explicit imports and future connectors.
-25. [RETRIEVAL.md](RETRIEVAL.md) — agent search and response bounds.
-26. [MEMORY_GOVERNANCE.md](MEMORY_GOVERNANCE.md) — automatic memory creation, review, and instruction-grade policy.
-27. [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md) — inbox/rules/review workflow, duplicates, conflicts, rule hygiene, erasure.
-28. [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md) — how Recallant avoids filling model context with unnecessary files.
-29. [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md) — full closeout and natural-language intent recognition.
-30. [MCP_SPEC.md](MCP_SPEC.md) — MCP tool contract.
-31. [SECURITY.md](SECURITY.md) — threats and safety rules.
-32. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
-33. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
-34. [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental AgentMemory reference review for client connect, hooks, skills, viewer/replay, and evals.
-35. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
-36. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
-37. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant attach`, lower-level `init`, client connection, cross-project search.
-38. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
-39. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
-40. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
-41. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
+12. [HUMAN_MEMORY_AND_UI_DIRECTION.md](HUMAN_MEMORY_AND_UI_DIRECTION.md) — human-centered product framing, plain-language UI direction, and upstream UI lessons.
+13. [PRD.md](PRD.md) — goals, scope, and success criteria.
+14. [NON_GOALS.md](NON_GOALS.md) — explicit non-goals.
+15. [GLOSSARY.md](GLOSSARY.md) — terms and stable identifiers.
+16. [ARCHITECTURE.md](ARCHITECTURE.md) — components and data flows.
+17. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — Recallant server topology on Linux/Tailscale/private networks.
+18. [SETTINGS.md](SETTINGS.md) — server/developer/project/session/client settings architecture.
+19. [RUNTIME_STACK.md](RUNTIME_STACK.md) — TypeScript/Python tradeoffs and controlled hybrid runtime.
+20. [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md) — Postgres/domain/schema boundaries and future splits.
+21. [BACKUP_RESTORE.md](BACKUP_RESTORE.md) — practical backup/restore policy and restore verification.
+22. [MODEL_ROUTING.md](MODEL_ROUTING.md) — local and cloud models, routing, fallback.
+23. [DATA_MODEL.md](DATA_MODEL.md) — canonical database schema.
+24. [INGESTION.md](INGESTION.md) — how events enter the system.
+25. [IMPORT_POLICY.md](IMPORT_POLICY.md) — explicit imports and future connectors.
+26. [RETRIEVAL.md](RETRIEVAL.md) — agent search and response bounds.
+27. [MEMORY_GOVERNANCE.md](MEMORY_GOVERNANCE.md) — automatic memory creation, review, and instruction-grade policy.
+28. [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md) — inbox/rules/review workflow, duplicates, conflicts, rule hygiene, erasure.
+29. [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md) — how Recallant avoids filling model context with unnecessary files.
+30. [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md) — full closeout and natural-language intent recognition.
+31. [MCP_SPEC.md](MCP_SPEC.md) — MCP tool contract.
+32. [SECURITY.md](SECURITY.md) — threats and safety rules.
+33. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
+34. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
+35. [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental AgentMemory reference review for client connect, hooks, skills, viewer/replay, and evals.
+36. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
+37. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
+38. [QUICKSTART.md](QUICKSTART.md) — user journey: `recallant attach`, lower-level `init`, client connection, cross-project search.
+39. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
+40. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
+41. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
+42. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
 
 ## ADR (Architecture Decision Records)
 
@@ -110,6 +111,7 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 - [ADR-0042-managed-ai-native-platform-and-operations.md](ADR-0042-managed-ai-native-platform-and-operations.md)
 - [ADR-0043-autonomous-project-attach-modes.md](ADR-0043-autonomous-project-attach-modes.md)
 - [ADR-0044-controlled-cross-project-recall.md](ADR-0044-controlled-cross-project-recall.md)
+- [ADR-0045-human-centered-memory-and-workbench.md](ADR-0045-human-centered-memory-and-workbench.md)
 
 ## Upstream research snapshots
 

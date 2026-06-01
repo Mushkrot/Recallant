@@ -28,6 +28,11 @@ One `developer` groups multiple `projects`. This enables cross-project search an
 
 ### 2.1 `projects`
 
+`projects` are logical memory spaces, not necessarily folders. A row may represent a repository,
+server/infrastructure area, client, research topic, personal domain, recurring process, or virtual
+topic. `primary_path` is a convenience/display/fallback pointer for folder-first coding workflows,
+not the permanent project identity.
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | `project_id` |
@@ -39,6 +44,30 @@ One `developer` groups multiple `projects`. This enables cross-project search an
 | `primary_path` | TEXT | Last known workspace path (nullable) |
 | `created_at` | TIMESTAMPTZ | |
 | `updated_at` | TIMESTAMPTZ | |
+
+### 2.1.0 `project_sources` (target source-binding table)
+
+The initial coding workflow can use `projects.primary_path` as a compatibility shortcut. The target
+architecture should support multiple sources attached to one project memory space. A source is a
+folder/repo/server/document/connector/manual binding, not a separate project unless the owner wants
+separate memory isolation.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `project_source_id` |
+| `project_id` | UUID FK → projects | required |
+| `source_kind` | TEXT | `workspace_path` \| `repo` \| `server_path` \| `document_collection` \| `connector` \| `manual` \| `virtual` \| `other` |
+| `label` | TEXT | Human label shown in UI |
+| `uri` | TEXT | Path, URL, connector id, or stable virtual id; nullable for fully manual sources |
+| `is_primary` | BOOLEAN | display/default source hint; at most one primary source per project by policy |
+| `status` | TEXT | `active` \| `detached` \| `archived` \| `needs_review` |
+| `metadata` | JSONB | nullable; source-specific safe metadata, never raw secrets |
+| `created_at` | TIMESTAMPTZ | |
+| `updated_at` | TIMESTAMPTZ | |
+
+**Invariant:** a project can exist with zero sources. A source can be detached without deleting the
+project memory. Source bindings may point to different machines or services; Recallant stores the
+binding and provenance, not a promise that the path is always locally reachable.
 
 ### 2.1.1 Scope and audience model
 

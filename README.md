@@ -1,8 +1,8 @@
 # Recallant
 
-**Governed memory for AI agents.**
+**Governed external memory for the owner and AI agents.**
 
-Recallant is a source-backed memory and context continuity platform for AI coding agents. It preserves decisions, working context, evidence, checkpoints, and project-specific operating knowledge across sessions, tools, and agent clients.
+Recallant is a source-backed memory and context continuity platform for AI-assisted work. It preserves decisions, working context, evidence, checkpoints, and operating knowledge across sessions, tools, agent clients, projects, and future memory spaces.
 
 ## Documentation
 
