@@ -2,12 +2,13 @@
 
 ## Current Session
 
-Status: Recallant Workbench now has a project-level Playwright screenshot/layout smoke.
-Current focus: UI QA can open a real headless Chromium browser, check desktop/mobile layout, submit
-Ask Recallant messages, and save screenshots without owner manual inspection.
-Next step: Use `npm run review-ui:playwright` as the browser-level gate for future Workbench UI
-changes, alongside `npm run review-ui:smoke`.
-Last updated: 2026-06-01T22:09:53Z.
+Status: Production `recallant.service` has been restarted and now serves the current Recallant
+Workbench UI.
+Current focus: The live site should show `Recallant Workbench` and `Ask Recallant` after browser
+refresh, rather than the older `Recallant Review Command Center` process that was still in memory.
+Next step: Continue Workbench UI/product implementation using `npm run review-ui:smoke` and
+`npm run review-ui:playwright` as the UI QA gates.
+Last updated: 2026-06-01T22:35:55Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -74,6 +75,13 @@ Last updated: 2026-06-01T22:09:53Z.
 - `npm run format:check`
 - `npm run review-ui:smoke`
 - `npm run review-ui:playwright`
+- `systemctl restart recallant`
+- local `/health` returned `{"ok":true,...}` after restart
+- unauthenticated local `/review` returned `401`
+- authenticated local `/review` HTML contains `Recallant Workbench` and `Ask Recallant`, with no
+  `Recallant Review Command Center` marker in the checked output
+- public unauthenticated `https://recallant.unicloud.ca/` returned Cloudflare Access `302`
+- `recallant-postgres` remained healthy on `127.0.0.1:15432`
 - Playwright screenshots written to:
   - `/ai/playwright/reports/recallant-workbench-desktop.png`
   - `/ai/playwright/reports/recallant-workbench-desktop-chat.png`

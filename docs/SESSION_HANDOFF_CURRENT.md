@@ -25,6 +25,12 @@ Recallant-specific browser QA is now implemented as `npm run review-ui:playwrigh
 local authenticated Workbench fixture, checks desktop/mobile layout and Ask Recallant readability in
 headless Chromium, writes screenshots under `/ai/playwright/reports`, and closes the browser/server
 after the run.
+Production `recallant.service` was restarted on 2026-06-01 after the Workbench UI changes because
+the live browser still showed the older in-memory `Recallant Review Command Center`. Post-restart
+checks passed: local `/health`, unauthenticated `/review` `401`, authenticated local `/review`
+contains `Recallant Workbench` and `Ask Recallant`, public unauthenticated
+`https://recallant.unicloud.ca/` redirects through Cloudflare Access, and `recallant-postgres`
+remains healthy on `127.0.0.1:15432`.
 
 The first copied-project pilot has been run on a GutenDocx sandbox copy. See
 [PILOT_REPORT_GUTENDOCX_2026-05-28.md](PILOT_REPORT_GUTENDOCX_2026-05-28.md). Do not attach the
