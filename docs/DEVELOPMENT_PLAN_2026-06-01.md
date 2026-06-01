@@ -255,6 +255,26 @@ Acceptance:
 - Original projects are untouched unless explicitly approved.
 - Pilot reports show what was learned and what needs product improvement.
 
+2026-06-01 first pilot-report automation slice:
+
+- Done: `npm run pilot-report:smoke` creates an isolated clean project, attaches
+  it, records decision/action/test/checkpoint memory, closes out, starts a later
+  session, verifies recall, checks `doctor --require-capture`, and detaches with
+  dry-run first.
+- Done: the same smoke creates an existing-project fixture, copies it to a
+  sandbox, attaches only the copy, imports discovered agent/doc sources, records
+  and recalls pilot memory, detaches the sandbox, and verifies the original
+  fixture hash tree is unchanged.
+- Done: the same smoke runs a production-sensitive attach preflight and verifies
+  requested autopilot is downgraded to guided with `writes_files=false` and
+  `writes_database=false`.
+- Done: the smoke prints a machine-readable pilot report containing what was
+  attached, what sources were detected/imported, what was remembered, what was
+  recalled later, what cleanup did, and what remained untouched.
+- Done: `pilot-report:smoke` is part of `npm run smoke:core`.
+- Remaining: run more non-fixture real-world pilots after Stage 4 hooks and
+  source-health UI become richer.
+
 ## Stage 6 - Broader External Memory Domain Design
 
 Goal: prepare personal/work memory expansion without prematurely building every

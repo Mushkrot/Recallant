@@ -543,6 +543,22 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   checkpoint evidence. `connect:smoke` verifies failure before capture and success after
   agent-start/agent-event/agent-checkpoint.
 
+2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
+
+- `npm run pilot-report:smoke` runs one self-contained pilot report against isolated temporary
+  projects and the dev DB.
+- Clean empty-project pilot: ordinary attach, decision/action/test/checkpoint capture, closeout,
+  later-session recall, `doctor --require-capture`, detach dry-run, confirmed detach.
+- Copied existing-project sandbox pilot: creates an existing-project fixture, copies it, attaches
+  only the copy, imports discovered agent/doc sources, creates a local backup, captures/recalls
+  pilot memory, detaches the sandbox, and proves the original fixture hash tree is unchanged.
+- Production-sensitive preflight pilot: verifies requested autopilot downgrades to guided,
+  requires confirmation, writes no files, writes no database rows, and leaves project files
+  unchanged.
+- The smoke prints JSON with attached project ids, detected/imported sources, remembered and
+  recalled markers, cleanup results, and untouched-original proof.
+- `pilot-report:smoke` is included in `npm run smoke:core`.
+
 Latest validation for the Workbench/source/chat follow-up slice:
 
 - `npm run build`
@@ -564,8 +580,8 @@ Next autonomous work after this checkpoint:
   search/review source filters.
 - Stage 4: add real client/global config writers where safe, local backups for global/client files,
   hook installation where supported, and fail-soft hook capture/spooling.
-- Stage 5: run the next real pilot report against the improved Workbench/source UI, including what
-  was attached, what was remembered, what was recalled later, and cleanup proof.
+- Stage 5: run additional non-fixture real-world pilots after hook capture and source-health UI are
+  mature enough to make the reports more realistic.
 
 ## Boundaries
 

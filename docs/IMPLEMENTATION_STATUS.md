@@ -125,6 +125,12 @@ Current implemented slices include:
   plan for `owner-server` and `single-user` profiles without creating files, starting Docker,
   writing DB rows, or touching systemd.
 - Cross-client MCP smoke showing one client kind can write a fact and another client kind can retrieve it through the same project memory.
+- Stage 5 pilot-report smoke: `npm run pilot-report:smoke` independently validates a clean
+  empty-project pilot, a copied existing-project sandbox pilot, and a production-sensitive guided
+  preflight. It records decision/action/test/checkpoint memory, proves later recall and
+  `doctor --require-capture`, detaches with dry-run first, verifies no files/records are
+  physically deleted by ordinary detach, and proves the original existing-project fixture is
+  untouched.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 - Contract-hardening checkpoint: Review Inbox now includes important long-term records and
   lifecycle/action candidates by default; Review UI first screen shows critical capture/spool/
@@ -395,6 +401,20 @@ Latest Workbench validation on 2026-06-01:
 - Stage 4 follow-up validation: `npm run connect:smoke` now covers failing
   `doctor --require-capture` before capture and passing it after real capture; `npm run
   phase7:smoke` verifies ordinary doctor output still includes non-required capture readiness
+
+Latest Stage 5 pilot-report validation on 2026-06-01:
+
+- `npm run pilot-report:smoke`
+- It passed with a JSON report showing:
+  - clean empty project: attached, remembered decision/action/test/checkpoint,
+    recalled in a later session, `doctor_status=capture_active`, detached after
+    dry-run, `files_changed=0`, `physically_deleted_records=0`;
+  - copied existing sandbox: 6 sources detected/imported, local backup created,
+    remembered/recalled pilot memory, detached after dry-run, original fixture
+    untouched;
+  - production-sensitive preflight: requested `autopilot`, effective `guided`,
+    `needs_confirmation`, `writes_files=false`, `writes_database=false`, project
+    files untouched.
 
 Latest contract-hardening validation on 2026-05-31:
 
