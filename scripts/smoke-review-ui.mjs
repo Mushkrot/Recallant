@@ -352,6 +352,10 @@ try {
     "Activity / Replay",
     "Project Actions",
     "1 active source",
+    "Sources for selected space",
+    "Create a memory space",
+    "Attach a source to selected space",
+    "Detach source",
     "Import Candidates",
     "Selected Detail",
     "Evidence excerpts",
@@ -409,9 +413,10 @@ try {
     );
   }
   const requiredLayoutContracts = [
-    "grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr) minmax(300px, 420px)",
+    "grid-template-columns: minmax(290px, 360px) minmax(0, 1fr)",
+    ".primary-workspace { display: grid",
     ".command-grid { display: grid",
-    ".right-rail { position: sticky",
+    ".right-rail { grid-column: 2",
     ".chat-answer { border-top",
     "max-height: 680px",
     "@media (max-width: 1180px)",
@@ -755,6 +760,94 @@ try {
     );
   }
 
+  const connectionCheckChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Проверь, подключен ли проект нормально и пишет ли память"
+    })
+  });
+  const connectionCheckChatJson = await connectionCheckChat.json();
+  if (
+    connectionCheckChat.status !== 200 ||
+    connectionCheckChatJson.intent !== "connection_check" ||
+    connectionCheckChatJson.result_type !== "read_only_answer" ||
+    typeof connectionCheckChatJson.facts.capture_ready !== "boolean" ||
+    !String(connectionCheckChatJson.answer).includes("Последний context read")
+  ) {
+    throw new Error(`Connection check chat failed: ${JSON.stringify(connectionCheckChatJson)}`);
+  }
+
+  const rememberedChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Покажи, что агент запомнил в этом проекте"
+    })
+  });
+  const rememberedChatJson = await rememberedChat.json();
+  if (
+    rememberedChat.status !== 200 ||
+    rememberedChatJson.intent !== "memory_summary" ||
+    rememberedChatJson.result_type !== "read_only_answer" ||
+    rememberedChatJson.facts.memory_count < 1 ||
+    !String(rememberedChatJson.answer).includes("Activity / Replay")
+  ) {
+    throw new Error(`Remembered memory chat failed: ${JSON.stringify(rememberedChatJson)}`);
+  }
+
+  const ruleDiagnosticsChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Почему это правило не применяется?"
+    })
+  });
+  const ruleDiagnosticsJson = await ruleDiagnosticsChat.json();
+  if (
+    ruleDiagnosticsChat.status !== 200 ||
+    ruleDiagnosticsJson.intent !== "rule_diagnostics" ||
+    ruleDiagnosticsJson.result_type !== "read_only_answer" ||
+    !String(ruleDiagnosticsJson.answer).includes("Active rule")
+  ) {
+    throw new Error(`Rule diagnostics chat failed: ${JSON.stringify(ruleDiagnosticsJson)}`);
+  }
+
+  const googleDriveChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Что мы решили по Google Drive и где искать пример?"
+    })
+  });
+  const googleDriveChatJson = await googleDriveChat.json();
+  if (
+    googleDriveChat.status !== 200 ||
+    googleDriveChatJson.intent !== "cross_project" ||
+    googleDriveChatJson.result_type !== "read_only_answer" ||
+    !String(googleDriveChatJson.answer).includes("Cross-project recall")
+  ) {
+    throw new Error(
+      `Google Drive cross-project chat failed: ${JSON.stringify(googleDriveChatJson)}`
+    );
+  }
+
   const destructiveChatForm = await fetch(`${baseUrl}/management-chat`, {
     method: "POST",
     headers: {
@@ -798,6 +891,106 @@ try {
     !chatFormHtml.includes("Context Pack")
   ) {
     throw new Error(`Management chat form smoke failed: ${chatForm.status} ${chatFormHtml}`);
+  }
+
+  const createdSpaceName = `Review UI virtual space ${randomUUID()}`;
+  const memorySpaceForm = await fetch(`${baseUrl}/memory-space`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      name: createdSpaceName,
+      project_kind: "personal_domain",
+      memory_domain: "personal_life",
+      primary_path: ""
+    })
+  });
+  const memorySpaceLocation = memorySpaceForm.headers.get("location") ?? "";
+  if (memorySpaceForm.status !== 303 || !memorySpaceLocation.startsWith("/review?project_id=")) {
+    throw new Error(
+      `Memory space create form failed: ${memorySpaceForm.status} ${memorySpaceLocation}`
+    );
+  }
+  const spacesAfterCreate = await db.listMemorySpaces();
+  const createdSpace = spacesAfterCreate.find((space) => space.name === createdSpaceName);
+  if (
+    !createdSpace ||
+    createdSpace.project_kind !== "personal_domain" ||
+    createdSpace.memory_domain !== "personal_life" ||
+    createdSpace.sources.length !== 0
+  ) {
+    throw new Error(
+      `Virtual memory space was not created correctly: ${JSON.stringify(createdSpace)}`
+    );
+  }
+
+  const manualSourceLabel = `Review UI manual source ${randomUUID()}`;
+  const manualSourceUri = `manual:review-ui:${randomUUID()}`;
+  const sourceAttachForm = await fetch(`${baseUrl}/source-attach`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      source_kind: "manual",
+      label: manualSourceLabel,
+      uri: manualSourceUri
+    })
+  });
+  const sourceAttachHtml = await sourceAttachForm.text();
+  if (
+    sourceAttachForm.status !== 200 ||
+    !sourceAttachHtml.includes("Source attached.") ||
+    !sourceAttachHtml.includes(manualSourceLabel) ||
+    !sourceAttachHtml.includes("Manual source active")
+  ) {
+    throw new Error(`Source attach form failed: ${sourceAttachForm.status} ${sourceAttachHtml}`);
+  }
+  const sourcesAfterAttach = await db.listProjectSources(projectId);
+  const attachedManualSource = sourcesAfterAttach.find(
+    (source) => source.label === manualSourceLabel && source.uri === manualSourceUri
+  );
+  if (!attachedManualSource || attachedManualSource.status !== "active") {
+    throw new Error(`Manual source was not attached: ${JSON.stringify(sourcesAfterAttach)}`);
+  }
+
+  const sourceDetachForm = await fetch(`${baseUrl}/source-detach`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      source_id: attachedManualSource.id
+    })
+  });
+  const sourceDetachHtml = await sourceDetachForm.text();
+  if (
+    sourceDetachForm.status !== 200 ||
+    !sourceDetachHtml.includes("Source detached.") ||
+    !sourceDetachHtml.includes(manualSourceLabel) ||
+    !sourceDetachHtml.includes("Manual source detached")
+  ) {
+    throw new Error(`Source detach form failed: ${sourceDetachForm.status} ${sourceDetachHtml}`);
+  }
+  const sourcesAfterDetach = await db.listProjectSources(projectId);
+  if (
+    !sourcesAfterDetach.some(
+      (source) => source.id === attachedManualSource.id && source.status === "detached"
+    ) ||
+    !sourcesAfterDetach.some(
+      (source) => source.source_kind === "workspace_path" && source.status === "active"
+    )
+  ) {
+    throw new Error(
+      `Source detach changed the wrong bindings: ${JSON.stringify(sourcesAfterDetach)}`
+    );
   }
 
   const detachDryRunApi = await fetch(`${baseUrl}/api/project-detach`, {

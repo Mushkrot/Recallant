@@ -483,6 +483,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - `npm run review-ui:smoke` now verifies the Workbench vocabulary, layout CSS contract, central Ask
   Recallant placement, human labels, capture activity, and the previous review/chat/settings/
   cleanup/forget gates.
+- Follow-up Workbench slice: Ask Recallant is now the wide top work surface, while Selected Detail,
+  Cost / Paid API, Cleanup / Forget, and Settings are secondary lower panels. Browser QA verifies
+  desktop/mobile no-horizontal-scroll and long Russian chat readability.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 
@@ -497,6 +500,8 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - `npm run review-ui:smoke` verifies read-only, global-rule safe action, cleanup dry-run,
   paid/public/connector/global-setting confirmation, sandbox cleanup targeting, and secret policy
   block result types.
+- The chat fallback now recognizes common owner questions about project connection/capture status,
+  what the agent remembered, why a rule is not applying, and Google Drive/example lookups.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 
@@ -515,6 +520,8 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   - `recallant source attach|list|detach`
 - Workbench Memory Spaces shows attached source information when available and falls back safely to
   `primary_path`.
+- Workbench forms now create logical memory spaces, attach a source to the selected memory space,
+  and detach one source without deleting the memory space, its memories, or project files.
 - `npm run project-sources:smoke` verifies virtual memory space creation, zero-source state,
   multiple source bindings, source detach, automatic primary workspace source creation, and
   dashboard source visibility.
@@ -532,16 +539,27 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - This slice does not write global client config or install hooks yet.
 - `npm run connect:smoke` and full `npm run smoke:core` passed.
 
+Latest validation for the Workbench/source/chat follow-up slice:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- `git diff --check`
+- `npm run review-ui:smoke`
+- `npm run review-ui:playwright`
+- `npm run project-sources:smoke`
+- `npm run product-acceptance:smoke`
+
 Next autonomous work after this checkpoint:
 
-- Stage 2: continue strengthening AI-native intent coverage and clarification flows while keeping
-  server policy as the execution authority.
-- Stage 3: continue source-aware context-pack provenance, richer source health/status, and UI flows
-  for creating/attaching sources directly from the Workbench.
+- Stage 2: continue strengthening live local-AI semantic tests and multi-project clarification
+  flows while keeping server policy as the execution authority.
+- Stage 3: continue source-aware context-pack provenance, richer source health/status, and
+  search/review source filters.
 - Stage 4: add real client/global config writers where safe, local backups for global/client files,
   hook installation where supported, fail-soft capture spooling, and `doctor --require-capture`.
-- Add a real Playwright/screenshot harness when dependency/tooling work is appropriate; current UI
-  visual regression coverage is the strengthened smoke layout contract.
+- Stage 5: run the next real pilot report against the improved Workbench/source UI, including what
+  was attached, what was remembered, what was recalled later, and cleanup proof.
 
 ## Boundaries
 

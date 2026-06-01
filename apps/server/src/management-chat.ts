@@ -13,6 +13,8 @@ type DashboardLike = {
   rules?: DashboardRow[];
   costs?: DashboardRow[];
   settings?: DashboardRow[];
+  project_readiness?: DashboardRow | null;
+  recent_activity?: DashboardRow[];
   project_cleanup?: DashboardRow | null;
 };
 
@@ -38,6 +40,9 @@ export type ManagementChatIntent =
   | "cross_project"
   | "review"
   | "global_rule"
+  | "connection_check"
+  | "memory_summary"
+  | "rule_diagnostics"
   | "general";
 
 export type ManagementChatAction = {
@@ -94,6 +99,13 @@ export type ManagementChatResponse = {
     active_rules: number;
     pending_paid_approvals: number;
     interrupted_sessions: number;
+    capture_ready: boolean;
+    last_context_read_at: string;
+    last_memory_write_at: string;
+    last_checkpoint_at: string;
+    capture_events: number;
+    captured_decisions: number;
+    memory_count: number;
   };
   proposed_actions: ManagementChatAction[];
 };
@@ -203,6 +215,24 @@ function detectIntent(message: string): ManagementChatIntent {
   if (!message) return "general";
   if (detectGlobalRuleRequest(message)) return "global_rule";
   if (
+    includesAny(message, ["почему", "why"]) &&
+    includesAny(message, ["правил", "rule", "applied", "примен"])
+  ) {
+    return "rule_diagnostics";
+  }
+  if (
+    includesAny(message, ["что", "show", "покажи", "какие"]) &&
+    includesAny(message, ["запомн", "remembered", "memorized", "memory"])
+  ) {
+    return "memory_summary";
+  }
+  if (
+    includesAny(message, ["проверь", "check", "verify", "подключ", "connect", "capture"]) &&
+    includesAny(message, ["проект", "project", "норм", "normal", "работ", "recording", "capture"])
+  ) {
+    return "connection_check";
+  }
+  if (
     includesAny(message, [
       "удал",
       "отцеп",
@@ -233,7 +263,11 @@ function detectIntent(message: string): ManagementChatIntent {
       "cross-project",
       "cross project",
       "similar project",
-      "пример"
+      "пример",
+      "google drive",
+      "gdrive",
+      "гугл",
+      "драйв"
     ])
   ) {
     return "cross_project";
@@ -319,6 +353,9 @@ function normalizeIntent(value: unknown, fallback: ManagementChatIntent): Manage
     "cross_project",
     "review",
     "global_rule",
+    "connection_check",
+    "memory_summary",
+    "rule_diagnostics",
     "general"
   ];
   return allowed.includes(candidate as ManagementChatIntent)
@@ -384,7 +421,7 @@ async function interpretMessage(
                   "Return strict JSON only.",
                   "Do not execute actions.",
                   "Classify the owner's message by meaning, including Russian text and typos.",
-                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,review,global_rule,general.",
+                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,review,global_rule,connection_check,memory_summary,rule_diagnostics,general.",
                   "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
                   "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
                   "target_hint should be current,sandbox,none,or ambiguous.",
@@ -646,6 +683,11 @@ function dashboardFacts(
 ): ManagementChatResponse["facts"] {
   const currentProject = dashboard.current_project ?? {};
   const critical = dashboard.critical ?? {};
+  const readiness = dashboard.project_readiness ?? {};
+  const lastContextRead = stringValue(readiness.last_context_read_at);
+  const lastMemoryWrite = stringValue(readiness.last_memory_write_at);
+  const lastCheckpoint = stringValue(readiness.checkpoint_updated_at);
+  const captureReady = Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
   return {
     project_id: targetProject.project_id,
     project_name: targetProject.project_name,
@@ -661,7 +703,14 @@ function dashboardFacts(
     conflicts_or_duplicates: asRows(dashboard.duplicate_conflicts).length,
     active_rules: asRows(dashboard.rules).length,
     pending_paid_approvals: asNumber(critical.pending_paid_approvals),
-    interrupted_sessions: asNumber(critical.interrupted_sessions)
+    interrupted_sessions: asNumber(critical.interrupted_sessions),
+    capture_ready: captureReady,
+    last_context_read_at: lastContextRead || "not yet",
+    last_memory_write_at: lastMemoryWrite || "not yet",
+    last_checkpoint_at: lastCheckpoint || "not yet",
+    capture_events: asNumber(readiness.capture_event_count),
+    captured_decisions: asNumber(readiness.captured_decision_count),
+    memory_count: asNumber(currentProject.memory_count)
   };
 }
 
@@ -864,6 +913,16 @@ function answerRu(
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "review":
       return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
+    case "connection_check":
+      return `${baseline}\n\nПроверка подключения: ${
+        facts.capture_ready
+          ? "проект не просто зарегистрирован, а уже пишет рабочую память через Recallant."
+          : "проект зарегистрирован, но полный capture loop еще не доказан."
+      }\n\nПоследний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
+    case "memory_summary":
+      return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
+    case "rule_diagnostics":
+      return `${baseline}\n\nЕсли правило не применяется, проверь три вещи: оно должно быть Active rule, его scope должен подходить этому проекту или всем проектам, и новая агентская сессия должна получить свежий Context Pack. Если правило только evidence-only, candidate, stale или needs review, агент может видеть его как факт, но не обязан выполнять как правило.`;
     case "status":
     case "general":
       if (interpretation.source === "local_ai" && interpretation.answer) {
@@ -924,6 +983,16 @@ function answerEn(
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
     case "review":
       return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
+    case "connection_check":
+      return `${baseline}\n\nConnection check: ${
+        facts.capture_ready
+          ? "this project is not merely registered; it has recorded working memory through Recallant."
+          : "this project is registered, but the full capture loop is not proven yet."
+      }\n\nLast context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
+    case "memory_summary":
+      return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
+    case "rule_diagnostics":
+      return `${baseline}\n\nIf a rule is not applying, check three things: it must be an Active rule, its scope must match this project or all projects, and the next agent session must receive a fresh Context Pack. Evidence-only, candidate, stale, or needs-review records can be visible as facts, but they are not binding behavior.`;
     case "status":
     case "general":
       if (interpretation.source === "local_ai" && interpretation.answer) {

@@ -195,7 +195,7 @@ async function run() {
     const leftRailBox = await visibleBox(desktop.locator(".left-rail"), "desktop left rail");
     assert(askBox.width >= 520, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
     assert(
-      askBox.x > leftRailBox.x + leftRailBox.width && askBox.x + askBox.width < rightRailBox.x + 4,
+      askBox.x > leftRailBox.x + leftRailBox.width && askBox.y < rightRailBox.y,
       `desktop Ask Recallant is not in the central work area: ${JSON.stringify({ askBox, leftRailBox, rightRailBox })}`
     );
 

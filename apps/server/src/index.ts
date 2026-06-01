@@ -6,6 +6,7 @@ import {
   createRecallantDbFromEnv,
   recallantDatabasePackage,
   type ForgetInput,
+  type ProjectSourceKind,
   type ProjectSettingInput,
   type ReviewAgentMemoryInput
 } from "@recallant/db";
@@ -39,6 +40,12 @@ type SettingRenderState = {
   key?: string | null;
   rawValue?: string | null;
   reason?: string | null;
+};
+
+type SourceRenderState = {
+  result?: Record<string, unknown> | null;
+  action?: "create_space" | "attach_source" | "detach_source";
+  message?: string;
 };
 
 export function describeServerBoundary() {
@@ -366,6 +373,32 @@ function parseProjectSettingFormValue(key: string, rawValue: unknown) {
       .filter(Boolean);
   }
   return parseSettingValue(value);
+}
+
+function parseProjectKindFormValue(value: unknown) {
+  const projectKind = String(value ?? "other");
+  const allowed = ["repo", "subproject", "workspace", "personal_domain", "other"];
+  if (allowed.includes(projectKind)) {
+    return projectKind as "repo" | "subproject" | "workspace" | "personal_domain" | "other";
+  }
+  return "other";
+}
+
+function parseSourceKindFormValue(value: unknown): ProjectSourceKind {
+  const sourceKind = String(value ?? "manual");
+  const allowed: ProjectSourceKind[] = [
+    "workspace_path",
+    "repo",
+    "server_path",
+    "document_collection",
+    "connector",
+    "manual",
+    "virtual",
+    "other"
+  ];
+  return allowed.includes(sourceKind as ProjectSourceKind)
+    ? (sourceKind as ProjectSourceKind)
+    : "manual";
 }
 
 function settingLabel(key: unknown) {
@@ -1013,41 +1046,174 @@ function currentProject(data: ReviewDashboardData) {
   return data.projects.find((row) => row.project_id === data.current_project_id) ?? {};
 }
 
-function renderMemorySpaces(data: ReviewDashboardData) {
-  if (data.projects.length === 0) return `<p class="empty">No memory spaces yet.</p>`;
-  return `<div class="memory-spaces">
-    ${data.projects
-      .map((row) => {
-        const active = row.project_id === data.current_project_id;
-        const state = captureState(row);
-        return `<a class="memory-space-link" href="${escapeHtml(reviewPath(row.project_id))}">
-          <article class="memory-space ${active ? "active" : ""}">
-            <div class="memory-space-head">
-              <h3>${escapeHtml(projectDisplayName(row))}</h3>
-              <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
-            </div>
-            <p>${escapeHtml(sourceLabel(row))}</p>
-            <p>${escapeHtml(attachedSourceSummary(row))}</p>
-            <p>${escapeHtml(sharingPolicy(row))}</p>
-            <div class="metrics">
-              <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
-              <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
-              <span>${escapeHtml(row.event_count ?? 0)} events</span>
-            </div>
-            <details>
-              <summary>Technical details</summary>
-              ${renderMeta([
-                ["project_id", row.project_id],
-                ["project_kind", row.project_kind],
-                ["memory_domain", row.memory_domain],
-                ["primary_path", row.primary_path],
-                ["sources", row.sources]
-              ])}
-            </details>
-          </article>
-        </a>`;
-      })
+function currentProjectSources(data: ReviewDashboardData) {
+  const sources = currentProject(data).sources;
+  return Array.isArray(sources) ? (sources as Array<Record<string, unknown>>) : [];
+}
+
+function sourceStatusLabel(source: Record<string, unknown>) {
+  const status = String(source.status ?? "active");
+  const prefix = source.is_primary ? "Primary" : sourceKindLabel(source.source_kind);
+  if (status === "active") return `${prefix} active`;
+  return `${prefix} ${status.replaceAll("_", " ")}`;
+}
+
+function renderSourceResult(source?: SourceRenderState) {
+  if (!source?.result && !source?.message) return "";
+  const result = asRecord(source.result);
+  const labels: Record<string, string> = {
+    create_space: "Memory space created.",
+    attach_source: "Source attached.",
+    detach_source: "Source detached."
+  };
+  const title = source.action ? labels[source.action] : "Memory space updated.";
+  const body =
+    source.message ??
+    (source.action === "create_space"
+      ? "The new space is available in Recallant. It can hold memory even before a folder is attached."
+      : source.action === "detach_source"
+        ? "The memory space remains available; only this source binding was detached."
+        : "The source is now linked to this memory space and can be shown as provenance.");
+  return `<article class="source-result">
+    <strong>${escapeHtml(title)}</strong>
+    <p>${escapeHtml(body)}</p>
+    <details>
+      <summary>Technical details</summary>
+      ${renderMeta([
+        ["source_id", result.id ?? result.source_id],
+        ["project_id", result.project_id],
+        ["source_kind", result.source_kind],
+        ["status", result.status],
+        ["uri", result.uri],
+        ["memory_space", result.name]
+      ])}
+    </details>
+  </article>`;
+}
+
+function renderMemorySpaceForms(data: ReviewDashboardData) {
+  return `<details class="memory-space-editor">
+    <summary>Create a memory space</summary>
+    <form class="source-form" method="post" action="/memory-space">
+      <label>Name<input name="name" required placeholder="Client research, My servers, Personal operations" /></label>
+      <label>Kind<select name="project_kind">
+        <option value="other">Virtual or general</option>
+        <option value="repo">Code repository</option>
+        <option value="workspace">Workspace</option>
+        <option value="personal_domain">Personal / work domain</option>
+        <option value="subproject">Subproject</option>
+      </select></label>
+      <label>Memory domain<select name="memory_domain">
+        <option value="agent_work">Agent work</option>
+        <option value="personal_life">Personal / work operations</option>
+      </select></label>
+      <label>Optional folder or path<input name="primary_path" placeholder="/ai/example or leave empty" /></label>
+      <button type="submit">Create space</button>
+    </form>
+  </details>
+  <details class="memory-space-editor">
+    <summary>Attach a source to selected space</summary>
+    <form class="source-form" method="post" action="/source-attach">
+      <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+      <label>Source type<select name="source_kind">
+        <option value="workspace_path">Workspace folder</option>
+        <option value="repo">Repository</option>
+        <option value="server_path">Server path</option>
+        <option value="document_collection">Document collection</option>
+        <option value="connector">Connector</option>
+        <option value="manual">Manual source</option>
+        <option value="virtual">Virtual source</option>
+        <option value="other">Other source</option>
+      </select></label>
+      <label>Label<input name="label" required placeholder="Docs folder, Google Drive notes, production server" /></label>
+      <label>Location or reference<input name="uri" placeholder="/ai/project, github:owner/repo, gdrive:folder-id" /></label>
+      <label class="checkbox-line"><input type="checkbox" name="primary" value="true" /> Make this the primary source</label>
+      <button type="submit">Attach source</button>
+    </form>
+  </details>`;
+}
+
+function renderSelectedSources(data: ReviewDashboardData) {
+  const sources = currentProjectSources(data);
+  if (sources.length === 0) {
+    return `<p class="empty">No sources are attached to this memory space yet.</p>`;
+  }
+  return `<div class="source-list">
+    ${sources
+      .map(
+        (source) => `<article class="source-card">
+          <div>
+            <strong>${escapeHtml(source.label ?? sourceKindLabel(source.source_kind))}</strong>
+            <span>${escapeHtml(sourceStatusLabel(source))}</span>
+            <p>${escapeHtml(source.uri ?? "No location recorded")}</p>
+          </div>
+          ${
+            source.status === "active"
+              ? `<form method="post" action="/source-detach">
+                  <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+                  <input type="hidden" name="source_id" value="${escapeHtml(source.source_id ?? source.id)}" />
+                  <button type="submit">Detach source</button>
+                </form>`
+              : ""
+          }
+          <details>
+            <summary>Technical details</summary>
+            ${renderMeta([
+              ["source_id", source.source_id ?? source.id],
+              ["source_kind", source.source_kind],
+              ["status", source.status],
+              ["is_primary", source.is_primary],
+              ["metadata", source.metadata]
+            ])}
+          </details>
+        </article>`
+      )
       .join("")}
+  </div>`;
+}
+
+function renderMemorySpaces(data: ReviewDashboardData, source?: SourceRenderState) {
+  const spaceList =
+    data.projects.length === 0
+      ? `<p class="empty">No memory spaces yet.</p>`
+      : `<div class="memory-spaces">
+        ${data.projects
+          .map((row) => {
+            const active = row.project_id === data.current_project_id;
+            const state = captureState(row);
+            return `<article class="memory-space ${active ? "active" : ""}">
+              <div class="memory-space-head">
+                <h3><a href="${escapeHtml(reviewPath(row.project_id))}">${escapeHtml(projectDisplayName(row))}</a></h3>
+                <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+              </div>
+              <p>${escapeHtml(sourceLabel(row))}</p>
+              <p>${escapeHtml(attachedSourceSummary(row))}</p>
+              <p>${escapeHtml(sharingPolicy(row))}</p>
+              <div class="metrics">
+                <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+                <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+                <span>${escapeHtml(row.event_count ?? 0)} events</span>
+              </div>
+              <details>
+                <summary>Technical details</summary>
+                ${renderMeta([
+                  ["project_id", row.project_id],
+                  ["project_kind", row.project_kind],
+                  ["memory_domain", row.memory_domain],
+                  ["primary_path", row.primary_path],
+                  ["sources", row.sources]
+                ])}
+              </details>
+            </article>`;
+          })
+          .join("")}
+      </div>`;
+  return `<div class="memory-spaces">
+    ${renderSourceResult(source)}
+    ${spaceList}
+    <h3>Sources for selected space</h3>
+    ${renderSelectedSources(data)}
+    ${renderMemorySpaceForms(data)}
   </div>`;
 }
 
@@ -1604,12 +1770,14 @@ function renderDashboard(
     detach?: DetachRenderState;
     memoryForget?: MemoryForgetRenderState;
     setting?: SettingRenderState;
+    source?: SourceRenderState;
   }
 ) {
   const chat = state?.chat;
   const detach = state?.detach;
   const memoryForget = state?.memoryForget;
   const setting = state?.setting;
+  const source = state?.source;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1619,9 +1787,9 @@ function renderDashboard(
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f4f6f8; color: #20242c; }
     body { margin: 0; }
-    header { padding: 18px 28px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    header { padding: 20px 30px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr) minmax(300px, 420px); gap: 18px; padding: 18px; align-items: start; }
+    main { display: grid; grid-template-columns: minmax(290px, 360px) minmax(0, 1fr); gap: 18px; padding: 18px; align-items: start; max-width: 1680px; margin: 0 auto; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     h3 { letter-spacing: 0; }
@@ -1630,6 +1798,8 @@ function renderDashboard(
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
     .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr); gap: 14px; align-items: start; }
+    .workbench-main { display: grid; gap: 14px; }
+    .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
     .row-link, .project-link { display: block; border-radius: 6px; }
     .row-link:hover .item, .project-link:hover .project { background: #f8fafc; }
@@ -1647,7 +1817,8 @@ function renderDashboard(
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
     .left-rail, .right-rail { align-self: start; }
-    .right-rail { position: sticky; top: 12px; }
+    .right-rail { grid-column: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .right-rail .panel { margin-bottom: 0; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .cleanup-flow p, .detach-result p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
@@ -1684,8 +1855,21 @@ function renderDashboard(
     .memory-space.active { background: #f4f8fb; border-color: #cdd9e7; }
     .memory-space-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .memory-space h3 { margin: 0; font-size: 14px; }
+    .memory-space h3 a { text-decoration: none; }
     .memory-space .state { border-radius: 999px; padding: 3px 7px; font-size: 11px; white-space: nowrap; }
     .memory-space p { margin: 7px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .memory-space-editor { border-top: 1px solid #e5e9f0; padding-top: 9px; margin-top: 10px; }
+    .source-form { display: grid; gap: 8px; margin-top: 9px; }
+    .source-form label { display: grid; gap: 5px; color: #303845; font-size: 12px; font-weight: 650; }
+    .source-form input, .source-form select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; background: #fff; color: #20242c; min-width: 0; }
+    .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
+    .source-form .checkbox-line input { width: auto; }
+    .source-list { display: grid; gap: 8px; }
+    .source-card, .source-result { border: 1px solid #e1e7ef; border-radius: 7px; padding: 9px; background: #fbfcfe; }
+    .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+    .source-card strong, .source-result strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
+    .source-card span { display: inline-block; color: #166454; font-size: 12px; margin-bottom: 3px; }
+    .source-card p, .source-result p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -1740,7 +1924,7 @@ function renderDashboard(
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
     .chat-form { display: grid; gap: 8px; }
-    .chat-form textarea { resize: vertical; min-height: 76px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px; font: inherit; font-size: 13px; color: #20242c; background: #fff; }
+    .chat-form textarea { resize: vertical; min-height: 112px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; font-size: 14px; color: #20242c; background: #fff; }
     .chat-form button { justify-self: start; }
     .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 680px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
@@ -1763,8 +1947,8 @@ function renderDashboard(
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .right-rail { position: static; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } .right-rail .panel { margin-bottom: 0; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; } main { grid-template-columns: 1fr; padding: 12px; } .right-rail { display: block; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } }
+    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .primary-workspace { grid-template-columns: 1fr; } .right-rail { grid-column: 1 / -1; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .right-rail { display: block; grid-column: auto; } .right-rail .panel { margin-bottom: 14px; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -1789,7 +1973,7 @@ function renderDashboard(
     <aside class="left-rail">
       <section class="panel" id="memory-spaces">
         <h2>Memory Spaces</h2>
-        ${renderMemorySpaces(data)}
+        ${renderMemorySpaces(data, source)}
       </section>
       <section class="panel">
         <h2>Current Signals</h2>
@@ -1806,27 +1990,29 @@ function renderDashboard(
         ${renderProjectActions(data)}
       </section>
     </aside>
-    <section>
-      <section class="panel" id="command-center">
-        <h2>Command Center</h2>
-        <div class="command-grid">
-          <div class="command-card">
-            <h3>What Needs Attention</h3>
-            ${renderAttention(data)}
+    <section class="workbench-main">
+      <div class="primary-workspace">
+        <section class="panel" id="ask-recallant">
+          <h2>Ask Recallant</h2>
+          ${renderManagementChat(data, chat)}
+        </section>
+        <section class="panel" id="command-center">
+          <h2>Command Center</h2>
+          <div class="command-grid">
+            <div class="command-card">
+              <h3>What Needs Attention</h3>
+              ${renderAttention(data)}
+            </div>
+            <div class="command-card">
+              <h3>Agent Readiness</h3>
+              ${renderReadiness(data)}
+            </div>
           </div>
-          <div class="command-card">
-            <h3>Agent Readiness</h3>
-            ${renderReadiness(data)}
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
       <section class="panel" id="activity-replay">
         <h2>Activity / Replay</h2>
         ${renderActivityReplay(data)}
-      </section>
-      <section class="panel" id="ask-recallant">
-        <h2>Ask Recallant</h2>
-        ${renderManagementChat(data, chat)}
       </section>
       <section class="panel" id="review">
         <h2>Review</h2>
@@ -2130,6 +2316,87 @@ export function createRecallantHttpServer() {
             rawValue,
             reason: optionalInput(body.reason)
           }
+        }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/memory-space") {
+      const body = await readForm(request);
+      const name = optionalInput(body.name);
+      if (!name) {
+        write(response, 400, "Memory space name is required", "text/plain");
+        return;
+      }
+      const result = await database.createMemorySpace({
+        name,
+        projectKind: parseProjectKindFormValue(body.project_kind),
+        memoryDomain: optionalInput(body.memory_domain) ?? "agent_work",
+        primaryPath: optionalInput(body.primary_path)
+      });
+      const location = reviewPath(result.project_id);
+      write(response, 303, "See other", "text/plain", { location });
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/source-attach") {
+      const body = await readForm(request);
+      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+      const label = optionalInput(body.label);
+      if (!projectId || !label) {
+        write(response, 400, "Project and source label are required", "text/plain");
+        return;
+      }
+      const sourceKind = parseSourceKindFormValue(body.source_kind);
+      const result = await database.attachProjectSource({
+        project_id: projectId,
+        source_kind: sourceKind,
+        label,
+        uri: optionalInput(body.uri),
+        is_primary: body.primary === "true",
+        status: "active",
+        metadata: { created_by: "review-ui" }
+      });
+      const sourceDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId,
+          selected_memory_id: dashboardInput.selected_memory_id
+        })
+      );
+      write(
+        response,
+        200,
+        renderDashboard(sourceDashboard, {
+          source: { action: "attach_source", result: result as Record<string, unknown> }
+        }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/source-detach") {
+      const body = await readForm(request);
+      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+      const sourceId = optionalInput(body.source_id);
+      if (!projectId || !sourceId) {
+        write(response, 400, "Project and source id are required", "text/plain");
+        return;
+      }
+      const result = await database.detachProjectSource({
+        source_id: sourceId,
+        reason: "Review UI source detach"
+      });
+      const sourceDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId,
+          selected_memory_id: dashboardInput.selected_memory_id
+        })
+      );
+      write(
+        response,
+        200,
+        renderDashboard(sourceDashboard, {
+          source: { action: "detach_source", result: result as Record<string, unknown> }
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}

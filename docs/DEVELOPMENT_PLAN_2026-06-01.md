@@ -81,6 +81,17 @@ Acceptance:
   desktop/mobile overflow and Ask Recallant placement/readability, and saves
   screenshots under `/ai/playwright/reports`.
 
+2026-06-01 follow-up Workbench slice:
+
+- Done: Ask Recallant is now the wide top work surface instead of sharing a
+  narrow first-viewport column with secondary admin panels.
+- Done: Cost / Paid API, Cleanup / Forget, Settings, and Selected Detail moved
+  into a secondary grid below the main work area so chat answers and review work
+  have more horizontal room.
+- Done: Playwright verifies that Ask Recallant is in the central work area,
+  long Russian chat answers remain readable, and desktop/mobile layouts have no
+  horizontal scroll.
+
 ## Stage 2 - AI-Native Management Layer
 
 Goal: make "Ask Recallant" a real AI-managed control surface, not keyword
@@ -122,8 +133,12 @@ Acceptance:
   changes return `confirmation_required`.
 - Done: secret-reveal requests return `blocked_by_policy`, not a confirmable
   action.
-- Remaining: broaden local-AI semantic intent tests beyond the deterministic
-  fallback test profile and strengthen multi-project clarification UX.
+- Done: deterministic fallback now understands additional owner-level requests:
+  check whether a project is actually recording, show what the agent remembered,
+  explain why a rule is not applying, and route Google Drive/example lookup
+  requests to controlled cross-project recall guidance.
+- Remaining: broaden live local-AI semantic tests beyond deterministic fallback
+  and strengthen multi-project clarification UX.
 
 ## Stage 3 - Project Sources And Memory Spaces
 
@@ -164,8 +179,11 @@ Acceptance:
 - Done: `npm run project-sources:smoke` verifies zero-source virtual memory
   space creation, multiple sources, source detach without memory deletion, and
   dashboard source visibility.
-- Remaining: source-aware context-pack provenance, source health/status, richer
-  Workbench source-management forms, and search/review source filters.
+- Done: Workbench now includes browser forms to create a logical memory space,
+  attach a source to the selected memory space, and detach one source without
+  deleting the memory space or project files.
+- Remaining: source-aware context-pack provenance, richer source health/status,
+  and search/review source filters.
 
 ## Stage 4 - Client Connect And Hook Capture
 

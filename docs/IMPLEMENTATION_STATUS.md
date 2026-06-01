@@ -281,6 +281,15 @@ Stage 1 first slice is now implemented:
   central Ask Recallant placement, human labels, capture activity fields, and hidden technical
   detail boundaries. A true Playwright screenshot harness is still a future infrastructure slice.
 
+Stage 1 Workbench follow-up slice is now implemented:
+
+- Ask Recallant is the wide top work surface in the main column, making the chat/control surface
+  visibly primary rather than a narrow side widget.
+- Secondary panels such as Selected Detail, Cost / Paid API, Cleanup / Forget, and Settings sit
+  below the main work area instead of squeezing chat/review content into a narrow right column.
+- The Playwright smoke now verifies the updated layout on desktop and mobile and saves screenshots
+  under `/ai/playwright/reports`.
+
 Stage 2 first slice is now implemented:
 
 - Management Chat responses now include a stable `result_type` field:
@@ -296,6 +305,10 @@ Stage 2 first slice is now implemented:
 - `npm run review-ui:smoke` covers result types for read-only Russian chat, developer-wide rule
   creation, cleanup dry-run, paid/public/connector/global-setting confirmation gates, and secret
   policy blocking.
+- Ask Recallant fallback interpretation now handles additional owner-facing questions by meaning:
+  checking whether the selected project is actually recording, showing what the agent has
+  remembered, explaining why an active rule may not apply, and treating Google Drive/example lookup
+  as controlled cross-project recall guidance.
 
 Stage 3 first slice is now implemented:
 
@@ -311,6 +324,8 @@ Stage 3 first slice is now implemented:
   - `recallant source attach|list|detach`
 - The Workbench Memory Spaces view uses attached sources when available and still works against an
   older schema by falling back to `primary_path`.
+- Workbench now includes browser forms for creating a memory space, attaching a source, and
+  detaching one source while preserving the memory space and project files.
 - Detaching one source marks the source detached without deleting the memory space or its memories.
 - `npm run project-sources:smoke` covers a virtual memory space with zero sources, multiple source
   bindings, source detach, automatic primary workspace source creation, and dashboard source
@@ -360,9 +375,16 @@ Latest Workbench validation on 2026-06-01:
 - `git diff --check`
 - `npm run review-ui:smoke` against the dev Postgres service on `127.0.0.1:15433`; passed with
   Workbench layout contract, Activity / Replay, Memory Spaces, central Ask Recallant placement,
-  dangerous setting confirmation, review actions, cleanup/detach, and forget-forever coverage
+  source-management forms, dangerous setting confirmation, review actions, cleanup/detach, and
+  forget-forever coverage
+- `npm run review-ui:playwright`; passed with auth, desktop/mobile no-horizontal-scroll, central
+  Ask Recallant panel, long Russian chat readability, and screenshots under `/ai/playwright/reports`
+- `npm run project-sources:smoke`; passed source binding and source detach contracts
+- `npm run product-acceptance:smoke`; passed attach/capture/closeout/recall loop after the UI/source
+  changes
 - Stage 2 Management Chat result-type validation used the same checks plus the strengthened
-  `npm run review-ui:smoke` result-type and policy-block assertions
+  `npm run review-ui:smoke` result-type, project-connection, memory-summary, rule-diagnostics,
+  cross-project lookup, and policy-block assertions
 - Stage 3 source-binding validation: clean `make db-reset`, `npm run schema:smoke`,
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run phase10:smoke`, and full
   `npm run smoke:core`
