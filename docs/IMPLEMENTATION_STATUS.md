@@ -253,6 +253,23 @@ Next useful work is now tracked in
 6. Broader External Memory Domain Design.
 7. Product Packaging And Public Readiness.
 
+Stage 1 first slice is now implemented:
+
+- The private UI is branded as `Recallant Workbench` instead of a raw Review Command Center.
+- The first screen is organized around Command Center, Memory Spaces, Activity / Replay, Ask
+  Recallant, Review, and Settings.
+- Ask Recallant moved out of the narrow right rail into the main work area so long answers are
+  readable.
+- Memory Spaces now show plain-language source and isolation/sharing descriptions plus capture
+  state: registered only, started but incomplete, capture active, or interrupted.
+- Activity / Replay now exposes recent session starts, context reads, memory writes, and
+  checkpoints from the dashboard API.
+- Default labels are more human-readable; raw ids, JSON, provider/model data, route classes, and
+  schema terms remain available under collapsed Technical details.
+- `npm run review-ui:smoke` now verifies the Workbench layout contract, responsive breakpoints,
+  central Ask Recallant placement, human labels, capture activity fields, and hidden technical
+  detail boundaries. A true Playwright screenshot harness is still a future infrastructure slice.
+
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
 ## Recent Commit Checkpoints
@@ -274,6 +291,16 @@ The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](S
 Earlier implementation commits cover Phase 0 through Phase 9 slices and are summarized in `docs/WORKING_CONTEXT.md`.
 
 ## Validation
+
+Latest Workbench validation on 2026-06-01:
+
+- `npm run build`
+- `npm run lint`
+- `npm run format:check`
+- `git diff --check`
+- `npm run review-ui:smoke` against the dev Postgres service on `127.0.0.1:15433`; passed with
+  Workbench layout contract, Activity / Replay, Memory Spaces, central Ask Recallant placement,
+  dangerous setting confirmation, review actions, cleanup/detach, and forget-forever coverage
 
 Latest contract-hardening validation on 2026-05-31:
 

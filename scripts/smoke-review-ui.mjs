@@ -345,8 +345,11 @@ try {
     throw new Error("Review UI HTML leaked raw secret setting values");
   }
   const requiredHtml = [
-    "Recallant Review Command Center",
+    "Recallant Workbench",
+    "Command Center",
     "What Needs Attention",
+    "Memory Spaces",
+    "Activity / Replay",
     "Project Actions",
     "Import Candidates",
     "Selected Detail",
@@ -372,9 +375,12 @@ try {
     "Enabled clients",
     "Project aliases",
     "system_settings",
-    "Management Chat",
-    'id="management-chat"',
+    "Ask Recallant",
+    'id="ask-recallant"',
     "Agent Readiness",
+    "Interrupted",
+    "Context was read",
+    "Memory was written",
     "Capture active. Checkpoint is still missing.",
     "last context read",
     "last memory write",
@@ -393,12 +399,48 @@ try {
     "Pending paid API approvals",
     "local cleanup dry-run",
     "Ask what to review next",
-    "Local embeddings"
+    "Local search by meaning"
   ];
   const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
   if (html.status !== 200 || missingHtml.length > 0) {
     throw new Error(
       `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; ${htmlText.slice(0, 500)}`
+    );
+  }
+  const requiredLayoutContracts = [
+    "grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr) minmax(300px, 420px)",
+    ".command-grid { display: grid",
+    ".right-rail { position: sticky",
+    ".chat-answer { border-top",
+    "max-height: 680px",
+    "@media (max-width: 1180px)",
+    "@media (max-width: 760px)"
+  ];
+  const missingLayoutContracts = requiredLayoutContracts.filter(
+    (marker) => !htmlText.includes(marker)
+  );
+  const askRecallantIndex = htmlText.indexOf('id="ask-recallant"');
+  const rightRailIndex = htmlText.indexOf('<aside class="right-rail">');
+  const visibleTechnicalLeaks = [
+    "<h3>embedding_route</h3>",
+    "<h3>instruction_grade</h3>",
+    "<h3>needs_review</h3>",
+    "scope_kind: developer"
+  ].filter((marker) => htmlText.includes(marker));
+  if (
+    missingLayoutContracts.length > 0 ||
+    askRecallantIndex < 0 ||
+    rightRailIndex < 0 ||
+    askRecallantIndex > rightRailIndex ||
+    visibleTechnicalLeaks.length > 0
+  ) {
+    throw new Error(
+      `Workbench layout contract failed: ${JSON.stringify({
+        missingLayoutContracts,
+        askRecallantIndex,
+        rightRailIndex,
+        visibleTechnicalLeaks
+      })}`
     );
   }
 
@@ -426,6 +468,10 @@ try {
     json.project_readiness?.project_registered !== true ||
     typeof json.project_readiness?.capture_event_count !== "number" ||
     !json.project_readiness?.last_context_read_at ||
+    !Array.isArray(json.recent_activity) ||
+    !json.recent_activity.some((row) => row.activity_kind === "context_read") ||
+    !json.recent_activity.some((row) => row.activity_kind === "memory_write") ||
+    !json.projects.some((project) => project.project_id === projectId && project.last_context_read_at) ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"
     ) ||
@@ -1330,7 +1376,7 @@ try {
   if (
     confirmedDangerousSettingForm.status !== 200 ||
     !confirmedDangerousSettingFormHtml.includes("Setting updated.") ||
-    !confirmedDangerousSettingFormHtml.includes("Local embedding route")
+    !confirmedDangerousSettingFormHtml.includes("Semantic search")
   ) {
     throw new Error(
       `Project dangerous setting confirmation failed: ${confirmedDangerousSettingForm.status} ${confirmedDangerousSettingFormHtml}`

@@ -450,6 +450,33 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `memory_append_turn` -> `embedded` -> `memory_search mode=vector_only`. Existing GutenDocx
   sandbox chunks were also re-embedded, and vector-only search now returns imported document chunks.
 
+## Current Implementation Checkpoint
+
+2026-06-01 Stage 1 Workbench UI first slice is implemented.
+
+- The private UI now presents itself as `Recallant Workbench`, not a raw Review Command Center.
+- The first screen is structured around Command Center, Memory Spaces, Activity / Replay, Ask
+  Recallant, Review, and Settings.
+- Ask Recallant is in the central work area, so long chat answers no longer live in the narrow
+  right rail.
+- Memory Spaces show source, isolation/sharing policy, and capture state in owner-facing language.
+- The dashboard API now exposes recent activity rows for session start, context read, memory write,
+  and checkpoint; per-project rows expose capture-state timestamps.
+- Technical ids, JSON, route classes, provider/model details, and schema terms remain available
+  under collapsed Technical details rather than the primary workflow.
+- `npm run review-ui:smoke` now verifies the Workbench vocabulary, layout CSS contract, central Ask
+  Recallant placement, human labels, capture activity, and the previous review/chat/settings/
+  cleanup/forget gates.
+
+Next autonomous work after this checkpoint:
+
+- Stage 2: add explicit structured management-chat result types and strengthen AI-native intent
+  coverage while keeping server policy as the execution authority.
+- Stage 3: implement the physical `project_sources` binding layer, memory spaces with zero or
+  multiple sources, and source-aware CLI/UI flows.
+- Add a real Playwright/screenshot harness when dependency/tooling work is appropriate; current UI
+  visual regression coverage is the strengthened smoke layout contract.
+
 ## Boundaries
 
 - Conversation with the owner may be Russian; repo artifacts stay English.

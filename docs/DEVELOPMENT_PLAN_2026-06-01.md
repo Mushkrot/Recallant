@@ -61,6 +61,21 @@ Acceptance:
 - Long chat answers do not waste page space or push the workbench into awkward
   scroll-only layouts.
 
+2026-06-01 first implementation slice:
+
+- Done: private UI renamed and reorganized as `Recallant Workbench`.
+- Done: first-class sections for Command Center, Memory Spaces, Activity /
+  Replay, Ask Recallant, Review, and Settings.
+- Done: Ask Recallant moved into the central work area.
+- Done: dashboard API exposes recent activity and per-project capture-state
+  fields.
+- Done: default screens use human-readable labels for local semantic search,
+  capture state, memory-space source, and sharing/isolation policy.
+- Done: `npm run review-ui:smoke` verifies the Workbench layout contract and
+  activity/capture fields.
+- Remaining: install or build a real screenshot/Playwright harness for
+  pixel-level desktop/mobile checks.
+
 ## Stage 2 - AI-Native Management Layer
 
 Goal: make "Ask Recallant" a real AI-managed control surface, not keyword

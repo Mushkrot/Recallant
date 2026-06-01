@@ -251,6 +251,25 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - `npm run phase5:smoke`; passed with broad startup query rejection coverage
 - `npm run phase7:smoke`; passed with owner-server doctor ports/security coverage
 
+## 2026-06-01 Stage 1 Workbench UI Checkpoint
+
+- The private Review UI is now presented as `Recallant Workbench` with top-level navigation for
+  Command Center, Memory Spaces, Activity / Replay, Ask Recallant, Review, and Settings.
+- Ask Recallant moved from the narrow right column into the central work area; long answers now have
+  a wider readable panel and bounded internal scrolling.
+- Memory Spaces use plain language for source and isolation/sharing policy, while ids, JSON, route
+  classes, provider/model details, and schema terms remain collapsed under Technical details.
+- Dashboard data now includes per-project capture-state signals and recent Activity / Replay rows:
+  session start, context read, memory write, and checkpoint.
+- `scripts/smoke-review-ui.mjs` now verifies Workbench vocabulary, central Ask Recallant placement,
+  responsive layout CSS breakpoints, activity data, capture-state visibility, and human-readable
+  labels in addition to the existing review/chat/settings/cleanup/forget gates.
+- Verification passed: `npm run build`, `npm run lint`, `npm run format:check`,
+  `git diff --check`, and `npm run review-ui:smoke` against the dev Postgres service on
+  `127.0.0.1:15433`.
+- A real Playwright/screenshot harness is not yet installed in the repo; the current UI regression
+  guard is the strengthened HTML/CSS/API smoke contract.
+
 ## Open Questions
 
 - None recorded.

@@ -2623,8 +2623,26 @@ export class RecallantDb {
             p.memory_domain,
             p.updated_at,
             (SELECT count(*)::int FROM sessions s WHERE s.project_id = p.id) AS session_count,
+            (SELECT count(*)::int FROM sessions s WHERE s.project_id = p.id AND s.status = 'active') AS active_sessions,
+            (SELECT count(*)::int FROM sessions s WHERE s.project_id = p.id AND s.status = 'interrupted') AS interrupted_sessions,
             (SELECT count(*)::int FROM events e WHERE e.project_id = p.id) AS event_count,
-            (SELECT count(*)::int FROM agent_memories m WHERE m.project_id = p.id) AS memory_count
+            (SELECT count(*)::int FROM agent_memories m WHERE m.project_id = p.id) AS memory_count,
+            (SELECT updated_at FROM checkpoints c WHERE c.project_id = p.id) AS checkpoint_updated_at,
+            (
+              SELECT max(e.created_at)
+              FROM events e
+              WHERE e.project_id = p.id
+                AND e.payload->'metadata'->>'capture_kind' = 'context_read'
+            ) AS last_context_read_at,
+            (
+              SELECT max(e.created_at)
+              FROM events e
+              WHERE e.project_id = p.id
+                AND (
+                  e.payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+                  OR e.kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
+                )
+            ) AS last_memory_write_at
           FROM projects p
           LEFT JOIN project_settings lifecycle
             ON lifecycle.project_id = p.id
@@ -2642,7 +2660,8 @@ export class RecallantDb {
           FROM project_usage
         )
         SELECT id AS project_id, name, primary_path, project_kind, memory_domain, updated_at,
-               session_count, event_count, memory_count
+               session_count, active_sessions, interrupted_sessions, event_count, memory_count,
+               checkpoint_updated_at, last_context_read_at, last_memory_write_at
         FROM ranked
         WHERE rank = 1
         ORDER BY updated_at DESC
@@ -2897,6 +2916,48 @@ export class RecallantDb {
       `,
       [dashboardProjectId]
     );
+    const recentActivity = await this.pool.query(
+      `
+        SELECT activity_kind, title, body, occurred_at
+        FROM (
+          SELECT
+            'session' AS activity_kind,
+            'Agent session started' AS title,
+            client_kind || coalesce(' / ' || client_version, '') AS body,
+            started_at AS occurred_at
+          FROM sessions
+          WHERE project_id = $1
+          UNION ALL
+          SELECT
+            'context_read' AS activity_kind,
+            'Context was read' AS title,
+            'Agent requested a startup Context Pack' AS body,
+            created_at AS occurred_at
+          FROM events
+          WHERE project_id = $1
+            AND payload->'metadata'->>'capture_kind' = 'context_read'
+          UNION ALL
+          SELECT
+            'memory_write' AS activity_kind,
+            'Memory was written' AS title,
+            title AS body,
+            updated_at AS occurred_at
+          FROM agent_memories
+          WHERE project_id = $1
+          UNION ALL
+          SELECT
+            'checkpoint' AS activity_kind,
+            'Checkpoint updated' AS title,
+            coalesce(payload->>'current_focus', payload->>'summary', 'Project checkpoint') AS body,
+            updated_at AS occurred_at
+          FROM checkpoints
+          WHERE project_id = $1
+        ) activity
+        ORDER BY occurred_at DESC NULLS LAST
+        LIMIT 30
+      `,
+      [dashboardProjectId]
+    );
     const selectedMemoryId =
       input?.selected_memory_id ??
       importCandidates.rows[0]?.memory_id ??
@@ -2941,6 +3002,7 @@ export class RecallantDb {
       pending_paid_api_approvals: pendingPaidApprovals.rows,
       settings: settings.rows,
       project_readiness: readiness.rows[0],
+      recent_activity: recentActivity.rows,
       project_cleanup: {
         dry_run_first: true,
         permanent_erasure_separate: true,

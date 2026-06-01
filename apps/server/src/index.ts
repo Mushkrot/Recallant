@@ -373,9 +373,9 @@ function settingLabel(key: unknown) {
   const labels: Record<string, string> = {
     capture_profile: "Capture profile",
     context_budget_profile: "Context budget",
-    embedding_route_enabled: "Local embedding route",
+    embedding_route_enabled: "Semantic search",
     enabled_clients: "Enabled clients",
-    embedding_route: "Local embeddings",
+    embedding_route: "Local search by meaning",
     paid_api_mode: "Paid API mode",
     project_aliases: "Project aliases",
     project_paths: "Project paths",
@@ -938,35 +938,83 @@ function renderDetail(
   </article>`;
 }
 
-function renderProjectRow(row: Record<string, unknown>, currentProjectId: unknown) {
-  const active = row.project_id === currentProjectId;
-  return `<a class="project-link" href="${escapeHtml(reviewPath(row.project_id))}">
-    <article class="project ${active ? "active" : ""}">
-      <div>
-        <h3>${escapeHtml(row.title ?? row.name ?? row.provider ?? row.key ?? row.source_kind ?? row.action ?? row.project_id ?? row.id)}</h3>
-        <p>${escapeHtml(row.primary_path ?? "No path recorded")}</p>
-      </div>
-      <div class="project-meta">
-        <span>ID ${escapeHtml(shortId(row.project_id))}</span>
-        <span>${escapeHtml(row.memory_domain ?? "agent_work")}</span>
-        <span>${escapeHtml(formatDate(row.updated_at))}</span>
-      </div>
-      <div class="metrics">
-        <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
-        <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
-        <span>${escapeHtml(row.event_count ?? 0)} events</span>
-      </div>
-    </article>
-  </a>`;
+function projectDisplayName(row: Record<string, unknown>) {
+  return (
+    row.title ??
+    row.name ??
+    row.provider ??
+    row.key ??
+    row.source_kind ??
+    row.action ??
+    row.project_id ??
+    row.id
+  );
 }
 
-function renderProjects(rows: Array<Record<string, unknown>>, currentProjectId: unknown) {
-  if (rows.length === 0) return `<p class="empty">No managed projects yet.</p>`;
-  return rows.map((row) => renderProjectRow(row, currentProjectId)).join("");
+function captureState(row: Record<string, unknown>) {
+  const interrupted = Number(row.interrupted_sessions ?? 0);
+  if (interrupted > 0) return { label: "Interrupted", className: "interrupted" };
+  if (row.last_context_read_at && row.last_memory_write_at && row.checkpoint_updated_at) {
+    return { label: "Capture active", className: "active" };
+  }
+  if (Number(row.session_count ?? 0) > 0 || row.last_context_read_at) {
+    return { label: "Started, not complete", className: "started" };
+  }
+  return { label: "Registered only", className: "registered" };
+}
+
+function sourceLabel(row: Record<string, unknown>) {
+  const path = row.primary_path;
+  if (path) return `Workspace folder: ${String(path)}`;
+  if (row.project_kind === "personal_domain") return "Virtual personal memory space";
+  return "No attached source is recorded yet";
+}
+
+function sharingPolicy(row: Record<string, unknown>) {
+  if (row.memory_domain === "agent_work") {
+    return "Isolated by default; agents may ask for source-linked examples from other spaces.";
+  }
+  return "Isolated by default; shared only through governed recall.";
 }
 
 function currentProject(data: ReviewDashboardData) {
   return data.projects.find((row) => row.project_id === data.current_project_id) ?? {};
+}
+
+function renderMemorySpaces(data: ReviewDashboardData) {
+  if (data.projects.length === 0) return `<p class="empty">No memory spaces yet.</p>`;
+  return `<div class="memory-spaces">
+    ${data.projects
+      .map((row) => {
+        const active = row.project_id === data.current_project_id;
+        const state = captureState(row);
+        return `<a class="memory-space-link" href="${escapeHtml(reviewPath(row.project_id))}">
+          <article class="memory-space ${active ? "active" : ""}">
+            <div class="memory-space-head">
+              <h3>${escapeHtml(projectDisplayName(row))}</h3>
+              <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+            </div>
+            <p>${escapeHtml(sourceLabel(row))}</p>
+            <p>${escapeHtml(sharingPolicy(row))}</p>
+            <div class="metrics">
+              <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+              <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+              <span>${escapeHtml(row.event_count ?? 0)} events</span>
+            </div>
+            <details>
+              <summary>Technical details</summary>
+              ${renderMeta([
+                ["project_id", row.project_id],
+                ["project_kind", row.project_kind],
+                ["memory_domain", row.memory_domain],
+                ["primary_path", row.primary_path]
+              ])}
+            </details>
+          </article>
+        </a>`;
+      })
+      .join("")}
+  </div>`;
 }
 
 function selectedSettingValue(rows: Array<Record<string, unknown>>, key: string) {
@@ -1302,6 +1350,40 @@ function renderReadiness(data: ReviewDashboardData) {
   </div>`;
 }
 
+function activityIcon(kind: unknown) {
+  const value = String(kind ?? "");
+  const labels: Record<string, string> = {
+    session: "Session",
+    context_read: "Context",
+    memory_write: "Memory",
+    checkpoint: "Checkpoint"
+  };
+  return labels[value] ?? "Activity";
+}
+
+function renderActivityReplay(data: ReviewDashboardData) {
+  const rows = Array.isArray(data.recent_activity)
+    ? (data.recent_activity as Array<Record<string, unknown>>)
+    : [];
+  if (rows.length === 0) {
+    return `<p class="empty">No recent Recallant activity has been captured for this memory space yet.</p>`;
+  }
+  return `<div class="activity-list">
+    ${rows
+      .map(
+        (row) => `<article class="activity-item">
+          <span>${escapeHtml(activityIcon(row.activity_kind))}</span>
+          <div>
+            <strong>${escapeHtml(row.title)}</strong>
+            <p>${escapeHtml(row.body)}</p>
+            <time>${escapeHtml(formatDate(row.occurred_at))}</time>
+          </div>
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
 function renderProjectActions(data: ReviewDashboardData) {
   const cleanup = asRecord(data.project_cleanup);
   return `<div class="action-plan">
@@ -1386,7 +1468,7 @@ function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
 function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState) {
   const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
   const selectedMemoryId = selectedMemory.id;
-  return `<form class="chat-form" method="post" action="/management-chat#management-chat">
+  return `<form class="chat-form" method="post" action="/management-chat#ask-recallant">
     <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
     ${
       selectedMemoryId
@@ -1473,17 +1555,22 @@ function renderDashboard(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Recallant Review Command Center</title>
+  <title>Recallant Workbench</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f6f7f9; color: #20242c; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f4f6f8; color: #20242c; }
     body { margin: 0; }
-    header { padding: 20px 28px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    header { padding: 18px 28px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(280px, 380px); gap: 18px; padding: 18px; align-items: start; }
+    main { display: grid; grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr) minmax(300px, 420px); gap: 18px; padding: 18px; align-items: start; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
+    h3 { letter-spacing: 0; }
     a { color: inherit; text-decoration: none; }
     .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
+    .command-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr); gap: 14px; align-items: start; }
+    .command-card h3 { margin: 0 0 8px; font-size: 14px; }
     .row-link, .project-link { display: block; border-radius: 6px; }
     .row-link:hover .item, .project-link:hover .project { background: #f8fafc; }
     .item { border-top: 1px solid #e5e9f0; padding: 10px 0; }
@@ -1500,7 +1587,7 @@ function renderDashboard(
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
     .left-rail, .right-rail { align-self: start; }
-    .chat-panel { position: sticky; top: 12px; z-index: 1; }
+    .right-rail { position: sticky; top: 12px; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .cleanup-flow p, .detach-result p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
@@ -1527,6 +1614,18 @@ function renderDashboard(
     .project p { margin: 0; color: #4f5867; font-size: 13px; overflow-wrap: anywhere; }
     .project-meta, .metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .project-meta span, .metrics span { background: #f2f5f8; border: 1px solid #dce3ec; border-radius: 999px; padding: 3px 7px; color: #4f5867; font-size: 11px; }
+    .state.active { color: #166454; border-color: #bad8cf; background: #eef8f5; }
+    .state.started { color: #715118; border-color: #e3d3a5; background: #fff9e8; }
+    .state.registered { color: #526070; border-color: #d6dde7; background: #f8fafc; }
+    .state.interrupted { color: #8a3c15; border-color: #e1b59b; background: #fff4ed; }
+    .memory-spaces { display: grid; gap: 9px; }
+    .memory-space-link { display: block; }
+    .memory-space { border: 1px solid #e1e7ef; border-radius: 8px; padding: 10px; background: #fbfcfe; }
+    .memory-space.active { background: #f4f8fb; border-color: #cdd9e7; }
+    .memory-space-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .memory-space h3 { margin: 0; font-size: 14px; }
+    .memory-space .state { border-radius: 999px; padding: 3px 7px; font-size: 11px; white-space: nowrap; }
+    .memory-space p { margin: 7px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -1583,7 +1682,7 @@ function renderDashboard(
     .chat-form { display: grid; gap: 8px; }
     .chat-form textarea { resize: vertical; min-height: 76px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px; font: inherit; font-size: 13px; color: #20242c; background: #fff; }
     .chat-form button { justify-self: start; }
-    .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 420px; overflow: auto; overscroll-behavior: contain; }
+    .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 680px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
     .chat-answer p { margin: 0 0 9px; color: #303845; font-size: 13px; line-height: 1.45; }
     .chat-answer .warning { color: #8a3c15; font-weight: 650; }
@@ -1595,13 +1694,31 @@ function renderDashboard(
     .chat-actions p { margin: 6px 0; color: #4f5867; }
     .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
     .chat-understanding { margin: 0 0 8px; color: #667085; font-size: 12px; }
+    .activity-list { display: grid; gap: 9px; }
+    .activity-item { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; border-top: 1px solid #e5e9f0; padding-top: 9px; }
+    .activity-item:first-child { border-top: 0; padding-top: 0; }
+    .activity-item > span { justify-self: start; border: 1px solid #d6dde7; border-radius: 999px; padding: 3px 7px; color: #445064; background: #f8fafc; font-size: 11px; }
+    .activity-item strong { display: block; font-size: 13px; margin-bottom: 3px; }
+    .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+    .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 980px) { main { grid-template-columns: 1fr; } .chat-panel { position: static; } }
+    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .right-rail { position: static; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } .right-rail .panel { margin-bottom: 0; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; } main { grid-template-columns: 1fr; padding: 12px; } .right-rail { display: block; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>Recallant Review Command Center</h1>
+    <div>
+      <h1>Recallant Workbench</h1>
+      <nav class="workbench-nav" aria-label="Workbench sections">
+        <a href="#command-center">Command Center</a>
+        <a href="#memory-spaces">Memory Spaces</a>
+        <a href="#activity-replay">Activity / Replay</a>
+        <a href="#ask-recallant">Ask Recallant</a>
+        <a href="#review">Review</a>
+        <a href="#settings">Settings</a>
+      </nav>
+    </div>
     <div class="status">
       <span class="pill">Project ${escapeHtml(shortId(data.current_project_id))}</span>
       <span class="pill">Private UI</span>
@@ -1609,12 +1726,12 @@ function renderDashboard(
   </header>
   <main>
     <aside class="left-rail">
-      <section class="panel">
-        <h2>Projects</h2>
-        ${renderProjects(data.projects, data.current_project_id)}
+      <section class="panel" id="memory-spaces">
+        <h2>Memory Spaces</h2>
+        ${renderMemorySpaces(data)}
       </section>
       <section class="panel">
-        <h2>Critical Status</h2>
+        <h2>Current Signals</h2>
         <div class="status">
           <span class="pill">Active ${escapeHtml(data.critical?.active_sessions ?? 0)}</span>
           <span class="pill">Interrupted ${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</span>
@@ -1623,38 +1740,42 @@ function renderDashboard(
           <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
         </div>
       </section>
-      <section class="panel chat-panel" id="management-chat">
-        <h2>Management Chat</h2>
-        ${renderManagementChat(data, chat)}
-      </section>
       <section class="panel">
         <h2>Project Actions</h2>
         ${renderProjectActions(data)}
       </section>
     </aside>
     <section>
-      <section class="panel">
-        <h2>What Needs Attention</h2>
-        ${renderAttention(data)}
+      <section class="panel" id="command-center">
+        <h2>Command Center</h2>
+        <div class="command-grid">
+          <div class="command-card">
+            <h3>What Needs Attention</h3>
+            ${renderAttention(data)}
+          </div>
+          <div class="command-card">
+            <h3>Agent Readiness</h3>
+            ${renderReadiness(data)}
+          </div>
+        </div>
       </section>
-      <section class="panel">
-        <h2>Agent Readiness</h2>
-        ${renderReadiness(data)}
+      <section class="panel" id="activity-replay">
+        <h2>Activity / Replay</h2>
+        ${renderActivityReplay(data)}
       </section>
-      <section class="panel">
-        <h2>Import Candidates</h2>
+      <section class="panel" id="ask-recallant">
+        <h2>Ask Recallant</h2>
+        ${renderManagementChat(data, chat)}
+      </section>
+      <section class="panel" id="review">
+        <h2>Review</h2>
+        <h3>Import Candidates</h3>
         ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
-      </section>
-      <section class="panel">
-        <h2>Review Inbox</h2>
+        <h3>Review Inbox</h3>
         ${renderRows(data.inbox, "No candidate or high-risk memories require review.", data.current_project_id)}
-      </section>
-      <section class="panel">
-        <h2>Conflicts / Duplicates</h2>
+        <h3>Conflicts / Duplicates</h3>
         ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.", data.current_project_id)}
-      </section>
-      <section class="panel">
-        <h2>Active Rules</h2>
+        <h3>Active Rules</h3>
         ${renderRuleFilters(data)}
         ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
       </section>
@@ -1672,7 +1793,7 @@ function renderDashboard(
         <h2>Cleanup / Forget</h2>
         ${renderCleanup(data, detach)}
       </section>
-      <section class="panel">
+      <section class="panel" id="settings">
         <h2>Settings</h2>
         ${renderSettings(data, setting)}
       </section>
