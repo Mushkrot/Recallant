@@ -548,6 +548,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `capture_readiness` and exits with status 2 until the project has context read, memory write, and
   checkpoint evidence. `connect:smoke` verifies failure before capture and success after
   agent-start/agent-event/agent-checkpoint.
+- Follow-up local hook kit: `recallant connect --install-local-hooks` installs optional
+  project-local scripts under `.recallant/hooks/` only. It writes no global client config, reports
+  `hook_status=local_hook_kit_installed`, and the scripts exit 0 if `recallant` is missing or a
+  timeout occurs.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 
@@ -585,7 +589,7 @@ Next autonomous work after this checkpoint:
   flows while keeping server policy as the execution authority.
 - Stage 3: continue richer source health/status and search/review source filters.
 - Stage 4: add real client/global config writers where safe, local backups for global/client files,
-  hook installation where supported, and fail-soft hook capture/spooling.
+  dedicated client hook installation where supported, and richer hook capture/spooling.
 - Stage 5: run additional non-fixture real-world pilots after hook capture and source-health UI are
   mature enough to make the reports more realistic.
 

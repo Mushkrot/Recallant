@@ -117,6 +117,9 @@ Current implemented slices include:
   starter memories, startup smoke checkpoint, and owner reports now point agents to
   `recallant agent-start --task-hint "<current task>"` plus `agent-event`, `agent-checkpoint`, and
   `agent-closeout` instead of treating project registration as sufficient readiness.
+- Connect local hook kit: `recallant connect --install-local-hooks` can write optional
+  project-local fail-soft hook scripts under `.recallant/hooks/` without touching global client
+  config. Scripts exit 0 when `recallant` is unavailable or times out.
 - Review dashboard capture readiness telemetry: projects now expose whether they are only
   registered or have actually run capture, including last context read, last memory write, last
   checkpoint, capture event count, and captured decision count.
@@ -412,6 +415,8 @@ Latest Workbench validation on 2026-06-01:
 - Stage 4 follow-up validation: `npm run connect:smoke` now covers failing
   `doctor --require-capture` before capture and passing it after real capture; `npm run
   phase7:smoke` verifies ordinary doctor output still includes non-required capture readiness
+- Stage 4 local hook-kit validation: `npm run connect:smoke` verifies local hook-kit dry-run,
+  install, no global-config writes, and fail-soft exit 0 when `recallant` is unavailable
 
 Latest Stage 5 pilot-report validation on 2026-06-01:
 

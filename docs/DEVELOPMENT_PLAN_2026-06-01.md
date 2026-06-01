@@ -238,8 +238,12 @@ Acceptance:
   the selected project is only registered or capture is partial, and passes only
   when Recallant sees context read, memory write, and checkpoint evidence from
   local session state or dashboard readiness.
+- Done: `recallant connect --install-local-hooks` writes an optional
+  project-local hook kit under `.recallant/hooks/` without touching global
+  client config. The scripts are fail-soft: missing `recallant` or timeout exits
+  0 so normal agent work is not broken.
 - Remaining: safe global/client config writers, local backups for global config,
-  hook install, and fail-soft hook capture/spooling.
+  dedicated client hook installation, and richer hook capture/spooling.
 
 ## Stage 5 - More Real Pilots
 

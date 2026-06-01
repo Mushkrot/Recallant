@@ -133,6 +133,19 @@ recallant attach . --target generic
 Use `.recallant/generic-mcp.json` as the canonical local stdio server config. The client must launch
 `recallant mcp-server` with the project/developer/database env values from that file.
 
+## Optional Local Hook Kit
+
+For clients that support local hook commands, Recallant can write project-local helper scripts
+without touching global client config:
+
+```bash
+recallant connect codex --install-local-hooks
+```
+
+This creates `.recallant/hooks/`. The scripts are fail-soft: if `recallant` is unavailable or the
+hook times out, they exit `0` so normal agent work is not interrupted. Client-specific global hook
+installation is still separate; the local hook kit only provides safe targets that adapters can call.
+
 ## Startup Smoke
 
 After connecting a client, the first agent session should do this without owner prompting:

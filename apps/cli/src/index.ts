@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
@@ -2501,10 +2501,102 @@ async function resolveConnectDeveloperId(input: { projectId: string }) {
   }
 }
 
+function failSoftHookScript(input: { command: string; stdinText?: boolean }) {
+  const stdin = input.stdinText ? 'TEXT="$(cat)"' : 'TEXT="${RECALLANT_HOOK_TEXT:-hook event}"';
+  return `#!/usr/bin/env sh
+set +e
+
+PROJECT_DIR="\${RECALLANT_PROJECT_DIR:-$(pwd)}"
+TIMEOUT_SECONDS="\${RECALLANT_HOOK_TIMEOUT_SECONDS:-2}"
+${stdin}
+
+if ! command -v recallant >/dev/null 2>&1; then
+  exit 0
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  timeout "$TIMEOUT_SECONDS" ${input.command} >/dev/null 2>&1
+else
+  ${input.command} >/dev/null 2>&1
+fi
+
+exit 0
+`;
+}
+
+function localHookKitFiles() {
+  const eventScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --kind "${1:-action}" --text "$TEXT"',
+    stdinText: true
+  });
+  const startScript = failSoftHookScript({
+    command:
+      'recallant agent-start --project-dir "$PROJECT_DIR" --task-hint "${1:-hook session start}"'
+  });
+  const checkpointScript = failSoftHookScript({
+    command:
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}"',
+    stdinText: true
+  });
+  const closeoutScript = failSoftHookScript({
+    command:
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}" --summary "$TEXT"',
+    stdinText: true
+  });
+  const readme = `# Recallant Local Hook Kit
+
+These project-local hook scripts are optional client integration helpers.
+
+They are fail-soft by design:
+
+- if \`recallant\` is unavailable, they exit 0;
+- if a hook times out, they exit 0;
+- they never write global client config;
+- set \`RECALLANT_PROJECT_DIR\` when a client runs hooks outside the project folder;
+- set \`RECALLANT_HOOK_TIMEOUT_SECONDS\` to tune the default 2 second timeout.
+
+Client integrations can call:
+
+- \`start-session.sh "<task hint>"\` at session start;
+- \`capture-event.sh action|decision|test < input.txt\` after meaningful prompts/tool results;
+- \`checkpoint.sh < summary.txt\` before compaction or pause;
+- \`closeout.sh < summary.txt\` when a session stops.
+`;
+  return [
+    {
+      path: ".recallant/hooks/README.md",
+      content: readme,
+      executable: false
+    },
+    {
+      path: ".recallant/hooks/start-session.sh",
+      content: startScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/capture-event.sh",
+      content: eventScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/checkpoint.sh",
+      content: checkpointScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/closeout.sh",
+      content: closeoutScript,
+      executable: true
+    }
+  ];
+}
+
 async function runConnect(argv: readonly string[]) {
   const dir = projectDir(argv);
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
   const dryRun = argv.includes("--dry-run");
+  const installLocalHooks = argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
   const config = await readProjectConfig(dir);
   if (!config?.project_id) {
     throw new Error(
@@ -2519,6 +2611,19 @@ async function runConnect(argv: readonly string[]) {
   const desired = `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`;
   const existing = await readOptional(targetPath);
   const same = existing === desired;
+  const hookFiles = installLocalHooks ? localHookKitFiles() : [];
+  const hookFilePlans = [];
+  for (const hookFile of hookFiles) {
+    const hookPath = join(dir, hookFile.path);
+    const current = await readOptional(hookPath);
+    hookFilePlans.push({
+      ...hookFile,
+      absolute_path: hookPath,
+      same: current === hookFile.content
+    });
+  }
+  const localHookKitPresent =
+    (await readOptional(join(dir, ".recallant", "hooks", "capture-event.sh"))) !== null;
   const state = await readAgentSessionState(dir);
   const backupPath =
     existing && !same
@@ -2535,6 +2640,11 @@ async function runConnect(argv: readonly string[]) {
         ...(backupPath ? [{ action: "backup_file", path: backupPath }] : []),
         { action: "write_file", path: targetConfig.config_file }
       ];
+  const hookChanges = hookFilePlans.map((hookFile) =>
+    hookFile.same
+      ? { action: "no_change", path: hookFile.path }
+      : { action: "write_file", path: hookFile.path }
+  );
   if (!dryRun && !same) {
     if (backupPath && existing !== null) {
       await mkdir(backupPath.split("/").slice(0, -1).join("/"), { recursive: true });
@@ -2545,6 +2655,22 @@ async function runConnect(argv: readonly string[]) {
     });
     await writeFile(targetPath, desired);
   }
+  if (!dryRun && installLocalHooks) {
+    for (const hookFile of hookFilePlans) {
+      if (!hookFile.same) {
+        await mkdir(hookFile.absolute_path.split("/").slice(0, -1).join("/"), { recursive: true });
+        await writeFile(hookFile.absolute_path, hookFile.content);
+      }
+      if (hookFile.executable) await chmod(hookFile.absolute_path, 0o755);
+    }
+  }
+  const hookStatus = installLocalHooks
+    ? dryRun
+      ? "local_hook_kit_planned"
+      : "local_hook_kit_installed"
+    : localHookKitPresent
+      ? "local_hook_kit_installed"
+      : "not_installed";
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -2555,13 +2681,21 @@ async function runConnect(argv: readonly string[]) {
         project_id: config.project_id,
         developer_id: developerId,
         connection_status: "mcp_only",
-        hook_status: "not_installed",
+        hook_status: hookStatus,
         capture_status: captureStatusFromState(state),
-        writes_files: !dryRun && !same,
+        writes_files: !dryRun && (!same || hookFilePlans.some((hookFile) => !hookFile.same)),
         writes_global_config: false,
-        planned_changes: plannedChanges,
+        planned_changes: [...plannedChanges, ...hookChanges],
         config_file: targetConfig.config_file,
         setup_hint: targetConfig.setup_hint,
+        hook_integration: {
+          mode: installLocalHooks || localHookKitPresent ? "local_hook_kit" : "none",
+          fail_soft: true,
+          writes_global_config: false,
+          installed_files: hookFilePlans.map((hookFile) => hookFile.path),
+          timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
+          project_dir_env: "RECALLANT_PROJECT_DIR"
+        },
         mcp_config: targetConfig.mcp_config
       },
       null,

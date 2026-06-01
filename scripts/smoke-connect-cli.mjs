@@ -124,6 +124,59 @@ assert(
   `Claude/generic dry-run should show config write: ${JSON.stringify(claudeDryRun)}`
 );
 
+const hookDryRun = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--install-local-hooks",
+  "--dry-run"
+]);
+assert(
+  hookDryRun.hook_status === "local_hook_kit_planned" &&
+    hookDryRun.writes_files === false &&
+    hookDryRun.writes_global_config === false,
+  `Hook dry-run should plan only local fail-soft hook files: ${JSON.stringify(hookDryRun)}`
+);
+assert(
+  hookDryRun.planned_changes.some((change) => change.path === ".recallant/hooks/capture-event.sh"),
+  `Hook dry-run missing capture-event script: ${JSON.stringify(hookDryRun)}`
+);
+assert(
+  hookDryRun.hook_integration?.fail_soft === true &&
+    hookDryRun.hook_integration?.mode === "local_hook_kit",
+  `Hook dry-run missing fail-soft integration summary: ${JSON.stringify(hookDryRun)}`
+);
+
+const hookConnect = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--install-local-hooks"
+]);
+assert(
+  hookConnect.hook_status === "local_hook_kit_installed" &&
+    hookConnect.writes_global_config === false,
+  `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
+);
+const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
+assert(
+  hookScript.includes("exit 0") &&
+    hookScript.includes("timeout") &&
+    hookScript.includes("agent-event"),
+  `Capture hook should be fail-soft and call agent-event: ${hookScript}`
+);
+const hookFailSoft = spawnSync(`${projectDir}/.recallant/hooks/capture-event.sh`, ["action"], {
+  input: "hook smoke should not break agent workflow",
+  env: { PATH: "/bin:/usr/bin", RECALLANT_PROJECT_DIR: projectDir },
+  encoding: "utf8"
+});
+assert(
+  hookFailSoft.status === 0,
+  `Hook script should exit 0 when recallant is unavailable: ${hookFailSoft.stderr}`
+);
+
 runCli(["agent-start", "--project-dir", projectDir, "--task-hint", "connect smoke capture"]);
 runCli([
   "agent-event",
