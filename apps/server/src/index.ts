@@ -2446,18 +2446,22 @@ function renderDashboard(
             <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
           </div>
           <div class="operation-panels">
-            <details class="operation-panel"${focused ? " open" : ""}>
+            ${
+              focused
+                ? ""
+                : `<details class="operation-panel">
               <summary><span>Selected Detail</span></summary>
               ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
             </details>
-            <details class="operation-panel"${focused ? " open" : ""}>
+            <details class="operation-panel">
               <summary><span>Cost / Paid API</span></summary>
               ${renderCosts(data)}
             </details>
-            <details class="operation-panel"${focused ? " open" : ""}>
+            <details class="operation-panel">
               <summary><span>Cleanup / Forget</span></summary>
               ${renderCleanup(data, detach)}
-            </details>
+            </details>`
+            }
             <details class="operation-panel" id="settings"${focused ? " open" : ""}>
               <summary><span>Settings</span></summary>
               ${renderSettings(data, setting)}
@@ -2649,8 +2653,7 @@ export function createRecallantHttpServer() {
             result: result as Record<string, unknown>,
             target: { kind: targetKind, id: targetId },
             reason: optionalInput(body.reason)
-          },
-          view: "settings"
+          }
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -2703,7 +2706,7 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        renderDashboard(detachDashboard, { detach: { result }, view: "settings" }),
+        renderDashboard(detachDashboard, { detach: { result } }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );

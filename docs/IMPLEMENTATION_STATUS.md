@@ -157,6 +157,9 @@ Current implemented slices include:
 - Workbench navigation now supports focused views with `?view=ask|memory|command|sources|activity|review|settings`
   plus the default full `All` view. Focused views reduce the long single-page dashboard effect and
   keep Ask/Source/Settings actions on the relevant work surface after form submissions.
+- Focused Settings view now renders the Settings work surface by itself instead of opening the
+  unrelated Selected Detail, Cost, and Cleanup panels. The full governed operations set remains
+  available in the default `All` overview.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.

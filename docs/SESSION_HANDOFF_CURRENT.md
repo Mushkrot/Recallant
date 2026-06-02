@@ -59,6 +59,8 @@ Workbench navigation now supports focused work surfaces with
 `?view=ask|memory|command|sources|activity|review|settings` plus the default full `All` view. Ask,
 Source, and Settings actions stay on the relevant focused surface instead of dropping the owner back
 into the long overview.
+`view=settings` renders only the Settings work surface; Selected Detail, Cost, and Cleanup remain
+available from the full `All` overview instead of crowding the focused Settings page.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,

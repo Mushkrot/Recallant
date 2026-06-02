@@ -394,6 +394,9 @@ Latest implementation checkpoints:
   with `?view=ask|memory|command|sources|activity|review|settings` plus the default full `All`
   view. Ask, Source, and Settings form submissions stay on the relevant focused surface, reducing
   the long single-page dashboard effect without removing the full overview.
+- 2026-06-02 Settings focused-view polish: `view=settings` now renders only the Settings work
+  surface instead of opening unrelated Selected Detail, Cost, and Cleanup panels. The full governed
+  operation set remains in `All`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing. Concrete local/repo/

@@ -487,6 +487,23 @@ try {
       `Sources focused view failed: ${sourcesView.status}; ${sourcesViewText.slice(0, 500)}`
     );
   }
+
+  const settingsView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=settings`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const settingsViewText = await settingsView.text();
+  if (
+    settingsView.status !== 200 ||
+    !settingsViewText.includes('id="settings" open') ||
+    !settingsViewText.includes("Edit project settings") ||
+    settingsViewText.includes("Cost / Paid API") ||
+    settingsViewText.includes("Cleanup / Forget") ||
+    settingsViewText.includes("Selected Detail")
+  ) {
+    throw new Error(
+      `Settings focused view failed: ${settingsView.status}; ${settingsViewText.slice(0, 500)}`
+    );
+  }
   const requiredLayoutContracts = [
     "main { display: grid; grid-template-columns: minmax(0, 1fr)",
     ".workbench-body { display: grid",
