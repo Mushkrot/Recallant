@@ -354,6 +354,9 @@ Latest implementation checkpoints:
   `.recallant/spool` path to primary capture commands and attempt `spool-append` fallback when
   primary capture fails while `recallant` is available. `npm run connect:smoke` verifies the
   fallback writes project-local JSONL and exits 0.
+- 2026-06-02 hook-spool path QA follow-up: default spool resolution now uses `--project-dir` when
+  present, so CLI capture/checkpoint/closeout commands launched from another working directory do
+  not inspect or write the Recallant repo's own `.recallant/spool`.
 - 2026-06-02 Claude Code connect follow-up: `recallant connect claude-code` now writes/merges a
   project-local `.mcp.json` instead of using the generic fallback. It preserves existing MCP
   servers, adds only `mcpServers.recallant`, creates a local backup before changing an existing

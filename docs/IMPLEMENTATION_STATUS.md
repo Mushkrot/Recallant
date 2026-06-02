@@ -134,6 +134,9 @@ Current implemented slices include:
   start, owner prompt, tool result, generic event capture, pre-compaction checkpoint, and
   stop/closeout, and server-mode closeout writes an explicit `agent_closeout` event before closing
   the session.
+- Direct CLI capture commands now resolve the default spool path from `--project-dir` when present,
+  so tests or clients launched from another working directory do not read/write the Recallant repo's
+  own `.recallant/spool`.
 - Review dashboard capture readiness telemetry: projects now expose whether they are only
   registered or have actually run capture, including last context read, last memory write, last
   checkpoint, capture event count, and captured decision count.
@@ -443,6 +446,9 @@ Latest Workbench validation on 2026-06-01:
 - Stage 4 local hook-kit validation: `npm run connect:smoke` verifies local hook-kit dry-run,
   install, no global-config writes, fail-soft exit 0 when `recallant` is unavailable, and
   project-local spool fallback when primary hook capture cannot reach the database
+- 2026-06-02 full core validation after hook-spool path fix: `npm run build`, `npm run lint`,
+  `npm run format:check`, `git diff --check`, targeted `npm run local-cleanup:smoke`,
+  `npm run spool:smoke`, `npm run connect:smoke`, and full `npm run smoke:core`
 
 Latest Stage 5 pilot-report validation on 2026-06-01:
 

@@ -146,7 +146,7 @@ function spoolDir(argv: readonly string[]) {
   return resolve(
     parseFlag(argv, "--spool-dir") ??
       process.env.RECALLANT_SPOOL_DIR ??
-      join(process.cwd(), ".recallant", "spool")
+      join(projectDir(argv), ".recallant", "spool")
   );
 }
 

@@ -580,6 +580,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `--spool-dir "$PROJECT_DIR/.recallant/spool"`, and hook scripts attempt a local `spool-append`
   fallback when primary capture fails while `recallant` is available. `connect:smoke` verifies the
   fallback writes project-local JSONL and still exits 0.
+- 2026-06-02 hook-spool path QA follow-up: full `smoke:core` exposed that direct CLI closeout with
+  `--project-dir` still checked the process working directory spool. The default spool path now
+  resolves through the project directory, and `local-cleanup:smoke`, `spool:smoke`,
+  `connect:smoke`, and full `smoke:core` pass.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 
