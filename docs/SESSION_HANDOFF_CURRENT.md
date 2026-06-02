@@ -13,7 +13,7 @@ This is the current handoff for the next Recallant session. Start here after rea
   deeper semantic routing are still in progress.
 - Stage 3 — Memory Spaces and Sources: `~45%` complete. Virtual spaces and source attach/detach
   flows are implemented; full source-health depth and cross-view source filtering are pending.
-- Stage 4 — Client Connect and Hook Capture: `~80%` complete. Connect lifecycle, MCP status, hook
+- Stage 4 — Client Connect and Hook Capture: `~82%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
 - Stage 5 — Real Pilots and QA: `~70%` complete. Pilot-report automation for clean, copied, and
@@ -645,6 +645,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - 2026-06-02 doctor manifest validation follow-up: `doctor` / client connection readiness now
   validates the hook manifest contract and reports missing, invalid, or valid manifest state.
   `connect:smoke` verifies this path.
+- 2026-06-02 connect status follow-up: top-level `connect.connection_status` now matches the
+  mandatory-startup state (`mcp_only`, `mcp_and_hooks_planned`, or `mcp_and_hooks_ready`) instead of
+  always reporting `mcp_only`.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 

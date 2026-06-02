@@ -15,7 +15,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 3 — Memory Spaces and Sources: `~45%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
-- Stage 4 — Client Connect and Hook Capture: `~80%` complete. Connect separation, hook install
+- Stage 4 — Client Connect and Hook Capture: `~82%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
 - Stage 5 — Real Pilots and QA: `~70%` complete. Pilot automation for clean/copied/production-sensitive
@@ -396,7 +396,8 @@ Latest implementation checkpoints:
 - 2026-06-02 mandatory-startup diagnostics follow-up: `recallant connect` now reports
   `mandatory_startup_layer`, and `recallant doctor` reports `client_connection`. These show MCP
   config presence, project-local hook-kit readiness, fail-soft behavior, covered capture targets,
-  and the exact `doctor --require-capture` proof command. Verified by `npm run connect:smoke` and
+  the exact `doctor --require-capture` proof command, and the top-level `connection_status` for
+  MCP-only, planned MCP+hooks, or ready MCP+hooks state. Verified by `npm run connect:smoke` and
   `npm run phase7:smoke`.
 - 2026-06-02 hook manifest follow-up: `recallant connect --install-local-hooks` now writes
   `.recallant/hooks/manifest.json` with fail-soft policy, no-global-config guarantee, lifecycle

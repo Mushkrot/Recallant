@@ -244,6 +244,7 @@ const hookDryRun = runCli([
 ]);
 assert(
   hookDryRun.hook_status === "local_hook_kit_planned" &&
+    hookDryRun.connection_status === "mcp_and_hooks_planned" &&
     hookDryRun.mandatory_startup_layer?.status === "mcp_and_hooks_planned" &&
     hookDryRun.writes_files === false &&
     hookDryRun.writes_global_config === false,
@@ -268,6 +269,7 @@ const hookConnect = runCli([
 ]);
 assert(
   hookConnect.hook_status === "local_hook_kit_installed" &&
+    hookConnect.connection_status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.capture_targets?.includes("pre_compaction_checkpoint") &&
     hookConnect.writes_global_config === false,

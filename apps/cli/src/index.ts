@@ -2972,7 +2972,7 @@ async function runConnect(argv: readonly string[]) {
         client: targetConfig.target,
         project_id: config.project_id,
         developer_id: developerId,
-        connection_status: "mcp_only",
+        connection_status: mandatoryStartupLayerStatus,
         hook_status: hookStatus,
         capture_status: captureStatusFromState(state),
         mandatory_startup_layer: {

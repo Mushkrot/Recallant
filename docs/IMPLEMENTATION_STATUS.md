@@ -72,7 +72,7 @@ Current implemented slices include:
 - Stage 3 — Memory Spaces and Sources: ~45% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
-- Stage 4 — Client Connect and Hook Capture: ~80% completed. Separate connect lifecycle, MCP setup,
+- Stage 4 — Client Connect and Hook Capture: ~82% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
 - Stage 5 — Real Pilots and QA: ~70% completed. Core pilot automation exists (clean and copied
@@ -446,6 +446,9 @@ Stage 4 first slice is now implemented:
   (session start, prompt, tool result, generic event, pre-compaction checkpoint, checkpoint, and
   stop/closeout), and the exact `doctor --require-capture` proof command. This makes the difference
   between MCP-only and MCP+hooks visible instead of relying on owner inspection.
+- `recallant connect` now also reports that same state in the top-level `connection_status`, so
+  humans and automation can distinguish `mcp_only`, `mcp_and_hooks_planned`, and
+  `mcp_and_hooks_ready` without drilling into nested diagnostics.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
