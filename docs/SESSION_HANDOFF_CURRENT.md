@@ -16,7 +16,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
-- Stage 5 — Real Pilots and QA: `~70%` complete. Pilot-report automation for clean, copied, and
+- Stage 5 — Real Pilots and QA: `~72%` complete. Pilot-report automation for clean, copied, and
   production-sensitive dry-runs exists; next is more real-world project scenarios and richer outcome
   review.
 
@@ -712,6 +712,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `client_connection=mcp_and_hooks_ready`.
 - 2026-06-02 Workbench snapshot follow-up: pilot reports now include capture readiness, review
   queue counts, source-health counts, and recent activity count for clean and copied-sandbox pilots.
+- 2026-06-02 cross-project recall follow-up: pilot reports now include explicit cross-project
+  recall evidence after sandbox detach. Default active recall hides detached projects;
+  `include_detached=true` can retrieve the copied sandbox as a source-linked example; and the report
+  asserts cross-project results are not binding rules.
 
 Latest validation for the Workbench/source/chat follow-up slice:
 

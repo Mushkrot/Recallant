@@ -574,6 +574,62 @@ async function runProductionSensitivePreflight() {
   };
 }
 
+async function runCrossProjectRecallEvidence(cleanPilot, copiedPilot) {
+  const database = new RecallantDb({
+    databaseUrl,
+    developerId,
+    projectId: cleanPilot.project_id,
+    projectPath: cleanPilot.project_name
+  });
+  try {
+    const copiedMarker = copiedPilot.capture.remembered_marker;
+    const activeOnly = await database.crossProjectRecall({
+      query: copiedMarker,
+      mode: "similar_projects",
+      top_k: 5
+    });
+    const activeHit = activeOnly.results.find(
+      (result) => result.source_project?.project_id === copiedPilot.project_id
+    );
+    assert(
+      !activeHit,
+      "detached copied pilot should not appear in active cross-project recall by default"
+    );
+
+    const includeDetached = await database.crossProjectRecall({
+      query: copiedMarker,
+      mode: "similar_projects",
+      include_detached: true,
+      top_k: 5
+    });
+    const detachedHit = includeDetached.results.find(
+      (result) =>
+        result.source_project?.project_id === copiedPilot.project_id &&
+        String(result.body).includes(copiedMarker)
+    );
+    assert(
+      detachedHit?.applicability === "example_only" &&
+        detachedHit?.promotion_policy &&
+        includeDetached.policy?.cross_project_results_are_binding_rules === false,
+      `detached cross-project recall did not return a source-linked example: ${JSON.stringify(includeDetached)}`
+    );
+
+    return {
+      active_search_hides_detached_project: true,
+      include_detached_finds_source_linked_example: true,
+      source_project_id: copiedPilot.project_id,
+      source_project_name: copiedPilot.sandbox_copy_name,
+      recalled_marker: copiedMarker,
+      applicability: detachedHit.applicability,
+      cross_project_results_are_binding_rules:
+        includeDetached.policy.cross_project_results_are_binding_rules,
+      trace_id: includeDetached.trace_id
+    };
+  } finally {
+    await database.close();
+  }
+}
+
 try {
   const generatedAt = new Date().toISOString();
   const reportDir = process.env.RECALLANT_PILOT_REPORT_DIR ?? join(tmpdir(), "recallant-pilot-reports");
@@ -586,12 +642,15 @@ try {
     action: "pilot_report_smoke",
     generated_at: generatedAt,
     developer_id: developerId,
-    pilots: {
-      clean_empty_project: await runCleanEmptyPilot(),
-      copied_existing_sandbox: await runCopiedExistingPilot(),
-      production_sensitive_dry_run: await runProductionSensitivePreflight()
-    }
+    pilots: {}
   };
+  report.pilots.clean_empty_project = await runCleanEmptyPilot();
+  report.pilots.copied_existing_sandbox = await runCopiedExistingPilot();
+  report.pilots.cross_project_recall = await runCrossProjectRecallEvidence(
+    report.pilots.clean_empty_project,
+    report.pilots.copied_existing_sandbox
+  );
+  report.pilots.production_sensitive_dry_run = await runProductionSensitivePreflight();
   report.qa_summary = {
     scenario_count: Object.keys(report.pilots).length,
     clean_attach_capture_recall_detach:
@@ -614,13 +673,18 @@ try {
       report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&
       report.pilots.production_sensitive_dry_run.writes_files === false &&
       report.pilots.production_sensitive_dry_run.writes_database === false,
+    cross_project_recall_source_linked:
+      report.pilots.cross_project_recall.active_search_hides_detached_project === true &&
+      report.pilots.cross_project_recall.include_detached_finds_source_linked_example === true &&
+      report.pilots.cross_project_recall.cross_project_results_are_binding_rules === false,
     all_required_scenarios_passed: true
   };
   report.qa_summary.all_required_scenarios_passed =
     report.qa_summary.clean_attach_capture_recall_detach &&
     report.qa_summary.copied_sandbox_original_untouched &&
     report.qa_summary.workbench_capture_visible &&
-    report.qa_summary.production_sensitive_preflight_safe;
+    report.qa_summary.production_sensitive_preflight_safe &&
+    report.qa_summary.cross_project_recall_source_linked;
   assert(report.qa_summary.all_required_scenarios_passed, "pilot report QA summary was not green");
   report.report_path = reportPath;
   await mkdir(reportDir, { recursive: true });
