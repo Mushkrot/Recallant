@@ -362,6 +362,9 @@ Acceptance:
   `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes a
   `qa_summary` for the three required scenarios, and reads the artifact back to
   verify the report is persisted.
+- Done: pilot reports now include a compact Workbench snapshot for clean and
+  copied-sandbox pilots: capture readiness, review queue counts, source-health
+  counts, and recent activity count.
 - Done: `pilot-report:smoke` is part of `npm run smoke:core`.
 - Remaining: run more non-fixture real-world pilots after Stage 4 hooks and
   source-health UI become richer.

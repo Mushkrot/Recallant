@@ -75,7 +75,7 @@ Current implemented slices include:
 - Stage 4 — Client Connect and Hook Capture: ~70% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
-- Stage 5 — Real Pilots and QA: ~65% completed. Core pilot automation exists (clean and copied
+- Stage 5 — Real Pilots and QA: ~70% completed. Core pilot automation exists (clean and copied
   sandbox, production-sensitive dry-run), but the plan still requires more realistic scenario batches and
   deeper cross-project recall/restore report coverage.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
@@ -183,6 +183,8 @@ Current implemented slices include:
   untouched. It writes a JSON report artifact under `RECALLANT_PILOT_REPORT_DIR` or
   `/tmp/recallant-pilot-reports`, includes a green `qa_summary`, and reads the artifact back as
   part of the smoke.
+- Pilot reports now include a Workbench snapshot for clean and copied-sandbox pilots: capture
+  readiness, review queue counts, source-health counts, and recent activity count.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 - Contract-hardening checkpoint: Review Inbox now includes important long-term records and
   lifecycle/action candidates by default; Review UI first screen shows critical capture/spool/

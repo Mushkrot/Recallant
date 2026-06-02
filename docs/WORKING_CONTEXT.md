@@ -18,7 +18,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 4 — Client Connect and Hook Capture: `~70%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
-- Stage 5 — Real Pilots and QA: `~65%` complete. Pilot automation for clean/copied/production-sensitive
+- Stage 5 — Real Pilots and QA: `~70%` complete. Pilot automation for clean/copied/production-sensitive
   dry-runs is in place, but more realistic non-fixture pilots and broader scenario reporting are pending.
 
 ## Current product intent
@@ -408,6 +408,9 @@ Latest implementation checkpoints:
   project-local hook targets for session start, user prompt, tool result, decision, and
   pre-compaction checkpoint, recall the hook-captured decision in a later context pack, and pass
   `doctor --require-capture` with `client_connection=mcp_and_hooks_ready`.
+- 2026-06-02 Pilot-report Workbench snapshot follow-up: pilot reports now include capture
+  readiness, review queue counts, source-health counts, and recent activity count for clean and
+  copied-sandbox pilots.
 - 2026-06-01 Context-pack provenance follow-up: binding rules and working memories returned by `memory_get_context_pack` now include redacted `source_refs` and a compact `provenance` object with source count, primary source kind/id, source path when available, and a short summary. This lets agents answer "where did this come from?" without reading raw artifacts or project history files. Verified by `npm run phase6:smoke:graph`.
 - 2026-06-01 Connect local hook-kit follow-up: `recallant connect --install-local-hooks` now installs only project-local fail-soft helper scripts under `.recallant/hooks/` and still writes no global client config. The hook scripts exit 0 when `recallant` is unavailable or a timeout occurs, giving client adapters a safe hook target without risking normal agent work. The kit includes session start, owner prompt, tool result, generic capture, pre-compaction checkpoint, stop/closeout targets, and a machine-readable manifest; server-mode closeout writes an explicit closeout event. Verified by `npm run connect:smoke`.
 - 2026-06-02 Connect hook-spool follow-up: project-local hooks now pass the project-local

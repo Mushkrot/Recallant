@@ -140,6 +140,46 @@ async function dashboardFor(projectId, projectPath) {
   }
 }
 
+function rows(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function workbenchSnapshot(dashboard) {
+  const readiness = dashboard.project_readiness ?? {};
+  const sourceFilters = dashboard.source_filters ?? {};
+  const sources = rows(sourceFilters.sources);
+  const healthRows = sources.map((source) => source.source_health ?? {});
+  const ready = healthRows.filter((health) => health.status === "ready").length;
+  const detached = healthRows.filter((health) => health.status === "detached").length;
+  const needsAttention = healthRows.filter((health) => {
+    const status = String(health.status ?? "");
+    return status.length > 0 && status !== "ready" && status !== "detached";
+  }).length;
+  return {
+    capture_ready: Boolean(
+      readiness.last_context_read_at &&
+        readiness.last_memory_write_at &&
+        readiness.checkpoint_updated_at
+    ),
+    last_context_read_at: readiness.last_context_read_at ?? null,
+    last_memory_write_at: readiness.last_memory_write_at ?? null,
+    checkpoint_updated_at: readiness.checkpoint_updated_at ?? null,
+    review_counts: {
+      import_candidates: rows(dashboard.import_candidates).length,
+      inbox: rows(dashboard.inbox).length,
+      conflicts_or_duplicates: rows(dashboard.duplicate_conflicts).length,
+      active_rules: rows(dashboard.rules).length
+    },
+    source_health: {
+      total: sources.length,
+      ready,
+      needs_attention: needsAttention,
+      detached
+    },
+    recent_activity_count: rows(dashboard.recent_activity).length
+  };
+}
+
 async function installHookCliWrapper(projectDir) {
   const hookBin = join(projectDir, ".recallant", "hook-bin");
   await mkdir(hookBin, { recursive: true });
@@ -391,6 +431,8 @@ async function runCleanEmptyPilot() {
 
   const capture = await runCapturedSession(projectDir, attach.project_id, marker, "clean pilot");
   const connect = await runConnectHookEvidence(projectDir, marker, "clean pilot");
+  const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, projectDir));
+  assert(workbench.capture_ready === true, "clean pilot Workbench snapshot did not show capture ready");
   const detachDryRun = await cli(projectDir, [
     "detach",
     "--project-id",
@@ -412,6 +454,7 @@ async function runCleanEmptyPilot() {
     imported_sources: attach.imported?.length ?? 0,
     connect,
     capture,
+    workbench,
     cleanup: {
       dry_run_first: detachDryRun.status,
       confirmed_status: detach.status,
@@ -437,6 +480,8 @@ async function runCopiedExistingPilot() {
 
   const capture = await runCapturedSession(sandboxDir, attach.project_id, marker, "copied pilot");
   const connect = await runConnectHookEvidence(sandboxDir, marker, "copied pilot");
+  const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, sandboxDir));
+  assert(workbench.capture_ready === true, "copied pilot Workbench snapshot did not show capture ready");
   const detachDryRun = await cli(sandboxDir, [
     "detach",
     "--project-id",
@@ -472,6 +517,7 @@ async function runCopiedExistingPilot() {
     local_backup_created: Boolean(attach.backup?.manifest_path),
     connect,
     capture,
+    workbench,
     cleanup: {
       dry_run_first: detachDryRun.status,
       confirmed_status: detach.status,
@@ -559,6 +605,11 @@ try {
       report.pilots.copied_existing_sandbox.connect.recalled_hook_decision === true &&
       report.pilots.copied_existing_sandbox.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.copied_existing_sandbox.local_backup_created === true,
+    workbench_capture_visible:
+      report.pilots.clean_empty_project.workbench.capture_ready === true &&
+      report.pilots.copied_existing_sandbox.workbench.capture_ready === true &&
+      report.pilots.clean_empty_project.workbench.source_health.total >= 1 &&
+      report.pilots.copied_existing_sandbox.workbench.source_health.total >= 1,
     production_sensitive_preflight_safe:
       report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&
       report.pilots.production_sensitive_dry_run.writes_files === false &&
@@ -568,6 +619,7 @@ try {
   report.qa_summary.all_required_scenarios_passed =
     report.qa_summary.clean_attach_capture_recall_detach &&
     report.qa_summary.copied_sandbox_original_untouched &&
+    report.qa_summary.workbench_capture_visible &&
     report.qa_summary.production_sensitive_preflight_safe;
   assert(report.qa_summary.all_required_scenarios_passed, "pilot report QA summary was not green");
   report.report_path = reportPath;
