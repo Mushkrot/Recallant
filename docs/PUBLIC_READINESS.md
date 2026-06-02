@@ -12,6 +12,8 @@ First packaging slice implemented:
 - neutral public server installs can use `managed-server`, while the legacy/current
   `owner-server` profile remains owner-specific;
 - production compose and backup scripts honor the selected profile env/data paths;
+- managed-server install planning supports explicit Postgres port/container isolation for
+  clean-host or side-by-side validation;
 - clean-host preflight smoke verifies isolated HOME/PREFIX/DATA install planning plus installed CLI
   wrapper execution without touching owner-server paths;
 - installer dry-run is side-effect free and no longer requires Docker only to preview the plan;
@@ -74,6 +76,7 @@ paths, or architecture ADRs to complete this path.
 
 - single-user dry-run uses a temporary HOME;
 - managed-server dry-run accepts explicit env/data/prefix overrides;
+- managed-server dry-run accepts non-default Postgres port/container overrides;
 - dry-run creates no env, data, or CLI paths;
 - the CLI wrapper can be installed into a temporary prefix and run a safe command.
 

@@ -93,7 +93,8 @@ Current implemented slices include:
   of the full image set remains open. `docs/PUBLIC_SECURITY_REVIEW.md` and
   `npm run public-security:smoke` now guard normal public onboarding docs against owner hostnames,
   owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
-  assignments.
+  assignments. Managed-server install planning now exposes Postgres port/container isolation knobs
+  and threads them through generated env, database URL, compose wrapper, and Docker Compose.
   This is not yet a public-release claim: real clean-host install validation, final sanitized
   screenshots, rollback testing on a non-owner host, refreshed public-facing security review, and
   final client mandatory-startup parity remain open.
@@ -1008,6 +1009,9 @@ Latest product-UX readiness checkpoint:
   - `npm run public-security:smoke` checks public-facing onboarding docs for private hostnames,
     owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
     assignments.
+  - `--postgres-port` and `--postgres-container-name` let managed-server clean-host validation use a
+    non-conflicting Postgres bind/container while keeping generated `RECALLANT_DATABASE_URL`
+    consistent.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
     for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
     URL in README/Quickstart.

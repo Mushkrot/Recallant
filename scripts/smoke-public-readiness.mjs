@@ -55,6 +55,13 @@ function staticDryRunPlan(args, env = {}) {
         ? "/var/lib/recallant"
         : "/ai/recallant-data";
   const prefix = profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin";
+  const option = (name) => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : null;
+  };
+  const postgresHost = option("--postgres-host") ?? "127.0.0.1";
+  const postgresPort = option("--postgres-port") ?? "15432";
+  const postgresContainerName = option("--postgres-container-name") ?? "recallant-postgres";
   const systemd = profile === "single-user" ? "manual" : "auto";
   return `Recallant install plan
 profile: ${profile}
@@ -65,6 +72,9 @@ data_dir: ${dataDir}
 run_user: ${env.SUDO_USER ?? process.env.SUDO_USER ?? process.env.USER ?? ""}
 install_cli_prefix: ${prefix}
 systemd_mode: ${systemd}
+postgres_host: ${postgresHost}
+postgres_port: ${postgresPort}
+postgres_container_name: ${postgresContainerName}
 will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
 will_create_env_file: yes
 will_install_dependencies: no
@@ -203,13 +213,19 @@ mustInclude(
   [
     "RECALLANT_ENV_FILE",
     "RECALLANT_DATA_DIR",
+    "RECALLANT_POSTGRES_PORT",
+    "RECALLANT_POSTGRES_CONTAINER_NAME",
     'export RECALLANT_DATA_DIR="$DATA_DIR"'
   ],
   "scripts/recallant-prod-compose.sh"
 );
 mustInclude(
   prodComposeYaml,
-  ["${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres"],
+  [
+    "${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres",
+    "${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}",
+    "${RECALLANT_POSTGRES_HOST:-127.0.0.1}:${RECALLANT_POSTGRES_PORT:-15432}:5432"
+  ],
   "docker-compose.production.yml"
 );
 mustInclude(
@@ -242,6 +258,8 @@ mustInclude(
     "profile: managed-server",
     "env_file: /etc/recallant/recallant.env",
     "data_dir: /var/lib/recallant",
+    "postgres_port: 15432",
+    "postgres_container_name: recallant-postgres",
     "will_install_systemd: auto"
   ],
   "managed-server installer dry-run"

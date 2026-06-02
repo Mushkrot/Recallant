@@ -36,6 +36,8 @@ A release candidate must prove:
 - README and Quickstart use the canonical repository URL;
 - installer dry-run works for `single-user` and `managed-server`;
 - `npm run public-clean-host:smoke` passes as the local clean-host preflight;
+- managed-server clean-host validation uses non-conflicting Postgres port/container settings when
+  run beside another Recallant instance;
 - install succeeds on a clean non-owner Linux host or container;
 - `recallant doctor` runs through the installed CLI;
 - a clean project can attach, connect, record, checkpoint, close out, and later recall;

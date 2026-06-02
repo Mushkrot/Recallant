@@ -492,6 +492,11 @@ Acceptance:
   verifies normal onboarding docs do not expose owner hostnames, owner emails,
   owner runtime paths, secure env paths, raw database URLs, or raw secret-like
   assignments.
+- Done: managed-server install planning now supports explicit Postgres
+  `--postgres-port` and `--postgres-container-name` knobs. The generated env
+  file, database URL, production compose wrapper, and Docker compose file stay
+  consistent, allowing clean-host or side-by-side validation without colliding
+  with the owner-server Postgres container/port.
 
 Remaining before a real public-release claim:
 

@@ -3,6 +3,9 @@ set -eu
 
 ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}
 DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}
+POSTGRES_HOST=${RECALLANT_POSTGRES_HOST:-127.0.0.1}
+POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}
+POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing $ENV_FILE" >&2
@@ -14,5 +17,8 @@ set -a
 set +a
 
 export RECALLANT_DATA_DIR="$DATA_DIR"
+export RECALLANT_POSTGRES_HOST="$POSTGRES_HOST"
+export RECALLANT_POSTGRES_PORT="$POSTGRES_PORT"
+export RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME"
 
 exec docker compose -f docker-compose.production.yml "$@"

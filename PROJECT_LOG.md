@@ -461,6 +461,9 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - Added `docs/PUBLIC_SECURITY_REVIEW.md` and `npm run public-security:smoke` to guard normal public
   onboarding docs against owner hostnames, owner emails, owner runtime paths, secure env paths, raw
   database URLs, and raw secret-like assignments.
+- Added managed-server Postgres isolation knobs (`--postgres-port`,
+  `--postgres-container-name`) and threaded them through generated env, database URL, compose
+  wrapper, and Docker Compose for future clean-host/side-by-side validation.
 - README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
   clone commands.
 - Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning

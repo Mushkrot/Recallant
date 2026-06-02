@@ -40,7 +40,20 @@ env file: /etc/recallant/recallant.env
 data dir: /var/lib/recallant
 CLI: /usr/local/bin/recallant
 systemd: recallant.service when available
+Postgres bind: 127.0.0.1:15432
+Postgres container: recallant-postgres
 ```
+
+For clean-host validation or side-by-side testing, use explicit Postgres isolation knobs:
+
+```bash
+sudo ./scripts/install-recallant.sh --profile managed-server \
+  --postgres-port 17432 \
+  --postgres-container-name recallant-clean-host-postgres
+```
+
+These values are written into the generated env file and passed through the production compose
+wrapper so the database URL, Docker container name, and bind port stay consistent.
 
 ### Owner-server compatibility profile
 

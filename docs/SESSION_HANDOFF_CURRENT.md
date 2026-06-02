@@ -34,6 +34,9 @@ This is the current handoff for the next Recallant session. Start here after rea
   focused Ask screenshot was spot-checked as synthetic and free of owner paths/hostnames/emails/
   secrets. `docs/PUBLIC_SECURITY_REVIEW.md` and `npm run public-security:smoke` now guard normal
   public onboarding docs against owner-specific host/path/email/secret leakage.
+  Managed-server install planning supports `--postgres-port` and `--postgres-container-name`, so a
+  future real clean-host validation can avoid conflicts with an existing Recallant production
+  Postgres container/port.
 
 ## Current State
 
@@ -150,6 +153,8 @@ execution. `docs/PUBLIC_SCREENSHOTS.md` defines the required public screenshot s
 rules. Latest screenshot candidates are in `/ai/playwright/reports` from the 2026-06-02
 `review-ui:playwright` run. `npm run public-security:smoke` verifies the normal public docs do not
 leak owner-specific host/path/email/secret patterns.
+Installer clean-host planning now includes Postgres port/container overrides and threads them into
+the generated env/database URL plus production compose.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

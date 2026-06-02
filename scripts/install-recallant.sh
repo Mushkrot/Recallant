@@ -8,6 +8,9 @@ DATA_DIR="${RECALLANT_DATA_DIR:-}"
 RUN_USER="${RECALLANT_RUN_USER:-${SUDO_USER:-$(id -un)}}"
 INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-}"
 SYSTEMD_MODE="${RECALLANT_SYSTEMD_MODE:-auto}"
+POSTGRES_HOST="${RECALLANT_POSTGRES_HOST:-127.0.0.1}"
+POSTGRES_PORT="${RECALLANT_POSTGRES_PORT:-15432}"
+POSTGRES_CONTAINER_NAME="${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}"
 DRY_RUN=false
 
 usage() {
@@ -21,6 +24,10 @@ Options:
   --env-file <path>          Environment file path.
   --data-dir <path>          Recallant data directory.
   --install-cli-prefix <dir> Directory where the recallant CLI wrapper is installed.
+  --postgres-host <host>     Host bind address for Postgres, default 127.0.0.1.
+  --postgres-port <port>     Host bind port for Postgres, default 15432.
+  --postgres-container-name <name>
+                             Docker container name, default recallant-postgres.
   --run-user <user>          systemd service user.
   --no-systemd               Do not write or start a systemd service.
   -h, --help                 Show this help.
@@ -51,6 +58,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install-cli-prefix)
       INSTALL_CLI_PREFIX="${2:-}"
+      shift 2
+      ;;
+    --postgres-host)
+      POSTGRES_HOST="${2:-}"
+      shift 2
+      ;;
+    --postgres-port)
+      POSTGRES_PORT="${2:-}"
+      shift 2
+      ;;
+    --postgres-container-name)
+      POSTGRES_CONTAINER_NAME="${2:-}"
       shift 2
       ;;
     --run-user)
@@ -110,6 +129,9 @@ data_dir: $DATA_DIR
 run_user: $RUN_USER
 install_cli_prefix: $INSTALL_CLI_PREFIX
 systemd_mode: $SYSTEMD_MODE
+postgres_host: $POSTGRES_HOST
+postgres_port: $POSTGRES_PORT
+postgres_container_name: $POSTGRES_CONTAINER_NAME
 will_create_data_dirs: $DATA_DIR/postgres, $DATA_DIR/backups
 will_create_env_file: $([[ -f "$ENV_FILE" ]] && echo no || echo yes)
 will_install_dependencies: $([[ -d "$RECALLANT_HOME/node_modules" ]] && echo no || echo yes)
@@ -165,7 +187,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
 POSTGRES_DB=recallant_agent_work
 POSTGRES_USER=recallant
 POSTGRES_PASSWORD=$db_password
-RECALLANT_DATABASE_URL=postgres://recallant:$db_password@127.0.0.1:15432/recallant_agent_work
+RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work
+RECALLANT_POSTGRES_HOST=$POSTGRES_HOST
+RECALLANT_POSTGRES_PORT=$POSTGRES_PORT
+RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME
 RECALLANT_DEVELOPER_ID=$developer_id
 RECALLANT_PROJECT_ID=$project_id
 RECALLANT_PROJECT_PATH=$RECALLANT_HOME
@@ -196,7 +221,12 @@ npm run build
 PREFIX="$INSTALL_CLI_PREFIX" "$RECALLANT_HOME/scripts/install-recallant-cli.sh"
 
 prod_compose() {
-  RECALLANT_ENV_FILE="$ENV_FILE" RECALLANT_DATA_DIR="$DATA_DIR" ./scripts/recallant-prod-compose.sh "$@"
+  RECALLANT_ENV_FILE="$ENV_FILE" \
+    RECALLANT_DATA_DIR="$DATA_DIR" \
+    RECALLANT_POSTGRES_HOST="$POSTGRES_HOST" \
+    RECALLANT_POSTGRES_PORT="$POSTGRES_PORT" \
+    RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME" \
+    ./scripts/recallant-prod-compose.sh "$@"
 }
 
 prod_compose up -d postgres
