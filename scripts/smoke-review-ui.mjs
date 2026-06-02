@@ -443,6 +443,8 @@ try {
     ".command-grid { display: grid",
     ".source-overview { display: grid",
     ".source-workspace-grid { display: grid",
+    ".review-overview { display: grid",
+    ".review-lanes { display: grid",
     ".secondary-workspace { display: block",
     ".operation-panels { display: grid",
     ".chat-answer { border-top",

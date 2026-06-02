@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~60% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~65% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~60% completed. Core risk-typed responses, safe-action and
@@ -123,6 +123,9 @@ Current implemented slices include:
   readiness in plain language; Review rows show compact provenance summaries such as source path;
   and the Review dashboard/API supports `source_id` filtering for source-linked import candidates,
   inbox items, and active rules while keeping global conflict signals visible.
+- Workbench compact Review slice: Review now starts with four human-readable queue summaries and
+  uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
+  Rules, reducing first-screen list overload while keeping details available.
 - Management chat target-safety pass: sandbox cleanup wording is now treated as a target-selection
   signal. If the open project is not the sandbox and exactly one sandbox/pilot project is visible,
   chat builds the dry-run command for that sandbox project instead of blindly using the open

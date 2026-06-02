@@ -113,6 +113,12 @@ Acceptance:
 - Done: `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the
   new Ask -> Sources -> secondary workspace order, source management surface,
   no horizontal scroll, and readable long chat answers.
+- Done: Review is now a compact workspace with four human-readable queue
+  summaries and expandable lanes for Import Candidates, Review Inbox,
+  Conflicts / Duplicates, and Active Rules. This keeps review detail available
+  without turning the first screen into a long database list.
+- Done: `review-ui:smoke` and `review-ui:playwright` verify the compact Review
+  overview layout in HTML and real desktop/mobile browser rendering.
 
 ## Stage 2 - AI-Native Management Layer
 

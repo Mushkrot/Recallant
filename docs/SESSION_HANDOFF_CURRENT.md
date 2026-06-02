@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~60%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~65%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~60%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -521,6 +521,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   Source Map with shortcuts to source-linked memories and provenance filtering, and governed
   Operations are collapsed below the main work area. `review-ui:smoke` and `review-ui:playwright`
   pass with updated screenshots under `/ai/playwright/reports`.
+- 2026-06-02 compact Review follow-up: Review now starts with four human-readable queue summaries
+  and expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
+  Rules. `review-ui:smoke` and `review-ui:playwright` pass with updated screenshots.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 

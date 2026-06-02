@@ -1662,6 +1662,100 @@ function renderReadiness(data: ReviewDashboardData) {
   </div>`;
 }
 
+function renderReviewSummaryTile(label: string, count: number, note: string) {
+  const countLabel = count === 0 ? "Clear" : String(count);
+  return `<article>
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(countLabel)}</strong>
+    <p>${escapeHtml(note)}</p>
+  </article>`;
+}
+
+function renderReviewLane(
+  title: string,
+  rows: Array<Record<string, unknown>>,
+  emptyLabel: string,
+  projectId: unknown,
+  open = false,
+  extra = ""
+) {
+  return `<details class="review-lane"${open ? " open" : ""}>
+    <summary>
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(rows.length)}</strong>
+    </summary>
+    ${extra}
+    ${renderRows(rows, emptyLabel, projectId)}
+  </details>`;
+}
+
+function renderReviewWorkspace(data: ReviewDashboardData) {
+  const importCount = rowCount(data.import_candidates);
+  const inboxCount = rowCount(data.inbox);
+  const conflictCount = rowCount(data.duplicate_conflicts);
+  const ruleCount = rowCount(data.rules);
+  const hasOpenDecision = importCount + inboxCount + conflictCount > 0;
+  return `<div class="review-workspace">
+    <div class="review-overview">
+      ${renderReviewSummaryTile(
+        "Import candidates",
+        importCount,
+        importCount > 0
+          ? "Imported evidence is waiting for review."
+          : "No imported evidence needs review."
+      )}
+      ${renderReviewSummaryTile(
+        "Review inbox",
+        inboxCount,
+        inboxCount > 0 ? "Memory items need an owner decision." : "No memory item needs a decision."
+      )}
+      ${renderReviewSummaryTile(
+        "Conflicts / duplicates",
+        conflictCount,
+        conflictCount > 0 ? "Potential overlap should be resolved." : "No conflicts are visible."
+      )}
+      ${renderReviewSummaryTile(
+        "Active rules",
+        ruleCount,
+        ruleCount > 0
+          ? "Reusable guidance is available."
+          : "No active rules match the current filters."
+      )}
+    </div>
+    <div class="review-lanes">
+      ${renderReviewLane(
+        "Import Candidates",
+        data.import_candidates,
+        "No imported candidates require review.",
+        data.current_project_id,
+        importCount > 0
+      )}
+      ${renderReviewLane(
+        "Review Inbox",
+        data.inbox,
+        "No candidate or high-risk memories require review.",
+        data.current_project_id,
+        inboxCount > 0
+      )}
+      ${renderReviewLane(
+        "Conflicts / Duplicates",
+        data.duplicate_conflicts,
+        "No conflicts or duplicates detected.",
+        data.current_project_id,
+        conflictCount > 0
+      )}
+      ${renderReviewLane(
+        "Active Rules",
+        data.rules,
+        "No instruction-grade rules match the current filters.",
+        data.current_project_id,
+        !hasOpenDecision && ruleCount > 0,
+        renderRuleFilters(data)
+      )}
+    </div>
+  </div>`;
+}
+
 function activityIcon(kind: unknown) {
   const value = String(kind ?? "");
   const labels: Record<string, string> = {
@@ -2061,6 +2155,18 @@ function renderDashboard(
     .rule-filters .filter-note { margin: 0; color: #166454; font-size: 12px; line-height: 1.35; }
     .filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; text-decoration: none; }
     .filter-chip:hover { background: #eef4fb; }
+    .review-workspace { display: grid; gap: 12px; }
+    .review-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .review-overview article { border: 1px solid #dce3ec; border-radius: 7px; padding: 10px; background: #fbfcfe; }
+    .review-overview span { display: block; color: #6a7280; font-size: 12px; margin-bottom: 4px; }
+    .review-overview strong { display: block; color: #20242c; font-size: 18px; margin-bottom: 5px; }
+    .review-overview p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; }
+    .review-lanes { display: grid; gap: 8px; }
+    .review-lane { border: 1px solid #e1e7ef; border-radius: 7px; padding: 10px; margin: 0; background: #fff; }
+    .review-lane summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; padding: 0; margin: 0; }
+    .review-lane summary span { font-size: 14px; font-weight: 750; }
+    .review-lane summary strong { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 8px; color: #445064; background: #f8fafc; font-size: 12px; }
+    .review-lane[open] summary { margin-bottom: 8px; }
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
@@ -2102,7 +2208,7 @@ function renderDashboard(
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
   </style>
 </head>
 <body>
@@ -2177,15 +2283,7 @@ function renderDashboard(
         </section>
         <section class="panel" id="review">
           <h2>Review</h2>
-          <h3>Import Candidates</h3>
-          ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
-          <h3>Review Inbox</h3>
-          ${renderRows(data.inbox, "No candidate or high-risk memories require review.", data.current_project_id)}
-          <h3>Conflicts / Duplicates</h3>
-          ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.", data.current_project_id)}
-          <h3>Active Rules</h3>
-          ${renderRuleFilters(data)}
-          ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
+          ${renderReviewWorkspace(data)}
         </section>
         <section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
           <div class="section-head">

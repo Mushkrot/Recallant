@@ -6,7 +6,7 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~60%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~65%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~60%` complete. Structured result types, safe action typing,
@@ -363,6 +363,10 @@ Latest implementation checkpoints:
   Source management is framed as a Source Map with shortcuts to source-linked memories and
   provenance filtering; governed Operations stay collapsed below the main memory workspace.
   Verified by `npm run review-ui:smoke` and `npm run review-ui:playwright`.
+- 2026-06-02 compact Review follow-up: Review now starts with four human-readable queue summaries
+  and expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
+  Rules, reducing first-screen list overload while preserving full review detail. Verified by
+  `npm run review-ui:smoke` and `npm run review-ui:playwright`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing, and concrete source attach

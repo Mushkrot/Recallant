@@ -213,6 +213,7 @@ async function run() {
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
     await visibleBox(desktop.locator("#activity-replay"), "desktop Activity / Replay");
     await visibleBox(desktop.locator("#review"), "desktop Review");
+    await visibleBox(desktop.locator("#review .review-overview"), "desktop Review overview");
     await visibleBox(desktop.locator("#settings"), "desktop Settings");
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-desktop.png"),
