@@ -64,6 +64,11 @@ assert(
     requireCaptureBefore.json?.capture_readiness?.required === true,
   `doctor --require-capture missing failed readiness: ${JSON.stringify(requireCaptureBefore.json)}`
 );
+assert(
+  requireCaptureBefore.json?.client_connection?.status === "mcp_only" &&
+    requireCaptureBefore.json?.client_connection?.hook_kit?.status === "not_installed",
+  `doctor should report MCP-only before hook installation: ${JSON.stringify(requireCaptureBefore.json?.client_connection)}`
+);
 
 const dryRun = runCli(["connect", "codex", "--project-dir", projectDir, "--dry-run"]);
 assert(dryRun.dry_run === true, `Connect dry-run flag missing: ${JSON.stringify(dryRun)}`);
@@ -79,6 +84,12 @@ assert(
 assert(
   dryRun.capture_status === "not_observed",
   `Unexpected capture status: ${JSON.stringify(dryRun)}`
+);
+assert(
+  dryRun.mandatory_startup_layer?.status === "mcp_only" &&
+    dryRun.mandatory_startup_layer?.capture_targets?.includes("user_prompt") &&
+    dryRun.mandatory_startup_layer?.proof_command?.includes("--require-capture"),
+  `Connect dry-run missing mandatory startup diagnostics: ${JSON.stringify(dryRun)}`
 );
 assert(dryRun.writes_files === false, `Dry-run should not write files: ${JSON.stringify(dryRun)}`);
 assert(
@@ -232,6 +243,7 @@ const hookDryRun = runCli([
 ]);
 assert(
   hookDryRun.hook_status === "local_hook_kit_planned" &&
+    hookDryRun.mandatory_startup_layer?.status === "mcp_and_hooks_planned" &&
     hookDryRun.writes_files === false &&
     hookDryRun.writes_global_config === false,
   `Hook dry-run should plan only local fail-soft hook files: ${JSON.stringify(hookDryRun)}`
@@ -255,6 +267,8 @@ const hookConnect = runCli([
 ]);
 assert(
   hookConnect.hook_status === "local_hook_kit_installed" &&
+    hookConnect.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
+    hookConnect.mandatory_startup_layer?.capture_targets?.includes("pre_compaction_checkpoint") &&
     hookConnect.writes_global_config === false,
   `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
 );
@@ -348,6 +362,11 @@ assert(
   requireCaptureAfter.json?.capture_readiness?.ready === true &&
     requireCaptureAfter.json?.capture_readiness?.status === "capture_active",
   `doctor --require-capture missing active readiness: ${JSON.stringify(requireCaptureAfter.json)}`
+);
+assert(
+  requireCaptureAfter.json?.client_connection?.status === "mcp_and_hooks_ready" &&
+    requireCaptureAfter.json?.client_connection?.hook_kit?.ready === true,
+  `doctor should report MCP+hooks after hook installation: ${JSON.stringify(requireCaptureAfter.json?.client_connection)}`
 );
 runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
 

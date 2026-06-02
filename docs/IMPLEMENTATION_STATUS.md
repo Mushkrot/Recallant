@@ -401,6 +401,11 @@ Stage 4 first slice is now implemented:
 - `recallant doctor --require-capture` now reports `capture_readiness` and exits with status 2
   when the project lacks proof of context read, memory write, and checkpoint. After agent-start,
   agent-event, and agent-checkpoint, the same gate passes and reports `capture_active`.
+- `recallant connect` and `recallant doctor` now expose mandatory-startup diagnostics: MCP config
+  presence, project-local hook kit status, fail-soft guarantee, capture lifecycle targets
+  (session start, prompt, tool result, generic event, pre-compaction checkpoint, checkpoint, and
+  stop/closeout), and the exact `doctor --require-capture` proof command. This makes the difference
+  between MCP-only and MCP+hooks visible instead of relying on owner inspection.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 
@@ -458,6 +463,10 @@ Latest Workbench validation on 2026-06-01:
   project-local spool fallback when primary hook capture cannot reach the database
 - Stage 4 Cursor connect validation: `npm run connect:smoke` verifies dedicated `.cursor/mcp.json`
   dry-run, merge, local backup, existing MCP server preservation, and idempotency
+- Stage 4 mandatory-startup diagnostics validation: `npm run connect:smoke` verifies
+  `mandatory_startup_layer` and `client_connection` for MCP-only, planned MCP+hooks, installed
+  MCP+hooks, and post-capture `doctor --require-capture`; `npm run phase7:smoke` verifies ordinary
+  doctor output remains compatible
 - 2026-06-02 full core validation after hook-spool path fix: `npm run build`, `npm run lint`,
   `npm run format:check`, `git diff --check`, targeted `npm run local-cleanup:smoke`,
   `npm run spool:smoke`, `npm run connect:smoke`, and full `npm run smoke:core`

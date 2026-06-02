@@ -353,6 +353,11 @@ Latest implementation checkpoints:
   product-acceptance, pilot-report, and browser-QA evidence commands. Verified by
   `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
+- 2026-06-02 mandatory-startup diagnostics follow-up: `recallant connect` now reports
+  `mandatory_startup_layer`, and `recallant doctor` reports `client_connection`. These show MCP
+  config presence, project-local hook-kit readiness, fail-soft behavior, covered capture targets,
+  and the exact `doctor --require-capture` proof command. Verified by `npm run connect:smoke` and
+  `npm run phase7:smoke`.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-02 Pilot-report artifact follow-up: `npm run pilot-report:smoke` now persists that JSON
   report under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes

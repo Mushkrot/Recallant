@@ -598,6 +598,68 @@ function captureStatusFromState(state: AgentSessionState | null) {
   return state.status === "active" ? "session_started" : "not_observed";
 }
 
+const captureTargetNames = [
+  "session_start",
+  "user_prompt",
+  "tool_result",
+  "generic_event",
+  "pre_compaction_checkpoint",
+  "checkpoint",
+  "stop_closeout"
+] as const;
+
+async function hookKitReadiness(projectDir: string) {
+  const files = localHookKitFiles();
+  const checked = [];
+  for (const file of files) {
+    const present = (await readOptional(join(projectDir, file.path))) !== null;
+    checked.push({ path: file.path, present, executable_expected: file.executable === true });
+  }
+  const presentCount = checked.filter((file) => file.present).length;
+  return {
+    status:
+      presentCount === files.length ? "installed" : presentCount > 0 ? "partial" : "not_installed",
+    ready: presentCount === files.length,
+    installed_count: presentCount,
+    expected_count: files.length,
+    capture_targets: captureTargetNames,
+    files: checked
+  };
+}
+
+async function clientConnectionReadiness(projectDir: string) {
+  const candidates = [
+    { client: "codex", path: ".recallant/codex-mcp.json" },
+    { client: "cursor", path: ".cursor/mcp.json" },
+    { client: "claude_code", path: ".mcp.json" },
+    { client: "generic", path: ".recallant/generic-mcp.json" }
+  ];
+  const configs = [];
+  for (const candidate of candidates) {
+    const present = (await readOptional(join(projectDir, candidate.path))) !== null;
+    configs.push({ ...candidate, present });
+  }
+  const mcpConfigured = configs.some((config) => config.present);
+  const hookKit = await hookKitReadiness(projectDir);
+  return {
+    status:
+      mcpConfigured && hookKit.ready
+        ? "mcp_and_hooks_ready"
+        : mcpConfigured
+          ? "mcp_only"
+          : hookKit.ready
+            ? "hooks_without_mcp"
+            : "not_configured",
+    mcp_configured: mcpConfigured,
+    mcp_configs: configs,
+    hook_kit: hookKit,
+    fail_soft: true,
+    writes_global_config: false,
+    proof_command: `recallant doctor --project-dir ${projectDir} --require-capture`,
+    note: "Client must be configured to call the MCP server and hook scripts; capture-active is proven by context read + memory write + checkpoint."
+  };
+}
+
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -1344,6 +1406,7 @@ async function runDoctor(argv: readonly string[]) {
         ...captureReadiness,
         required: requireCapture
       },
+      client_connection: await clientConnectionReadiness(projectDir),
       local_model: await checkOllama(),
       model_routes: {
         local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
@@ -2805,6 +2868,19 @@ async function runConnect(argv: readonly string[]) {
     : localHookKitPresent
       ? "local_hook_kit_installed"
       : "not_installed";
+  const clientConnection = await clientConnectionReadiness(dir);
+  const mcpConfigWillExist = clientConnection.mcp_configured || !same;
+  const hookKitWillExist = hookStatus !== "not_installed";
+  const mandatoryStartupLayerStatus =
+    installLocalHooks && dryRun
+      ? "mcp_and_hooks_planned"
+      : mcpConfigWillExist && hookKitWillExist
+        ? "mcp_and_hooks_ready"
+        : mcpConfigWillExist
+          ? "mcp_only"
+          : hookKitWillExist
+            ? "hooks_without_mcp"
+            : "not_configured";
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -2817,6 +2893,18 @@ async function runConnect(argv: readonly string[]) {
         connection_status: "mcp_only",
         hook_status: hookStatus,
         capture_status: captureStatusFromState(state),
+        mandatory_startup_layer: {
+          status: mandatoryStartupLayerStatus,
+          mcp_configured_or_planned: mcpConfigWillExist,
+          hook_kit_status: hookStatus,
+          fail_soft: true,
+          writes_global_config: false,
+          capture_targets: captureTargetNames,
+          proof_command: `recallant doctor --project-dir ${dir} --require-capture`,
+          ready_definition:
+            "MCP config plus hook targets are installed/planned; capture-active still requires context read, memory write, and checkpoint evidence."
+        },
+        client_connection: clientConnection,
         writes_files: !dryRun && (!same || hookFilePlans.some((hookFile) => !hookFile.same)),
         writes_global_config: false,
         planned_changes: [...plannedChanges, ...hookChanges],

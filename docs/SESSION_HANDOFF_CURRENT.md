@@ -597,6 +597,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   project-local `.cursor/mcp.json` merge path. It preserves existing MCP servers, creates a local
   backup before changing an existing file, supports dry-run, stays idempotent, and writes no global
   config. `connect:smoke` covers the path.
+- 2026-06-02 mandatory-startup diagnostics follow-up: `connect` output now includes
+  `mandatory_startup_layer`, and `doctor` output includes `client_connection`. They distinguish
+  MCP-only, planned MCP+hooks, installed MCP+hooks, and capture-active proof, including covered hook
+  targets and the `doctor --require-capture` command. `connect:smoke` and `phase7:smoke` pass.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 
