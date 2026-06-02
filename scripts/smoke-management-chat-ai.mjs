@@ -592,28 +592,32 @@ try {
     destructive_or_sensitive: false,
     global_rule_request: false
   });
+  let googleDriveRecallInput;
   const googleDriveLookup = await buildManagementChatResponse({
     message: "Что мы решили по Google Drive?",
     dashboard: baseDashboard,
     database: {
-      recallAgentMemories: async (input) => ({
-        trace_id: "trace-same-google-drive",
-        truncated: false,
-        memories: [
-          {
-            memory_id: "memory-google-drive-current",
-            title: "Google Drive access pattern",
-            body: "Use the existing connector pattern from the docs project before creating a new binding.",
-            status: "accepted",
-            use_policy: "recall_allowed",
-            scope: "project",
-            scope_kind: "project",
-            provenance: { summary: "From source AGENTS.md", source_path: "AGENTS.md" },
-            source_refs: []
-          }
-        ],
-        query: input.query
-      }),
+      recallAgentMemories: async (input) => {
+        googleDriveRecallInput = input;
+        return {
+          trace_id: "trace-same-google-drive",
+          truncated: false,
+          memories: [
+            {
+              memory_id: "memory-google-drive-current",
+              title: "Google Drive access pattern",
+              body: "Use the existing connector pattern from the docs project before creating a new binding.",
+              status: "accepted",
+              use_policy: "recall_allowed",
+              scope: "project",
+              scope_kind: "project",
+              provenance: { summary: "From source AGENTS.md", source_path: "AGENTS.md" },
+              source_refs: []
+            }
+          ],
+          query: input.query
+        };
+      },
       crossProjectRecall: async (input) => ({
         trace_id: "trace-cross-google-drive",
         mode: input.mode,
@@ -649,12 +653,17 @@ try {
       googleDriveLookup.intent === "cross_project" &&
       googleDriveLookup.result_type === "read_only_answer" &&
       googleDriveLookup.memory_lookup_result?.status === "found" &&
+      googleDriveLookup.memory_lookup_result?.source_filter?.label === "AGENTS.md" &&
       googleDriveLookup.memory_lookup_result?.same_project_hits.length === 1 &&
       googleDriveLookup.memory_lookup_result?.cross_project_examples.length === 1,
     `Google Drive memory lookup failed: ${JSON.stringify(googleDriveLookup)}`
   );
   assert(
-    String(googleDriveLookup.answer).includes("Google Drive") &&
+    googleDriveRecallInput?.source_id === "source-agents-md" &&
+      String(googleDriveLookup.answer).includes("Google Drive") &&
+      String(googleDriveLookup.answer).includes(
+        "Фильтр источника в текущем memory space: AGENTS.md"
+      ) &&
       String(googleDriveLookup.answer).includes("В текущем memory space") &&
       String(googleDriveLookup.answer).includes("Примеры из других проектов") &&
       String(googleDriveLookup.answer).includes("AGENTS.md") &&

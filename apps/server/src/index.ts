@@ -1369,12 +1369,18 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
   const state = captureState(project);
   const sources = currentProjectSources(data);
   const activeSources = sources.filter((source) => source.status === "active");
+  const filterState = sourceFilterState(data);
   const title = projectDisplayName(project) || data.current_project_id;
   return `<aside class="memory-profile" aria-label="Current memory space profile">
     <span class="section-kicker">Current memory space</span>
     <h3>${escapeHtml(title)}</h3>
     <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
     <p>${escapeHtml(sourceLabel(project))}</p>
+    ${
+      filterState.isFiltered
+        ? `<p><strong>Source filter:</strong> ${escapeHtml(filterState.selectedLabel)}</p>`
+        : ""
+    }
     <p>${escapeHtml(sharingPolicy(project))}</p>
     <div class="memory-profile-metrics">
       <span><strong>${escapeHtml(activeSources.length)}</strong> active sources</span>
@@ -2003,9 +2009,15 @@ function renderManagementChat(
 ) {
   const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
   const selectedMemoryId = selectedMemory.id;
+  const selectedSourceId = String(asRecord(data.source_filters).selected_source_id ?? "all");
   return `<form class="chat-form" method="post" action="/management-chat#ask-recallant">
     <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
     <input type="hidden" name="view" value="${escapeHtml(view === "all" ? "ask" : view)}" />
+    ${
+      selectedSourceId !== "all"
+        ? `<input type="hidden" name="source_id" value="${escapeHtml(selectedSourceId)}" />`
+        : ""
+    }
     ${
       selectedMemoryId
         ? `<input type="hidden" name="memory_id" value="${escapeHtml(selectedMemoryId)}" />`
@@ -2634,6 +2646,7 @@ export function createRecallantHttpServer() {
     if (request.method === "POST" && requestUrl.pathname === "/api/management-chat") {
       const body = (await readJson(request)) as {
         project_id?: string | null;
+        source_id?: string | null;
         selected_memory_id?: string | null;
         memory_id?: string | null;
         message?: string;
@@ -2641,6 +2654,7 @@ export function createRecallantHttpServer() {
       const chatDashboard = sanitizeDashboardForClient(
         await database.getReviewDashboard({
           project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+          source_id: optionalInput(body.source_id),
           selected_memory_id:
             optionalInput(body.selected_memory_id) ??
             optionalInput(body.memory_id) ??
@@ -2660,6 +2674,7 @@ export function createRecallantHttpServer() {
       const chatDashboard = sanitizeDashboardForClient(
         await database.getReviewDashboard({
           project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+          source_id: optionalInput(body.source_id),
           selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
         })
       );

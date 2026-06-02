@@ -82,6 +82,11 @@ For large raw artifacts, chunks may be generated from bounded excerpts, extracte
 5. Return source refs with each memory so the agent can inspect evidence before relying on it.
 6. Create a `recall_traces` row and return `trace_id`.
 
+Callers may pass `source_id` to narrow same-project governed-memory recall to memories linked to a
+selected project source. This is useful when the owner or agent asks "what came from this folder,
+document, connector, or manual source?" The filter must not hide session/capture health in the UI,
+and it must not silently mix cross-project examples into the current project.
+
 Scope/audience filtering is mandatory before ranking:
 
 - exclude memories outside the current project/repo/subproject unless the caller explicitly requests broader scope;

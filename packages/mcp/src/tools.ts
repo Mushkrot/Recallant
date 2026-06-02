@@ -656,6 +656,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     inputSchema: z.object({
       view: z.enum(["inbox", "rules", "candidates", "duplicates", "conflicts", "all"]),
       project_id: uuidString.nullable().optional(),
+      source_id: uuidString.nullable().optional(),
       scope: memoryScope.nullable().optional(),
       scope_kind: nullableString,
       audience_kind: nullableString,
@@ -694,6 +695,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     description: "Return bounded governed memories relevant to the current task.",
     inputSchema: z.object({
       query: z.string().min(1),
+      source_id: uuidString.nullable().optional(),
       scope: scope.default("project"),
       scope_kind: nullableString,
       audience_kind: nullableString,

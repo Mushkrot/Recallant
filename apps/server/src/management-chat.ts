@@ -174,6 +174,10 @@ type MemoryLookupHit = {
 type MemoryLookupResult = {
   status: "found" | "not_found" | "skipped";
   query: string;
+  source_filter?: {
+    source_id: string;
+    label: string;
+  };
   same_project_hits: MemoryLookupHit[];
   cross_project_examples: MemoryLookupHit[];
   trace_ids: string[];
@@ -232,6 +236,7 @@ export async function buildManagementChatResponse(input: {
     ? await maybeLookupMemories({
         message,
         intent,
+        dashboard,
         database: input.database
       })
     : undefined;
@@ -1007,6 +1012,22 @@ function dashboardFacts(
   };
 }
 
+function selectedSourceLookupFilter(dashboard?: DashboardLike) {
+  const sourceFilters = asRecord(dashboard?.source_filters);
+  const selectedSourceId = stringValue(sourceFilters.selected_source_id);
+  if (!selectedSourceId || selectedSourceId === "all") return undefined;
+  const selectedSource = asRecord(sourceFilters.selected_source);
+  const label =
+    stringValue(selectedSource.display_label) ||
+    stringValue(selectedSource.label) ||
+    stringValue(selectedSource.uri) ||
+    shortId(selectedSourceId);
+  return {
+    source_id: selectedSourceId,
+    label
+  };
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -1460,14 +1481,17 @@ function memoryHitFromRow(row: Record<string, unknown>): MemoryLookupHit {
 async function maybeLookupMemories(input: {
   message: string;
   intent: ManagementChatIntent;
+  dashboard?: DashboardLike;
   database?: RecallantDb;
 }): Promise<MemoryLookupResult | undefined> {
   if (!shouldLookupMemories(input.intent)) return undefined;
   const query = lookupQueryFromMessage(input.message);
+  const sourceFilter = selectedSourceLookupFilter(input.dashboard);
   if (!query || !input.database) {
     return {
       status: "skipped",
       query,
+      source_filter: sourceFilter,
       same_project_hits: [],
       cross_project_examples: [],
       trace_ids: [],
@@ -1479,6 +1503,7 @@ async function maybeLookupMemories(input: {
   try {
     const sameProject = await input.database.recallAgentMemories({
       query,
+      source_id: sourceFilter?.source_id,
       include_needs_review: input.intent === "review" || input.intent === "provenance",
       include_candidates: input.intent === "review",
       include_stale: input.intent === "rule_diagnostics",
@@ -1507,6 +1532,7 @@ async function maybeLookupMemories(input: {
     return {
       status: found ? "found" : "not_found",
       query,
+      source_filter: sourceFilter,
       same_project_hits: sameProjectHits,
       cross_project_examples: crossProjectExamples,
       trace_ids: traceIds,
@@ -1516,6 +1542,7 @@ async function maybeLookupMemories(input: {
     return {
       status: "skipped",
       query,
+      source_filter: sourceFilter,
       same_project_hits: [],
       cross_project_examples: [],
       trace_ids: [],
@@ -1598,6 +1625,9 @@ function formatLookupHitEn(hit: MemoryLookupHit) {
 
 function formatMemoryLookupRu(result: MemoryLookupResult) {
   const sections: string[] = [];
+  if (result.source_filter) {
+    sections.push(`Фильтр источника в текущем memory space: ${result.source_filter.label}.`);
+  }
   if (result.same_project_hits.length > 0) {
     sections.push(
       `В текущем memory space:\n${result.same_project_hits.map(formatLookupHitRu).join("\n")}`
@@ -1621,6 +1651,9 @@ function formatMemoryLookupRu(result: MemoryLookupResult) {
 
 function formatMemoryLookupEn(result: MemoryLookupResult) {
   const sections: string[] = [];
+  if (result.source_filter) {
+    sections.push(`Current memory-space source filter: ${result.source_filter.label}.`);
+  }
   if (result.same_project_hits.length > 0) {
     sections.push(
       `In the current memory space:\n${result.same_project_hits.map(formatLookupHitEn).join("\n")}`

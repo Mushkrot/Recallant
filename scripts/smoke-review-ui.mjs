@@ -726,6 +726,68 @@ try {
     throw new Error(`Source filter API smoke failed: ${JSON.stringify(sourceFilteredJson)}`);
   }
 
+  const sourceFilteredRecall = await db.recallAgentMemories({
+    query: "AGENTS.md source refs",
+    source_id: importedDocSource.id,
+    include_needs_review: true,
+    top_k: 5,
+    max_chars_total: 1_200
+  });
+  if (
+    !sourceFilteredRecall.memories.some((memory) => memory.memory_id === importMemoryId) ||
+    sourceFilteredRecall.memories.some((memory) => memory.memory_id === rule.memory_id)
+  ) {
+    throw new Error(
+      `Source-filtered governed recall failed: ${JSON.stringify(sourceFilteredRecall)}`
+    );
+  }
+
+  const sourceFilteredChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      source_id: importedDocSource.id,
+      message: "Where did AGENTS.md guidance come from?"
+    })
+  });
+  const sourceFilteredChatJson = await sourceFilteredChat.json();
+  if (
+    sourceFilteredChat.status !== 200 ||
+    sourceFilteredChatJson.memory_lookup_result?.source_filter?.label !== "AGENTS.md" ||
+    !String(sourceFilteredChatJson.answer).includes(
+      "Current memory-space source filter: AGENTS.md"
+    ) ||
+    !sourceFilteredChatJson.memory_lookup_result?.same_project_hits?.some(
+      (memory) => memory.memory_id === importMemoryId
+    )
+  ) {
+    throw new Error(
+      `Source-filtered Management Chat lookup failed: ${JSON.stringify(sourceFilteredChatJson)}`
+    );
+  }
+
+  const sourceFilteredAskView = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=ask&source_id=${importedDocSource.id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const sourceFilteredAskText = await sourceFilteredAskView.text();
+  if (
+    sourceFilteredAskView.status !== 200 ||
+    !sourceFilteredAskText.includes(`name="source_id" value="${importedDocSource.id}"`) ||
+    !sourceFilteredAskText.includes("Source filter:") ||
+    !sourceFilteredAskText.includes("AGENTS.md")
+  ) {
+    throw new Error(
+      `Source-filtered Ask form did not preserve source_id: ${sourceFilteredAskView.status}; ${sourceFilteredAskText.slice(0, 700)}`
+    );
+  }
+
   const sourceFilteredActivityView = await fetch(
     `${baseUrl}/review?project_id=${projectId}&view=activity&source_id=${importedDocSource.id}`,
     {

@@ -582,6 +582,7 @@ Returns bounded governed memories relevant to the current task. This complements
 ```json
 {
   "query": "string",
+  "source_id": "uuid|null",
   "scope": "project|developer|all",
   "scope_kind": "string|null",
   "audience_kind": "string|null",
@@ -593,6 +594,10 @@ Returns bounded governed memories relevant to the current task. This complements
   "max_chars_total": 12000
 }
 ```
+
+`source_id` optionally narrows same-project governed-memory recall to memories linked to the selected
+project source. This is the agent/MCP equivalent of the Workbench source filter. Cross-project recall
+remains a separate explicit tool.
 
 `top_k` and `max_chars_total` here are standard-profile examples. The implementation must enforce configured policy caps rather than treating these numbers as universal constants.
 

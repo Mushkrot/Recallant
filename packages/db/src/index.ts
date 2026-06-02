@@ -132,6 +132,7 @@ export type ListAgentMemoriesInput = {
 export type RecallAgentMemoriesInput = {
   query: string;
   project_id?: string | null;
+  source_id?: string | null;
   scope?: string;
   scope_kind?: string | null;
   audience_kind?: string | null;
@@ -2630,6 +2631,8 @@ export class RecallantDb {
       values.push(input.scope_kind);
       clauses.push(`m.scope_kind = $${values.length}`);
     }
+    const sourceFilter = await this.sourceFilter(input.source_id);
+    this.addSourceFilterClause(clauses, values, sourceFilter, "m");
     const result = await this.pool.query(
       `
         SELECT
@@ -2684,7 +2687,10 @@ export class RecallantDb {
         context.projectId,
         input.query,
         JSON.stringify(memories.map((memory) => memory.memory_id)),
-        JSON.stringify({ truncated: result.rows.length > memories.length })
+        JSON.stringify({
+          truncated: result.rows.length > memories.length,
+          source_id: sourceFilter?.source_id ?? null
+        })
       ]
     );
     return {
