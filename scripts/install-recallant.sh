@@ -11,6 +11,7 @@ SYSTEMD_MODE="${RECALLANT_SYSTEMD_MODE:-auto}"
 POSTGRES_HOST="${RECALLANT_POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${RECALLANT_POSTGRES_PORT:-15432}"
 POSTGRES_CONTAINER_NAME="${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}"
+COMPOSE_PROJECT_NAME="${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}"
 DRY_RUN=false
 
 usage() {
@@ -28,6 +29,8 @@ Options:
   --postgres-port <port>     Host bind port for Postgres, default 15432.
   --postgres-container-name <name>
                              Docker container name, default recallant-postgres.
+  --compose-project-name <name>
+                             Docker Compose project name, default recallant.
   --run-user <user>          systemd service user.
   --no-systemd               Do not write or start a systemd service.
   -h, --help                 Show this help.
@@ -70,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --postgres-container-name)
       POSTGRES_CONTAINER_NAME="${2:-}"
+      shift 2
+      ;;
+    --compose-project-name)
+      COMPOSE_PROJECT_NAME="${2:-}"
       shift 2
       ;;
     --run-user)
@@ -132,6 +139,7 @@ systemd_mode: $SYSTEMD_MODE
 postgres_host: $POSTGRES_HOST
 postgres_port: $POSTGRES_PORT
 postgres_container_name: $POSTGRES_CONTAINER_NAME
+compose_project_name: $COMPOSE_PROJECT_NAME
 will_create_data_dirs: $DATA_DIR/postgres, $DATA_DIR/backups
 will_create_env_file: $([[ -f "$ENV_FILE" ]] && echo no || echo yes)
 will_install_dependencies: $([[ -d "$RECALLANT_HOME/node_modules" ]] && echo no || echo yes)
@@ -191,6 +199,7 @@ RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRE
 RECALLANT_POSTGRES_HOST=$POSTGRES_HOST
 RECALLANT_POSTGRES_PORT=$POSTGRES_PORT
 RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME
+RECALLANT_COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
 RECALLANT_DEVELOPER_ID=$developer_id
 RECALLANT_PROJECT_ID=$project_id
 RECALLANT_PROJECT_PATH=$RECALLANT_HOME
@@ -226,6 +235,7 @@ prod_compose() {
     RECALLANT_POSTGRES_HOST="$POSTGRES_HOST" \
     RECALLANT_POSTGRES_PORT="$POSTGRES_PORT" \
     RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME" \
+    RECALLANT_COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
     ./scripts/recallant-prod-compose.sh "$@"
 }
 

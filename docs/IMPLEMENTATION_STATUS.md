@@ -93,9 +93,14 @@ Current implemented slices include:
   of the full image set remains open. `docs/PUBLIC_SECURITY_REVIEW.md` and
   `npm run public-security:smoke` now guard normal public onboarding docs against owner hostnames,
   owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
-  assignments. Managed-server install planning now exposes Postgres port/container isolation knobs
-  and threads them through generated env, database URL, compose wrapper, and Docker Compose.
-  This is not yet a public-release claim: real clean-host install validation, final sanitized
+  assignments. Managed-server install planning now exposes Postgres port/container/Compose-project
+  isolation knobs and threads them through generated env, database URL, compose wrapper, and Docker
+  Compose. `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke` passed on
+  the current owner host on 2026-06-02 using an isolated temporary managed-server install, unique
+  Postgres port/container/Compose project, attach, connect dry-run, agent capture, closeout, and
+  `doctor --require-capture`.
+  This is not yet a public-release claim: repeat validation on a clean non-owner host or approved
+  isolated VM/container, final sanitized
   screenshots, rollback testing on a non-owner host, refreshed public-facing security review, and
   final client mandatory-startup parity remain open.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
@@ -1009,9 +1014,13 @@ Latest product-UX readiness checkpoint:
   - `npm run public-security:smoke` checks public-facing onboarding docs for private hostnames,
     owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
     assignments.
-  - `--postgres-port` and `--postgres-container-name` let managed-server clean-host validation use a
-    non-conflicting Postgres bind/container while keeping generated `RECALLANT_DATABASE_URL`
-    consistent.
+  - `--postgres-port`, `--postgres-container-name`, and `--compose-project-name` let managed-server
+    clean-host validation use a non-conflicting Postgres bind/container/project while keeping
+    generated `RECALLANT_DATABASE_URL` consistent.
+  - `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke` performs the
+    Docker-backed install/capture/cleanup validation and is intentionally not part of default
+    `smoke:core`. It passed on the current owner host on 2026-06-02, including attach, connect
+    dry-run, agent capture, closeout, and `doctor --require-capture`.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
     for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
     URL in README/Quickstart.

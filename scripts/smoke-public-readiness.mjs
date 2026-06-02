@@ -62,6 +62,7 @@ function staticDryRunPlan(args, env = {}) {
   const postgresHost = option("--postgres-host") ?? "127.0.0.1";
   const postgresPort = option("--postgres-port") ?? "15432";
   const postgresContainerName = option("--postgres-container-name") ?? "recallant-postgres";
+  const composeProjectName = option("--compose-project-name") ?? "recallant";
   const systemd = profile === "single-user" ? "manual" : "auto";
   return `Recallant install plan
 profile: ${profile}
@@ -75,6 +76,7 @@ systemd_mode: ${systemd}
 postgres_host: ${postgresHost}
 postgres_port: ${postgresPort}
 postgres_container_name: ${postgresContainerName}
+compose_project_name: ${composeProjectName}
 will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
 will_create_env_file: yes
 will_install_dependencies: no
@@ -177,7 +179,8 @@ mustInclude(
     "package.json",
     "semantic versioning",
     "Release Candidate Gate",
-    "clean non-owner Linux host",
+    "public-managed-install:smoke",
+    "approved isolated container/VM",
     "What Must Not Be Released As Public Defaults"
   ],
   "docs/RELEASE.md"
@@ -215,6 +218,8 @@ mustInclude(
     "RECALLANT_DATA_DIR",
     "RECALLANT_POSTGRES_PORT",
     "RECALLANT_POSTGRES_CONTAINER_NAME",
+    "RECALLANT_COMPOSE_PROJECT_NAME",
+    'docker compose -p "$COMPOSE_PROJECT_NAME"',
     'export RECALLANT_DATA_DIR="$DATA_DIR"'
   ],
   "scripts/recallant-prod-compose.sh"
@@ -260,6 +265,7 @@ mustInclude(
     "data_dir: /var/lib/recallant",
     "postgres_port: 15432",
     "postgres_container_name: recallant-postgres",
+    "compose_project_name: recallant",
     "will_install_systemd: auto"
   ],
   "managed-server installer dry-run"
@@ -276,6 +282,7 @@ mustInclude(
 );
 
 const fakeBin = await mkdtemp(join(tmpdir(), "recallant-public-readiness-path-"));
+await symlink("/usr/bin/cat", join(fakeBin, "cat"));
 await symlink("/usr/bin/dirname", join(fakeBin, "dirname"));
 const noDockerPlan = runInstallerDryRun(["--dry-run", "--profile", "single-user"], {
   PATH: fakeBin,

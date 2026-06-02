@@ -493,16 +493,25 @@ Acceptance:
   owner runtime paths, secure env paths, raw database URLs, or raw secret-like
   assignments.
 - Done: managed-server install planning now supports explicit Postgres
-  `--postgres-port` and `--postgres-container-name` knobs. The generated env
-  file, database URL, production compose wrapper, and Docker compose file stay
-  consistent, allowing clean-host or side-by-side validation without colliding
-  with the owner-server Postgres container/port.
+  `--postgres-port`, `--postgres-container-name`, and
+  `--compose-project-name` knobs. The generated env file, database URL,
+  production compose wrapper, and Docker compose file stay consistent, allowing
+  clean-host or side-by-side validation without colliding with the owner-server
+  Postgres container/port/Compose project.
+- Done: added opt-in `npm run public-managed-install:smoke`. With
+  `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1`, it performs a Docker-backed managed
+  install using temporary env/data/prefix paths, a unique Postgres container, a
+  unique Compose project, `--no-systemd`, CLI doctor, attach, connect dry-run,
+  capture/checkpoint/closeout, require-capture doctor, and cleanup. This smoke
+  passed on the current owner host on 2026-06-02 with an isolated temporary
+  managed-server install.
 
 Remaining before a real public-release claim:
 
 - Final manual approval of public-quality screenshots from the generated
   Workbench candidate set.
-- Clean-host install validation outside the owner server.
+- Repeat the Docker-backed managed install smoke on a clean non-owner host or
+  approved isolated VM/container before public release.
 - Rollback docs tested on a non-owner host.
 - Full mandatory startup parity for supported clients.
 - Final manual security review after real clean-host install and screenshot

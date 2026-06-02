@@ -52,6 +52,7 @@
     "installer:smoke": "node scripts/smoke-installer.mjs",
     "public-readiness:smoke": "node scripts/smoke-public-readiness.mjs",
     "public-clean-host:smoke": "node scripts/smoke-public-clean-host.mjs",
+    "public-managed-install:smoke": "node scripts/smoke-public-managed-install.mjs",
     "public-security:smoke": "node scripts/smoke-public-security.mjs",
     "cross-client:smoke": "node scripts/smoke-cross-client.mjs",
     "prepilot:smoke:discovery": "node scripts/smoke-pre-pilot-discovery.mjs",

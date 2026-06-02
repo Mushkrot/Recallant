@@ -462,8 +462,15 @@ recallant.service`, local `/health`, and authenticated Review route check for
   onboarding docs against owner hostnames, owner emails, owner runtime paths, secure env paths, raw
   database URLs, and raw secret-like assignments.
 - Added managed-server Postgres isolation knobs (`--postgres-port`,
-  `--postgres-container-name`) and threaded them through generated env, database URL, compose
-  wrapper, and Docker Compose for future clean-host/side-by-side validation.
+  `--postgres-container-name`, `--compose-project-name`) and threaded them through generated env,
+  database URL, compose wrapper, and Docker Compose for future clean-host/side-by-side validation.
+- Added opt-in `npm run public-managed-install:smoke` for Docker-backed release-candidate install
+  validation with temporary env/data/prefix paths, unique Postgres container/Compose project,
+  attach/connect/capture/require-capture checks, and cleanup.
+- `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke` passed on the
+  current owner host on 2026-06-02 using an isolated temporary managed-server install, unique
+  Postgres port/container/Compose project, attach, connect dry-run, agent capture, closeout, and
+  `doctor --require-capture`.
 - README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
   clone commands.
 - Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning
@@ -473,7 +480,9 @@ recallant.service`, local `/health`, and authenticated Review route check for
   owner-server, plus the no-Docker-preview path.
 - `npm run installer:smoke` now has a sandbox-safe fallback when Node cannot spawn `/bin/bash`; in
   normal environments it still executes the installer dry-run.
-- Verification so far: `npm run public-readiness:smoke` and `npm run installer:smoke` passed.
+- Verification so far: `npm run public-readiness:smoke`, `npm run public-clean-host:smoke`,
+  `npm run installer:smoke`, `npm run public-security:smoke`, and the opt-in Docker-backed
+  `public-managed-install:smoke` passed.
 
 ## Open Questions
 

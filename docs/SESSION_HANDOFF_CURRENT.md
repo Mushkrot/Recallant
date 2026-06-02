@@ -27,16 +27,22 @@ This is the current handoff for the next Recallant session. Start here after rea
   while `owner-server` remains owner-host compatibility. Production compose and backup scripts honor
   the selected profile env/data paths. README/Quickstart use the canonical repository URL, and
   `docs/RELEASE.md` records the release/version policy. `npm run public-clean-host:smoke` adds a
-  clean-host-style preflight, but a real non-owner VM/container install is still pending before a
-  public-release claim. `docs/PUBLIC_SCREENSHOTS.md` defines the screenshot/redaction policy, but
+  clean-host-style preflight, and `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run
+  public-managed-install:smoke` passed on the current owner host on 2026-06-02 in an isolated
+  temporary managed-server install. A repeat run on a clean non-owner VM/container is still pending
+  before a public-release claim. `docs/PUBLIC_SCREENSHOTS.md` defines the screenshot/redaction policy, but
   final public screenshots still need full manual approval. `npm run review-ui:playwright` passed on
   2026-06-02 and generated fresh synthetic screenshot candidates under `/ai/playwright/reports`; the
   focused Ask screenshot was spot-checked as synthetic and free of owner paths/hostnames/emails/
   secrets. `docs/PUBLIC_SECURITY_REVIEW.md` and `npm run public-security:smoke` now guard normal
   public onboarding docs against owner-specific host/path/email/secret leakage.
-  Managed-server install planning supports `--postgres-port` and `--postgres-container-name`, so a
-  future real clean-host validation can avoid conflicts with an existing Recallant production
-  Postgres container/port.
+  Managed-server install planning supports `--postgres-port`, `--postgres-container-name`, and
+  `--compose-project-name`, so a future real clean-host validation can avoid conflicts with an
+  existing Recallant production Postgres container/port/Compose project.
+  The Docker-backed release-candidate validation covered unique Postgres port/container/Compose
+  project, install, CLI doctor, attach, connect dry-run, agent capture, closeout, and
+  `doctor --require-capture`; it has not yet been repeated on a clean non-owner host in this
+  checkpoint.
 
 ## Current State
 
@@ -153,8 +159,12 @@ execution. `docs/PUBLIC_SCREENSHOTS.md` defines the required public screenshot s
 rules. Latest screenshot candidates are in `/ai/playwright/reports` from the 2026-06-02
 `review-ui:playwright` run. `npm run public-security:smoke` verifies the normal public docs do not
 leak owner-specific host/path/email/secret patterns.
-Installer clean-host planning now includes Postgres port/container overrides and threads them into
-the generated env/database URL plus production compose.
+Installer clean-host planning now includes Postgres port/container/Compose-project overrides and
+threads them into the generated env/database URL plus production compose.
+Opt-in Docker-backed validation is available as `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run
+public-managed-install:smoke`; it passed on the current owner host on 2026-06-02 in an isolated
+temporary managed-server install with attach, connect dry-run, capture, closeout, and
+`doctor --require-capture`.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

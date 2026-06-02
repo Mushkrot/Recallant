@@ -63,6 +63,7 @@ function staticDryRunPlan(args, env = {}) {
   const postgresHost = option("--postgres-host") ?? "127.0.0.1";
   const postgresPort = option("--postgres-port") ?? "15432";
   const postgresContainerName = option("--postgres-container-name") ?? "recallant-postgres";
+  const composeProjectName = option("--compose-project-name") ?? "recallant";
   const systemd = profile === "single-user" ? "manual" : "auto";
   return `Recallant install plan
 profile: ${profile}
@@ -76,6 +77,7 @@ systemd_mode: ${systemd}
 postgres_host: ${postgresHost}
 postgres_port: ${postgresPort}
 postgres_container_name: ${postgresContainerName}
+compose_project_name: ${composeProjectName}
 will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
 will_create_env_file: yes
 will_install_dependencies: no
@@ -149,6 +151,7 @@ for (const marker of [
   "postgres_host: 127.0.0.1",
   "postgres_port: 15432",
   "postgres_container_name: recallant-postgres",
+  "compose_project_name: recallant",
   "systemd_mode: auto",
   "will_install_systemd: auto"
 ]) {
@@ -181,21 +184,25 @@ assert(
   installerSource.includes('RECALLANT_ENV_FILE="$ENV_FILE"') &&
     installerSource.includes('RECALLANT_DATA_DIR="$DATA_DIR"') &&
     installerSource.includes('RECALLANT_POSTGRES_PORT="$POSTGRES_PORT"') &&
-    installerSource.includes('RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME"'),
-  "Installer must pass the selected env/data/Postgres settings into production compose"
+    installerSource.includes('RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME"') &&
+    installerSource.includes('RECALLANT_COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME"'),
+  "Installer must pass the selected env/data/Postgres/Compose settings into production compose"
 );
 assert(
   installerSource.includes("RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work") &&
-    installerSource.includes("RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME"),
-  "Installer must write selected Postgres host/port/container settings"
+    installerSource.includes("RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME") &&
+    installerSource.includes("RECALLANT_COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME"),
+  "Installer must write selected Postgres/Compose settings"
 );
 assert(
   prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}') &&
     prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
     prodComposeSource.includes('POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}') &&
     prodComposeSource.includes('POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}') &&
+    prodComposeSource.includes('COMPOSE_PROJECT_NAME=${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}') &&
+    prodComposeSource.includes('docker compose -p "$COMPOSE_PROJECT_NAME"') &&
     prodComposeSource.includes('export RECALLANT_DATA_DIR="$DATA_DIR"'),
-  "Production compose wrapper must honor RECALLANT_ENV_FILE and RECALLANT_DATA_DIR"
+  "Production compose wrapper must honor selected env/data/Postgres/Compose settings"
 );
 assert(
   prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres") &&

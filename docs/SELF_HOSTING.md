@@ -42,6 +42,7 @@ CLI: /usr/local/bin/recallant
 systemd: recallant.service when available
 Postgres bind: 127.0.0.1:15432
 Postgres container: recallant-postgres
+Docker Compose project: recallant
 ```
 
 For clean-host validation or side-by-side testing, use explicit Postgres isolation knobs:
@@ -49,11 +50,22 @@ For clean-host validation or side-by-side testing, use explicit Postgres isolati
 ```bash
 sudo ./scripts/install-recallant.sh --profile managed-server \
   --postgres-port 17432 \
-  --postgres-container-name recallant-clean-host-postgres
+  --postgres-container-name recallant-clean-host-postgres \
+  --compose-project-name recallant-clean-host
 ```
 
 These values are written into the generated env file and passed through the production compose
-wrapper so the database URL, Docker container name, and bind port stay consistent.
+wrapper so the database URL, Docker container name, bind port, and Compose project stay consistent.
+
+Release-candidate managed install validation:
+
+```bash
+RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke
+```
+
+This smoke starts Docker, uses temporary env/data/prefix paths, a unique Postgres container, a
+unique Compose project, `--no-systemd`, and cleans up after itself. Run it only on a clean
+non-owner host or an approved isolated VM/container.
 
 ### Owner-server compatibility profile
 

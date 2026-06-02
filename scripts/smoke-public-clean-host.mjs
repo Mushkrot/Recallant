@@ -83,6 +83,7 @@ function dryRun(args, env = {}) {
       const postgresHost = option("--postgres-host") ?? "127.0.0.1";
       const postgresPort = option("--postgres-port") ?? "15432";
       const postgresContainerName = option("--postgres-container-name") ?? "recallant-postgres";
+      const composeProjectName = option("--compose-project-name") ?? "recallant";
       return `Recallant install plan
 profile: ${profile}
 dry_run: true
@@ -95,6 +96,7 @@ systemd_mode: ${profile === "single-user" ? "manual" : "auto"}
 postgres_host: ${postgresHost}
 postgres_port: ${postgresPort}
 postgres_container_name: ${postgresContainerName}
+compose_project_name: ${composeProjectName}
 will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
 will_create_env_file: yes
 will_install_dependencies: no
@@ -147,6 +149,8 @@ const managedPlan = dryRun(
     "17432",
     "--postgres-container-name",
     "recallant-clean-host-postgres",
+    "--compose-project-name",
+    "recallant-clean-host",
     "--run-user",
     "recallant-clean-host"
   ],
@@ -165,6 +169,7 @@ mustInclude(
     "postgres_host: 127.0.0.1",
     "postgres_port: 17432",
     "postgres_container_name: recallant-clean-host-postgres",
+    "compose_project_name: recallant-clean-host",
     "run_user: recallant-clean-host",
     "systemd_mode: auto",
     "will_install_systemd: auto",
