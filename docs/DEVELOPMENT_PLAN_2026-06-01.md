@@ -335,6 +335,10 @@ Acceptance:
 - Done: the smoke prints a machine-readable pilot report containing what was
   attached, what sources were detected/imported, what was remembered, what was
   recalled later, what cleanup did, and what remained untouched.
+- Done: the smoke also writes a JSON pilot-report artifact under
+  `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes a
+  `qa_summary` for the three required scenarios, and reads the artifact back to
+  verify the report is persisted.
 - Done: `pilot-report:smoke` is part of `npm run smoke:core`.
 - Remaining: run more non-fixture real-world pilots after Stage 4 hooks and
   source-health UI become richer.

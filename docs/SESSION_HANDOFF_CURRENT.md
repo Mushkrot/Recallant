@@ -592,6 +592,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - The smoke prints JSON with attached project ids, detected/imported sources, remembered and
   recalled markers, cleanup results, and untouched-original proof.
 - `pilot-report:smoke` is included in `npm run smoke:core`.
+- 2026-06-02 report-artifact follow-up: `pilot-report:smoke` now writes a persisted JSON artifact
+  under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes a `qa_summary` for
+  the clean project, copied sandbox, and production-sensitive preflight scenarios, and reads the
+  artifact back before passing.
 
 Latest validation for the Workbench/source/chat follow-up slice:
 

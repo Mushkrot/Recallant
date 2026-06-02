@@ -396,10 +396,16 @@ async function runProductionSensitivePreflight() {
 }
 
 try {
+  const generatedAt = new Date().toISOString();
+  const reportDir = process.env.RECALLANT_PILOT_REPORT_DIR ?? join(tmpdir(), "recallant-pilot-reports");
+  const reportPath = join(
+    reportDir,
+    `pilot-report-${generatedAt.replace(/[:.]/g, "-")}-${randomUUID()}.json`
+  );
   const report = {
     ok: true,
     action: "pilot_report_smoke",
-    generated_at: new Date().toISOString(),
+    generated_at: generatedAt,
     developer_id: developerId,
     pilots: {
       clean_empty_project: await runCleanEmptyPilot(),
@@ -407,6 +413,34 @@ try {
       production_sensitive_dry_run: await runProductionSensitivePreflight()
     }
   };
+  report.qa_summary = {
+    scenario_count: Object.keys(report.pilots).length,
+    clean_attach_capture_recall_detach:
+      report.pilots.clean_empty_project.capture.recalled_in_later_session === true &&
+      report.pilots.clean_empty_project.cleanup.dry_run_first === "pending_confirmation" &&
+      report.pilots.clean_empty_project.cleanup.confirmed_status === "detached",
+    copied_sandbox_original_untouched:
+      report.pilots.copied_existing_sandbox.untouched_original === true &&
+      report.pilots.copied_existing_sandbox.local_backup_created === true,
+    production_sensitive_preflight_safe:
+      report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&
+      report.pilots.production_sensitive_dry_run.writes_files === false &&
+      report.pilots.production_sensitive_dry_run.writes_database === false,
+    all_required_scenarios_passed: true
+  };
+  report.qa_summary.all_required_scenarios_passed =
+    report.qa_summary.clean_attach_capture_recall_detach &&
+    report.qa_summary.copied_sandbox_original_untouched &&
+    report.qa_summary.production_sensitive_preflight_safe;
+  assert(report.qa_summary.all_required_scenarios_passed, "pilot report QA summary was not green");
+  report.report_path = reportPath;
+  await mkdir(reportDir, { recursive: true });
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  const persisted = JSON.parse(await readFile(reportPath, "utf8"));
+  assert(
+    persisted.qa_summary?.all_required_scenarios_passed === true,
+    "persisted pilot report did not preserve QA summary"
+  );
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
   await Promise.all(tempRoots.map((dir) => rm(dir, { recursive: true, force: true })));

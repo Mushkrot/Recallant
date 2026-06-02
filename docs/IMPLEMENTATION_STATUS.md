@@ -152,7 +152,9 @@ Current implemented slices include:
   preflight. It records decision/action/test/checkpoint memory, proves later recall and
   `doctor --require-capture`, detaches with dry-run first, verifies no files/records are
   physically deleted by ordinary detach, and proves the original existing-project fixture is
-  untouched.
+  untouched. It writes a JSON report artifact under `RECALLANT_PILOT_REPORT_DIR` or
+  `/tmp/recallant-pilot-reports`, includes a green `qa_summary`, and reads the artifact back as
+  part of the smoke.
 - Aggregated `npm run smoke:core` suite for the local DB-backed implementation surface.
 - Contract-hardening checkpoint: Review Inbox now includes important long-term records and
   lifecycle/action candidates by default; Review UI first screen shows critical capture/spool/
@@ -452,6 +454,9 @@ Latest Stage 5 pilot-report validation on 2026-06-01:
   - production-sensitive preflight: requested `autopilot`, effective `guided`,
     `needs_confirmation`, `writes_files=false`, `writes_database=false`, project
     files untouched.
+- Latest artifact write/readback was verified on 2026-06-02; the report included
+  `qa_summary.all_required_scenarios_passed=true` and a `report_path` under
+  `/tmp/recallant-pilot-reports`.
 
 Latest contract-hardening validation on 2026-05-31:
 
