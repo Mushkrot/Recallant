@@ -88,6 +88,13 @@ export type ManagementChatResponse = {
     use_policy?: string;
     reason: string;
   };
+  source_action_result?: {
+    status: "created" | "skipped";
+    operation: SourceRequestAnalysis["operation"];
+    project_id?: string;
+    space_name?: string;
+    reason: string;
+  };
   facts: {
     project_id: string;
     project_name: string;
@@ -183,6 +190,13 @@ export async function buildManagementChatResponse(input: {
           database: input.database
         })
       : undefined;
+  const sourceActionResult =
+    intent === "source_management" && !policyBlockReason
+      ? await maybeRunSafeSourceAction({
+          sourceRequest,
+          database: input.database
+        })
+      : undefined;
   const confirmationRequired =
     !policyBlockReason && (destructiveOrSensitive || globalRuleResult?.status === "needs_review");
   const resultType = resultTypeForIntent({
@@ -192,6 +206,7 @@ export async function buildManagementChatResponse(input: {
     confirmationRequired,
     policyBlockReason,
     globalRuleResult,
+    sourceActionResult,
     sourceRequest,
     workflowRequest
   });
@@ -215,6 +230,7 @@ export async function buildManagementChatResponse(input: {
     interpretation,
     globalRuleResult,
     policyBlockReason,
+    sourceActionResult,
     sourceRequest,
     workflowRequest
   );
@@ -234,6 +250,7 @@ export async function buildManagementChatResponse(input: {
     destructive_or_sensitive: destructiveOrSensitive,
     policy_block_reason: policyBlockReason,
     global_rule_result: globalRuleResult,
+    source_action_result: sourceActionResult,
     facts,
     proposed_actions: proposedActions
   };
@@ -689,6 +706,7 @@ function resultTypeForIntent(input: {
   confirmationRequired: boolean;
   policyBlockReason?: string;
   globalRuleResult?: ManagementChatResponse["global_rule_result"];
+  sourceActionResult?: ManagementChatResponse["source_action_result"];
   sourceRequest?: SourceRequestAnalysis;
   workflowRequest?: WorkflowRequestAnalysis;
 }): ManagementChatResultType {
@@ -708,6 +726,9 @@ function resultTypeForIntent(input: {
     if (input.globalRuleResult?.status === "created") return "safe_action";
     if (input.globalRuleResult?.status === "needs_review") return "confirmation_required";
     return "needs_clarification";
+  }
+  if (input.intent === "source_management" && input.sourceActionResult?.status === "created") {
+    return "safe_action";
   }
   if (input.destructiveOrSensitive && input.intent === "cleanup") return "dry_run_required";
   if (input.confirmationRequired) return "confirmation_required";
@@ -928,6 +949,28 @@ function sourceLabelFromMessage(message: string, sourceUri: string, sourceKind: 
   return labels[sourceKind] ?? "Memory source";
 }
 
+function memorySpaceNameFromMessage(message: string) {
+  const quoted = firstQuotedValue(message);
+  if (quoted) return quoted.slice(0, 120);
+  const patterns = [
+    /(?:memory space|virtual space|space)\s+(?:named|called|for)?\s*([^\n\r.;]+)/iu,
+    /(?:пространство памяти|виртуальное пространство|пространство)\s+(?:с именем|для)?\s*([^\n\r.;]+)/iu
+  ];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    const raw = match?.[1]?.trim();
+    if (!raw) continue;
+    const cleaned = raw
+      .replace(
+        /\s+(with|and attach|source|folder|repo|connector|с источником|и подключи|папк.*)$/iu,
+        ""
+      )
+      .trim();
+    if (cleaned.length > 1) return cleaned.slice(0, 120);
+  }
+  return "";
+}
+
 function clientFromMessage(message: string) {
   const normalized = message.toLowerCase();
   if (normalized.includes("cursor")) return "cursor";
@@ -1024,7 +1067,7 @@ function analyzeSourceRequest(
   const sourceUri = extractPathLike(message);
   const sourceKind = sourceKindFromMessage(message, sourceUri);
   const sourceLabel = sourceLabelFromMessage(message, sourceUri, sourceKind);
-  const spaceName = wantsCreate ? firstQuotedValue(message) : "";
+  const spaceName = wantsCreate ? memorySpaceNameFromMessage(message) : "";
   const operation = wantsDetach
     ? "detach_source"
     : wantsCreate
@@ -1134,6 +1177,53 @@ async function maybeCreateGlobalRule(input: {
   };
 }
 
+async function maybeRunSafeSourceAction(input: {
+  sourceRequest?: SourceRequestAnalysis;
+  database?: RecallantDb;
+}): Promise<ManagementChatResponse["source_action_result"]> {
+  const request = input.sourceRequest;
+  if (!request || request.operation !== "create_space") return undefined;
+  if (request.missing.length > 0) return undefined;
+  if (request.source_uri) {
+    return {
+      status: "skipped",
+      operation: request.operation,
+      space_name: request.space_name,
+      reason:
+        "Creating a memory space and attaching a source in one chat step is skipped; attach the source separately through the governed source workflow."
+    };
+  }
+  if (!input.database) {
+    return {
+      status: "skipped",
+      operation: request.operation,
+      space_name: request.space_name,
+      reason: "Database is unavailable, so the memory space was not created."
+    };
+  }
+  const personal = includesAny(request.space_name, [
+    "personal",
+    "личн",
+    "life",
+    "жизн",
+    "work operations"
+  ]);
+  const created = await input.database.createMemorySpace({
+    name: request.space_name,
+    projectKind: personal ? "personal_domain" : "other",
+    memoryDomain: personal ? "personal_life" : "agent_work",
+    primaryPath: undefined
+  });
+  return {
+    status: "created",
+    operation: request.operation,
+    project_id: String(created.project_id),
+    space_name: request.space_name,
+    reason:
+      "Created an empty memory space only. No project files, sources, secrets, or external connectors were touched."
+  };
+}
+
 function answerForIntent(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
@@ -1142,6 +1232,7 @@ function answerForIntent(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
+  sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
@@ -1153,6 +1244,7 @@ function answerForIntent(
       interpretation,
       globalRuleResult,
       policyBlockReason,
+      sourceActionResult,
       sourceRequest,
       workflowRequest
     );
@@ -1163,6 +1255,7 @@ function answerForIntent(
     interpretation,
     globalRuleResult,
     policyBlockReason,
+    sourceActionResult,
     sourceRequest,
     workflowRequest
   );
@@ -1195,6 +1288,7 @@ function answerRu(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
+  sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
@@ -1240,6 +1334,12 @@ function answerRu(
     case "cross_project":
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "source_management":
+      if (sourceActionResult?.status === "created") {
+        return `${baseline}\n\nЯ создал пустое memory space “${sourceActionResult.space_name}”. Это безопасная операция внутри Recallant: файлы проекта, источники, секреты и внешние connectors не тронуты.\n\nСледующий шаг: если этому space нужен источник, подключи его отдельно через Source Map или попроси меня подготовить безопасный attach-source шаг.`;
+      }
+      if (sourceActionResult?.status === "skipped") {
+        return `${baseline}\n\nЯ понял это как source/memory-space операцию, но не выполнил ее автоматически: ${sourceActionResult.reason}`;
+      }
       if (sourceRequest?.missing.length) {
         return `${baseline}\n\nЯ понял это как управление источниками, но мне не хватает данных: ${sourceRequest.missing.join(", ")}. Уточни имя memory space и/или точный путь, repo, connector reference или document collection. Я не буду угадывать источник, потому что это может привязать память не туда.`;
       }
@@ -1284,6 +1384,7 @@ function answerEn(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
+  sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
@@ -1329,6 +1430,12 @@ function answerEn(
     case "cross_project":
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
     case "source_management":
+      if (sourceActionResult?.status === "created") {
+        return `${baseline}\n\nI created the empty memory space “${sourceActionResult.space_name}”. This is a safe Recallant-only action: project files, sources, secrets, and external connectors were not touched.\n\nNext step: if this space needs a source, attach it separately through Source Map or ask me to prepare a safe attach-source step.`;
+      }
+      if (sourceActionResult?.status === "skipped") {
+        return `${baseline}\n\nI understood this as a source/memory-space operation, but did not run it automatically: ${sourceActionResult.reason}`;
+      }
       if (sourceRequest?.missing.length) {
         return `${baseline}\n\nI understood this as source management, but I need more detail: ${sourceRequest.missing.join(", ")}. Name the memory space and/or provide the exact path, repo, connector reference, or document collection. I will not guess the source because that could bind memory to the wrong place.`;
       }

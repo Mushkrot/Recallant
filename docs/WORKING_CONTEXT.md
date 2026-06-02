@@ -357,6 +357,10 @@ Latest implementation checkpoints:
   concrete project paths produce attach/connect/doctor dry-run plans, and pilot-QA asks produce
   product-acceptance, pilot-report, and browser-QA evidence commands. Verified by
   `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
+- 2026-06-02 Management Chat safe source-action follow-up: Ask Recallant can now create an empty
+  virtual memory space as a `safe_action`; the smoke verifies the response and DB state with zero
+  sources. Source attach/detach and project attach/connect still stay behind governed UI/dry-run
+  workflows. Verified by `npm run review-ui:smoke` and `npm run management-chat-ai:smoke`.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
 - 2026-06-02 mandatory-startup diagnostics follow-up: `recallant connect` now reports
   `mandatory_startup_layer`, and `recallant doctor` reports `client_connection`. These show MCP

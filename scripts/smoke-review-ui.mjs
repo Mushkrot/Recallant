@@ -935,6 +935,39 @@ try {
     throw new Error(`Pilot QA chat failed: ${JSON.stringify(pilotQaJson)}`);
   }
 
+  const chatCreatedSpaceName = `Chat virtual space ${randomUUID()}`;
+  const createSpaceChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: `Create memory space "${chatCreatedSpaceName}"`
+    })
+  });
+  const createSpaceChatJson = await createSpaceChat.json();
+  const chatCreatedSpaces = await db.listMemorySpaces();
+  const chatCreatedSpace = chatCreatedSpaces.find((space) => space.name === chatCreatedSpaceName);
+  if (
+    createSpaceChat.status !== 200 ||
+    createSpaceChatJson.intent !== "source_management" ||
+    createSpaceChatJson.result_type !== "safe_action" ||
+    createSpaceChatJson.source_action_result?.status !== "created" ||
+    createSpaceChatJson.source_action_result?.space_name !== chatCreatedSpaceName ||
+    !chatCreatedSpace ||
+    chatCreatedSpace.sources.length !== 0 ||
+    !String(createSpaceChatJson.answer).includes("project files, sources, secrets")
+  ) {
+    throw new Error(
+      `Chat memory-space create failed: ${JSON.stringify({
+        createSpaceChatJson,
+        chatCreatedSpace
+      })}`
+    );
+  }
+
   const rememberedChat = await fetch(`${baseUrl}/api/management-chat`, {
     method: "POST",
     headers: {

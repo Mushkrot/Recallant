@@ -363,6 +363,10 @@ Stage 2 first slice is now implemented:
   attach/connect/doctor dry-run plan, including client-specific connect such as Cursor. Pilot-QA
   requests produce product-acceptance, pilot-report, and browser-QA evidence commands without
   executing them directly from chat.
+- Stage 2/3 safe source-action follow-up is implemented: Ask Recallant can create an empty virtual
+  memory space as a `safe_action` because it only writes Recallant metadata and does not touch
+  project files, sources, secrets, connectors, paid API, or production services. Source attach,
+  source detach, and project attach/connect remain guided/dry-run workflows.
 
 Stage 3 first slice is now implemented:
 
