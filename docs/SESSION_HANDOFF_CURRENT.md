@@ -25,6 +25,10 @@ Recallant-specific browser QA is now implemented as `npm run review-ui:playwrigh
 local authenticated Workbench fixture, checks desktop/mobile layout and Ask Recallant readability in
 headless Chromium, writes screenshots under `/ai/playwright/reports`, and closes the browser/server
 after the run.
+The latest Workbench source slice adds human-readable source health/status, source provenance
+summaries in Review rows, and a `source_id` Review/dashboard filter for source-linked import
+candidates, inbox items, and active rules. It is verified by `npm run project-sources:smoke`,
+`npm run review-ui:smoke`, and `npm run review-ui:playwright`.
 Production `recallant.service` was restarted on 2026-06-01 after the Workbench UI changes because
 the live browser still showed the older in-memory `Recallant Review Command Center`. Post-restart
 checks passed: local `/health`, unauthenticated `/review` `401`, authenticated local `/review`

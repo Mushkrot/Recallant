@@ -170,6 +170,13 @@ const importSource = await db.importSource({
 const importMemoryId = importSource.memory_ids[0];
 if (!importMemoryId)
   throw new Error(`Import source did not create memory: ${JSON.stringify(importSource)}`);
+const importedDocSource = await db.attachProjectSource({
+  project_id: projectId,
+  source_kind: "document_collection",
+  label: "AGENTS.md",
+  uri: "AGENTS.md",
+  metadata: { smoke: true, purpose: "source filter provenance smoke" }
+});
 const candidate = await db.createAgentMemory({
   memory_type: "procedure",
   scope: "developer",
@@ -353,6 +360,8 @@ try {
     "Project Actions",
     "1 active source",
     "Sources for selected space",
+    "Primary source ready",
+    "Source ready",
     "Create a memory space",
     "Attach a source to selected space",
     "Detach source",
@@ -396,6 +405,9 @@ try {
     "Rule filters",
     "Scope filter",
     "Type filter",
+    "Source filter",
+    "All sources",
+    "From source AGENTS.md",
     "Project filter",
     "Domain filter",
     "Current day",
@@ -466,6 +478,9 @@ try {
         setting.value?.status === "configured"
     ) ||
     !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
+    !json.import_candidates.some(
+      (memory) => memory.memory_id === importMemoryId && memory.provenance?.source_path === "AGENTS.md"
+    ) ||
     json.selected_detail?.memory?.id !== importMemoryId ||
     !json.selected_detail?.source_refs?.some((ref) => ref.source_id === importSource.event_id) ||
     !json.duplicate_conflicts.some((memory) => memory.memory_id === importMemoryId) ||
@@ -481,7 +496,21 @@ try {
       (project) =>
         project.project_id === projectId &&
         project.last_context_read_at &&
-        project.sources?.some((source) => source.source_kind === "workspace_path")
+        project.sources?.some(
+          (source) =>
+            source.source_kind === "workspace_path" &&
+            source.source_health?.status === "ready" &&
+            source.source_health?.label === "Primary source ready"
+        ) &&
+        project.sources?.some(
+          (source) =>
+            source.source_id === importedDocSource.id &&
+            source.source_health?.status === "ready" &&
+            source.display_label === "AGENTS.md"
+        )
+    ) ||
+    !json.source_filters?.sources?.some(
+      (source) => source.source_id === importedDocSource.id && source.source_health?.status === "ready"
     ) ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"
@@ -520,6 +549,25 @@ try {
     filteredRulesJson.rules.some((memory) => memory.memory_id === altDomainRuleId)
   ) {
     throw new Error(`Rule filter API smoke failed: ${JSON.stringify(filteredRulesJson)}`);
+  }
+
+  const sourceFiltered = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&source_id=${importedDocSource.id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const sourceFilteredJson = await sourceFiltered.json();
+  if (
+    sourceFiltered.status !== 200 ||
+    sourceFilteredJson.source_filters?.selected_source_id !== importedDocSource.id ||
+    sourceFilteredJson.rule_filters?.source_id !== importedDocSource.id ||
+    !sourceFilteredJson.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
+    sourceFilteredJson.rules.some((memory) => memory.memory_id === rule.memory_id) ||
+    !sourceFilteredJson.source_filters?.selected_source?.source_health ||
+    sourceFilteredJson.source_filters.selected_source.display_label !== "AGENTS.md"
+  ) {
+    throw new Error(`Source filter API smoke failed: ${JSON.stringify(sourceFilteredJson)}`);
   }
 
   const allDomainRules = await fetch(
@@ -947,7 +995,7 @@ try {
     sourceAttachForm.status !== 200 ||
     !sourceAttachHtml.includes("Source attached.") ||
     !sourceAttachHtml.includes(manualSourceLabel) ||
-    !sourceAttachHtml.includes("Manual source active")
+    !sourceAttachHtml.includes("Source ready")
   ) {
     throw new Error(`Source attach form failed: ${sourceAttachForm.status} ${sourceAttachHtml}`);
   }
@@ -975,7 +1023,7 @@ try {
     sourceDetachForm.status !== 200 ||
     !sourceDetachHtml.includes("Source detached.") ||
     !sourceDetachHtml.includes(manualSourceLabel) ||
-    !sourceDetachHtml.includes("Manual source detached")
+    !sourceDetachHtml.includes("Detached from active use")
   ) {
     throw new Error(`Source detach form failed: ${sourceDetachForm.status} ${sourceDetachHtml}`);
   }

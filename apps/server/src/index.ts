@@ -569,6 +569,11 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
   return rows
     .map((row) => {
       const isMemory = Boolean(row.memory_id);
+      const provenance = asRecord(row.provenance);
+      const provenanceSummary =
+        typeof provenance.summary === "string" && provenance.summary.length > 0
+          ? provenance.summary
+          : "";
       const title = isMemory
         ? sourcePath(row)
         : (row.title ??
@@ -597,6 +602,7 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
                 ["Type", memoryKindLabel(row.memory_type)]
               ])}
               <p>${escapeHtml(body)}</p>
+              ${provenanceSummary ? `<p class="source-note">${escapeHtml(provenanceSummary)}</p>` : ""}
               <p class="why">${escapeHtml(riskSummary(row))}</p>`
             : `<p>${escapeHtml(body)}</p>
               ${renderMeta(
@@ -1052,10 +1058,30 @@ function currentProjectSources(data: ReviewDashboardData) {
 }
 
 function sourceStatusLabel(source: Record<string, unknown>) {
+  const health = asRecord(source.source_health);
+  if (typeof health.label === "string" && health.label.length > 0) {
+    return health.label;
+  }
   const status = String(source.status ?? "active");
   const prefix = source.is_primary ? "Primary" : sourceKindLabel(source.source_kind);
   if (status === "active") return `${prefix} active`;
   return `${prefix} ${status.replaceAll("_", " ")}`;
+}
+
+function sourceHealth(source: Record<string, unknown>) {
+  const health = asRecord(source.source_health);
+  return {
+    status: String(health.status ?? source.status ?? "ready").replaceAll("_", "-"),
+    label: String(health.label ?? sourceStatusLabel(source)),
+    reason:
+      typeof health.reason === "string" && health.reason.length > 0
+        ? health.reason
+        : "Recallant can show this source as provenance when memory is source-linked.",
+    action:
+      typeof health.action_needed === "string" && health.action_needed.length > 0
+        ? health.action_needed
+        : "No action needed."
+  };
 }
 
 function renderSourceResult(source?: SourceRenderState) {
@@ -1140,12 +1166,15 @@ function renderSelectedSources(data: ReviewDashboardData) {
   }
   return `<div class="source-list">
     ${sources
-      .map(
-        (source) => `<article class="source-card">
+      .map((source) => {
+        const health = sourceHealth(source);
+        return `<article class="source-card">
           <div>
-            <strong>${escapeHtml(source.label ?? sourceKindLabel(source.source_kind))}</strong>
-            <span>${escapeHtml(sourceStatusLabel(source))}</span>
+            <strong>${escapeHtml(source.display_label ?? source.label ?? sourceKindLabel(source.source_kind))}</strong>
+            <span class="source-health ${escapeHtml(health.status)}">${escapeHtml(health.label)}</span>
             <p>${escapeHtml(source.uri ?? "No location recorded")}</p>
+            <p>${escapeHtml(health.reason)}</p>
+            <p class="source-action">${escapeHtml(health.action)}</p>
           </div>
           ${
             source.status === "active"
@@ -1162,12 +1191,13 @@ function renderSelectedSources(data: ReviewDashboardData) {
               ["source_id", source.source_id ?? source.id],
               ["source_kind", source.source_kind],
               ["status", source.status],
+              ["source_health", source.source_health],
               ["is_primary", source.is_primary],
               ["metadata", source.metadata]
             ])}
           </details>
-        </article>`
-      )
+        </article>`;
+      })
       .join("")}
   </div>`;
 }
@@ -1413,21 +1443,41 @@ function renderCosts(data: ReviewDashboardData) {
 
 function renderRuleFilters(data: ReviewDashboardData) {
   const filters = asRecord(data.rule_filters);
+  const sourceFilters = asRecord(data.source_filters);
+  const sources = asArray(sourceFilters.sources) as Array<Record<string, unknown>>;
   const projectId = data.current_project_id;
   const current = {
     scope: String(filters.scope ?? "all"),
     scope_kind: String(filters.scope_kind ?? "all"),
     rule_type: String(filters.memory_type ?? "all"),
-    rule_domain: String(filters.memory_domain ?? "agent_work")
+    rule_domain: String(filters.memory_domain ?? "agent_work"),
+    source_id: String(sourceFilters.selected_source_id ?? filters.source_id ?? "all")
   };
   const link = (label: string, params: Record<string, unknown>) =>
     `<a class="filter-chip" href="${escapeHtml(
       reviewPathWithParams(projectId, { ...current, ...params })
     )}">${escapeHtml(label)}</a>`;
+  const sourceLinks = [
+    link("All sources", { source_id: "all" }),
+    ...sources.slice(0, 8).map((source) => {
+      const sourceId = source.source_id ?? source.id;
+      const label = source.display_label ?? source.label ?? sourceKindLabel(source.source_kind);
+      return link(String(label), { source_id: sourceId });
+    })
+  ].join(" ");
+  const selectedSource = asRecord(sourceFilters.selected_source);
+  const selectedSourceNote =
+    current.source_id !== "all" && Object.keys(selectedSource).length > 0
+      ? `<p class="filter-note">Showing source-linked memories from ${escapeHtml(
+          selectedSource.display_label ?? selectedSource.label ?? current.source_id
+        )}. Conflicts are still shown globally so high-risk issues are not hidden.</p>`
+      : "";
   return `<div class="rule-filters" aria-label="Active rule filters">
     <h3>Rule filters</h3>
     <div><strong>Scope filter</strong> ${link("All", { scope: "all" })} ${link("Project", { scope: "project" })} ${link("Developer", { scope: "developer" })}</div>
     <div><strong>Type filter</strong> ${link("All", { rule_type: "all" })} ${link("Procedure", { rule_type: "procedure" })} ${link("Constraint", { rule_type: "constraint" })} ${link("Decision", { rule_type: "decision" })}</div>
+    <div><strong>Source filter</strong> ${sourceLinks}</div>
+    ${selectedSourceNote}
     <div><strong>Project filter</strong> <span>${escapeHtml(shortId(projectId))}</span></div>
     <div><strong>Domain filter</strong> <span>${escapeHtml(current.rule_domain)}</span></div>
   </div>`;
@@ -1808,6 +1858,7 @@ function renderDashboard(
     .item h3 { font-size: 14px; margin: 0 0 5px; }
     .item p { margin: 0 0 8px; color: #565d6b; font-size: 13px; overflow-wrap: anywhere; }
     .item .why { color: #7a4d18; }
+    .item .source-note { color: #166454; font-size: 12px; }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
     .badges span { display: inline-flex; gap: 5px; align-items: baseline; border: 1px solid #d6dde7; background: #f8fafc; border-radius: 999px; padding: 4px 7px; font-size: 11px; color: #445064; }
     .badges strong { color: #6a7280; font-weight: 600; }
@@ -1868,8 +1919,13 @@ function renderDashboard(
     .source-card, .source-result { border: 1px solid #e1e7ef; border-radius: 7px; padding: 9px; background: #fbfcfe; }
     .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .source-card strong, .source-result strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
-    .source-card span { display: inline-block; color: #166454; font-size: 12px; margin-bottom: 3px; }
+    .source-card span { display: inline-block; font-size: 12px; margin-bottom: 3px; }
+    .source-health { border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; background: #f8fafc; color: #445064; }
+    .source-health.ready { border-color: #bad8cf; background: #eef8f5; color: #166454; }
+    .source-health.needs-setup, .source-health.needs-attention { border-color: #e3d3a5; background: #fff9e8; color: #715118; }
+    .source-health.detached { border-color: #d6dde7; background: #f8fafc; color: #6a7280; }
     .source-card p, .source-result p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .source-card .source-action { color: #6a7280; }
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -1918,6 +1974,7 @@ function renderDashboard(
     .rule-filters { display: grid; gap: 7px; margin-bottom: 12px; color: #4f5867; font-size: 12px; }
     .rule-filters h3 { margin: 0; font-size: 13px; color: #303845; }
     .rule-filters div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .rule-filters .filter-note { margin: 0; color: #166454; font-size: 12px; line-height: 1.35; }
     .filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; text-decoration: none; }
     .filter-chip:hover { background: #eef4fb; }
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
@@ -2077,6 +2134,7 @@ export function createRecallantHttpServer() {
     const dashboardInput = {
       project_id: requestUrl.searchParams.get("project_id"),
       selected_memory_id: requestUrl.searchParams.get("memory_id"),
+      source_id: requestUrl.searchParams.get("source_id"),
       rule_scope: requestUrl.searchParams.get("scope"),
       rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
       rule_memory_type: requestUrl.searchParams.get("rule_type"),

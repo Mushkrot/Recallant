@@ -97,6 +97,11 @@ Current implemented slices include:
   Ask Recallant placement, long Russian chat-answer readability, mobile no-horizontal-scroll, and
   mobile chat readability. It saves screenshots to `/ai/playwright/reports` and closes the browser
   and server after the run.
+- Workbench source-health/source-filter slice: project sources returned by the dashboard now include
+  human-readable source health/status and display labels; Memory Spaces source cards explain source
+  readiness in plain language; Review rows show compact provenance summaries such as source path;
+  and the Review dashboard/API supports `source_id` filtering for source-linked import candidates,
+  inbox items, and active rules while keeping global conflict signals visible.
 - Management chat target-safety pass: sandbox cleanup wording is now treated as a target-selection
   signal. If the open project is not the sandbox and exactly one sandbox/pilot project is visible,
   chat builds the dry-run command for that sandbox project instead of blindly using the open

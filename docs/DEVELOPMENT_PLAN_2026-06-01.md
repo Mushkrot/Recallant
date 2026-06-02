@@ -91,6 +91,11 @@ Acceptance:
 - Done: Playwright verifies that Ask Recallant is in the central work area,
   long Russian chat answers remain readable, and desktop/mobile layouts have no
   horizontal scroll.
+- Done: Memory Space source cards now show human-readable health/status such
+  as primary source ready, source ready, connector setup needed, or detached,
+  with a plain reason and next action.
+- Done: Review rows now show compact provenance summaries such as "From source
+  AGENTS.md" instead of requiring the owner to open raw source refs.
 
 ## Stage 2 - AI-Native Management Layer
 
@@ -190,7 +195,12 @@ Acceptance:
 - Done: context-pack binding rules and working memories now include redacted
   `source_refs` plus compact `provenance` summaries, so agents can answer where
   a fact/rule came from without loading raw artifact content.
-- Remaining: richer source health/status and search/review source filters.
+- Done: Review dashboard/API and Workbench now expose source health/status and
+  a source filter. The filter can select an attached source and limit source-
+  linked import candidates, inbox items, and active rules while leaving global
+  conflict signals visible.
+- Remaining: deeper source health probes for real connectors/server paths and
+  richer source filtering across search/replay views.
 
 ## Stage 4 - Client Connect And Hook Capture
 

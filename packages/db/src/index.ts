@@ -116,6 +116,7 @@ export type ReviewAgentMemoryInput = {
 export type ListAgentMemoriesInput = {
   view: string;
   project_id?: string | null;
+  source_id?: string | null;
   scope?: string | null;
   scope_kind?: string | null;
   memory_type?: string | null;
@@ -988,7 +989,7 @@ export class RecallantDb {
       `,
       [projectId]
     );
-    return result.rows;
+    return result.rows.map((row) => this.enrichProjectSource(row));
   }
 
   async detachProjectSource(input: { source_id: string; reason?: string | null }) {
@@ -1012,6 +1013,135 @@ export class RecallantDb {
       ]
     );
     return result.rows[0] ?? null;
+  }
+
+  private enrichProjectSource<T extends Record<string, unknown>>(source: T) {
+    const status = String(source.status ?? "active");
+    const sourceKind = String(source.source_kind ?? "other");
+    const label = typeof source.label === "string" ? source.label : "";
+    const uri = typeof source.uri === "string" ? source.uri : "";
+    const isPrimary = source.is_primary === true;
+    const locationRequired = [
+      "workspace_path",
+      "repo",
+      "server_path",
+      "document_collection",
+      "connector"
+    ].includes(sourceKind);
+    let healthStatus = "ready";
+    let healthLabel = isPrimary ? "Primary source ready" : "Source ready";
+    let healthReason = "Recallant can show this source as provenance for source-linked memories.";
+    let actionNeeded = "No action needed.";
+
+    if (status === "detached") {
+      healthStatus = "detached";
+      healthLabel = "Detached from active use";
+      healthReason =
+        "This source binding is kept for audit/history, but it is not active for new work.";
+      actionNeeded = "Attach a new source or reattach this one if it should be used again.";
+    } else if (status !== "active") {
+      healthStatus = "needs_attention";
+      healthLabel = `${status.replaceAll("_", " ")} source`;
+      healthReason = "This source is not in normal active state.";
+      actionNeeded = "Review the source state before relying on it.";
+    } else if (locationRequired && !uri) {
+      healthStatus = "needs_setup";
+      healthLabel = "Location missing";
+      healthReason =
+        "This source type normally needs a folder, repository, connector, or document reference.";
+      actionNeeded = "Add a location/reference or convert it to a manual/virtual source.";
+    } else if (sourceKind === "connector") {
+      healthStatus = "needs_setup";
+      healthLabel = "Connector source needs setup";
+      healthReason =
+        "The source is recorded, but connector capture/authorization is not active in this slice.";
+      actionNeeded =
+        "Keep it as a planned source until connector capability binding is implemented.";
+    }
+
+    return {
+      ...source,
+      display_label: label || uri || "Unnamed source",
+      source_kind_label: this.projectSourceKindLabel(sourceKind),
+      source_health: {
+        status: healthStatus,
+        label: healthLabel,
+        reason: healthReason,
+        action_needed: actionNeeded
+      }
+    };
+  }
+
+  private projectSourceKindLabel(sourceKind: string) {
+    const labels: Record<string, string> = {
+      workspace_path: "Workspace folder",
+      repo: "Repository",
+      server_path: "Server path",
+      document_collection: "Document collection",
+      connector: "Connector",
+      manual: "Manual source",
+      virtual: "Virtual source",
+      other: "Source"
+    };
+    return labels[sourceKind] ?? "Source";
+  }
+
+  private async sourceFilter(input?: string | null) {
+    if (!input) return null;
+    const result = await this.pool.query(
+      `
+        SELECT id, label, uri, source_kind, metadata
+        FROM project_sources
+        WHERE id = $1
+      `,
+      [input]
+    );
+    const row = result.rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    const values = new Set<string>([String(row.id)]);
+    for (const value of [row.label, row.uri]) {
+      if (typeof value !== "string" || value.trim().length === 0) continue;
+      values.add(value);
+      const basename = value.split(/[\\/]/).filter(Boolean).pop();
+      if (basename) values.add(basename);
+    }
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    for (const key of ["source_path", "path", "uri", "label"]) {
+      const value = (metadata as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim().length > 0) values.add(value);
+    }
+    return {
+      source_id: String(row.id),
+      match_values: Array.from(values)
+    };
+  }
+
+  private addSourceFilterClause(
+    clauses: string[],
+    values: unknown[],
+    sourceFilter: { source_id: string; match_values: string[] } | null,
+    memoryAlias = "m"
+  ) {
+    if (!sourceFilter) return;
+    values.push(sourceFilter.source_id);
+    const sourceIdParam = values.length;
+    values.push(sourceFilter.match_values);
+    const valuesParam = values.length;
+    clauses.push(`
+      EXISTS (
+        SELECT 1
+        FROM agent_memory_source_refs source_filter_refs
+        WHERE source_filter_refs.memory_id = ${memoryAlias}.id
+          AND (
+            source_filter_refs.source_id = $${sourceIdParam}
+            OR source_filter_refs.source_id = ANY($${valuesParam}::text[])
+            OR source_filter_refs.metadata->>'project_source_id' = $${sourceIdParam}
+            OR source_filter_refs.metadata->>'source_id' = $${sourceIdParam}
+            OR source_filter_refs.metadata->>'source_path' = ANY($${valuesParam}::text[])
+            OR source_filter_refs.metadata->>'path' = ANY($${valuesParam}::text[])
+          )
+      )
+    `);
   }
 
   async listMemorySpaces() {
@@ -1049,7 +1179,14 @@ export class RecallantDb {
       `,
       [context.developerId]
     );
-    return result.rows;
+    return result.rows.map((row) => ({
+      ...row,
+      sources: Array.isArray(row.sources)
+        ? row.sources.map((source: unknown) =>
+            this.enrichProjectSource(source as Record<string, unknown>)
+          )
+        : []
+    }));
   }
 
   async getProjectBinding(projectId: string) {
@@ -2184,6 +2321,7 @@ export class RecallantDb {
 
   async listAgentMemories(input: ListAgentMemoriesInput) {
     const context = await this.ensureProject();
+    const sourceFilter = await this.sourceFilter(input.source_id);
     if (input.view === "duplicates") {
       const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
       const clauses = [
@@ -2300,63 +2438,85 @@ export class RecallantDb {
     }
 
     const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
-    const clauses = ["developer_id = $2::uuid"];
+    const clauses = ["m.developer_id = $2::uuid"];
     if (input.view === "all") clauses.push("$1::uuid IS NOT NULL");
-    if (input.view !== "all") clauses.push("(project_id = $1::uuid OR scope = 'developer')");
+    if (input.view !== "all") clauses.push("(m.project_id = $1::uuid OR m.scope = 'developer')");
     if (input.view === "inbox") {
       clauses.push(
         `(
-          status IN ('candidate', 'needs_review')
-          OR metadata->>'policy_reason' LIKE '%high_risk%'
-          OR metadata::text ILIKE '%possible_duplicate%'
-          OR metadata::text ILIKE '%possible_conflict%'
-          OR metadata::text ILIKE '%recommended_action%'
-          OR metadata::text ILIKE '%review_candidate_action%'
-          OR metadata::text ILIKE '%scope_change%'
-          OR metadata::text ILIKE '%long_term%'
+          m.status IN ('candidate', 'needs_review')
+          OR m.metadata->>'policy_reason' LIKE '%high_risk%'
+          OR m.metadata::text ILIKE '%possible_duplicate%'
+          OR m.metadata::text ILIKE '%possible_conflict%'
+          OR m.metadata::text ILIKE '%recommended_action%'
+          OR m.metadata::text ILIKE '%review_candidate_action%'
+          OR m.metadata::text ILIKE '%scope_change%'
+          OR m.metadata::text ILIKE '%long_term%'
         )`
       );
     } else if (input.view === "rules") {
-      clauses.push("status = 'accepted' AND use_policy = 'instruction_grade'");
+      clauses.push("m.status = 'accepted' AND m.use_policy = 'instruction_grade'");
     } else if (input.view === "candidates") {
-      clauses.push("status IN ('candidate', 'needs_review')");
+      clauses.push("m.status IN ('candidate', 'needs_review')");
     } else if (input.status) {
       values.push(input.status);
-      clauses.push(`status = $${values.length}`);
+      clauses.push(`m.status = $${values.length}`);
     }
     if (input.use_policy) {
       values.push(input.use_policy);
-      clauses.push(`use_policy = $${values.length}`);
+      clauses.push(`m.use_policy = $${values.length}`);
     }
     if (input.scope) {
       values.push(input.scope);
-      clauses.push(`scope = $${values.length}`);
+      clauses.push(`m.scope = $${values.length}`);
     }
     if (input.scope_kind) {
       values.push(input.scope_kind);
-      clauses.push(`scope_kind = $${values.length}`);
+      clauses.push(`m.scope_kind = $${values.length}`);
     }
     if (input.memory_type) {
       values.push(input.memory_type);
-      clauses.push(`memory_type = $${values.length}`);
+      clauses.push(`m.memory_type = $${values.length}`);
     }
     if (input.memory_domain) {
       values.push(input.memory_domain);
-      clauses.push(`memory_domain = $${values.length}`);
+      clauses.push(`m.memory_domain = $${values.length}`);
     }
+    this.addSourceFilterClause(clauses, values, sourceFilter, "m");
     values.push(input.limit ?? 50);
     const result = await this.pool.query(
       `
-        SELECT id AS memory_id, memory_domain, memory_type, title, body, status, use_policy, scope, scope_kind,
-               scope_id, audience, confidence, created_by, metadata, updated_at
-        FROM agent_memories
+        SELECT
+          m.id AS memory_id,
+          m.memory_domain,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.audience,
+          m.confidence,
+          m.created_by,
+          m.metadata,
+          m.updated_at,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
         WHERE ${clauses.join(" AND ")}
-        ORDER BY updated_at DESC
+        GROUP BY m.id
+        ORDER BY m.updated_at DESC
         LIMIT $${values.length}::int
       `,
       values
     );
-    return { memories: result.rows };
+    return { memories: result.rows.map((row) => this.withSourceProvenance(row)) };
   }
 
   async getAgentMemory(memoryId: string) {
@@ -2888,6 +3048,7 @@ export class RecallantDb {
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
+    source_id?: string | null;
     rule_scope?: string | null;
     rule_scope_kind?: string | null;
     rule_memory_type?: string | null;
@@ -2969,7 +3130,7 @@ export class RecallantDb {
         for (const source of sourceRows.rows) {
           const key = String(source.project_id);
           const rows = sourcesByProject.get(key) ?? [];
-          rows.push(source);
+          rows.push(this.enrichProjectSource(source));
           sourcesByProject.set(key, rows);
         }
       } catch (error) {
@@ -2982,6 +3143,12 @@ export class RecallantDb {
     }));
     const currentProject =
       projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
+    const currentSources = Array.isArray(currentProject?.sources)
+      ? (currentProject.sources as Array<Record<string, unknown>>)
+      : [];
+    const selectedSourceId = input?.source_id && input.source_id !== "all" ? input.source_id : null;
+    const sourceFilter = await this.sourceFilter(selectedSourceId);
+    const effectiveSourceId = sourceFilter?.source_id ?? null;
     const ruleMemoryDomain =
       input?.rule_memory_domain === "all"
         ? undefined
@@ -2989,11 +3156,13 @@ export class RecallantDb {
     const inbox = await this.listAgentMemories({
       view: "inbox",
       project_id: dashboardProjectId,
+      source_id: effectiveSourceId,
       limit: 25
     });
     const rules = await this.listAgentMemories({
       view: "rules",
       project_id: dashboardProjectId,
+      source_id: effectiveSourceId,
       scope: input?.rule_scope && input.rule_scope !== "all" ? input.rule_scope : undefined,
       scope_kind:
         input?.rule_scope_kind && input.rule_scope_kind !== "all"
@@ -3006,19 +3175,44 @@ export class RecallantDb {
       memory_domain: ruleMemoryDomain,
       limit: 25
     });
+    const sourceClauses: string[] = [];
+    const sourceValues: unknown[] = [context.developerId, dashboardProjectId];
+    this.addSourceFilterClause(sourceClauses, sourceValues, sourceFilter, "m");
+    const sourceWhere = sourceClauses.length > 0 ? `AND ${sourceClauses.join(" AND ")}` : "";
     const importCandidates = await this.pool.query(
       `
-        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
-               scope_id, audience, confidence, created_by, metadata, updated_at
-        FROM agent_memories
-        WHERE developer_id = $1
-          AND (project_id = $2 OR scope = 'developer')
-          AND created_by = 'import'
-          AND status IN ('candidate', 'needs_review')
-        ORDER BY updated_at DESC
+        SELECT
+          m.id AS memory_id,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.audience,
+          m.confidence,
+          m.created_by,
+          m.metadata,
+          m.updated_at,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE m.developer_id = $1
+          AND (m.project_id = $2 OR m.scope = 'developer')
+          AND m.created_by = 'import'
+          AND m.status IN ('candidate', 'needs_review')
+          ${sourceWhere}
+        GROUP BY m.id
+        ORDER BY m.updated_at DESC
         LIMIT 25
       `,
-      [context.developerId, dashboardProjectId]
+      sourceValues
     );
     const duplicateConflicts = await this.pool.query(
       `
@@ -3286,7 +3480,7 @@ export class RecallantDb {
       projects: projects.rows,
       critical: critical.rows[0],
       inbox: inbox.memories,
-      import_candidates: importCandidates.rows,
+      import_candidates: importCandidates.rows.map((row) => this.withSourceProvenance(row)),
       duplicate_conflicts: duplicateConflicts.rows,
       selected_detail: selectedDetail,
       available_review_actions: [
@@ -3306,7 +3500,16 @@ export class RecallantDb {
         scope: input?.rule_scope ?? "all",
         scope_kind: input?.rule_scope_kind ?? "all",
         memory_type: input?.rule_memory_type ?? "all",
-        memory_domain: ruleMemoryDomain ?? "all"
+        memory_domain: ruleMemoryDomain ?? "all",
+        source_id: effectiveSourceId ?? "all"
+      },
+      source_filters: {
+        selected_source_id: effectiveSourceId ?? "all",
+        selected_source:
+          currentSources.find(
+            (source) => String(source.source_id ?? source.id) === String(effectiveSourceId ?? "")
+          ) ?? null,
+        sources: currentSources
       },
       costs: costs.rows,
       cost_summary: costSummary.rows[0],
