@@ -24,9 +24,9 @@ This is the current handoff for the next Recallant session. Start here after rea
   Quickstart, Self-hosting, Owner-server, and Public-readiness docs now describe the outside-user
   path separately from owner-server `/ai` operations, and `npm run public-readiness:smoke` guards
   the packaging contract. The neutral `managed-server` install profile now uses generic Linux paths
-  while `owner-server` remains owner-host compatibility. README/Quickstart use the canonical
-  repository URL, and `docs/RELEASE.md` records the release/version policy. It is not a
-  public-release claim yet.
+  while `owner-server` remains owner-host compatibility. Production compose and backup scripts honor
+  the selected profile env/data paths. README/Quickstart use the canonical repository URL, and
+  `docs/RELEASE.md` records the release/version policy. It is not a public-release claim yet.
 
 ## Current State
 
@@ -135,6 +135,7 @@ exits before dependency checks, so previewing the install plan does not require 
 available.
 The installer also has a neutral `managed-server` profile with `/etc/recallant/recallant.env` and
 `/var/lib/recallant`; the current `owner-server` profile remains for the owner's `/ai` host.
+Production compose and backup wrappers now respect those selected profile paths.
 README/Quickstart now use `https://github.com/Mushkrot/Recallant.git`, and `docs/RELEASE.md`
 records the pre-release version policy plus the release-candidate gate.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact

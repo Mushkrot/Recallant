@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-ENV_FILE=/opt/secure-configs/recallant.env
-BACKUP_TARGET=/ai/recallant-data/backups
+ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}
+DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}
+BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing $ENV_FILE" >&2

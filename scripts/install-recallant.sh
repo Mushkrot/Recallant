@@ -195,11 +195,15 @@ npm run build
 
 PREFIX="$INSTALL_CLI_PREFIX" "$RECALLANT_HOME/scripts/install-recallant-cli.sh"
 
-./scripts/recallant-prod-compose.sh up -d postgres
-./scripts/recallant-prod-compose.sh exec -T postgres sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done'
-schema_ready="$(./scripts/recallant-prod-compose.sh exec -T postgres psql -tAc "SELECT to_regclass('public.projects') IS NOT NULL" -U recallant -d recallant_agent_work | tr -d '[:space:]')"
+prod_compose() {
+  RECALLANT_ENV_FILE="$ENV_FILE" RECALLANT_DATA_DIR="$DATA_DIR" ./scripts/recallant-prod-compose.sh "$@"
+}
+
+prod_compose up -d postgres
+prod_compose exec -T postgres sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done'
+schema_ready="$(prod_compose exec -T postgres psql -tAc "SELECT to_regclass('public.projects') IS NOT NULL" -U recallant -d recallant_agent_work | tr -d '[:space:]')"
 if [[ "$schema_ready" != "t" ]]; then
-  ./scripts/recallant-prod-compose.sh exec -T postgres psql -v ON_ERROR_STOP=1 -U recallant -d recallant_agent_work -f /migrations/0001_initial.sql
+  prod_compose exec -T postgres psql -v ON_ERROR_STOP=1 -U recallant -d recallant_agent_work -f /migrations/0001_initial.sql
 else
   echo "Recallant database schema already present"
 fi

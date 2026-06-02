@@ -449,6 +449,8 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - Added `--profile managed-server` as the neutral public managed Linux profile with
   `/etc/recallant/recallant.env` and `/var/lib/recallant`; `--profile owner-server` remains for the
   owner's `/ai` production host.
+- Production compose and backup wrappers now honor `RECALLANT_ENV_FILE` and `RECALLANT_DATA_DIR`,
+  so managed-server data and backup paths do not silently fall back to owner `/ai` paths.
 - README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
   clone commands.
 - Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning

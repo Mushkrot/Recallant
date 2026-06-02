@@ -179,6 +179,29 @@ assert(
   "docs/QUICKSTART.md still contains a placeholder repo URL"
 );
 
+const prodCompose = await read("scripts/recallant-prod-compose.sh");
+const prodComposeYaml = await read("docker-compose.production.yml");
+const backupScript = await read("scripts/recallant-production-backup.sh");
+mustInclude(
+  prodCompose,
+  [
+    "RECALLANT_ENV_FILE",
+    "RECALLANT_DATA_DIR",
+    'export RECALLANT_DATA_DIR="$DATA_DIR"'
+  ],
+  "scripts/recallant-prod-compose.sh"
+);
+mustInclude(
+  prodComposeYaml,
+  ["${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres"],
+  "docker-compose.production.yml"
+);
+mustInclude(
+  backupScript,
+  ["RECALLANT_ENV_FILE", "RECALLANT_DATA_DIR", "RECALLANT_BACKUP_TARGET"],
+  "scripts/recallant-production-backup.sh"
+);
+
 const ownerPlan = runInstallerDryRun(["--dry-run", "--profile", "owner-server"], {
   SUDO_USER: "recallant-smoke"
 });

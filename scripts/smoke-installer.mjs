@@ -6,6 +6,11 @@ import { join } from "node:path";
 
 const repoRoot = process.cwd();
 
+const installerSource = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
+const prodComposeSource = readFileSync(join(repoRoot, "scripts", "recallant-prod-compose.sh"), "utf8");
+const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
+const backupSource = readFileSync(join(repoRoot, "scripts", "recallant-production-backup.sh"), "utf8");
+
 function run(args, env = {}) {
   const result = spawnSync("/bin/bash", ["scripts/install-recallant.sh", ...args], {
     cwd: repoRoot,
@@ -27,9 +32,9 @@ function run(args, env = {}) {
 
 function staticDryRunPlan(args, env = {}) {
   assert(args.includes("--dry-run"), "Static installer smoke fallback only supports dry-run");
-  const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
   assert(
-    installer.indexOf('if [[ "$DRY_RUN" == "true" ]]') < installer.indexOf("need_command node"),
+    installerSource.indexOf('if [[ "$DRY_RUN" == "true" ]]') <
+      installerSource.indexOf("need_command node"),
     "Installer dry-run must happen before dependency checks"
   );
   const profile = args[args.indexOf("--profile") + 1] ?? "owner-server";
@@ -162,5 +167,26 @@ for (const marker of [
 assert(!(await exists(singleEnv)), "Single-user installer dry-run created env file");
 assert(!(await exists(singleData)), "Single-user installer dry-run created data dir");
 assert(!(await exists(singlePrefix)), "Single-user installer dry-run created CLI prefix");
+
+assert(
+  installerSource.includes('RECALLANT_ENV_FILE="$ENV_FILE" RECALLANT_DATA_DIR="$DATA_DIR"'),
+  "Installer must pass the selected env/data paths into production compose"
+);
+assert(
+  prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}') &&
+    prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
+    prodComposeSource.includes('export RECALLANT_DATA_DIR="$DATA_DIR"'),
+  "Production compose wrapper must honor RECALLANT_ENV_FILE and RECALLANT_DATA_DIR"
+);
+assert(
+  prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres"),
+  "Production compose volume must use RECALLANT_DATA_DIR instead of a hard-coded data path"
+);
+assert(
+  backupSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}') &&
+    backupSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
+    backupSource.includes('BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}'),
+  "Production backup script must honor profile env/data paths"
+);
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

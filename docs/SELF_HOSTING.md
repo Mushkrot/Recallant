@@ -76,6 +76,10 @@ Confirmed install:
 - applies the initial schema when needed;
 - starts `recallant.service` when the profile uses systemd.
 
+The selected profile paths are passed through the production compose wrapper and backup script.
+`managed-server` therefore uses `/var/lib/recallant/postgres` for Postgres data and
+`/var/lib/recallant/backups` for default backups unless overridden.
+
 ## Rollback And Recovery
 
 The installer should be treated as reversible operational setup:

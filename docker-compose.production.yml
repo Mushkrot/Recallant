@@ -10,7 +10,7 @@ services:
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
-      - /ai/recallant-data/postgres:/var/lib/postgresql/data
+      - ${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres:/var/lib/postgresql/data
       - ./packages/db/migrations:/migrations:ro
     healthcheck:
       test:

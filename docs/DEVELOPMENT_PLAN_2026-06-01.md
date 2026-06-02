@@ -466,6 +466,9 @@ Acceptance:
   do not have to treat the owner's `/ai` layout as the default managed-server
   install. The existing `owner-server` profile remains available for the current
   owner host and compatibility.
+- Done: production compose and backup scripts now honor `RECALLANT_ENV_FILE` and
+  `RECALLANT_DATA_DIR`, so `managed-server` data paths are not silently routed
+  back to owner `/ai` paths.
 - Done: README and Quickstart now use the canonical HTTPS repository URL
   `https://github.com/Mushkrot/Recallant.git` instead of placeholder clone
   commands.
