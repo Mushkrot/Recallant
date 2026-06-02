@@ -19,8 +19,9 @@ type McpServerConfig = {
 export type ClientTargetConfig = {
   target: ClientKind;
   config_file: string;
-  format: "codex_mcp_json" | "generic_mcp_json";
+  format: "codex_mcp_json" | "claude_code_mcp_json" | "generic_mcp_json";
   client_specific: boolean;
+  merge_mcp_servers: boolean;
   setup_hint: string;
   mcp_config: McpServerConfig;
 };
@@ -72,7 +73,20 @@ export function clientTargetConfig(
       config_file: ".recallant/codex-mcp.json",
       format: "codex_mcp_json",
       client_specific: true,
+      merge_mcp_servers: false,
       setup_hint: "Use this generated Codex MCP config for Recallant-backed sessions.",
+      mcp_config
+    };
+  }
+  if (target === "claude_code") {
+    return {
+      target,
+      config_file: ".mcp.json",
+      format: "claude_code_mcp_json",
+      client_specific: true,
+      merge_mcp_servers: true,
+      setup_hint:
+        "Claude Code can read this project-local .mcp.json. Recallant merges its server entry without removing existing MCP servers.",
       mcp_config
     };
   }
@@ -81,6 +95,7 @@ export function clientTargetConfig(
     config_file: ".recallant/generic-mcp.json",
     format: "generic_mcp_json",
     client_specific: target === "generic",
+    merge_mcp_servers: false,
     setup_hint:
       target === "generic"
         ? "Use this generic MCP stdio config with any client that supports custom MCP servers."

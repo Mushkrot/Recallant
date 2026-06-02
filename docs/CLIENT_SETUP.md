@@ -83,20 +83,18 @@ Official reference:
 
 - [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp)
 
-Use the generic target:
+Use the dedicated project-local target:
 
 ```bash
-recallant attach . --target generic
+recallant connect claude-code --project-dir .
 ```
 
-From the project root, register Recallant as a local stdio server:
+Recallant writes or merges `.mcp.json` in the project root. It preserves existing MCP servers,
+adds only `mcpServers.recallant`, and creates a local backup before changing an existing file.
+Preview the exact change first:
 
 ```bash
-claude mcp add --transport stdio \
-  --env RECALLANT_PROJECT_ID=<project-id> \
-  --env RECALLANT_DEVELOPER_ID=<developer-id> \
-  --env 'RECALLANT_DATABASE_URL=${RECALLANT_DATABASE_URL}' \
-  recallant -- recallant mcp-server
+recallant connect claude-code --project-dir . --dry-run
 ```
 
 Then verify in Claude Code with:

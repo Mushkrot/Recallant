@@ -269,10 +269,15 @@ Acceptance:
   nothing.
 - Done: Codex connect is idempotent after attach because attach still creates
   `.recallant/codex-mcp.json` for compatibility.
-- Done: non-Codex clients use the generic MCP fallback until dedicated writers
-  are implemented.
+- Done: Claude Code now has a dedicated project-local `.mcp.json` writer. It
+  merges only the `mcpServers.recallant` entry, preserves existing MCP servers,
+  creates a local backup when changing an existing file, supports dry-run, and
+  is idempotent.
+- Done: other non-Codex clients still use the generic MCP fallback until
+  dedicated writers are implemented.
 - Done: `npm run connect:smoke` verifies sandbox attach, Codex dry-run/
-  idempotency, actual connect, and Claude Code/generic fallback dry-run.
+  idempotency, actual connect, Claude Code `.mcp.json` merge/backup/idempotency,
+  and generic fallback dry-run.
 - Done: `recallant doctor --require-capture` now fails with exit code 2 when
   the selected project is only registered or capture is partial, and passes only
   when Recallant sees context read, memory write, and checkpoint evidence from

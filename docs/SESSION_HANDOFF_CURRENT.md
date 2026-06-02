@@ -557,9 +557,14 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - `connect --dry-run` reports exact planned file changes and writes nothing.
 - Codex connect is idempotent after attach because attach still creates `.recallant/codex-mcp.json`
   for compatibility.
-- Non-Codex clients currently use the generic MCP config fallback.
-- This slice does not write global client config or install hooks yet.
-- `npm run connect:smoke` and full `npm run smoke:core` passed.
+- Claude Code now has a dedicated project-local `.mcp.json` writer. It merges
+  `mcpServers.recallant` into existing local MCP config, preserves other servers, creates a local
+  backup when changing an existing file, supports dry-run, and is idempotent. Other non-Codex
+  clients still use the generic MCP fallback.
+- This slice does not write global client config. Project-local fail-soft hooks are available
+  through `--install-local-hooks`.
+- `npm run connect:smoke` and full `npm run smoke:core` passed for the first slice; the latest
+  connect smoke also verifies Claude Code `.mcp.json` merge/backup/idempotency.
 - Follow-up Stage 4 gate: `recallant doctor --require-capture` now reports
   `capture_readiness` and exits with status 2 until the project has context read, memory write, and
   checkpoint evidence. `connect:smoke` verifies failure before capture and success after

@@ -111,18 +111,61 @@ assert(
   `Second connect should report no_change: ${JSON.stringify(idempotent)}`
 );
 
+await writeFile(
+  `${projectDir}/.mcp.json`,
+  `${JSON.stringify(
+    {
+      mcpServers: {
+        existing_docs: {
+          command: "docs-helper",
+          args: ["serve"]
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
+);
+
 const claudeDryRun = runCli(["connect", "claude-code", "--project-dir", projectDir, "--dry-run"]);
 assert(
   claudeDryRun.client === "claude_code",
   `Claude alias mismatch: ${JSON.stringify(claudeDryRun)}`
 );
 assert(
-  claudeDryRun.config_file === ".recallant/generic-mcp.json",
-  `Claude first slice should use generic config fallback: ${JSON.stringify(claudeDryRun)}`
+  claudeDryRun.config_file === ".mcp.json" &&
+    claudeDryRun.config_format === "claude_code_mcp_json" &&
+    claudeDryRun.client_specific === true &&
+    claudeDryRun.merge_mcp_servers === true,
+  `Claude connect should use project-local dedicated .mcp.json merge: ${JSON.stringify(claudeDryRun)}`
 );
 assert(
-  claudeDryRun.planned_changes.some((change) => change.action === "write_file"),
-  `Claude/generic dry-run should show config write: ${JSON.stringify(claudeDryRun)}`
+  claudeDryRun.planned_changes.some((change) => change.action === "backup_file") &&
+    claudeDryRun.planned_changes.some(
+      (change) => change.action === "merge_file" && change.path === ".mcp.json"
+    ) &&
+    claudeDryRun.writes_files === false,
+  `Claude dry-run should show local backup plus .mcp.json merge without writing: ${JSON.stringify(claudeDryRun)}`
+);
+
+const claudeConnected = runCli(["connect", "claude-code", "--project-dir", projectDir]);
+assert(
+  claudeConnected.writes_files === true &&
+    claudeConnected.planned_changes.some((change) => change.action === "backup_file") &&
+    claudeConnected.planned_changes.some((change) => change.action === "merge_file"),
+  `Claude connect should merge local .mcp.json with backup: ${JSON.stringify(claudeConnected)}`
+);
+const claudeConfig = JSON.parse(await readFile(`${projectDir}/.mcp.json`, "utf8"));
+assert(
+  claudeConfig.mcpServers?.existing_docs?.command === "docs-helper" &&
+    claudeConfig.mcpServers?.recallant?.args?.includes("mcp-server"),
+  `Claude .mcp.json merge did not preserve existing server and add Recallant: ${JSON.stringify(claudeConfig)}`
+);
+const claudeIdempotent = runCli(["connect", "claude-code", "--project-dir", projectDir]);
+assert(
+  claudeIdempotent.writes_files === false &&
+    claudeIdempotent.planned_changes.some((change) => change.action === "no_change"),
+  `Claude second connect should be idempotent: ${JSON.stringify(claudeIdempotent)}`
 );
 
 const hookDryRun = runCli([

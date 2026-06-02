@@ -373,12 +373,14 @@ Stage 4 first slice is now implemented:
   `connection_status=mcp_only`, `hook_status=not_installed`, and capture observation state.
 - `connect --dry-run` reports exact planned file changes and writes nothing.
 - `connect` is idempotent. For Codex, `attach` already creates `.recallant/codex-mcp.json` for
-  compatibility, so `connect codex` normally reports `no_change`; non-Codex clients use the generic
-  MCP fallback until dedicated global/client config writers are added.
-- The command does not write global client config or install hooks yet. That remains the next Stage
-  4 slice.
+  compatibility, so `connect codex` normally reports `no_change`. Claude Code now has a dedicated
+  project-local `.mcp.json` writer that merges only `mcpServers.recallant`, preserves existing MCP
+  servers, creates a local backup when changing an existing file, and stays idempotent. Other
+  non-Codex clients use the generic MCP fallback until dedicated writers are added.
+- The command does not write global client config. Project-local fail-soft hook kit installation is
+  available through `--install-local-hooks`.
 - `npm run connect:smoke` covers sandbox attach, Codex dry-run/idempotency, actual connect, and
-  Claude Code/generic fallback dry-run.
+  Claude Code `.mcp.json` merge/backup/idempotency plus generic fallback dry-run.
 - `recallant doctor --require-capture` now reports `capture_readiness` and exits with status 2
   when the project lacks proof of context read, memory write, and checkpoint. After agent-start,
   agent-event, and agent-checkpoint, the same gate passes and reports `capture_active`.

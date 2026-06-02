@@ -2662,6 +2662,38 @@ Client integrations can call:
   ];
 }
 
+function parseJsonObjectOrEmpty(text: string | null) {
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeMcpServers(
+  existingText: string | null,
+  desiredConfig: { mcpServers: Record<string, unknown> }
+) {
+  const existingObject = parseJsonObjectOrEmpty(existingText);
+  const existingServers =
+    existingObject.mcpServers &&
+    typeof existingObject.mcpServers === "object" &&
+    !Array.isArray(existingObject.mcpServers)
+      ? (existingObject.mcpServers as Record<string, unknown>)
+      : {};
+  return {
+    ...existingObject,
+    mcpServers: {
+      ...existingServers,
+      ...desiredConfig.mcpServers
+    }
+  };
+}
+
 async function runConnect(argv: readonly string[]) {
   const dir = projectDir(argv);
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
@@ -2678,8 +2710,11 @@ async function runConnect(argv: readonly string[]) {
   });
   const targetConfig = clientTargetConfig(target, config.project_id, developerId);
   const targetPath = join(dir, targetConfig.config_file);
-  const desired = `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`;
   const existing = await readOptional(targetPath);
+  const desiredConfig = targetConfig.merge_mcp_servers
+    ? mergeMcpServers(existing, targetConfig.mcp_config)
+    : targetConfig.mcp_config;
+  const desired = `${JSON.stringify(desiredConfig, null, 2)}\n`;
   const same = existing === desired;
   const hookFiles = installLocalHooks ? localHookKitFiles() : [];
   const hookFilePlans = [];
@@ -2708,7 +2743,10 @@ async function runConnect(argv: readonly string[]) {
     ? [{ action: "no_change", path: targetConfig.config_file }]
     : [
         ...(backupPath ? [{ action: "backup_file", path: backupPath }] : []),
-        { action: "write_file", path: targetConfig.config_file }
+        {
+          action: targetConfig.merge_mcp_servers ? "merge_file" : "write_file",
+          path: targetConfig.config_file
+        }
       ];
   const hookChanges = hookFilePlans.map((hookFile) =>
     hookFile.same
@@ -2757,6 +2795,9 @@ async function runConnect(argv: readonly string[]) {
         writes_global_config: false,
         planned_changes: [...plannedChanges, ...hookChanges],
         config_file: targetConfig.config_file,
+        config_format: targetConfig.format,
+        client_specific: targetConfig.client_specific,
+        merge_mcp_servers: targetConfig.merge_mcp_servers,
         setup_hint: targetConfig.setup_hint,
         hook_integration: {
           mode: installLocalHooks || localHookKitPresent ? "local_hook_kit" : "none",
@@ -2766,7 +2807,7 @@ async function runConnect(argv: readonly string[]) {
           timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
           project_dir_env: "RECALLANT_PROJECT_DIR"
         },
-        mcp_config: targetConfig.mcp_config
+        mcp_config: desiredConfig
       },
       null,
       2
