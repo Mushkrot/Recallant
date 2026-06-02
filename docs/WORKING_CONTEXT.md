@@ -1,8 +1,25 @@
 # Working context snapshot
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-02.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
+
+## Stage 1-5 progress snapshot
+
+- Stage 1 — Human Workbench UI: `~60%` complete. Ask-first workbench, primary Ask panel,
+  cleaner labels, and reduced right-column dominance are working, but final UI polish and some
+  operator readability details remain.
+- Stage 2 — AI-native Management Chat: `~60%` complete. Structured result types, safe action typing,
+  and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
+  scenario interpretation are still being expanded.
+- Stage 3 — Memory Spaces and Sources: `~40%` complete. The source-binding model and source API
+  are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
+  filtering are still partly open.
+- Stage 4 — Client Connect and Hook Capture: `~70%` complete. Connect separation, hook install
+  pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
+  are still active.
+- Stage 5 — Real Pilots and QA: `~65%` complete. Pilot automation for clean/copied/production-sensitive
+  dry-runs is in place, but more realistic non-fixture pilots and broader scenario reporting are pending.
 
 ## Current product intent
 

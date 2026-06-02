@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-02.
 
 This file records the current implementation checkpoint for Recallant so future sessions can resume from repository evidence rather than chat history.
 
@@ -57,10 +57,27 @@ Current implemented slices include:
   unless that path is the configured Recallant project path. The Phase 10 attach smoke now simulates
   this production-like env binding and fails if a new sandbox receives the host project id.
 - Phase 10 detach first slice: `recallant detach` and `recallant project-detach` provide governed
-  project cleanup with dry-run affected counts, confirmation-required writes, live hide-only detach,
-  sandbox hide plus active-chunk archiving, Review UI project-list hiding, active-search blocking
-  for detached projects, and hard-delete policy blocking that points sensitive/wrong memory to the
-  separate forget workflow.
+  project cleanup with dry-run affected counts, confirmation-required writes, and live hide-only
+  detach. Hidden-project safeguards include active-search blocking, detached-project list visibility
+  controls, and hard-delete policy routing to the separate forget workflow.
+
+### Stage completion snapshot (against Stage 1-5 roadmap)
+
+- Stage 1 — Human Workbench UI: ~60% completed. Working as an ask-first workbench with cleaner
+  labels and primary Ask panel is in place, but the final visual balance and non-technical operator
+  flow polish still need one more hardening iteration.
+- Stage 2 — AI-native Management Chat: ~60% completed. Core risk-typed responses, safe-action and
+  dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
+  for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
+- Stage 3 — Memory Spaces and Sources: ~40% completed. Logical memory space model and source binding
+  APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
+  source provenance UX, and full cross-view usage filtering are still incomplete.
+- Stage 4 — Client Connect and Hook Capture: ~70% completed. Separate connect lifecycle, MCP setup,
+  hook installation, and capture readiness gate are implemented, while full mandatory startup parity
+  and broader client/global installer hardening are still being refined.
+- Stage 5 — Real Pilots and QA: ~65% completed. Core pilot automation exists (clean and copied
+  sandbox, production-sensitive dry-run), but the plan still requires more realistic scenario batches and
+  deeper cross-project recall/restore report coverage.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
   `memory_cross_project_recall` with explicit modes for same-project, developer rules, environment,
   similar projects, and all-project review. Similar-project results are source-linked examples with

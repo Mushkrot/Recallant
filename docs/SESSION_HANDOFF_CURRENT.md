@@ -1,8 +1,24 @@
 # Current Session Handoff
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-02.
 
 This is the current handoff for the next Recallant session. Start here after reading `AGENTS.md`.
+
+## Current stage completion snapshot
+
+- Stage 1 — Human Workbench UI: `~60%` complete. Ask-first workbench and capture-state visibility
+  are implemented; final UX polish and reduced visual clutter are still ongoing.
+- Stage 2 — AI-native Management Chat: `~60%` complete. Core risk-typed results, safe
+  action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
+  deeper semantic routing are still in progress.
+- Stage 3 — Memory Spaces and Sources: `~40%` complete. Virtual spaces and source attach/detach
+  flows are implemented; full source-health depth and cross-view source filtering are pending.
+- Stage 4 — Client Connect and Hook Capture: `~70%` complete. Connect lifecycle, MCP status, hook
+  install, and capture readiness checks are active; full mandatory startup parity for all clients is
+  still being hardened.
+- Stage 5 — Real Pilots and QA: `~65%` complete. Pilot-report automation for clean, copied, and
+  production-sensitive dry-runs exists; next is more real-world project scenarios and richer outcome
+  review.
 
 ## Current State
 
