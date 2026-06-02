@@ -1910,11 +1910,16 @@ function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
   </div>`;
 }
 
-function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState) {
+function renderManagementChat(
+  data: ReviewDashboardData,
+  chat?: ChatRenderState,
+  view: WorkbenchView = "ask"
+) {
   const selectedMemory = asRecord(asRecord(data.selected_detail).memory);
   const selectedMemoryId = selectedMemory.id;
   return `<form class="chat-form" method="post" action="/management-chat#ask-recallant">
     <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+    <input type="hidden" name="view" value="${escapeHtml(view === "all" ? "ask" : view)}" />
     ${
       selectedMemoryId
         ? `<input type="hidden" name="memory_id" value="${escapeHtml(selectedMemoryId)}" />`
@@ -2034,6 +2039,64 @@ function resultTypeLabel(
   return labels[resultType];
 }
 
+type WorkbenchView =
+  | "all"
+  | "ask"
+  | "memory"
+  | "command"
+  | "sources"
+  | "activity"
+  | "review"
+  | "settings";
+
+function normalizeWorkbenchView(value: unknown): WorkbenchView {
+  const view = String(value ?? "all").toLowerCase();
+  const allowed: WorkbenchView[] = [
+    "all",
+    "ask",
+    "memory",
+    "command",
+    "sources",
+    "activity",
+    "review",
+    "settings"
+  ];
+  return allowed.includes(view as WorkbenchView) ? (view as WorkbenchView) : "all";
+}
+
+function showWorkbenchView(activeView: WorkbenchView, target: Exclude<WorkbenchView, "all">) {
+  return activeView === "all" || activeView === target;
+}
+
+function workbenchViewHref(data: ReviewDashboardData, view: WorkbenchView) {
+  return view === "all"
+    ? reviewPath(data.current_project_id)
+    : reviewPathWithParams(data.current_project_id, { view });
+}
+
+function renderWorkbenchNav(data: ReviewDashboardData, activeView: WorkbenchView) {
+  const items: Array<{ view: WorkbenchView; label: string }> = [
+    { view: "all", label: "All" },
+    { view: "ask", label: "Ask Recallant" },
+    { view: "memory", label: "Memory Spaces" },
+    { view: "command", label: "Command Center" },
+    { view: "sources", label: "Sources" },
+    { view: "activity", label: "Activity / Replay" },
+    { view: "review", label: "Review" },
+    { view: "settings", label: "Settings" }
+  ];
+  return `<nav class="workbench-nav" aria-label="Workbench sections">
+    ${items
+      .map(
+        (item) =>
+          `<a class="${item.view === activeView ? "active" : ""}" href="${escapeHtml(
+            workbenchViewHref(data, item.view)
+          )}">${escapeHtml(item.label)}</a>`
+      )
+      .join("")}
+  </nav>`;
+}
+
 function renderDashboard(
   data: ReviewDashboardData,
   state?: {
@@ -2042,6 +2105,7 @@ function renderDashboard(
     memoryForget?: MemoryForgetRenderState;
     setting?: SettingRenderState;
     source?: SourceRenderState;
+    view?: WorkbenchView;
   }
 ) {
   const chat = state?.chat;
@@ -2049,6 +2113,17 @@ function renderDashboard(
   const memoryForget = state?.memoryForget;
   const setting = state?.setting;
   const source = state?.source;
+  const activeView = normalizeWorkbenchView(state?.view);
+  const showAsk = showWorkbenchView(activeView, "ask");
+  const showMemory = showWorkbenchView(activeView, "memory");
+  const showCommand = showWorkbenchView(activeView, "command");
+  const showSources = showWorkbenchView(activeView, "sources");
+  const showActivity = showWorkbenchView(activeView, "activity");
+  const showReview = showWorkbenchView(activeView, "review");
+  const showSettings = showWorkbenchView(activeView, "settings");
+  const showBody =
+    showMemory || showCommand || showSources || showActivity || showReview || showSettings;
+  const focused = activeView !== "all";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2068,8 +2143,11 @@ function renderDashboard(
     .panel { background: #fff; border: 1px solid #d7dedb; border-radius: 8px; padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.04); }
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
     .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
+    .workbench-nav a.active { border-color: #20242c; background: #20242c; color: #fff; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr); gap: 18px; align-items: start; }
     .workbench-body { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 22px; align-items: start; }
+    .workbench-body.focused { grid-template-columns: minmax(0, 1fr); }
+    .workbench-body.focused .workbench-main { max-width: 1180px; width: 100%; justify-self: center; }
     .workbench-main { display: grid; gap: 16px; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
@@ -2282,15 +2360,7 @@ function renderDashboard(
   <header>
     <div>
       <h1>Recallant Workbench</h1>
-      <nav class="workbench-nav" aria-label="Workbench sections">
-        <a href="#ask-recallant">Ask Recallant</a>
-        <a href="#memory-spaces">Memory Spaces</a>
-        <a href="#command-center">Command Center</a>
-        <a href="#sources">Sources</a>
-        <a href="#activity-replay">Activity / Replay</a>
-        <a href="#review">Review</a>
-        <a href="#settings">Settings</a>
-      </nav>
+      ${renderWorkbenchNav(data, activeView)}
     </div>
     <div class="status">
       <span class="pill">Project ${escapeHtml(shortId(data.current_project_id))}</span>
@@ -2298,18 +2368,26 @@ function renderDashboard(
     </div>
   </header>
   <main>
-    <section class="panel ask-panel" id="ask-recallant">
+    ${
+      showAsk
+        ? `<section class="panel ask-panel" id="ask-recallant">
       <div class="ask-layout">
         <div class="ask-work">
           <span class="section-kicker">AI control surface</span>
           <h2>Ask Recallant</h2>
-          ${renderManagementChat(data, chat)}
+          ${renderManagementChat(data, chat, activeView)}
         </div>
         ${renderCurrentMemoryProfile(data)}
       </div>
-    </section>
-    <section class="workbench-body" aria-label="Recallant workspace">
-      <aside class="left-rail">
+    </section>`
+        : ""
+    }
+    ${
+      showBody
+        ? `<section class="workbench-body ${focused ? "focused" : ""}" aria-label="Recallant workspace">
+      ${
+        showMemory
+          ? `<aside class="left-rail">
         <section class="panel" id="memory-spaces">
           <h2>Memory Spaces</h2>
           ${renderMemorySpaces(data)}
@@ -2318,9 +2396,13 @@ function renderDashboard(
           <h2>Project Actions</h2>
           ${renderProjectActions(data)}
         </section>
-      </aside>
+      </aside>`
+          : ""
+      }
       <section class="workbench-main">
-        <section class="panel" id="command-center">
+        ${
+          showCommand
+            ? `<section class="panel" id="command-center">
           <h2>Command Center</h2>
           ${renderCurrentSignals(data)}
           <div class="command-grid">
@@ -2333,17 +2415,29 @@ function renderDashboard(
               ${renderReadiness(data)}
             </div>
           </div>
-        </section>
-        ${renderSourceWorkbench(data, source)}
-        <section class="panel" id="activity-replay">
+        </section>`
+            : ""
+        }
+        ${showSources ? renderSourceWorkbench(data, source) : ""}
+        ${
+          showActivity
+            ? `<section class="panel" id="activity-replay">
           <h2>Activity / Replay</h2>
           ${renderActivityReplay(data)}
-        </section>
-        <section class="panel" id="review">
+        </section>`
+            : ""
+        }
+        ${
+          showReview
+            ? `<section class="panel" id="review">
           <h2>Review</h2>
           ${renderReviewWorkspace(data)}
-        </section>
-        <section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
+        </section>`
+            : ""
+        }
+        ${
+          showSettings
+            ? `<section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
           <div class="section-head">
             <div>
               <span class="section-kicker">Governed operations</span>
@@ -2352,26 +2446,30 @@ function renderDashboard(
             <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
           </div>
           <div class="operation-panels">
-            <details class="operation-panel">
+            <details class="operation-panel"${focused ? " open" : ""}>
               <summary><span>Selected Detail</span></summary>
               ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
             </details>
-            <details class="operation-panel">
+            <details class="operation-panel"${focused ? " open" : ""}>
               <summary><span>Cost / Paid API</span></summary>
               ${renderCosts(data)}
             </details>
-            <details class="operation-panel">
+            <details class="operation-panel"${focused ? " open" : ""}>
               <summary><span>Cleanup / Forget</span></summary>
               ${renderCleanup(data, detach)}
             </details>
-            <details class="operation-panel" id="settings">
+            <details class="operation-panel" id="settings"${focused ? " open" : ""}>
               <summary><span>Settings</span></summary>
               ${renderSettings(data, setting)}
             </details>
           </div>
-        </section>
+        </section>`
+            : ""
+        }
       </section>
-    </section>
+    </section>`
+        : ""
+    }
   </main>
 </body>
 </html>`;
@@ -2410,12 +2508,14 @@ export function createRecallantHttpServer() {
       rule_memory_type: requestUrl.searchParams.get("rule_type"),
       rule_memory_domain: requestUrl.searchParams.get("rule_domain")
     };
+    const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
     if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
       write(
         response,
         200,
         renderDashboard(
-          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput))
+          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
+          { view: workbenchView }
         ),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -2474,7 +2574,10 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        renderDashboard(chatDashboard, { chat: { question, response: result } }),
+        renderDashboard(chatDashboard, {
+          chat: { question, response: result },
+          view: normalizeWorkbenchView(body.view)
+        }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
@@ -2546,7 +2649,8 @@ export function createRecallantHttpServer() {
             result: result as Record<string, unknown>,
             target: { kind: targetKind, id: targetId },
             reason: optionalInput(body.reason)
-          }
+          },
+          view: "settings"
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -2599,7 +2703,7 @@ export function createRecallantHttpServer() {
       write(
         response,
         200,
-        renderDashboard(detachDashboard, { detach: { result } }),
+        renderDashboard(detachDashboard, { detach: { result }, view: "settings" }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );
@@ -2643,7 +2747,8 @@ export function createRecallantHttpServer() {
             key,
             rawValue,
             reason: optionalInput(body.reason)
-          }
+          },
+          view: "settings"
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -2695,7 +2800,8 @@ export function createRecallantHttpServer() {
         response,
         200,
         renderDashboard(sourceDashboard, {
-          source: { action: "attach_source", result: result as Record<string, unknown> }
+          source: { action: "attach_source", result: result as Record<string, unknown> },
+          view: "sources"
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -2724,7 +2830,8 @@ export function createRecallantHttpServer() {
         response,
         200,
         renderDashboard(sourceDashboard, {
-          source: { action: "detach_source", result: result as Record<string, unknown> }
+          source: { action: "detach_source", result: result as Record<string, unknown> },
+          view: "sources"
         }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}

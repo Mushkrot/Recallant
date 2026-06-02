@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~69%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~71%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~66%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -55,6 +55,10 @@ sources, sources that need setup, and sources that need attention. The Review UI
 smokes cover ready local sources, planned connectors, and missing paths.
 Primary workspace sources use short human-visible labels such as "Primary workspace folder"; exact
 paths, ids, and raw source values remain available in source cards and Technical details.
+Workbench navigation now supports focused work surfaces with
+`?view=ask|memory|command|sources|activity|review|settings` plus the default full `All` view. Ask,
+Source, and Settings actions stay on the relevant focused surface instead of dropping the owner back
+into the long overview.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,

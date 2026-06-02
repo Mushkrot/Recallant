@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~69% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~71% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~66% completed. Core risk-typed responses, safe-action and
@@ -145,6 +145,9 @@ Current implemented slices include:
 - Primary workspace sources now show a short human title on the visible Workbench layer instead of
   generated project/source labels; exact paths and ids remain available in the source card and
   Technical details.
+- Workbench navigation now supports focused views with `?view=ask|memory|command|sources|activity|review|settings`
+  plus the default full `All` view. Focused views reduce the long single-page dashboard effect and
+  keep Ask/Source/Settings actions on the relevant work surface after form submissions.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.

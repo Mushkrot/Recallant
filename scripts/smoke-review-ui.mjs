@@ -455,6 +455,38 @@ try {
       `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; ${htmlText.slice(0, 500)}`
     );
   }
+
+  const askView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const askViewText = await askView.text();
+  if (
+    askView.status !== 200 ||
+    !askViewText.includes('class="active" href="/review?project_id=') ||
+    !askViewText.includes("Ask Recallant") ||
+    !askViewText.includes('id="ask-recallant"') ||
+    askViewText.includes("Source Map") ||
+    askViewText.includes('id="command-center"')
+  ) {
+    throw new Error(`Ask focused view failed: ${askView.status}; ${askViewText.slice(0, 500)}`);
+  }
+
+  const sourcesView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=sources`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const sourcesViewText = await sourcesView.text();
+  if (
+    sourcesView.status !== 200 ||
+    !sourcesViewText.includes("Source Map") ||
+    !sourcesViewText.includes("Sources for selected space") ||
+    !sourcesViewText.includes("workbench-body focused") ||
+    sourcesViewText.includes('id="ask-recallant"') ||
+    sourcesViewText.includes("What Needs Attention")
+  ) {
+    throw new Error(
+      `Sources focused view failed: ${sourcesView.status}; ${sourcesViewText.slice(0, 500)}`
+    );
+  }
   const requiredLayoutContracts = [
     "main { display: grid; grid-template-columns: minmax(0, 1fr)",
     ".workbench-body { display: grid",
