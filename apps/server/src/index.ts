@@ -290,6 +290,14 @@ function shortId(value: unknown) {
   return String(value ?? "").slice(0, 8);
 }
 
+function publicScreenshotMode() {
+  return process.env.RECALLANT_PUBLIC_SCREENSHOT_MODE === "true";
+}
+
+function publicProjectBadge() {
+  return publicScreenshotMode() ? "Demo memory space" : "";
+}
+
 function formatDate(value: unknown) {
   if (!value) return "";
   const date = new Date(String(value));
@@ -448,15 +456,13 @@ function settingSummary(row: Record<string, unknown>) {
   const value = parseSettingValue(row.value);
   const record = asRecord(value);
   if (key === "embedding_route") {
-    const provider = record.provider ? String(record.provider) : "local provider";
-    const model = record.model ? String(record.model) : "configured model";
-    const dims = record.dims ? `, ${String(record.dims)} dims` : "";
-    return `Uses ${model} through ${provider}${dims}.`;
+    const dims = record.dims ? ` Vector size: ${String(record.dims)}.` : "";
+    return `Semantic search is configured locally.${dims}`;
   }
   if (key === "paid_api_mode") {
     if (value === "confirm_each") return "Paid model calls require explicit confirmation.";
     if (value === "disabled") return "Paid model calls are disabled.";
-    return `Paid API policy: ${formatDisplayValue(value)}.`;
+    return "Paid model use has a custom approval policy. Technical details show the exact value.";
   }
   if (key === "capture_profile") {
     return `Future capture profile: ${formatDisplayValue(value) || "not set"}.`;
@@ -483,6 +489,15 @@ function sourcePath(row: Record<string, unknown>) {
   const metadata = asRecord(row.metadata);
   const sourcePathValue = metadata.source_path;
   return typeof sourcePathValue === "string" ? sourcePathValue : title || "Memory";
+}
+
+function publicSafeProvenanceSummary(summary: string) {
+  if (!publicScreenshotMode()) return summary;
+  if (/event\s+[0-9a-f]{6,}/i.test(summary)) return "Source evidence available.";
+  if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(summary)) {
+    return "Source evidence available.";
+  }
+  return summary;
 }
 
 function humanStatus(value: unknown) {
@@ -593,7 +608,7 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
       const provenance = asRecord(row.provenance);
       const provenanceSummary =
         typeof provenance.summary === "string" && provenance.summary.length > 0
-          ? provenance.summary
+          ? publicSafeProvenanceSummary(provenance.summary)
           : "";
       const title = isMemory
         ? sourcePath(row)
@@ -618,9 +633,9 @@ function renderRows(rows: Array<Record<string, unknown>>, emptyLabel: string, pr
         ${
           isMemory
             ? `${renderBadges([
-                ["Status", humanStatus(row.status)],
-                ["Use", humanPolicy(row.use_policy)],
-                ["Type", memoryKindLabel(row.memory_type)]
+                ["Decision", humanStatus(row.status)],
+                ["Agent use", humanPolicy(row.use_policy)],
+                ["Kind", memoryKindLabel(row.memory_type)]
               ])}
               <p>${escapeHtml(body)}</p>
               ${provenanceSummary ? `<p class="source-note">${escapeHtml(provenanceSummary)}</p>` : ""}
@@ -686,7 +701,7 @@ function renderReviewActions(
       <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
       <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
       <input type="hidden" name="action" value="supersede" />
-      <label>Superseded by memory id <input name="superseded_by" /></label>
+      <label>Replacement memory reference <input name="superseded_by" /></label>
       <label>Note <input name="note" value="Owner superseded memory from Review UI" /></label>
       <button type="submit">Mark superseded</button>
     </form>
@@ -694,7 +709,7 @@ function renderReviewActions(
       <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
       <input type="hidden" name="memory_id" value="${escapeHtml(memory.id)}" />
       <input type="hidden" name="action" value="merge" />
-      <label>Merge memory ids <input name="merge_memory_ids" placeholder="id1, id2" /></label>
+      <label>Other memory references <input name="merge_memory_ids" placeholder="memory reference 1, memory reference 2" /></label>
       <label>Note <input name="note" value="Owner merged duplicate memories from Review UI" /></label>
       <button type="submit">Merge duplicates into this memory</button>
     </form>
@@ -730,7 +745,7 @@ function renderMemoryForgetResult(
     <p>${escapeHtml(
       needsConfirmation
         ? "Review the affected Recallant records. Confirm only if this memory is sensitive, wrong, or must never be recalled again."
-        : "This is not ordinary cleanup. The receipt below contains only safe ids, counts, and status."
+        : "This is not ordinary cleanup. The receipt below contains only safe internal references, counts, and status."
     )}</p>
     <div class="summary-grid">
       <span><strong>${escapeHtml(affected.agent_memories ?? 0)}</strong> memories</span>
@@ -953,9 +968,9 @@ function renderDetail(
   return `<article class="detail">
     <h3>${escapeHtml(sourcePath(memory))}</h3>
     ${renderBadges([
-      ["Status", humanStatus(memory.status)],
-      ["Use", humanPolicy(memory.use_policy)],
-      ["Type", memoryKindLabel(memory.memory_type)]
+      ["Decision", humanStatus(memory.status)],
+      ["Agent use", humanPolicy(memory.use_policy)],
+      ["Kind", memoryKindLabel(memory.memory_type)]
     ])}
     <h4>What this is</h4>
     <p>${escapeHtml(currentEffect(memory))}</p>
@@ -963,10 +978,14 @@ function renderDetail(
     <p>${escapeHtml(riskSummary(memory))}</p>
     <h4>Recommended action</h4>
     <p>${escapeHtml(recommendedAction(memory))}</p>
-    <h4>Actions</h4>
-    <div class="actions">${renderReviewActions(memory, projectId, payload.source_refs?.length ?? 0)}${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
+    <h4>Normal review actions</h4>
+    <p class="action-note">Use these for ordinary review decisions: keep as Usable memory, reject, archive, edit, merge, or promote source-backed guidance into an Active rule.</p>
+    <div class="actions review-action-group">${renderReviewActions(memory, projectId, payload.source_refs?.length ?? 0)}</div>
     ${renderDuplicateResolution(memory, projectId, duplicateRows)}
     ${renderConflictResolution(memory, projectId, duplicateRows)}
+    <h4>Separate sensitive cleanup</h4>
+    <p class="action-note">Forget forever is separate from normal review. It is only for sensitive or wrong memory and still starts with a dry run.</p>
+    <div class="actions risky-action-group">${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -992,13 +1011,14 @@ function renderDetail(
       ])}
     </details>
     <details>
-      <summary>Available action keys</summary>
+      <summary>Technical action keys</summary>
       <div class="actions disabled">${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join("")}</div>
     </details>
   </article>`;
 }
 
 function projectDisplayName(row: Record<string, unknown>) {
+  if (publicScreenshotMode() && !row.name && !row.title) return "Demo memory space";
   return (
     row.title ??
     row.name ??
@@ -1036,6 +1056,7 @@ function sourceLabel(row: Record<string, unknown>) {
     return `${sourceKindLabel(primarySource.source_kind)}: ${sourceDisplayTitle(primarySource)}`;
   }
   const path = row.primary_path;
+  if (publicScreenshotMode() && path) return "Workspace folder attached";
   if (path) return `Workspace folder: ${String(path)}`;
   if (row.project_kind === "personal_domain") return "Virtual personal memory space";
   return "No attached source is recorded yet";
@@ -1134,6 +1155,39 @@ function sourceHealthCounts(sources: Array<Record<string, unknown>>) {
   return counts;
 }
 
+function sourceMapStatus(source: Record<string, unknown>) {
+  if (source.status === "detached") return "detached";
+  const status = sourceHealth(source).status;
+  if (status === "ready") return "ready";
+  if (status === "needs-setup") return "needs-setup";
+  if (status === "needs-attention") return "needs-attention";
+  return "ready";
+}
+
+function sourceMapStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ready: "Ready to cite",
+    "needs-setup": "Needs setup",
+    "needs-attention": "Needs attention",
+    detached: "Detached"
+  };
+  return labels[status] ?? "Source";
+}
+
+function sourceProvenanceNote(source: Record<string, unknown>) {
+  const status = sourceMapStatus(source);
+  if (status === "ready") {
+    return "Recallant can cite memory from this source with provenance.";
+  }
+  if (status === "needs-setup") {
+    return "Visible in the map, but setup is needed before agents should rely on it.";
+  }
+  if (status === "needs-attention") {
+    return "Recallant can keep the source record, but this source needs attention.";
+  }
+  return "Detached from active use. Memory remains in Recallant unless separately cleaned.";
+}
+
 function sourceFilterState(data: ReviewDashboardData) {
   const sourceFilters = asRecord(data.source_filters);
   const sources = asArray(sourceFilters.sources) as Array<Record<string, unknown>>;
@@ -1229,6 +1283,53 @@ function renderSourceResult(source?: SourceRenderState) {
   </article>`;
 }
 
+function renderSourceTree(data: ReviewDashboardData) {
+  const project = currentProject(data);
+  const sources = currentProjectSources(data);
+  const title = projectDisplayName(project) || data.current_project_id;
+  const rootNote = sources.length
+    ? "This memory space can cite attached sources without mixing them automatically."
+    : "This memory space has no attached sources yet.";
+  const groups = ["ready", "needs-setup", "needs-attention", "detached"].map((status) => ({
+    status,
+    label: sourceMapStatusLabel(status),
+    sources: sources.filter((source) => sourceMapStatus(source) === status)
+  }));
+  return `<div class="source-tree" aria-label="Memory Tree source map">
+    <article class="source-tree-root">
+      <span>Memory space</span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(rootNote)}</p>
+    </article>
+    <div class="source-tree-groups">
+      ${groups
+        .filter((group) => group.sources.length > 0)
+        .map(
+          (group) => `<section class="source-tree-group ${escapeHtml(group.status)}">
+            <h3>${escapeHtml(group.label)}</h3>
+            <div>
+              ${group.sources
+                .map((source) => {
+                  const sourceId = source.source_id ?? source.id;
+                  const sourceMemoryPath = reviewPathWithParams(data.current_project_id, {
+                    source_id: sourceId
+                  });
+                  return `<article class="source-tree-node">
+                    <strong>${escapeHtml(sourceDisplayTitle(source))}</strong>
+                    <span>${escapeHtml(sourceKindLabel(source.source_kind))}</span>
+                    <p>${escapeHtml(sourceProvenanceNote(source))}</p>
+                    <a href="${escapeHtml(sourceMemoryPath)}#sources">View source memory</a>
+                  </article>`;
+                })
+                .join("")}
+            </div>
+          </section>`
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
 function renderMemorySpaceForms(data: ReviewDashboardData) {
   return `<details class="memory-space-editor">
     <summary>Create a memory space</summary>
@@ -1289,7 +1390,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
             <strong>${escapeHtml(sourceDisplayTitle(source))}</strong>
             <span class="source-health ${escapeHtml(health.status)}">${escapeHtml(health.label)}</span>
             <span class="source-kind">${escapeHtml(sourceKindLabel(source.source_kind))}</span>
-            <p>${escapeHtml(source.uri ?? "No location recorded")}</p>
+            <p>${escapeHtml(sourceProvenanceNote(source))}</p>
             <p>${escapeHtml(health.reason)}</p>
             <p class="source-action">${escapeHtml(health.action)}</p>
             <div class="source-card-actions">
@@ -1312,6 +1413,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
               ["source_id", source.source_id ?? source.id],
               ["source_kind", source.source_kind],
               ["status", source.status],
+              ["location", source.uri],
               ["source_health", source.source_health],
               ["is_primary", source.is_primary],
               ["metadata", source.metadata]
@@ -1390,6 +1492,90 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
   </aside>`;
 }
 
+function attentionSnapshot(data: ReviewDashboardData) {
+  const pendingReview = criticalCount(data, "pending_review");
+  const conflicts = rowCount(data.duplicate_conflicts);
+  const interrupted = criticalCount(data, "interrupted_sessions");
+  const activeSessions = criticalCount(data, "active_sessions");
+  const paidApprovals = criticalCount(data, "pending_paid_approvals");
+  const unsyncedSpool = criticalCount(data, "unsynced_spool_records");
+  const highRiskConflicts = criticalCount(data, "high_risk_conflicts");
+  const urgent =
+    pendingReview +
+    conflicts +
+    interrupted +
+    activeSessions +
+    paidApprovals +
+    unsyncedSpool +
+    highRiskConflicts;
+  if (urgent === 0) {
+    return {
+      count: 0,
+      label: "Clear",
+      note: "No urgent owner decision is waiting.",
+      className: "ready"
+    };
+  }
+  const main =
+    highRiskConflicts > 0
+      ? "High-risk conflict"
+      : pendingReview > 0
+        ? "Review decision"
+        : conflicts > 0
+          ? "Possible conflict"
+          : activeSessions > 0
+            ? "Open session"
+            : interrupted > 0
+              ? "Interrupted session"
+              : unsyncedSpool > 0
+                ? "Unsynced capture"
+                : "Paid approval";
+  return {
+    count: urgent,
+    label: `${urgent} item${urgent === 1 ? "" : "s"}`,
+    note: main,
+    className: "needs-work"
+  };
+}
+
+function renderFirstScreenSnapshot(data: ReviewDashboardData) {
+  const project = currentProject(data);
+  const capture = captureState(project);
+  const sources = currentProjectSources(data);
+  const sourceCounts = sourceHealthCounts(sources);
+  const attention = attentionSnapshot(data);
+  const captureReady = capture.className === "active";
+  const sourceLabel =
+    sourceCounts.active === 0
+      ? "No sources"
+      : `${sourceCounts.ready} of ${sourceCounts.active} ready`;
+  const sourceNote =
+    sourceCounts.needsAttention > 0
+      ? `${sourceCounts.needsAttention} source${sourceCounts.needsAttention === 1 ? "" : "s"} need attention.`
+      : sourceCounts.needsSetup > 0
+        ? `${sourceCounts.needsSetup} source${sourceCounts.needsSetup === 1 ? "" : "s"} need setup.`
+        : sourceCounts.active > 0
+          ? "Sources are ready to cite."
+          : "Attach a source when this memory space needs evidence.";
+  return `<div class="first-screen-snapshot" aria-label="Workbench status snapshot">
+    <article class="${escapeHtml(attention.className)}">
+      <span>Needs attention</span>
+      <strong>${escapeHtml(attention.label)}</strong>
+      <p>${escapeHtml(attention.note)}</p>
+    </article>
+    <article class="${captureReady ? "ready" : "needs-work"}">
+      <span>Memory capture</span>
+      <strong>${escapeHtml(capture.label)}</strong>
+      <p>${escapeHtml(captureReady ? "Agents are recording memory." : "Capture proof is not complete yet.")}</p>
+    </article>
+    <article class="${sourceCounts.needsAttention > 0 || sourceCounts.needsSetup > 0 ? "needs-work" : "ready"}">
+      <span>Sources</span>
+      <strong>${escapeHtml(sourceLabel)}</strong>
+      <p>${escapeHtml(sourceNote)}</p>
+    </article>
+  </div>`;
+}
+
 function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
   const sources = currentProjectSources(data);
   const counts = sourceHealthCounts(sources);
@@ -1410,6 +1596,7 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
       <span><strong>${escapeHtml(counts.needsAttention)}</strong> need attention</span>
       <span><strong>${escapeHtml(filterState.selectedLabel)}</strong> selected source</span>
     </div>
+    ${renderSourceTree(data)}
     ${renderSourceFilterControl(data, "sources")}
     <div class="source-workspace-grid">
       <div>
@@ -1592,14 +1779,14 @@ function renderCosts(data: ReviewDashboardData) {
   const estimatedUsd = rows.reduce((sum, row) => sum + Number(row.estimated_usd ?? 0), 0);
   const callCount = rows.reduce((sum, row) => sum + Number(row.call_count ?? 0), 0);
   return `<div class="cost-summary">
-    <h3>Current day</h3>
+    <h3>Today</h3>
     <div class="summary-grid">
       <span><strong>${escapeHtml(summary.current_day_calls ?? 0)}</strong> calls</span>
       <span><strong>${escapeHtml(formatUsd(summary.current_day_actual_usd))}</strong> actual</span>
       <span><strong>${escapeHtml(formatUsd(summary.current_day_estimated_usd))}</strong> estimated</span>
       <span><strong>${escapeHtml(pendingApprovals.length)}</strong> pending approvals</span>
     </div>
-    <h3>Current month</h3>
+    <h3>This month</h3>
     <div class="summary-grid">
       <span><strong>${escapeHtml(summary.current_month_calls ?? callCount)}</strong> calls</span>
       <span><strong>${escapeHtml(formatUsd(summary.current_month_actual_usd ?? actualUsd))}</strong> actual</span>
@@ -1607,11 +1794,11 @@ function renderCosts(data: ReviewDashboardData) {
       <span><strong>${escapeHtml(formatUsd(summary.pending_approval_estimated_usd))}</strong> pending estimate</span>
     </div>
     <details>
-      <summary>Cost by project/provider/model/purpose</summary>
+      <summary>Technical cost breakdown</summary>
       ${renderRows(rows, "No model cost records in the last 30 days.")}
     </details>
     <details>
-      <summary>Pending paid API approvals</summary>
+      <summary>Pending paid model approvals</summary>
       ${renderRows(pendingApprovals, "No paid API approvals are pending.")}
     </details>
   </div>`;
@@ -1649,13 +1836,22 @@ function renderRuleFilters(data: ReviewDashboardData) {
         )}. Conflicts are still shown globally so high-risk issues are not hidden.</p>`
       : "";
   return `<div class="rule-filters" aria-label="Active rule filters">
-    <h3>Rule filters</h3>
-    <div><strong>Scope filter</strong> ${link("All", { scope: "all" })} ${link("Project", { scope: "project" })} ${link("Developer", { scope: "developer" })}</div>
-    <div><strong>Type filter</strong> ${link("All", { rule_type: "all" })} ${link("Procedure", { rule_type: "procedure" })} ${link("Constraint", { rule_type: "constraint" })} ${link("Decision", { rule_type: "decision" })}</div>
-    <div><strong>Source filter</strong> ${sourceLinks}</div>
+    <h3>Rule view</h3>
+    <div><strong>Applies to</strong> ${link("All", { scope: "all" })} ${link("This memory space", { scope: "project" })} ${link("All your projects", { scope: "developer" })}</div>
+    <div><strong>Kind</strong> ${link("All", { rule_type: "all" })} ${link("Process", { rule_type: "procedure" })} ${link("Limit", { rule_type: "constraint" })} ${link("Decision", { rule_type: "decision" })}</div>
+    <div><strong>From source</strong> ${sourceLinks}</div>
     ${selectedSourceNote}
-    <div><strong>Project filter</strong> <span>${escapeHtml(shortId(projectId))}</span></div>
-    <div><strong>Domain filter</strong> <span>${escapeHtml(current.rule_domain)}</span></div>
+    <details>
+      <summary>Technical filter values</summary>
+      ${renderMeta([
+        ["project_id", projectId],
+        ["scope", current.scope],
+        ["scope_kind", current.scope_kind],
+        ["memory_type", current.rule_type],
+        ["memory_domain", current.rule_domain],
+        ["source_id", current.source_id]
+      ])}
+    </details>
   </div>`;
 }
 
@@ -1801,6 +1997,7 @@ function renderReviewLane(
   emptyLabel: string,
   projectId: unknown,
   open = false,
+  note = "",
   extra = ""
 ) {
   return `<details class="review-lane"${open ? " open" : ""}>
@@ -1808,9 +2005,45 @@ function renderReviewLane(
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(rows.length)}</strong>
     </summary>
+    ${note ? `<p class="review-lane-note">${escapeHtml(note)}</p>` : ""}
     ${extra}
     ${renderRows(rows, emptyLabel, projectId)}
   </details>`;
+}
+
+function renderReviewDecisionGuide(
+  importCount: number,
+  inboxCount: number,
+  conflictCount: number,
+  ruleCount: number
+) {
+  const openCount = importCount + inboxCount + conflictCount;
+  const headline =
+    conflictCount > 0
+      ? "Start with possible conflicts."
+      : inboxCount > 0
+        ? "Start with memories that need your decision."
+        : importCount > 0
+          ? "Start with imported evidence."
+          : "No owner decision is waiting.";
+  const note =
+    openCount > 0
+      ? "Review items from top to bottom: conflicts first, then memories that need your decision, then imported evidence. Keep ordinary facts as Usable memory; promote only source-backed guidance into an Active rule."
+      : ruleCount > 0
+        ? "Active rules are already available. Use this area when new evidence needs review or when agents surface a conflict."
+        : "Recallant has no review work for this memory space right now.";
+  return `<section class="review-guide" aria-label="Review decision guide">
+    <div>
+      <span>Review decision guide</span>
+      <strong>${escapeHtml(headline)}</strong>
+      <p>${escapeHtml(note)}</p>
+    </div>
+    <ol>
+      <li>Resolve conflict states before routine review.</li>
+      <li>Keep useful facts as Usable memory.</li>
+      <li>Make only durable guidance an Active rule.</li>
+    </ol>
+  </section>`;
 }
 
 function renderReviewWorkspace(data: ReviewDashboardData) {
@@ -1821,60 +2054,69 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   const hasOpenDecision = importCount + inboxCount + conflictCount > 0;
   return `<div class="review-workspace">
     ${renderSourceFilterControl(data, "review")}
+    ${renderReviewDecisionGuide(importCount, inboxCount, conflictCount, ruleCount)}
     <div class="review-overview">
       ${renderReviewSummaryTile(
-        "Import candidates",
+        "Imported evidence",
         importCount,
         importCount > 0
-          ? "Imported evidence is waiting for review."
+          ? "Imported evidence is waiting for review before agents rely on it."
           : "No imported evidence needs review."
       )}
       ${renderReviewSummaryTile(
-        "Review inbox",
+        "Needs your decision",
         inboxCount,
-        inboxCount > 0 ? "Memory items need an owner decision." : "No memory item needs a decision."
+        inboxCount > 0
+          ? "Choose Usable memory, reject, archive, or review before making a rule."
+          : "No memory item needs a decision."
       )}
       ${renderReviewSummaryTile(
-        "Conflicts / duplicates",
+        "Possible conflicts",
         conflictCount,
-        conflictCount > 0 ? "Potential overlap should be resolved." : "No conflicts are visible."
+        conflictCount > 0
+          ? "Conflict states should be resolved before normal review."
+          : "No conflict states are visible."
       )}
       ${renderReviewSummaryTile(
         "Active rules",
         ruleCount,
         ruleCount > 0
-          ? "Reusable guidance is available."
+          ? "Reusable guidance is available to agents."
           : "No active rules match the current filters."
       )}
     </div>
     <div class="review-lanes">
       ${renderReviewLane(
-        "Import Candidates",
+        "Imported evidence",
         data.import_candidates,
-        "No imported candidates require review.",
+        "No imported evidence needs review.",
         data.current_project_id,
-        importCount > 0
+        importCount > 0,
+        "Imported material stays as evidence until you decide what is useful."
       )}
       ${renderReviewLane(
-        "Review Inbox",
+        "Needs your decision",
         data.inbox,
-        "No candidate or high-risk memories require review.",
+        "No memory item needs your decision.",
         data.current_project_id,
-        inboxCount > 0
+        inboxCount > 0,
+        "Decide whether each item becomes Usable memory, gets rejected, is archived, or needs more work."
       )}
       ${renderReviewLane(
-        "Conflicts / Duplicates",
+        "Possible conflicts",
         data.duplicate_conflicts,
-        "No conflicts or duplicates detected.",
+        "No conflict states or duplicates detected.",
         data.current_project_id,
-        conflictCount > 0
+        conflictCount > 0,
+        "Compare overlapping memories and keep the one agents should trust."
       )}
       ${renderReviewLane(
-        "Active Rules",
+        "Active rules",
         data.rules,
-        "No instruction-grade rules match the current filters.",
+        "No active rules match the current filters.",
         data.current_project_id,
         !hasOpenDecision && ruleCount > 0,
+        "These are durable rules agents can apply across work after review.",
         renderRuleFilters(data)
       )}
     </div>
@@ -1892,6 +2134,36 @@ function activityIcon(kind: unknown) {
   return labels[value] ?? "Activity";
 }
 
+function activityGroup(kind: unknown) {
+  const value = String(kind ?? "");
+  if (value === "memory_write") return "Memory updates";
+  if (value === "checkpoint") return "Checkpoints";
+  if (value === "session" || value === "context_read") return "Recording flow";
+  return "Other activity";
+}
+
+function activityGroupNote(group: string) {
+  const notes: Record<string, string> = {
+    "Recording flow": "Session starts and context reads prove the agent is entering Recallant.",
+    "Memory updates": "These records show what Recallant captured as usable working memory.",
+    Checkpoints: "Checkpoints show the latest durable handoff state.",
+    "Other activity": "Additional Recallant events that do not fit the main recording flow."
+  };
+  return notes[group] ?? "Recent Recallant activity.";
+}
+
+function activitySummary(rows: Array<Record<string, unknown>>) {
+  const count = (kind: string) => rows.filter((row) => row.activity_kind === kind).length;
+  const sourceLinked = rows.filter((row) => row.source_summary).length;
+  return {
+    sessions: count("session"),
+    contextReads: count("context_read"),
+    memoryWrites: count("memory_write"),
+    checkpoints: count("checkpoint"),
+    sourceLinked
+  };
+}
+
 function renderActivityReplay(data: ReviewDashboardData) {
   const rows = Array.isArray(data.recent_activity)
     ? (data.recent_activity as Array<Record<string, unknown>>)
@@ -1900,22 +2172,49 @@ function renderActivityReplay(data: ReviewDashboardData) {
   if (rows.length === 0) {
     return `${sourceFilter}<p class="empty">No recent Recallant activity has been captured for this memory space yet.</p>`;
   }
-  return `${sourceFilter}<div class="activity-list">
-    ${rows
+  const summary = activitySummary(rows);
+  const grouped = ["Recording flow", "Memory updates", "Checkpoints", "Other activity"]
+    .map((group) => ({
+      group,
+      rows: rows.filter((row) => activityGroup(row.activity_kind) === group)
+    }))
+    .filter((group) => group.rows.length > 0);
+  return `${sourceFilter}
+  <div class="activity-summary" aria-label="Activity replay summary">
+    <span><strong>${escapeHtml(summary.sessions)}</strong> sessions</span>
+    <span><strong>${escapeHtml(summary.contextReads)}</strong> context reads</span>
+    <span><strong>${escapeHtml(summary.memoryWrites)}</strong> memory writes</span>
+    <span><strong>${escapeHtml(summary.checkpoints)}</strong> checkpoints</span>
+    <span><strong>${escapeHtml(summary.sourceLinked)}</strong> source-linked</span>
+  </div>
+  <div class="activity-list">
+    ${grouped
       .map(
-        (row) => `<article class="activity-item">
-          <span>${escapeHtml(activityIcon(row.activity_kind))}</span>
-          <div>
-            <strong>${escapeHtml(row.title)}</strong>
-            <p>${escapeHtml(row.body)}</p>
-            ${
-              row.source_summary
-                ? `<p class="source-note">Source: ${escapeHtml(row.source_summary)}</p>`
-                : ""
-            }
-            <time>${escapeHtml(formatDate(row.occurred_at))}</time>
+        (group) => `<section class="activity-group">
+          <div class="activity-group-head">
+            <h3>${escapeHtml(group.group)}</h3>
+            <p>${escapeHtml(activityGroupNote(group.group))}</p>
           </div>
-        </article>`
+          ${group.rows
+            .map(
+              (row) => `<article class="activity-item">
+                <span>${escapeHtml(activityIcon(row.activity_kind))}</span>
+                <div>
+                  <strong>${escapeHtml(row.title)}</strong>
+                  <p>${escapeHtml(row.body)}</p>
+                  ${
+                    row.source_summary
+                      ? `<p class="source-note">Source: ${escapeHtml(
+                          publicSafeProvenanceSummary(String(row.source_summary))
+                        )}</p>`
+                      : ""
+                  }
+                  <time>${escapeHtml(formatDate(row.occurred_at))}</time>
+                </div>
+              </article>`
+            )
+            .join("")}
+        </section>`
       )
       .join("")}
   </div>`;
@@ -1926,7 +2225,7 @@ function renderProjectActions(data: ReviewDashboardData) {
   return `<div class="action-plan">
     <p>Project memory stays isolated by default. Agents can ask for cross-project examples, but unrelated memories are not mixed into this project automatically.</p>
     <details>
-      <summary>Detach / cleanup commands</summary>
+      <summary>Advanced cleanup details</summary>
       ${renderMeta([
         ["detach dry-run", cleanup.detach_command],
         ["sandbox cleanup dry-run", cleanup.sandbox_cleanup_command],
@@ -1988,9 +2287,12 @@ function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
   const projectPath = project.primary_path ?? "No path recorded";
   return `<div class="cleanup-flow">
     <article class="selected-project-card">
-      <strong>${escapeHtml(projectName)}</strong>
-      <span>${escapeHtml(projectPath)}</span>
-      <span>ID ${escapeHtml(data.current_project_id)}</span>
+      <strong>${escapeHtml(publicScreenshotMode() ? "Demo memory space" : projectName)}</strong>
+      <span>${escapeHtml(publicScreenshotMode() ? "Project files stay private" : projectPath)}</span>
+      <details>
+        <summary>Technical details</summary>
+        ${renderMeta([["project_id", data.current_project_id]])}
+      </details>
     </article>
     <p>This removes the selected project from active Recallant views and search. Project files on disk are not changed. Permanent erasure uses a separate forget-forever workflow.</p>
     ${renderProjectDetachResult(data, detach)}
@@ -2036,10 +2338,10 @@ function renderManagementChat(
           <p class="chat-understanding">${escapeHtml(
             chat.response.language === "ru"
               ? chat.response.understanding.source === "local_ai"
-                ? `Понято локальной AI-моделью${chat.response.understanding.model ? `: ${chat.response.understanding.model}` : ""}.`
+                ? "Понято локальной AI-моделью."
                 : "Понято безопасными локальными правилами; AI-модель недоступна."
               : chat.response.understanding.source === "local_ai"
-                ? `Understood by local AI${chat.response.understanding.model ? `: ${chat.response.understanding.model}` : ""}.`
+                ? "Understood by local AI."
                 : "Understood by safe local rules; AI model unavailable."
           )} <span class="chat-result">${escapeHtml(resultTypeLabel(chat.response.result_type, chat.response.language))}</span></p>
           ${renderTextBlock(chat.response.answer)}
@@ -2229,19 +2531,44 @@ function renderDashboard(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Recallant Workbench</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #eef2f1; color: #20242c; }
-    body { margin: 0; background: #eef2f1; }
-    header { padding: 20px 32px; border-bottom: 1px solid #d5dddb; background: #fbfdfc; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      --bg: #f3f6f5;
+      --surface: #ffffff;
+      --surface-soft: #f8fbfa;
+      --surface-muted: #f4f7fb;
+      --line: #d7dedb;
+      --line-strong: #c9d5d1;
+      --text: #20242c;
+      --muted: #4f5867;
+      --quiet: #6f7785;
+      --accent: #166454;
+      --accent-strong: #145a4d;
+      --accent-soft: #eef8f5;
+      --warning: #7a4d18;
+      --warning-soft: #fff8e8;
+      --danger: #8a3c15;
+      --danger-soft: #fff4ed;
+      --shadow-soft: 0 8px 24px rgba(32, 36, 44, 0.05);
+      --radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    header { padding: 20px 32px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.94); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; color: var(--text); }
     main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 22px; align-items: start; max-width: 1760px; margin: 0 auto; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     h3 { letter-spacing: 0; }
     a { color: inherit; text-decoration: none; }
-    .panel { background: #fff; border: 1px solid #d7dedb; border-radius: 8px; padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.04); }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow-soft); }
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
-    .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
-    .workbench-nav a.active { border-color: #20242c; background: #20242c; color: #fff; }
+    .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: var(--surface-soft); color: #303845; }
+    .workbench-nav a:hover { border-color: var(--line-strong); background: #f0f6f3; }
+    .workbench-nav a.active { border-color: var(--accent); background: var(--accent); color: #fff; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr); gap: 18px; align-items: start; }
     .workbench-body { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 22px; align-items: start; }
     .workbench-body.focused { grid-template-columns: minmax(0, 1fr); }
@@ -2250,13 +2577,13 @@ function renderDashboard(
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
     .row-link, .project-link { display: block; border-radius: 6px; }
-    .row-link:hover .item, .project-link:hover .project { background: #f8fafc; }
+    .row-link:hover .item, .project-link:hover .project { background: var(--surface-soft); }
     .item { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .item:first-child { border-top: 0; }
     .item h3 { font-size: 14px; margin: 0 0 5px; }
-    .item p { margin: 0 0 8px; color: #565d6b; font-size: 13px; overflow-wrap: anywhere; }
-    .item .why { color: #7a4d18; }
-    .item .source-note { color: #166454; font-size: 12px; }
+    .item p { margin: 0 0 8px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .item .why { color: var(--warning); }
+    .item .source-note { color: var(--accent); font-size: 12px; }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
     .badges span { display: inline-flex; gap: 5px; align-items: baseline; border: 1px solid #d6dde7; background: #f8fafc; border-radius: 999px; padding: 4px 7px; font-size: 11px; color: #445064; }
     .badges strong { color: #6a7280; font-weight: 600; }
@@ -2264,12 +2591,12 @@ function renderDashboard(
     dt { color: #6a7280; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
-    .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
+    .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: var(--surface-soft); }
     .left-rail { align-self: start; position: sticky; top: 12px; }
     .secondary-workspace { display: block; }
     .operations-workspace { background: transparent; border: 0; box-shadow: none; padding: 2px 0 0; }
     .operation-panels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
-    .operation-panel { border: 1px solid #d7dedb; border-radius: 8px; background: #fff; padding: 12px; margin: 0; }
+    .operation-panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px; margin: 0; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.03); }
     .operation-panel summary { border: 0; padding: 0; margin: 0; }
     .operation-panel summary span { font-size: 14px; font-weight: 750; }
     .operation-panel[open] { grid-column: span 2; }
@@ -2277,8 +2604,8 @@ function renderDashboard(
     .workbench-body.focused .operation-panel[open] { grid-column: span 1; }
     .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 12px; }
     .section-head h2 { margin-bottom: 0; }
-    .section-head p { max-width: 520px; margin: 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
-    .section-kicker { display: block; color: #166454; font-size: 11px; font-weight: 750; letter-spacing: 0; margin-bottom: 4px; text-transform: uppercase; }
+    .section-head p { max-width: 520px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .section-kicker { display: block; color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: 0; margin-bottom: 4px; text-transform: uppercase; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .signal-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
     .signal-strip span { border: 1px solid #dce3ec; border-radius: 999px; padding: 7px 10px; background: #f8fafc; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
@@ -2314,8 +2641,8 @@ function renderDashboard(
     .state.interrupted { color: #8a3c15; border-color: #e1b59b; background: #fff4ed; }
     .memory-spaces { display: grid; gap: 9px; }
     .memory-space-link { display: block; }
-    .memory-space { border: 1px solid #e1e7ef; border-radius: 8px; padding: 10px; background: #fbfcfe; }
-    .memory-space.active { background: #f4f8fb; border-color: #cdd9e7; }
+    .memory-space { border: 1px solid #dbe5e1; border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
+    .memory-space.active { background: #eff7f4; border-color: #bdd8cf; box-shadow: inset 3px 0 0 var(--accent); }
     .memory-space-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .memory-space h3 { margin: 0; font-size: 14px; }
     .memory-space h3 a { text-decoration: none; }
@@ -2327,11 +2654,29 @@ function renderDashboard(
     .source-form input, .source-form select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; background: #fff; color: #20242c; min-width: 0; }
     .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
     .source-form .checkbox-line input { width: auto; }
-    .source-workbench { border-color: #cdded9; background: #fbfdfc; }
+    .source-workbench { border-color: #cdded9; background: var(--surface); }
     .source-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 0 0 14px; }
     .source-overview span { border: 1px solid #d4e1dd; border-radius: 7px; padding: 9px; background: #fff; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
     .source-overview strong { display: block; color: #166454; font-size: 15px; }
-    .source-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr); gap: 12px; align-items: start; border: 1px solid #d4e1dd; border-radius: 8px; padding: 12px; margin: 0 0 14px; background: #fff; }
+    .source-tree { display: grid; grid-template-columns: minmax(220px, 0.38fr) minmax(0, 1fr); gap: 12px; align-items: stretch; margin: 0 0 14px; }
+    .source-tree-root { border: 1px solid #cbded8; border-radius: var(--radius); padding: 12px; background: #f4fbf8; }
+    .source-tree-root span, .source-tree-group h3 { display: block; color: var(--accent); font-size: 11px; font-weight: 750; margin: 0 0 6px; text-transform: uppercase; }
+    .source-tree-root strong { display: block; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
+    .source-tree-root p { margin: 8px 0 0; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .source-tree-groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .source-tree-group { border: 1px solid #dbe4ea; border-radius: var(--radius); padding: 10px; background: var(--surface); }
+    .source-tree-group.ready { border-color: #bdd8cf; }
+    .source-tree-group.needs-setup { border-color: #e2d0a4; background: #fffdf7; }
+    .source-tree-group.needs-attention { border-color: #dfb59c; background: #fff8f4; }
+    .source-tree-group.detached { background: #f8fafc; }
+    .source-tree-group > div { display: grid; gap: 8px; }
+    .source-tree-node { border-top: 1px solid #e5e9f0; padding-top: 8px; }
+    .source-tree-node:first-child { border-top: 0; padding-top: 0; }
+    .source-tree-node strong { display: block; font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+    .source-tree-node span { display: inline-block; color: #6a7280; font-size: 11px; margin-top: 3px; }
+    .source-tree-node p { margin: 6px 0 7px; color: #4f5867; font-size: 12px; line-height: 1.35; }
+    .source-tree-node a { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 3px 7px; background: #f8fafc; color: #303845; font-size: 11px; }
+    .source-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr); gap: 12px; align-items: start; border: 1px solid #d4e1dd; border-radius: var(--radius); padding: 12px; margin: 0 0 14px; background: var(--surface-soft); }
     .source-filter-panel h3 { margin: 0 0 6px; font-size: 14px; }
     .source-filter-panel p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
     .source-filter-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
@@ -2340,7 +2685,7 @@ function renderDashboard(
     .source-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
     .source-management { display: grid; gap: 10px; }
     .source-list { display: grid; gap: 8px; }
-    .source-card, .source-result { border: 1px solid #e1e7ef; border-radius: 7px; padding: 9px; background: #fbfcfe; }
+    .source-card, .source-result { border: 1px solid #dfe8e4; border-radius: 7px; padding: 9px; background: var(--surface-soft); }
     .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .source-card strong, .source-result strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
     .source-card span { display: inline-block; font-size: 12px; margin-bottom: 3px; }
@@ -2381,9 +2726,9 @@ function renderDashboard(
     .conflict-compare p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; }
     .conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .conflict-actions form { margin: 0; }
-    button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 6px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+    button { border: 1px solid #aeb9c8; border-radius: 6px; background: var(--surface); padding: 6px 9px; font: inherit; font-size: 12px; cursor: pointer; color: var(--text); max-width: 100%; overflow-wrap: anywhere; }
     button:hover { background: #f2f6fb; }
-    button.danger { border-color: #b77f62; color: #8a3c15; }
+    button.danger { border-color: #b77f62; color: var(--danger); background: var(--danger-soft); }
     .actions.disabled span { color: #788292; background: #f9fafb; }
     .setting { border-top: 1px solid #e5e9f0; padding: 10px 0; }
     .setting:first-child { border-top: 0; }
@@ -2402,27 +2747,42 @@ function renderDashboard(
     .rule-filters h3 { margin: 0; font-size: 13px; color: #303845; }
     .rule-filters div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .rule-filters .filter-note { margin: 0; color: #166454; font-size: 12px; line-height: 1.35; }
-    .filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; text-decoration: none; }
+    .filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; color: #303845; background: var(--surface-soft); text-decoration: none; max-width: 100%; overflow-wrap: anywhere; }
     .filter-chip:hover { background: #eef4fb; }
     .review-workspace { display: grid; gap: 12px; }
+    .review-guide { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.8fr); gap: 12px; border: 1px solid #cfded8; border-radius: var(--radius); padding: 14px; background: var(--surface-soft); }
+    .review-guide span { display: block; color: #166454; font-size: 12px; font-weight: 750; margin-bottom: 5px; text-transform: uppercase; }
+    .review-guide strong { display: block; color: #20242c; font-size: 18px; line-height: 1.2; margin-bottom: 6px; }
+    .review-guide p { margin: 0; color: #425064; font-size: 13px; line-height: 1.45; }
+    .review-guide ol { margin: 0; padding-left: 20px; color: #303845; font-size: 13px; line-height: 1.5; }
     .review-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .review-overview article { border: 1px solid #dce3ec; border-radius: 7px; padding: 10px; background: #fbfcfe; }
     .review-overview span { display: block; color: #6a7280; font-size: 12px; margin-bottom: 4px; }
     .review-overview strong { display: block; color: #20242c; font-size: 18px; margin-bottom: 5px; }
     .review-overview p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; }
     .review-lanes { display: grid; gap: 8px; }
-    .review-lane { border: 1px solid #e1e7ef; border-radius: 7px; padding: 10px; margin: 0; background: #fff; }
+    .review-lane { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 0; background: var(--surface); }
     .review-lane summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; padding: 0; margin: 0; }
     .review-lane summary span { font-size: 14px; font-weight: 750; }
     .review-lane summary strong { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 8px; color: #445064; background: #f8fafc; font-size: 12px; }
     .review-lane[open] summary { margin-bottom: 8px; }
+    .review-lane-note { margin: 0 0 10px; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .review-action-group { border-bottom: 1px solid #e3e8ef; padding-bottom: 8px; margin-bottom: 8px; }
+    .risky-action-group { border: 1px solid #e5c7bf; border-radius: 7px; padding: 8px; background: #fffaf8; }
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
-    .ask-panel { border-color: #accfc5; background: #fdfefe; padding: 0; overflow: hidden; box-shadow: 0 8px 24px rgba(32, 36, 44, 0.06); }
+    .ask-panel { border-color: #accfc5; background: var(--surface); padding: 0; overflow: hidden; box-shadow: 0 12px 30px rgba(32, 36, 44, 0.07); }
     .ask-layout { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(320px, 0.8fr); gap: 0; align-items: stretch; }
     .ask-work { padding: 28px; }
     .ask-work h2 { font-size: 28px; margin-bottom: 14px; }
+    .first-screen-snapshot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
+    .first-screen-snapshot article { border: 1px solid #d5e1dd; border-radius: 8px; padding: 12px; background: #fff; min-height: 88px; }
+    .first-screen-snapshot article.ready { border-color: #bdd8cf; background: #f4fbf8; }
+    .first-screen-snapshot article.needs-work { border-color: #e2d0a4; background: #fffaf0; }
+    .first-screen-snapshot span { display: block; color: #5f6976; font-size: 11px; font-weight: 750; margin-bottom: 5px; text-transform: uppercase; }
+    .first-screen-snapshot strong { display: block; color: #20242c; font-size: 18px; line-height: 1.15; overflow-wrap: anywhere; }
+    .first-screen-snapshot p { margin: 7px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
     .memory-profile { border-left: 1px solid #d9e4df; padding: 24px 20px; color: #303845; background: #f4f8f7; }
     .memory-profile h3 { margin: 0 0 7px; font-size: 15px; overflow-wrap: anywhere; }
     .memory-profile .state { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 11px; margin-bottom: 8px; }
@@ -2434,7 +2794,7 @@ function renderDashboard(
     .chat-form textarea { resize: vertical; min-height: 260px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 13px; font: inherit; font-size: 15px; color: #20242c; background: #fff; }
     .chat-submit-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     .chat-submit-row span { color: #607080; font-size: 12px; }
-    .chat-form button { justify-self: start; border-color: #8fb9ad; background: #eef8f5; color: #145a4d; font-weight: 700; }
+    .chat-form button { justify-self: start; border-color: #8fb9ad; background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
     .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 680px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
     .chat-answer p { margin: 0 0 9px; color: #303845; font-size: 13px; line-height: 1.45; }
@@ -2450,16 +2810,25 @@ function renderDashboard(
     .chat-action-form button { border-color: #8fb9ad; background: #eef8f5; color: #145a4d; font-weight: 700; }
     .chat-understanding { margin: 0 0 8px; color: #667085; font-size: 12px; }
     .chat-result { display: inline-flex; margin-left: 6px; border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; }
-    .activity-list { display: grid; gap: 9px; }
+    .activity-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+    .activity-summary span { border: 1px solid #dce3ec; border-radius: 7px; padding: 9px; background: #fbfcfe; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .activity-summary strong { display: block; color: #166454; font-size: 15px; }
+    .activity-list { display: grid; gap: 12px; }
+    .activity-group { border: 1px solid #dfe8e4; border-radius: var(--radius); padding: 11px; background: var(--surface); }
+    .activity-group-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 9px; }
+    .activity-group-head h3 { margin: 0; font-size: 14px; }
+    .activity-group-head p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; max-width: 520px; }
     .activity-item { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; border-top: 1px solid #e5e9f0; padding-top: 9px; }
     .activity-item:first-child { border-top: 0; padding-top: 0; }
     .activity-item > span { justify-self: start; border: 1px solid #d6dde7; border-radius: 999px; padding: 3px 7px; color: #445064; background: #f8fafc; font-size: 11px; }
     .activity-item strong { display: block; font-size: 13px; margin-bottom: 3px; }
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
-    .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid { grid-template-columns: 1fr; } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .signal-strip { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
+    .panel, .operation-panel, .memory-space, .source-card, .source-result, .source-tree-group, .review-lane, .activity-group, .activity-item, .item { min-width: 0; }
+    .empty { color: var(--muted); font-size: 13px; line-height: 1.4; border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
+    a:focus-visible, button:focus-visible, summary:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #7eb6a9; outline-offset: 2px; }
+    @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid, .source-tree { grid-template-columns: 1fr; } .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
   </style>
 </head>
 <body>
@@ -2469,7 +2838,7 @@ function renderDashboard(
       ${renderWorkbenchNav(data, activeView)}
     </div>
     <div class="status">
-      <span class="pill">Project ${escapeHtml(shortId(data.current_project_id))}</span>
+      <span class="pill">${escapeHtml(publicProjectBadge() || `Project ${shortId(data.current_project_id)}`)}</span>
       <span class="pill">Private UI</span>
     </div>
   </header>
@@ -2481,6 +2850,7 @@ function renderDashboard(
         <div class="ask-work">
           <span class="section-kicker">AI control surface</span>
           <h2>Ask Recallant</h2>
+          ${renderFirstScreenSnapshot(data)}
           ${renderManagementChat(data, chat, activeView)}
         </div>
         ${renderCurrentMemoryProfile(data)}
@@ -2560,7 +2930,7 @@ function renderDashboard(
               ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
             </details>
             <details class="operation-panel">
-              <summary><span>Cost / Paid API</span></summary>
+              <summary><span>Model costs and approvals</span></summary>
               ${renderCosts(data)}
             </details>
             <details class="operation-panel">

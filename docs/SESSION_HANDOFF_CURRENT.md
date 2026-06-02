@@ -6,20 +6,33 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench and capture-state visibility
-  are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~73%` complete. Core risk-typed results, safe
-  action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
-  deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~63%` complete. Virtual spaces, source attach/detach,
-  source filters, and source-linked Activity visibility are implemented; deeper connector/server
-  live verification plus broader source-aware recovery are pending.
-- Stage 4 — Client Connect and Hook Capture: `~85%` complete. Connect lifecycle, MCP status, hook
-  install, and capture readiness checks are active; full mandatory startup parity for all clients is
-  still being hardened.
-- Stage 5 — Real Pilots and QA: `~73%` complete. Pilot-report automation for clean, copied, and
-  production-sensitive dry-runs exists; next is more real-world project scenarios and richer outcome
-  review.
+- Stage 1 — Human Workbench UI: complete against the corrected full closure plan. All Goals
+  1.1-1.9 are marked completed, default-visible technical language is guarded by smoke tests, and
+  `npm run stage1:acceptance` passed after Playwright screenshot generation.
+- Stage 2 — AI-native Management Chat: `~55-65%` complete against the corrected full closure plan.
+  Core result types, risk gates, mock local-AI semantic tests, fallback, source actions, and memory
+  lookup exist. Remaining: live local-model gate, multi-step clarification, rule governance,
+  provenance-rich answers, guided action cards, semantic matrix, paid/external AI approval path,
+  rule diagnostics, and a Stage 2 acceptance gate.
+- Stage 3 — Memory Spaces and Sources: `~65-75%` complete against the corrected full closure plan.
+  Memory spaces, source records, attach/detach, source health, filters, and provenance exist.
+  Remaining: mature source workspace polish, provenance drilldown, remote/connector status contract,
+  filter consistency, no-secret capability placeholder, multi-source comparison, and a Stage 3 gate.
+- Stage 4 — Client Connect and Hook Capture: `~65-75%` complete against the corrected full closure
+  plan. Project-local connect, MCP config, local hooks, fail-soft behavior, spool fallback, and
+  capture proof exist. Remaining: global dry-run/backup/rollback contracts, one safe opt-in global
+  writer path, spool diagnostics, native hook status, real client pilot matrix, readiness matrix,
+  and a Stage 4 gate.
+- Stage 5 — Real Pilots and QA: `~55-65%` complete against the corrected full closure plan.
+  Fixture-based clean/copied/production-sensitive pilot automation exists. Remaining:
+  owner-readable reports, refreshed clean pilot, copied real-project sandbox, real production
+  dry-run, cleanup matrix, Recallant dogfood pilot, real client pilot matrix, evidence index, and a
+  Stage 5 gate.
+- Stage 6 — Broader External Memory Domain: `~25-35%` complete against the corrected full closure
+  plan. Logical spaces, personal-domain records, safe virtual creation, and governed connector
+  placeholders exist. Remaining: first non-code profile, isolation smoke, human-memory UI,
+  manual human-memory workflow, connector consent stub, no-secret capability proof, first connector
+  design, and a Stage 6 gate.
 - Stage 7 — Packaging and Public Readiness: first public-packaging slice is implemented. README,
   Quickstart, Self-hosting, Owner-server, and Public-readiness docs now describe the outside-user
   path separately from owner-server `/ai` operations, and `npm run public-readiness:smoke` guards
@@ -65,6 +78,17 @@ Recallant-specific browser QA is now implemented as `npm run review-ui:playwrigh
 local authenticated Workbench fixture, checks desktop/mobile layout and Ask Recallant readability in
 headless Chromium, writes screenshots under `/ai/playwright/reports`, and closes the browser/server
 after the run.
+Stage 1 Human Workbench UI is now complete. The Workbench CSS has shared product tokens, a clearer
+panel/action/empty-state hierarchy, focus states, and stronger word-wrapping bounds. Playwright now
+seeds a dense synthetic Workbench with multiple memory spaces, many sources, long labels, review
+queues, activity rows, and long chat answers. Default-visible technical labels are guarded by
+`assertHumanDefaultLanguage`, while raw ids/keys/provider/model values remain available behind
+Technical details. It writes evidence screenshots:
+`/ai/playwright/reports/recallant-workbench-dense-desktop.png`,
+`/ai/playwright/reports/recallant-workbench-dense-review.png`, and
+`/ai/playwright/reports/recallant-workbench-dense-mobile.png`.
+`npm run stage1:acceptance` writes the Stage 1 acceptance report to
+`/tmp/recallant-stage1-acceptance.json` by default.
 The latest Workbench source slice adds human-readable source health/status, source provenance
 summaries in Review rows, and a `source_id` Review/dashboard filter for source-linked import
 candidates, inbox items, and active rules. It is verified by `npm run project-sources:smoke`,
@@ -656,6 +680,33 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - 2026-06-02 compact Review follow-up: Review now starts with four human-readable queue summaries
   and expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules. `review-ui:smoke` and `review-ui:playwright` pass with updated screenshots.
+- 2026-06-02 first-screen polish follow-up: the primary Ask Recallant surface now includes a compact
+  first-screen status snapshot for owner attention, memory capture, and source readiness before the
+  input box. This makes the first viewport understandable without scanning lower panels. The
+  Review UI smoke and Playwright browser QA now verify the snapshot is visible, prominent, and
+  responsive.
+- 2026-06-02 Source Map direction follow-up: the Sources workspace now includes a Memory Tree-style
+  source map with the current memory space as the root and attached sources grouped by ready,
+  needs-setup, needs-attention, and detached states. Default source cards now explain provenance and
+  health in human language while exact source locations stay under Technical details. Review UI
+  smoke and Playwright verify the tree, focused-source layout, source filters, and hidden exact
+  paths in the visible source list.
+- 2026-06-02 Activity / Replay readability follow-up: Activity now starts with a compact replay
+  summary and groups recent rows into Recording flow, Memory updates, Checkpoints, and Other
+  activity. Source-filtered Activity still keeps session/context/checkpoint signals visible while
+  narrowing source-linked memory writes. Review UI smoke and Playwright verify the summary and
+  grouped focused Activity view.
+- 2026-06-02 Review decision workflow polish follow-up: Review now starts with a decision guide
+  that tells the owner to handle conflict states first, then memories needing a decision, then
+  imported evidence. Queue labels use human language: Imported evidence, Needs your decision,
+  Possible conflicts, and Active rules. Normal review actions are visually separated from the
+  separate sensitive cleanup path; Forget forever still starts with a dry run.
+- 2026-06-02 public-safe screenshot candidate follow-up: `review-ui:playwright` now runs its
+  fixture in public screenshot mode, using Demo Product Workspace and synthetic source labels. It
+  writes separate candidate images under `/ai/playwright/reports/public-safe-candidates` and fails
+  before writing them if visible page text contains generated project/developer ids, private
+  hostnames, owner paths, raw database/API-key-looking text, old dev fixture labels, UUIDs, or short
+  event ids. This prepares internal candidates only; nothing is published.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 
@@ -836,8 +887,39 @@ Latest validation for the Workbench/source/chat follow-up slice:
 - `npm run connect:smoke`
 - `npm run phase7:smoke`
 
+2026-06-02 Stage 7 public proof-flow checkpoint is implemented.
+
+- Public Quickstart was rewritten around a short external-user path and separates normal user flow
+  from owner/server-specific operations.
+- Public/owner/development docs were separated: public docs avoid owner-only `/ai` paths,
+  Cloudflare Access assumptions, private Postgres details, and private Playwright paths; owner and
+  operations details live in dedicated docs.
+- `recallant attach` defaults to a human-readable report for a new user and still supports JSON
+  with `--format json`.
+- `recallant connect <client>` defaults to a human-readable report with client, hook status,
+  "capture configured but not yet proven", and the exact verification command; JSON remains
+  available for automation.
+- `recallant doctor` defaults to a human-readable readiness report; JSON remains available with
+  `--format json`.
+- `recallant demo-capture` proves the minimal capture loop on a clean attached project: session
+  start, context read, demo memory write, checkpoint, closeout, and later recall.
+- `recallant ask "what did the agent remember?"` retrieves governed memory for the current project
+  and is used by the demo proof path.
+- The documented proof sequence is:
+
+  ```bash
+  recallant demo-capture --project-dir .
+  recallant doctor --project-dir . --require-capture
+  recallant ask "what did the agent remember?" --project-dir .
+  ```
+
+- Latest focused validation: `npm run build`, `npm run format:check`, `git diff --check`,
+  `npm run demo-capture:smoke`, and `npm run agent-capture:smoke`.
+
 Next autonomous work after this checkpoint:
 
+- Stage 7: continue installer hardening, clean-host validation, public screenshots, rollback docs,
+  and outside-user quickstart polish after this proof path remains green.
 - Stage 2: continue strengthening live local-AI semantic tests and multi-project clarification
   flows while keeping server policy as the execution authority.
 - Stage 3: continue richer source health/status and search/review source filters.

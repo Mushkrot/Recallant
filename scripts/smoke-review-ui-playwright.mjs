@@ -39,6 +39,73 @@ async function noHorizontalScroll(page, label) {
   );
 }
 
+async function assertResponsiveBounds(page, label) {
+  const offenders = await page.evaluate(() => {
+    const document = globalThis.document;
+    const selector = [
+      "header",
+      "main",
+      ".panel",
+      ".ask-panel",
+      ".memory-space",
+      ".source-card",
+      ".source-tree-group",
+      ".review-lane",
+      ".activity-group",
+      ".activity-item",
+      "button",
+      ".filter-chip",
+      ".source-filter-chip",
+      ".workbench-nav a",
+      ".pill"
+    ].join(",");
+    return Array.from(document.querySelectorAll(selector))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          className: String(element.className ?? ""),
+          text: String(element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          viewport: globalThis.innerWidth
+        };
+      })
+      .filter((item) => item.width > 0)
+      .filter(
+        (item) =>
+          item.left < -2 || item.right > item.viewport + 2 || item.width > item.viewport + 2
+      )
+      .slice(0, 8);
+  });
+  assert(
+    offenders.length === 0,
+    `${label} has elements outside the viewport: ${JSON.stringify(offenders)}`
+  );
+
+  const clippedControls = await page.evaluate(() =>
+    Array.from(
+      globalThis.document.querySelectorAll(
+        "button,.filter-chip,.source-filter-chip,.workbench-nav a,.pill"
+      )
+    )
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        className: String(element.className ?? ""),
+        text: String(element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth
+      }))
+      .filter((item) => item.scrollWidth > item.clientWidth + 2)
+      .slice(0, 8)
+  );
+  assert(
+    clippedControls.length === 0,
+    `${label} has clipped controls: ${JSON.stringify(clippedControls)}`
+  );
+}
+
 async function visibleBox(locator, label) {
   await locator.waitFor({ state: "visible" });
   const box = await locator.boundingBox();
@@ -52,6 +119,65 @@ async function absent(locator, label) {
   assert(count === 0, `${label} should not be present, found ${count}`);
 }
 
+async function assertPublicSafePage(page, label, forbiddenText) {
+  const visibleText = await page.locator("body").innerText();
+  for (const forbidden of forbiddenText) {
+    if (!forbidden) continue;
+    assert(
+      !visibleText.includes(forbidden),
+      `${label} public screenshot text contains forbidden marker: ${forbidden}`
+    );
+  }
+  assert(
+    !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visibleText),
+    `${label} public screenshot text contains a raw UUID`
+  );
+  assert(
+    !/\bevent\s+[0-9a-f]{6,}\b/i.test(visibleText),
+    `${label} public screenshot text contains a raw event id`
+  );
+}
+
+async function assertHumanDefaultLanguage(page, label) {
+  const visibleText = await page.locator("body").innerText();
+  const forbiddenVisible = [
+    "project_id",
+    "memory_id",
+    "source_id",
+    "scope_kind",
+    "memory_domain",
+    "embedding_route",
+    "route_class",
+    "provider_api_key",
+    "database_url",
+    "Cost by project/provider/model/purpose",
+    "Project filter",
+    "Domain filter"
+  ].filter((marker) => visibleText.includes(marker));
+  assert(
+    forbiddenVisible.length === 0,
+    `${label} default visible text leaked technical language: ${JSON.stringify(forbiddenVisible)}`
+  );
+  for (const required of [
+    "Ask Recallant",
+    "Memory Spaces",
+    "Source Map",
+    "Activity / Replay",
+    "Technical details"
+  ]) {
+    assert(
+      visibleText.includes(required),
+      `${label} missing human Workbench language: ${required}`
+    );
+  }
+}
+
+async function saveScreenshotPair(page, standardPath, publicPath, label, forbiddenText) {
+  await page.screenshot({ path: standardPath, fullPage: true });
+  await assertPublicSafePage(page, label, forbiddenText);
+  await page.screenshot({ path: publicPath, fullPage: true });
+}
+
 async function run() {
   const { chromium } = loadPlaywright();
   const databaseUrl =
@@ -61,7 +187,30 @@ async function run() {
   const developerId = randomUUID();
   const projectId = randomUUID();
   const projectPath = `/tmp/recallant-playwright-${randomUUID()}`;
+  const missingSourcePath = `/tmp/recallant-playwright-missing-source-${randomUUID()}`;
   const reportDir = process.env.RECALLANT_PLAYWRIGHT_REPORT_DIR ?? "/ai/playwright/reports";
+  const publicReportDir = join(reportDir, "public-safe-candidates");
+  const publicScreenshots = {
+    overview: join(publicReportDir, "recallant-workbench-overview.png"),
+    ask: join(publicReportDir, "recallant-workbench-ask.png"),
+    sources: join(publicReportDir, "recallant-workbench-sources.png"),
+    activity: join(publicReportDir, "recallant-workbench-activity.png"),
+    review: join(publicReportDir, "recallant-workbench-review.png"),
+    mobile: join(publicReportDir, "recallant-workbench-mobile.png")
+  };
+  const forbiddenPublicText = [
+    projectId,
+    projectId.slice(0, 8),
+    developerId,
+    developerId.slice(0, 8),
+    projectPath,
+    missingSourcePath,
+    "/ai/",
+    "recallant.unicloud.ca",
+    "AGENTS.md",
+    "sk-",
+    "postgres://"
+  ];
 
   process.env.RECALLANT_AUTH_TOKEN = token;
   process.env.RECALLANT_SESSION_SECRET = `review-playwright-session-${randomUUID()}`;
@@ -70,6 +219,7 @@ async function run() {
   process.env.RECALLANT_PROJECT_ID = projectId;
   process.env.RECALLANT_PROJECT_PATH = projectPath;
   process.env.RECALLANT_MANAGEMENT_CHAT_AI = "off";
+  process.env.RECALLANT_PUBLIC_SCREENSHOT_MODE = "true";
   delete process.env.RECALLANT_CLOUDFLARE_MODE;
   delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
   delete process.env.RECALLANT_ADMIN_EMAILS;
@@ -79,30 +229,146 @@ async function run() {
   assert(defaultHttpConfig.recallant_auth_required === true, "Review UI smoke must require auth");
 
   await mkdir(reportDir, { recursive: true });
+  await mkdir(publicReportDir, { recursive: true });
   await mkdir(projectPath, { recursive: true });
 
   const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
   await db.ensureProject(projectPath);
+  await db.pool.query(
+    `
+      UPDATE projects
+      SET name = 'Demo Product Workspace',
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [projectId]
+  );
   const importedDocSource = await db.attachProjectSource({
     project_id: projectId,
     source_kind: "document_collection",
-    label: "AGENTS.md",
-    uri: "AGENTS.md",
+    label: "Team handbook",
+    uri: "demo:team-handbook",
     metadata: { smoke: "playwright", purpose: "source-filtered activity visual state" }
   });
   await db.attachProjectSource({
     project_id: projectId,
     source_kind: "connector",
-    label: "Google Drive planned connector",
+    label: "Planned Drive connector",
     metadata: { smoke: "playwright", purpose: "planned connector visual state" }
   });
   await db.attachProjectSource({
     project_id: projectId,
     source_kind: "server_path",
-    label: "Missing server docs path",
-    uri: `/tmp/recallant-playwright-missing-source-${randomUUID()}`,
+    label: "Archive source needs setup",
+    uri: missingSourcePath,
     metadata: { smoke: "playwright", purpose: "missing source visual state" }
   });
+  const denseSources = [
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "manual",
+      label:
+        "Owner decisions and launch notes with an intentionally long but ordinary readable name",
+      metadata: {
+        smoke: "playwright",
+        purpose: "dense manual source with long label",
+        source_path: "Owner decisions and launch notes"
+      }
+    }),
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "virtual",
+      label:
+        "Virtual memory space input for operations planning, onboarding, and later review",
+      metadata: {
+        smoke: "playwright",
+        purpose: "dense virtual source with long label",
+        source_path: "Operations planning virtual input"
+      }
+    }),
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "repo",
+      label: "Public demo repository mirror waiting for governed sync",
+      uri: "demo-repo://public-demo-product-workspace",
+      metadata: { smoke: "playwright", purpose: "remote repo source visual state" }
+    }),
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "connector",
+      label: "Configured knowledge connector reference",
+      uri: "demo-connector://knowledge-base",
+      metadata: {
+        smoke: "playwright",
+        purpose: "ready connector visual state",
+        capability_binding_status: "configured"
+      }
+    }),
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "document_collection",
+      label:
+        "Customer research summaries, support notes, and release planning documents",
+      uri: "demo-docs://customer-research-release-planning",
+      metadata: {
+        smoke: "playwright",
+        purpose: "dense document source",
+        source_path: "Customer research summaries"
+      }
+    }),
+    await db.attachProjectSource({
+      project_id: projectId,
+      source_kind: "other",
+      label: "Archived design-review notes kept only as provenance",
+      metadata: {
+        smoke: "playwright",
+        purpose: "other source visual state",
+        source_path: "Archived design-review notes"
+      }
+    })
+  ].filter(Boolean);
+
+  const denseSpaces = [
+    {
+      id: randomUUID(),
+      name: "Long Term Operations Memory Space With Source Map Stress State",
+      project_kind: "personal_domain",
+      memory_domain: "operations"
+    },
+    {
+      id: randomUUID(),
+      name: "Customer Research And Product Decisions Workspace",
+      project_kind: "workspace",
+      memory_domain: "agent_work"
+    },
+    {
+      id: randomUUID(),
+      name: "Server Access Patterns And Safe Automation Examples",
+      project_kind: "other",
+      memory_domain: "infrastructure"
+    },
+    {
+      id: randomUUID(),
+      name: "Archive Recovery Notes With A Very Long Human Readable Name",
+      project_kind: "workspace",
+      memory_domain: "archive"
+    }
+  ];
+  for (const space of denseSpaces) {
+    await db.pool.query(
+      `
+        INSERT INTO projects (id, developer_id, name, primary_path, project_kind, memory_domain)
+        VALUES ($1, $2, $3, NULL, $4, $5)
+      `,
+      [space.id, developerId, space.name, space.project_kind, space.memory_domain]
+    );
+    await db.attachProjectSource({
+      project_id: space.id,
+      source_kind: "virtual",
+      label: `${space.name} source`,
+      metadata: { smoke: "playwright", purpose: "dense memory-space list" }
+    });
+  }
   await db.pool.query(
     `
       INSERT INTO project_settings (project_id, key, value, updated_by)
@@ -151,15 +417,15 @@ async function run() {
   await db.createAgentMemory({
     memory_type: "environment_fact",
     scope: "project",
-    title: "AGENTS.md source is visible in Activity",
-    body: "Source-filtered Activity / Replay should show memory writes that came from AGENTS.md.",
+    title: "Team handbook source is visible in Activity",
+    body: "Source-filtered Activity / Replay should show memory writes that came from the team handbook.",
     created_by: "agent",
     source_refs: [
       {
         source_kind: "external",
         source_id: importedDocSource.id,
-        quote: "AGENTS.md",
-        metadata: { project_source_id: importedDocSource.id, source_path: "AGENTS.md" }
+        quote: "team handbook",
+        metadata: { project_source_id: importedDocSource.id, source_path: "Team handbook" }
       }
     ]
   });
@@ -188,6 +454,135 @@ async function run() {
       { source_kind: "event", source_id: userEvent.event_id, quote: "review candidate" }
     ]
   });
+  const denseMemorySources = [importedDocSource, ...denseSources].filter(Boolean);
+  const denseActivityTitles = [
+    "Decision from launch planning should stay readable even when the title is unusually long",
+    "Action item captured from a source-linked document review",
+    "Test result recorded after browser layout verification",
+    "Owner preference about human language in the workbench",
+    "Source map reminder for connectors that are configured but governed",
+    "Follow-up note about recovery and archive search",
+    "Capture-state observation from a later agent session",
+    "Review queue item with cautious wording for a reusable memory"
+  ];
+  for (const [index, title] of denseActivityTitles.entries()) {
+    const source = denseMemorySources[index % denseMemorySources.length] ?? importedDocSource;
+    await db.createAgentMemory({
+      memory_type: index % 3 === 0 ? "decision" : index % 3 === 1 ? "action" : "test_result",
+      scope: "project",
+      title,
+      body:
+        "Dense Workbench QA uses this synthetic record to prove long human-readable text remains scannable in Activity / Replay and Review without showing raw database fields.",
+      created_by: "agent",
+      confidence: index === denseActivityTitles.length - 1 ? 0.45 : 0.78,
+      metadata: {
+        smoke: "playwright",
+        created_from: "recallant_agent_event",
+        dense_fixture: true
+      },
+      source_refs: [
+        {
+          source_kind: "external",
+          source_id: source.id,
+          quote: "dense fixture source-linked memory",
+          metadata: {
+            project_source_id: source.id,
+            source_path: source.label ?? source.display_label ?? "Dense fixture source"
+          }
+        }
+      ]
+    });
+  }
+  for (let index = 1; index <= 4; index += 1) {
+    const source = denseMemorySources[index % denseMemorySources.length] ?? importedDocSource;
+    const imported = await db.pool.query(
+      `
+        INSERT INTO agent_memories (
+          developer_id, project_id, scope, scope_kind, scope_id, audience,
+          memory_type, title, body, status, use_policy, confidence, created_by, metadata
+        )
+        VALUES ($1, $2, 'project', 'project', $7, $3, 'environment_fact', $4, $5,
+                'candidate', 'evidence_only', 0.62, 'import', $6)
+        RETURNING id
+      `,
+      [
+        developerId,
+        projectId,
+        JSON.stringify([{ kind: "all_agents", id: null }]),
+        `Imported demo evidence ${index} with a long but readable title`,
+        "This imported evidence remains reviewable before agents rely on it. It is intentionally verbose so dense Review lanes have realistic text.",
+        JSON.stringify({
+          smoke: "playwright",
+          dense_fixture: true,
+          risk: "medium",
+          risks: [{ code: "stale_history", severity: "warning" }],
+          policy_reason: "import_candidate_review_required"
+        }),
+        projectId
+      ]
+    );
+    const importedId = imported.rows[0]?.id;
+    assert(importedId, "dense import candidate was not created");
+    await db.pool.query(
+      `
+        INSERT INTO agent_memory_source_refs (memory_id, source_kind, source_id, quote, metadata)
+        VALUES ($1, 'external', $2, $3, $4)
+      `,
+      [
+        importedId,
+        source.id,
+        "dense imported evidence excerpt",
+        JSON.stringify({
+          project_source_id: source.id,
+          source_path: source.label ?? "Dense imported source"
+        })
+      ]
+    );
+  }
+  const conflictSource = denseMemorySources.at(-1) ?? importedDocSource;
+  const conflictMemory = await db.createAgentMemory({
+    memory_type: "environment_fact",
+    scope: "project",
+    title: "Possible overlapping guidance about source review",
+    body:
+      "This synthetic conflict proves the Workbench can keep conflict review readable in a crowded state.",
+    created_by: "agent",
+    confidence: 0.52,
+    metadata: {
+      smoke: "playwright",
+      dense_fixture: true,
+      possible_conflict: true,
+      conflict_group: "source-review-guidance"
+    },
+    source_refs: [
+      {
+        source_kind: "external",
+        source_id: conflictSource.id,
+        quote: "possible conflict dense fixture",
+        metadata: {
+          project_source_id: conflictSource.id,
+          source_path: conflictSource.label ?? "Dense conflict source"
+        }
+      }
+    ]
+  });
+  await db.pool.query(
+    `
+      UPDATE agent_memories
+      SET status = 'needs_review',
+          use_policy = 'evidence_only',
+          metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [
+      conflictMemory.memory_id,
+      JSON.stringify({
+        review_candidate_action: "compare before relying on this guidance",
+        recommended_action: "keep one clear source-review rule"
+      })
+    ]
+  );
   await db.setCheckpoint(projectId, {
     summary: "Playwright visual smoke checkpoint",
     current_focus: "Verify Recallant Workbench desktop and mobile layout.",
@@ -230,8 +625,18 @@ async function run() {
     await desktop.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
     await desktop.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
     await noHorizontalScroll(desktop, "desktop initial Workbench");
+    await assertResponsiveBounds(desktop, "desktop initial Workbench");
+    await assertHumanDefaultLanguage(desktop, "desktop initial Workbench");
 
     const askBox = await visibleBox(desktop.locator("#ask-recallant"), "desktop Ask Recallant");
+    const snapshotBox = await visibleBox(
+      desktop.locator("#ask-recallant .first-screen-snapshot"),
+      "desktop first-screen snapshot"
+    );
+    const textareaBox = await visibleBox(
+      desktop.locator('#ask-recallant textarea[name="message"]'),
+      "desktop Ask Recallant textarea"
+    );
     const leftRailBox = await visibleBox(desktop.locator(".left-rail"), "desktop left rail");
     const sourcesBox = await visibleBox(desktop.locator("#sources"), "desktop Sources");
     const secondaryBox = await visibleBox(
@@ -239,6 +644,13 @@ async function run() {
       "desktop secondary workspace"
     );
     assert(askBox.width >= 980, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
+    assert(
+      snapshotBox.width >= 620 && snapshotBox.y < textareaBox.y,
+      `desktop first-screen snapshot is not prominent above the Ask input: ${JSON.stringify({
+        snapshotBox,
+        textareaBox
+      })}`
+    );
     assert(
       askBox.y < leftRailBox.y && askBox.y < sourcesBox.y && sourcesBox.y < secondaryBox.y,
       `desktop Workbench order is not Ask-first with Sources before secondary panels: ${JSON.stringify(
@@ -252,28 +664,59 @@ async function run() {
     );
 
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
+    await desktop.getByText("Memory capture").first().waitFor();
     await visibleBox(desktop.locator("#activity-replay"), "desktop Activity / Replay");
     await desktop.getByText("Primary workspace folder").first().waitFor();
     await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
     await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
-    await desktop.getByText("ready to cite").waitFor();
+    await desktop.locator(".source-overview", { hasText: "ready to cite" }).waitFor();
     await desktop.getByText("need setup").waitFor();
-    await desktop.getByText("need attention").waitFor();
+    await desktop.locator(".source-overview", { hasText: "need attention" }).waitFor();
+    await desktop
+      .getByText("Long Term Operations Memory Space With Source Map Stress State")
+      .first()
+      .waitFor();
+    const denseMemorySpaceCount = await desktop.locator(".memory-space").count();
+    assert(
+      denseMemorySpaceCount >= 5,
+      `dense fixture should show multiple memory spaces, found ${denseMemorySpaceCount}`
+    );
+    const denseSourceNodeCount = await desktop.locator(".source-tree-node").count();
+    assert(
+      denseSourceNodeCount >= 6,
+      `dense fixture should show many source nodes, found ${denseSourceNodeCount}`
+    );
+    const denseSourceTreeText = await desktop.locator("#sources .source-tree").innerText();
+    assert(
+      denseSourceTreeText.includes("Customer research summaries"),
+      `dense source map did not include a long human-readable source label: ${denseSourceTreeText}`
+    );
     await visibleBox(desktop.locator(".source-filter-panel").first(), "desktop source filter");
     await desktop.getByText("Showing all sources").first().waitFor();
     await visibleBox(desktop.locator("#review"), "desktop Review");
     await visibleBox(desktop.locator("#review .review-overview"), "desktop Review overview");
+    await desktop.getByText("Review decision guide").first().waitFor();
+    await desktop.getByText("Needs your decision").first().waitFor();
+    await desktop.getByText("Possible conflicts").first().waitFor();
     await visibleBox(desktop.locator("#settings"), "desktop Settings");
     await desktop.screenshot({
-      path: join(reportDir, "recallant-workbench-desktop.png"),
+      path: join(reportDir, "recallant-workbench-dense-desktop.png"),
       fullPage: true
     });
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop.png"),
+      publicScreenshots.overview,
+      "desktop overview",
+      forbiddenPublicText
+    );
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
       waitUntil: "networkidle"
     });
     await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Ask view");
+    await assertResponsiveBounds(desktop, "desktop focused Ask view");
     const focusedAskBox = await visibleBox(
       desktop.locator("#ask-recallant"),
       "desktop focused Ask Recallant"
@@ -284,34 +727,60 @@ async function run() {
     );
     await absent(desktop.locator("#command-center"), "focused Ask command center");
     await absent(desktop.locator("#sources"), "focused Ask sources");
-    await desktop.screenshot({
-      path: join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
-      fullPage: true
-    });
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
+      publicScreenshots.ask,
+      "desktop focused Ask",
+      forbiddenPublicText
+    );
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=sources`, {
       waitUntil: "networkidle"
     });
     await desktop.getByRole("heading", { name: "Source Map" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Sources view");
+    await assertResponsiveBounds(desktop, "desktop focused Sources view");
     const focusedSourcesBox = await visibleBox(
       desktop.locator("#sources"),
       "desktop focused Sources"
     );
+    await visibleBox(desktop.locator("#sources .source-tree"), "desktop Memory Tree source map");
     assert(
       focusedSourcesBox.width >= 980,
       `desktop focused Sources is too narrow: ${JSON.stringify(focusedSourcesBox)}`
     );
     await desktop.locator(".workbench-body.focused").waitFor();
+    await desktop.getByRole("heading", { name: "Ready to cite" }).waitFor();
+    await desktop.getByRole("heading", { name: "Needs setup" }).waitFor();
+    await desktop.getByRole("heading", { name: "Needs attention" }).waitFor();
+    await desktop
+      .locator("#sources .source-tree", {
+        hasText: "Recallant can cite memory from this source with provenance."
+      })
+      .waitFor();
     await desktop.getByText("Attach a source to selected space").waitFor();
     await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
     await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
+    const focusedSourceCardCount = await desktop.locator("#sources .source-card").count();
+    assert(
+      focusedSourceCardCount >= 8,
+      `focused Sources should remain usable with many source cards, found ${focusedSourceCardCount}`
+    );
+    const visibleSourceListText = await desktop.locator("#sources .source-list").innerText();
+    assert(
+      !visibleSourceListText.includes(projectPath) && !visibleSourceListText.includes(missingSourcePath),
+      `visible source list leaked exact paths instead of keeping them in Technical details: ${visibleSourceListText}`
+    );
     await absent(desktop.locator("#ask-recallant"), "focused Sources Ask panel");
     await absent(desktop.locator("#command-center"), "focused Sources command center");
-    await desktop.screenshot({
-      path: join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
-      fullPage: true
-    });
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
+      publicScreenshots.sources,
+      "desktop focused Sources",
+      forbiddenPublicText
+    );
 
     await desktop.goto(
       `${baseUrl}/review?project_id=${projectId}&view=activity&source_id=${importedDocSource.id}`,
@@ -321,28 +790,84 @@ async function run() {
     );
     await desktop.getByRole("heading", { name: "Activity / Replay" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused source-filtered Activity view");
+    await assertResponsiveBounds(desktop, "desktop focused source-filtered Activity view");
     const focusedActivityBox = await visibleBox(
       desktop.locator("#activity-replay"),
       "desktop focused source-filtered Activity"
+    );
+    await visibleBox(
+      desktop.locator("#activity-replay .activity-summary"),
+      "desktop Activity replay summary"
     );
     assert(
       focusedActivityBox.width >= 980,
       `desktop focused source-filtered Activity is too narrow: ${JSON.stringify(focusedActivityBox)}`
     );
-    await desktop.getByText("Filtered to AGENTS.md").waitFor();
-    await desktop.getByText("Source: AGENTS.md").waitFor();
+    await desktop.getByText("Filtered to Team handbook").waitFor();
+    await desktop.getByRole("heading", { name: "Recording flow" }).waitFor();
+    await desktop.getByRole("heading", { name: "Memory updates" }).waitFor();
+    await desktop.getByRole("heading", { name: "Checkpoints" }).waitFor();
+    await desktop.locator("#activity-replay .activity-summary", { hasText: "source-linked" }).waitFor();
+    await desktop.getByText("Session starts and context reads prove the agent is entering Recallant.").waitFor();
+    await desktop.getByText("Source: Team handbook").first().waitFor();
     await desktop.getByText("Context was read").waitFor();
     await absent(desktop.locator("#ask-recallant"), "focused Activity Ask panel");
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
+      publicScreenshots.activity,
+      "desktop focused Activity",
+      forbiddenPublicText
+    );
+
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=review`, {
+      waitUntil: "networkidle"
+    });
+    await desktop.getByRole("heading", { name: "Review", exact: true }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused Review view");
+    await assertResponsiveBounds(desktop, "desktop focused Review view");
+    await visibleBox(desktop.locator("#review"), "desktop focused Review");
+    await desktop.getByText("Review decision guide").first().waitFor();
+    await desktop.getByText("Needs your decision").first().waitFor();
+    const importedEvidenceLane = desktop.locator(".review-lane").filter({
+      hasText: "Imported evidence"
+    });
+    const importedLaneCount = Number(
+      await importedEvidenceLane.first().locator("summary strong").innerText()
+    );
+    assert(
+      importedLaneCount >= 4,
+      `dense Review should include imported evidence rows, found ${importedLaneCount}`
+    );
+    const conflictLane = desktop.locator(".review-lane").filter({ hasText: "Possible conflicts" });
+    const conflictLaneCount = Number(await conflictLane.first().locator("summary strong").innerText());
+    assert(
+      conflictLaneCount >= 1,
+      `dense Review should include a possible conflict row, found ${conflictLaneCount}`
+    );
+    const denseReviewItemCount = await desktop.locator("#review .item").count();
+    assert(
+      denseReviewItemCount >= 6,
+      `dense Review should show several scannable items, found ${denseReviewItemCount}`
+    );
     await desktop.screenshot({
-      path: join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
+      path: join(reportDir, "recallant-workbench-dense-review.png"),
       fullPage: true
     });
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-review.png"),
+      publicScreenshots.review,
+      "desktop focused Review",
+      forbiddenPublicText
+    );
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=settings`, {
       waitUntil: "networkidle"
     });
     await desktop.getByRole("heading", { name: "Operations" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Settings view");
+    await assertResponsiveBounds(desktop, "desktop focused Settings view");
     const focusedSettingsBox = await visibleBox(
       desktop.locator("#settings"),
       "desktop focused Settings"
@@ -393,11 +918,30 @@ async function run() {
     await mobile.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
     await mobile.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
     await noHorizontalScroll(mobile, "mobile initial Workbench");
+    await assertResponsiveBounds(mobile, "mobile initial Workbench");
+    await assertHumanDefaultLanguage(mobile, "mobile initial Workbench");
     const mobileAskBox = await visibleBox(mobile.locator("#ask-recallant"), "mobile Ask Recallant");
+    const mobileSnapshotBox = await visibleBox(
+      mobile.locator("#ask-recallant .first-screen-snapshot"),
+      "mobile first-screen snapshot"
+    );
     assert(
       mobileAskBox.width >= 340,
       `mobile Ask Recallant is too narrow: ${JSON.stringify(mobileAskBox)}`
     );
+    assert(
+      mobileSnapshotBox.width >= 330,
+      `mobile first-screen snapshot is too narrow: ${JSON.stringify(mobileSnapshotBox)}`
+    );
+    await assertPublicSafePage(mobile, "mobile Workbench", forbiddenPublicText);
+    await mobile.screenshot({
+      path: join(reportDir, "recallant-workbench-dense-mobile.png"),
+      fullPage: true
+    });
+    await mobile.screenshot({
+      path: publicScreenshots.mobile,
+      fullPage: true
+    });
     await mobile
       .locator('#ask-recallant textarea[name="message"]')
       .fill("Why is this rule not applied?");
@@ -419,21 +963,37 @@ async function run() {
           base_url: baseUrl,
           screenshots: [
             join(reportDir, "recallant-workbench-desktop.png"),
+            join(reportDir, "recallant-workbench-dense-desktop.png"),
             join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
             join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
             join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-review.png"),
+            join(reportDir, "recallant-workbench-dense-review.png"),
             join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
+            join(reportDir, "recallant-workbench-dense-mobile.png"),
             join(reportDir, "recallant-workbench-mobile-chat.png")
           ],
+          public_safe_screenshot_candidates: Object.values(publicScreenshots),
           checks: [
             "auth_required",
             "desktop_no_horizontal_scroll",
             "central_ask_recallant_panel",
+            "first_screen_snapshot_prominent",
             "desktop_focused_ask_view",
             "desktop_focused_sources_view",
+            "memory_tree_source_map",
+            "review_decision_workflow",
+            "public_safe_screenshot_candidates",
             "desktop_focused_source_filtered_activity_view",
+            "activity_replay_readability",
             "desktop_focused_settings_view",
+            "visual_system_responsive_bounds",
+            "default_visible_language_is_human_first",
+            "dense_state_desktop_responsive",
+            "dense_source_map_many_sources",
+            "dense_review_scannable",
+            "dense_state_mobile_responsive",
             "long_russian_chat_answer_readable",
             "mobile_no_horizontal_scroll",
             "mobile_chat_answer_readable"

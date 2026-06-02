@@ -4,22 +4,35 @@ Last updated: 2026-06-02.
 
 This file preserves the current conversation-level direction so a future agent does not restart the architecture discussion from zero.
 
-## Stage 1-5 progress snapshot
+## Stage 1-6 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench, primary Ask panel,
-  cleaner labels, and reduced right-column dominance are working, but final UI polish and some
-  operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~73%` complete. Structured result types, safe action typing,
-  and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
-  scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~63%` complete. The source-binding model and source API
-  are implemented, but live connector verification, broader source-aware recovery, and deeper
-  external-source handling are still partly open.
-- Stage 4 — Client Connect and Hook Capture: `~85%` complete. Connect separation, hook install
-  pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
-  are still active.
-- Stage 5 — Real Pilots and QA: `~73%` complete. Pilot automation for clean/copied/production-sensitive
-  dry-runs is in place, but more realistic non-fixture pilots and broader scenario reporting are pending.
+These percentages were corrected on 2026-06-02 after rewriting `stage_goals/stage_1` through
+`stage_goals/stage_6` as full closure plans instead of partial next-slice lists.
+
+- Stage 1 — Human Workbench UI: complete against the corrected full closure plan. All Goals 1.1-1.9
+  are marked completed, default-visible technical language is guarded by smoke tests, and
+  `npm run stage1:acceptance` passed after Playwright screenshot generation.
+- Stage 2 — AI-native Management Chat: `~55-65%` complete. Core result types, risk gates, mock
+  local-AI semantic tests, fallback, source actions, and memory lookup exist. Remaining: live local
+  model gate, multi-step clarification, global-rule governance, provenance-rich answers, guided
+  action cards, semantic matrix, paid/external AI approval path, rule diagnostics, and Stage 2
+  acceptance.
+- Stage 3 — Memory Spaces and Sources: `~65-75%` complete. Memory spaces, source records,
+  attach/detach, source health, filters, and provenance exist. Remaining: source workspace polish,
+  provenance drilldown, remote/connector status contract, filter consistency, no-secret capability
+  placeholder, multi-source comparison, and Stage 3 acceptance.
+- Stage 4 — Client Connect and Hook Capture: `~65-75%` complete. Project-local connect, MCP config,
+  local hooks, fail-soft behavior, spool fallback, and capture proof exist. Remaining: global
+  dry-run/backup/rollback contracts, one safe opt-in global writer path, spool diagnostics, native
+  hook status, real client pilot matrix, readiness matrix, and Stage 4 acceptance.
+- Stage 5 — Real Pilots and QA: `~55-65%` complete. Fixture-based clean/copied/production-sensitive
+  pilot automation exists. Remaining: owner-readable reports, refreshed clean pilot, copied
+  real-project sandbox, real production dry-run, cleanup matrix, Recallant dogfood pilot, real client
+  pilot matrix, evidence index, and Stage 5 acceptance.
+- Stage 6 — Broader External Memory Domain: `~25-35%` complete. Logical spaces, personal-domain
+  records, safe virtual creation, and governed connector placeholders exist. Remaining: first
+  non-code profile, isolation smoke, human-memory UI, manual human-memory workflow, connector
+  consent stub, no-secret capability proof, first connector design, and Stage 6 acceptance.
 
 ## Current product intent
 
@@ -55,6 +68,11 @@ Accepted refinement: Codex is the first adapter and working scenario, not the pr
   human-readable language by default, hide raw technical values in details/advanced views, and
   borrow MF0 workbench ideas, OB1 human-memory framing, AgentMemory live capture/replay visibility,
   MemPalace search/archive recovery, and Journey guided onboarding.
+- Stage 1 Goals 1.6 and 1.7 are complete as of 2026-06-02. The Workbench now has a shared visual
+  token layer for panels, actions, empty states, focus states, and dense text wrapping. The
+  Playwright Workbench fixture now includes a dense synthetic state with many memory spaces, many
+  sources, long labels, review queues, activity rows, and long chat answers; it verifies
+  desktop/mobile bounds and writes dense screenshots under `/ai/playwright/reports`.
 
 ## Current v1 quality bar
 
@@ -415,6 +433,24 @@ Latest implementation checkpoints:
   and expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while preserving full review detail. Verified by
   `npm run review-ui:smoke` and `npm run review-ui:playwright`.
+- 2026-06-02 first-screen Workbench polish: the top Ask Recallant surface now includes a compact
+  status snapshot for owner attention, memory capture, and source readiness before the input box.
+  Playwright verifies the snapshot is prominent on desktop, remains readable on mobile, and keeps
+  the Ask-first layout free of horizontal overflow.
+- 2026-06-02 Source Map direction polish: Sources now render a Memory Tree-style map with the
+  current memory space as the root and source groups for ready, needs setup, needs attention, and
+  detached states. Visible source cards use provenance/health explanations instead of raw paths;
+  exact locations remain in Technical details. Playwright verifies the focused Sources layout and
+  checks that exact paths are not visible in the default source list.
+- 2026-06-02 Activity / Replay readability polish: Activity now includes a replay summary and
+  groups recent events into Recording flow, Memory updates, Checkpoints, and Other activity. The
+  focused source-filtered Activity view still shows session/context/checkpoint proof while narrowing
+  source-linked memory writes, so capture visibility is not hidden by provenance filtering.
+- 2026-06-02 public-safe screenshot candidates: the Playwright fixture now uses a public screenshot
+  mode with Demo Product Workspace and synthetic source labels, writes candidate PNGs under
+  `/ai/playwright/reports/public-safe-candidates`, and verifies visible screenshot text before
+  writing candidate copies. The guard blocks project/developer ids, UUIDs, short event ids, owner
+  paths, private hostnames, raw database/API-key-looking text, and old development fixture labels.
 - 2026-06-02 Workbench focused-view follow-up: top navigation now supports focused work surfaces
   with `?view=ask|memory|command|sources|activity|review|settings` plus the default full `All`
   view. Ask, Source, and Settings form submissions stay on the relevant focused surface, reducing

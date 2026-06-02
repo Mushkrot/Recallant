@@ -2,14 +2,12 @@
 
 ## Current Session
 
-Status: Source-filtered Workbench/source health, governed/raw recall, no-port Management Chat AI QA,
-stable MCP protocol smoke, and Review triage chat are implemented.
-Current focus: Continue turning the Workbench into a professional, human-readable control surface
-while keeping Playwright checks for layout regressions.
-Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
-realistic pilot reports, and live rerun of the source-filtered raw search DB smoke when local
-Postgres access is available outside the current sandbox/usage-limit condition.
-Last updated: 2026-06-02T07:30:00Z.
+Status: Stage 1 Human Workbench UI is complete against the corrected Goal 1.1-1.9 plan.
+Current focus: Stage 1 is closed; next work should start from a new requested stage/goal.
+Next step: Do not add more Stage 1 work in this slice. Continue only with the next owner-selected
+stage/goal.
+Do not drift into installer, hooks, storage, or broader Stage 7 work from this checkpoint.
+Last updated: 2026-06-02T20:32:46Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -77,6 +75,9 @@ Last updated: 2026-06-02T07:30:00Z.
 - Product readiness requires the end-to-end agent capture loop, not only attach/project
   registration. An attached project must start a Recallant-backed session, read context, write
   decisions/actions/tests/checkpoints, close out, and recall that memory in a later session.
+- The public proof path should be short enough for a new user: after attaching a project, run
+  `recallant demo-capture --project-dir .`, `recallant doctor --project-dir . --require-capture`,
+  and `recallant ask "what did the agent remember?" --project-dir .`.
 - Hook-kit readiness must require all generated hook files, executable hook scripts, and a valid
   manifest. A project-local hook kit with an invalid manifest or missing executable permissions must
   not be reported as `mcp_and_hooks_ready`.
@@ -103,6 +104,16 @@ Last updated: 2026-06-02T07:30:00Z.
   focused surface is wide enough, confirms unrelated panels are absent, and saves dedicated
   screenshots. This caught and fixed a real bug where focused Settings still used the old half-width
   operations grid.
+- Stage 1 final visual-system pass is complete: Workbench CSS now has shared product tokens,
+  clearer panel/action/empty-state hierarchy, focus-visible states, and safer dense text wrapping.
+- Stage 1 dense-state responsive QA is complete: `npm run review-ui:playwright` now seeds multiple
+  memory spaces, many sources, long labels, review queues, activity rows, and long chat answers, then
+  checks desktop/mobile responsive bounds and writes dense screenshots.
+- Stage 1 progressive-disclosure cleanup is complete: default Workbench screens now use
+  human-readable labels, while raw ids, keys, provider/model values, route classes, and filter
+  internals stay behind intentional Technical details disclosure.
+- Stage 1 acceptance is now explicit: `npm run stage1:acceptance` checks all Stage 1 goals, required
+  Workbench surfaces, screenshot artifacts, and the default-visible human-language guard.
 
 ## Verification
 
@@ -175,6 +186,16 @@ Last updated: 2026-06-02T07:30:00Z.
   `npm run review-ui:smoke`, `npm run review-ui:playwright`, `npm run lint`,
   `npm run format:check`, and `git diff --check` passed. Playwright now captures
   `recallant-workbench-desktop-focused-activity-source.png`.
+- Stage 1 visual-system/dense-state verification on 2026-06-02: `npm run build`, `npm run lint`,
+  `npm run format:check`, `git diff --check`, `npm run review-ui:smoke`, and
+  `npm run review-ui:playwright` passed. Playwright now captures
+  `recallant-workbench-dense-desktop.png`, `recallant-workbench-dense-review.png`, and
+  `recallant-workbench-dense-mobile.png`.
+- Stage 1 progressive-disclosure/acceptance verification on 2026-06-02: `npm run build`,
+  `npm run lint`, `npm run format:check`, `git diff --check`, `npm run review-ui:smoke`,
+  `npm run review-ui:playwright`, and `npm run stage1:acceptance` passed. The Playwright smoke now
+  includes `default_visible_language_is_human_first`, and the Stage 1 acceptance report is written to
+  `/tmp/recallant-stage1-acceptance.json`.
 - Source-aware governed recall verification on 2026-06-02: `npm run build`,
   `npm run review-ui:smoke`, `npm run management-chat-ai:smoke`, `npm run mcp:smoke`,
   and `git diff --check` passed before final lint/format checks.
@@ -483,6 +504,80 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - Verification so far: `npm run public-readiness:smoke`, `npm run public-clean-host:smoke`,
   `npm run installer:smoke`, `npm run public-security:smoke`, and the opt-in Docker-backed
   `public-managed-install:smoke` passed.
+
+## 2026-06-02 Stage 1 Goal 1.1 First-Screen Workbench Polish
+
+- Added a compact first-screen status snapshot inside the primary Ask Recallant surface.
+- The snapshot shows owner attention, memory capture, and source readiness before the chat input,
+  so the first viewport communicates the current state without scanning lower panels.
+- Kept the change UI-only: no storage, API, client-connect, or architecture changes.
+- Updated Review UI smoke and Playwright checks to verify the snapshot exists, is prominent above
+  the Ask input on desktop, remains readable on mobile, and preserves the Ask-first layout.
+
+## 2026-06-02 Stage 1 Goal 1.2 Memory Tree / Source Map Direction
+
+- Added a Memory Tree-style Source Map: the current memory space is shown as the root, and attached
+  sources are grouped by ready, needs setup, needs attention, and detached states.
+- Updated visible source cards to explain provenance and source health in human language instead of
+  showing raw source locations by default.
+- Exact source locations remain available under Technical details, preserving inspectability without
+  making the first source view feel like a database record list.
+- Updated Review UI smoke and Playwright checks to verify the tree, focused Sources layout, source
+  filters, and that exact paths are hidden from the visible source list.
+
+## 2026-06-02 Stage 1 Goal 1.3 Activity / Replay Readability
+
+- Added an Activity / Replay summary that shows sessions, context reads, memory writes,
+  checkpoints, and source-linked activity at a glance.
+- Grouped recent activity into Recording flow, Memory updates, Checkpoints, and Other activity so
+  the owner can read the history as a replay rather than a flat event log.
+- Kept source-filtered Activity safe: source-linked memory writes narrow to the selected source,
+  while session/context/checkpoint proof remains visible so capture status is not hidden.
+- Updated Review UI smoke and Playwright checks to verify the summary and grouped focused Activity
+  view.
+
+## 2026-06-02 Stage 1 Goal 1.4 Review Decision Workflow Polish
+
+- Added a Review decision guide that tells the owner where to start: conflicts first, then memories
+  needing a decision, then imported evidence.
+- Renamed Review queues and summaries into human language: Imported evidence, Needs your decision,
+  Possible conflicts, and Active rules.
+- Made the normal decision path clearer: useful facts become Usable memory, while durable guidance
+  can become an Active rule only after review.
+- Separated sensitive cleanup from normal review actions. Forget forever remains a separate dry-run
+  path for sensitive or wrong memory, not an ordinary review button.
+- Updated Review UI smoke and Playwright checks to verify the new decision guide and queue language.
+
+## 2026-06-02 Stage 1 Goal 1.5 Public-Safe UI Screenshot Candidates
+
+- Added a public screenshot mode for the Review UI Playwright fixture. It uses Demo Product
+  Workspace and synthetic source labels instead of owner project names, paths, or ids.
+- Playwright now writes separate internal candidate screenshots under
+  `/ai/playwright/reports/public-safe-candidates`:
+  `recallant-workbench-overview.png`, `recallant-workbench-ask.png`,
+  `recallant-workbench-sources.png`, `recallant-workbench-activity.png`,
+  `recallant-workbench-review.png`, and `recallant-workbench-mobile.png`.
+- The fixture checks visible page text before writing candidate copies and blocks generated
+  project/developer ids, UUIDs, short event ids, owner paths, private hostnames, raw database/API-key
+  looking text, and old development fixture labels.
+- Public screenshot policy now documents the candidate directory, filenames, and automated
+  visible-text guard. The images are internal candidates only and are not published by this goal.
+
+## 2026-06-02 Stage 1-6 Closure Planning Correction
+
+- Corrected the temporary `stage_goals/` planning layer after discovering that some sub-goal files
+  listed useful next slices but did not fully close their parent Stage.
+- Rewrote `stage_goals/stage_1` through `stage_goals/stage_6` so each Stage now has:
+  - an updated audit based on current repository evidence;
+  - a clear completion rule;
+  - a sub-goal list that is intended to fully close the Stage;
+  - an explicit Stage acceptance gate.
+- Stage 1 now records completed Goals 1.1-1.5 and pending Goals 1.6-1.9 for final visual system,
+  dense-state QA, progressive disclosure, and Stage acceptance.
+- Stage 2-6 now have corrected closure plans covering AI chat, sources, client connect/hooks,
+  pilots/QA, and broader external-memory safety respectively.
+- Updated `docs/SESSION_HANDOFF_CURRENT.md` and `docs/WORKING_CONTEXT.md` to lower optimistic
+  percentage language and align status with the corrected full closure plans.
 
 ## Open Questions
 
