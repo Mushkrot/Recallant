@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~65%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~60%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -48,6 +48,9 @@ candidates, inbox items, and active rules. It is verified by `npm run project-so
 The local source-health follow-up checks absolute local `workspace_path`, `repo`, and `server_path`
 bindings without reading source contents, so the UI can distinguish ready local sources from
 missing, unreadable, or wrong-shape paths.
+The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
+strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
+project actions.
 Production `recallant.service` was restarted on 2026-06-01 after the Workbench UI changes because
 the live browser still showed the older in-memory `Recallant Review Command Center`. Post-restart
 checks passed: local `/health`, unauthenticated `/review` `401`, authenticated local `/review`

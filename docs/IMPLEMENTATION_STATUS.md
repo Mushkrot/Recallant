@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~65% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~68% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~60% completed. Core risk-typed responses, safe-action and
@@ -361,6 +361,9 @@ Stage 1 Workbench follow-up slice is now implemented:
 - The 2026-06-02 Ask-first Workbench follow-up makes Ask Recallant a full-width top work surface
   above the Memory Spaces / Command Center / Sources workspace, closes governed Operations by
   default, and presents Sources as a Source Map with source-memory and provenance-filter shortcuts.
+- The 2026-06-02 Command Center compacting follow-up moves Current Signals out of the left rail and
+  into a compact strip inside Command Center, reducing standalone card clutter while keeping capture,
+  review, conflict, and paid-approval signals visible.
 - `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new Ask-first -> Sources
   -> secondary workspace order, source management surface, no horizontal scroll, and readable long
   chat answers.

@@ -6,7 +6,7 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~65%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~60%` complete. Structured result types, safe action typing,
@@ -367,6 +367,9 @@ Latest implementation checkpoints:
   Source management is framed as a Source Map with shortcuts to source-linked memories and
   provenance filtering; governed Operations stay collapsed below the main memory workspace.
   Verified by `npm run review-ui:smoke` and `npm run review-ui:playwright`.
+- 2026-06-02 Command Center compacting follow-up: Current Signals are no longer a separate left-rail
+  card. They now render as a compact signal strip inside Command Center so the left side stays focused
+  on Memory Spaces and project-level safety actions.
 - 2026-06-02 compact Review follow-up: Review now starts with four human-readable queue summaries
   and expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while preserving full review detail. Verified by

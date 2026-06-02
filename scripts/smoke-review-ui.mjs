@@ -399,6 +399,7 @@ try {
     "Ask Recallant",
     'id="ask-recallant"',
     "Agent Readiness",
+    "Current Recallant signals",
     "Interrupted",
     "Context was read",
     "Memory was written",
@@ -441,6 +442,7 @@ try {
     ".ask-layout { display: grid",
     ".primary-workspace { display: grid",
     ".command-grid { display: grid",
+    ".signal-strip { display: grid",
     ".source-overview { display: grid",
     ".source-workspace-grid { display: grid",
     ".review-overview { display: grid",
@@ -464,7 +466,8 @@ try {
     "<h3>embedding_route</h3>",
     "<h3>instruction_grade</h3>",
     "<h3>needs_review</h3>",
-    "scope_kind: developer"
+    "scope_kind: developer",
+    "<h2>Current Signals</h2>"
   ].filter((marker) => htmlText.includes(marker));
   if (
     missingLayoutContracts.length > 0 ||

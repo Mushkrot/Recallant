@@ -1611,6 +1611,16 @@ function renderAttention(data: ReviewDashboardData) {
   return `<ul class="attention-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
+function renderCurrentSignals(data: ReviewDashboardData) {
+  return `<div class="signal-strip" aria-label="Current Recallant signals">
+    <span><strong>${escapeHtml(data.critical?.active_sessions ?? 0)}</strong> Active</span>
+    <span><strong>${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</strong> Interrupted</span>
+    <span><strong>${escapeHtml(data.critical?.pending_review ?? 0)}</strong> Review</span>
+    <span><strong>${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</strong> Conflicts</span>
+    <span><strong>${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</strong> Paid API</span>
+  </div>`;
+}
+
 function renderReadiness(data: ReviewDashboardData) {
   const readiness = asRecord(data.project_readiness);
   const registered = Boolean(readiness.project_registered);
@@ -2040,6 +2050,9 @@ function renderDashboard(
     .section-head p { max-width: 520px; margin: 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .section-kicker { display: block; color: #166454; font-size: 11px; font-weight: 750; letter-spacing: 0; margin-bottom: 4px; text-transform: uppercase; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
+    .signal-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
+    .signal-strip span { border: 1px solid #dce3ec; border-radius: 999px; padding: 7px 10px; background: #f8fafc; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .signal-strip strong { color: #20242c; margin-right: 4px; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .cleanup-flow p, .detach-result p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .detach-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin-bottom: 10px; background: #fbfcfe; }
@@ -2208,7 +2221,7 @@ function renderDashboard(
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .signal-strip { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
   </style>
 </head>
 <body>
@@ -2248,16 +2261,6 @@ function renderDashboard(
           ${renderMemorySpaces(data)}
         </section>
         <section class="panel">
-          <h2>Current Signals</h2>
-          <div class="status">
-            <span class="pill">Active ${escapeHtml(data.critical?.active_sessions ?? 0)}</span>
-            <span class="pill">Interrupted ${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</span>
-            <span class="pill">Review ${escapeHtml(data.critical?.pending_review ?? 0)}</span>
-            <span class="pill">Conflicts ${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</span>
-            <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
-          </div>
-        </section>
-        <section class="panel">
           <h2>Project Actions</h2>
           ${renderProjectActions(data)}
         </section>
@@ -2265,6 +2268,7 @@ function renderDashboard(
       <section class="workbench-main">
         <section class="panel" id="command-center">
           <h2>Command Center</h2>
+          ${renderCurrentSignals(data)}
           <div class="command-grid">
             <div class="command-card">
               <h3>What Needs Attention</h3>
