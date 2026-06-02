@@ -1937,10 +1937,33 @@ function renderChatActions(
           <span>${escapeHtml(actionKindLabel(action.kind, language))}</span>
           <p>${escapeHtml(action.reason)}</p>
           ${action.command ? `<code>${escapeHtml(action.command)}</code>` : ""}
+          ${renderChatActionForm(action, language)}
         </article>`
       )
       .join("")}
   </div>`;
+}
+
+function renderChatActionForm(
+  action: ManagementChatResponse["proposed_actions"][number],
+  language: ManagementChatResponse["language"]
+) {
+  if (action.kind !== "dry_run" || !action.command) return "";
+  const projectMatch = action.command.match(/--project-id\s+([0-9a-f-]{36})(?:\s|$)/i);
+  if (!projectMatch) return "";
+  if (
+    !/\brecallant\s+detach\b/.test(action.command) ||
+    !/(?:^|\s)--dry-run(?:\s|$)/.test(action.command)
+  ) {
+    return "";
+  }
+  const mode = /(?:^|\s)--mode\s+sandbox(?:\s|$)/.test(action.command) ? "sandbox" : "live";
+  const label = language === "ru" ? "Запустить dry-run в интерфейсе" : "Run dry-run in UI";
+  return `<form class="chat-action-form" method="post" action="/project-detach#ask-recallant">
+    <input type="hidden" name="project_id" value="${escapeHtml(projectMatch[1] ?? "")}" />
+    <input type="hidden" name="mode" value="${escapeHtml(mode)}" />
+    <button type="submit">${escapeHtml(label)}</button>
+  </form>`;
 }
 
 function actionKindLabel(
@@ -2210,6 +2233,8 @@ function renderDashboard(
     .chat-actions span { display: inline-block; margin-top: 5px; color: #6a7280; font-size: 12px; }
     .chat-actions p { margin: 6px 0; color: #4f5867; }
     .chat-actions code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7fb; border-radius: 5px; padding: 6px; font-size: 12px; }
+    .chat-action-form { margin-top: 8px; }
+    .chat-action-form button { border-color: #8fb9ad; background: #eef8f5; color: #145a4d; font-weight: 700; }
     .chat-understanding { margin: 0 0 8px; color: #667085; font-size: 12px; }
     .chat-result { display: inline-flex; margin-left: 6px; border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; color: #303845; background: #f8fafc; }
     .activity-list { display: grid; gap: 9px; }

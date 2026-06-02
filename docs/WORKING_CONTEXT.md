@@ -9,7 +9,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~60%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~63%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
 - Stage 3 — Memory Spaces and Sources: `~45%` complete. The source-binding model and source API
@@ -392,6 +392,9 @@ Latest implementation checkpoints:
   virtual memory space as a `safe_action`; the smoke verifies the response and DB state with zero
   sources. Source attach/detach and project attach/connect still stay behind governed UI/dry-run
   workflows. Verified by `npm run review-ui:smoke` and `npm run management-chat-ai:smoke`.
+- 2026-06-02 Management Chat safe dry-run UI follow-up: when Ask Recallant proposes project detach
+  dry-run, the Workbench renders a button that posts to the existing `/project-detach` dry-run path.
+  It never sends `confirm=true`, so chat can guide cleanup without executing removal.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
 - 2026-06-02 mandatory-startup diagnostics follow-up: `recallant connect` now reports
   `mandatory_startup_layer`, and `recallant doctor` reports `client_connection`. These show MCP

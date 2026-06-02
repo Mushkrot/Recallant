@@ -66,7 +66,7 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~68% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~60% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~63% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
 - Stage 3 — Memory Spaces and Sources: ~45% completed. Logical memory space model and source binding
@@ -400,6 +400,10 @@ Stage 2 first slice is now implemented:
 - Stage 2/3 source-health answer follow-up is implemented: Ask Recallant source-management facts
   now include ready, needs-attention, and detached source counts so natural-language source
   questions can explain source health without exposing raw source rows.
+- Stage 2 safe dry-run UI follow-up is implemented: when Ask Recallant proposes a project detach
+  dry-run, the Workbench renders a policy-safe "Run dry-run in UI" form instead of leaving the owner
+  with only a terminal command. The form still goes through the existing `/project-detach` dry-run
+  path and never confirms removal directly from chat.
 
 Stage 3 first slice is now implemented:
 

@@ -805,6 +805,7 @@ try {
     sandboxDestructiveChatJson.facts.target_project_id !== sandboxProjectId ||
     sandboxDestructiveChatJson.proposed_actions.length < 1 ||
     !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(sandboxProjectId) ||
+    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes("--mode sandbox") ||
     String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(projectId)
   ) {
     throw new Error(
@@ -1056,6 +1057,9 @@ try {
     !destructiveChatFormHtml.includes("Перед рискованным действием требуется подтверждение.") ||
     !destructiveChatFormHtml.includes("Результат: сначала dry-run") ||
     !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
+    !destructiveChatFormHtml.includes("Запустить dry-run в интерфейсе") ||
+    !destructiveChatFormHtml.includes('action="/project-detach#ask-recallant"') ||
+    !destructiveChatFormHtml.includes('name="mode" value="sandbox"') ||
     !destructiveChatFormHtml.includes(sandboxProjectId) ||
     destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")
   ) {

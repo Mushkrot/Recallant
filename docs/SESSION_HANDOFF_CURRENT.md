@@ -8,7 +8,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~60%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~63%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
 - Stage 3 — Memory Spaces and Sources: `~45%` complete. Virtual spaces and source attach/detach
@@ -567,6 +567,9 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   as a `safe_action` from chat. It does not attach sources or touch files/secrets/connectors; those
   remain governed source workflows. `review-ui:smoke` verifies the API response and zero-source DB
   state; `management-chat-ai:smoke` still passes.
+- 2026-06-02 safe dry-run UI follow-up: Ask Recallant project-detach dry-run proposals now render a
+  Workbench button that posts to `/project-detach` without confirmation, so the owner can run the
+  preliminary check from the interface while actual removal remains separately confirmed.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 

@@ -1547,7 +1547,7 @@ function actionsForIntent(
     const detachCommand =
       targetProject.project_id === facts.current_project_id
         ? stringValue(cleanup.detach_command)
-        : `recallant detach --project-id ${targetProject.project_id} --dry-run`;
+        : `recallant detach --project-id ${targetProject.project_id} --mode sandbox --dry-run`;
     return [
       {
         label:
