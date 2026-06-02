@@ -458,6 +458,9 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - `npm run review-ui:playwright` passed on 2026-06-02 and generated fresh synthetic Workbench
   screenshot candidates under `/ai/playwright/reports`; focused Ask was spot-checked as synthetic
   and free of owner paths, private hostnames, owner emails, and secrets.
+- Added `docs/PUBLIC_SECURITY_REVIEW.md` and `npm run public-security:smoke` to guard normal public
+  onboarding docs against owner hostnames, owner emails, owner runtime paths, secure env paths, raw
+  database URLs, and raw secret-like assignments.
 - README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
   clone commands.
 - Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning

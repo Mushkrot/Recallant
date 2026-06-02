@@ -90,7 +90,10 @@ Current implemented slices include:
   source and redaction policy; `npm run review-ui:playwright` generated fresh synthetic
   desktop/mobile screenshot candidates under `/ai/playwright/reports` on 2026-06-02, with a focused
   Ask screenshot spot-check showing no owner paths/hostnames/emails/secrets. Final manual approval
-  of the full image set remains open.
+  of the full image set remains open. `docs/PUBLIC_SECURITY_REVIEW.md` and
+  `npm run public-security:smoke` now guard normal public onboarding docs against owner hostnames,
+  owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
+  assignments.
   This is not yet a public-release claim: real clean-host install validation, final sanitized
   screenshots, rollback testing on a non-owner host, refreshed public-facing security review, and
   final client mandatory-startup parity remain open.
@@ -1002,6 +1005,9 @@ Latest product-UX readiness checkpoint:
   - `npm run review-ui:playwright` passed and generated seven Workbench screenshot candidates:
     desktop overview, focused Ask, focused Sources, source-filtered Activity, focused Settings,
     desktop chat, and mobile chat.
+  - `npm run public-security:smoke` checks public-facing onboarding docs for private hostnames,
+    owner emails, owner runtime paths, secure env paths, raw database URLs, and raw secret-like
+    assignments.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
     for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
     URL in README/Quickstart.

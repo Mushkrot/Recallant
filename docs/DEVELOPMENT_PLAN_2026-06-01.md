@@ -487,6 +487,11 @@ Acceptance:
   The focused Ask screenshot was manually spot-checked as synthetic and free of
   owner paths, hostnames, emails, and secrets; final public approval of the full
   image set remains a release-candidate task.
+- Done: [PUBLIC_SECURITY_REVIEW.md](PUBLIC_SECURITY_REVIEW.md) records the
+  public packaging security checklist, and `npm run public-security:smoke`
+  verifies normal onboarding docs do not expose owner hostnames, owner emails,
+  owner runtime paths, secure env paths, raw database URLs, or raw secret-like
+  assignments.
 
 Remaining before a real public-release claim:
 
@@ -495,7 +500,8 @@ Remaining before a real public-release claim:
 - Clean-host install validation outside the owner server.
 - Rollback docs tested on a non-owner host.
 - Full mandatory startup parity for supported clients.
-- Security review of public-facing packaging instructions.
+- Final manual security review after real clean-host install and screenshot
+  approval.
 
 ## Verification Discipline
 

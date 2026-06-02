@@ -51,8 +51,7 @@ operator workflow:
 sudo ./scripts/install-recallant.sh --dry-run --profile owner-server
 ```
 
-That profile uses owner-specific defaults such as `/ai/recallant-data` and
-`/opt/secure-configs/recallant.env`. It is documented in [OWNER_SERVER.md](OWNER_SERVER.md) and
+That profile uses owner-specific defaults documented in [OWNER_SERVER.md](OWNER_SERVER.md). It
 should not be treated as the generic public install path.
 
 ## What The Installer Does

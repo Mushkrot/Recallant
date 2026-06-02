@@ -43,7 +43,8 @@ A release candidate must prove:
 - public screenshots follow [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md) and contain no private
   paths, tokens, project names, hostnames, or owner email addresses;
 - rollback instructions have been tested on a non-owner host;
-- security docs have been reviewed for public-facing instructions.
+- `npm run public-security:smoke` passes;
+- security docs have been manually reviewed for public-facing instructions.
 
 ## What Must Not Be Released As Public Defaults
 

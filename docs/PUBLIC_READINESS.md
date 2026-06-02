@@ -19,6 +19,8 @@ First packaging slice implemented:
 - README and Quickstart now use the canonical repository URL instead of placeholder clone commands;
 - release/version policy and release-candidate gates are recorded in [RELEASE.md](RELEASE.md);
 - public screenshot/redaction policy is recorded in [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md);
+- public-facing security review checklist is recorded in
+  [PUBLIC_SECURITY_REVIEW.md](PUBLIC_SECURITY_REVIEW.md);
 - latest Workbench Playwright screenshot QA generated synthetic desktop/mobile candidates under
   `/ai/playwright/reports` on 2026-06-02;
 - Quickstart is now the ordinary user path;
@@ -32,7 +34,7 @@ Still pending before a public release claim:
 - broader external-user install run on a clean VM/container;
 - final rollback docs tested on a non-owner host;
 - complete mandatory startup parity for the supported clients;
-- refreshed security review for any public-facing packaging instructions.
+- final manual security review after real clean-host install and screenshot approval.
 
 ## Public Acceptance Path
 
@@ -74,6 +76,10 @@ paths, or architecture ADRs to complete this path.
 - managed-server dry-run accepts explicit env/data/prefix overrides;
 - dry-run creates no env, data, or CLI paths;
 - the CLI wrapper can be installed into a temporary prefix and run a safe command.
+
+`npm run public-security:smoke` checks that normal public onboarding docs do not expose owner
+hostnames, owner emails, owner runtime paths, secure env paths, raw database URLs, or raw secret-like
+assignments.
 
 This smoke does not prove the whole product is public-ready. It prevents the packaging path from
 regressing while Stage 7 continues.
