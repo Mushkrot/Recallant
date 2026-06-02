@@ -93,6 +93,9 @@ export type ManagementChatResponse = {
     operation: SourceRequestAnalysis["operation"];
     project_id?: string;
     space_name?: string;
+    source_id?: string;
+    source_label?: string;
+    source_uri?: string;
     reason: string;
   };
   facts: {
@@ -144,6 +147,7 @@ type ChatInterpretation = {
 
 type SourceRequestAnalysis = {
   operation: "create_space" | "attach_source" | "detach_source" | "inspect_sources";
+  project_id: string;
   missing: string[];
   source_kind: string;
   source_label: string;
@@ -938,10 +942,10 @@ function sourceKindFromMessage(message: string, sourceUri: string) {
   if (includesAny(message, ["server path", "server", "сервер"])) {
     return "server_path";
   }
+  if (sourceUri.startsWith("/")) return "workspace_path";
   if (includesAny(message, ["document", "documents", "docs", "документ"])) {
     return sourceUri ? "document_collection" : "manual";
   }
-  if (sourceUri.startsWith("/")) return "workspace_path";
   return "manual";
 }
 
@@ -1110,6 +1114,7 @@ function analyzeSourceRequest(
         : undefined;
   return {
     operation,
+    project_id: facts.current_project_id,
     missing,
     source_kind: sourceKind,
     source_label: sourceLabel,
@@ -1196,8 +1201,63 @@ async function maybeRunSafeSourceAction(input: {
   database?: RecallantDb;
 }): Promise<ManagementChatResponse["source_action_result"]> {
   const request = input.sourceRequest;
-  if (!request || request.operation !== "create_space") return undefined;
+  if (!request) return undefined;
+  if (request.operation !== "create_space" && request.operation !== "attach_source") {
+    return undefined;
+  }
   if (request.missing.length > 0) return undefined;
+  if (request.operation === "attach_source") {
+    const safeSourceKinds = new Set(["workspace_path", "repo", "document_collection", "manual"]);
+    if (!safeSourceKinds.has(request.source_kind)) {
+      return {
+        status: "skipped",
+        operation: request.operation,
+        source_label: request.source_label,
+        source_uri: request.source_uri,
+        reason:
+          "This source type can affect connectors, server access, or security boundaries, so it must go through the governed source workflow."
+      };
+    }
+    if (!input.database) {
+      return {
+        status: "skipped",
+        operation: request.operation,
+        source_label: request.source_label,
+        source_uri: request.source_uri,
+        reason: "Database is unavailable, so the source was not attached."
+      };
+    }
+    const source = await input.database.attachProjectSource({
+      project_id: request.project_id,
+      source_kind: request.source_kind as Parameters<
+        RecallantDb["attachProjectSource"]
+      >[0]["source_kind"],
+      label: request.source_label,
+      uri: request.source_uri || null,
+      is_primary: false,
+      status: "active",
+      metadata: { created_by: "management_chat", safe_db_only_attach: true }
+    });
+    if (!source) {
+      return {
+        status: "skipped",
+        operation: request.operation,
+        source_label: request.source_label,
+        source_uri: request.source_uri,
+        reason: "Recallant did not return an attached source record."
+      };
+    }
+    return {
+      status: "created",
+      operation: request.operation,
+      project_id: request.project_id,
+      source_id: String(source.id),
+      source_label: request.source_label,
+      source_uri: request.source_uri,
+      reason:
+        "Attached the source as a Recallant database record only. Project files, source files, secrets, and connectors were not touched."
+    };
+  }
   if (request.source_uri) {
     return {
       status: "skipped",
@@ -1322,7 +1382,7 @@ function answerRu(
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nЯ не буду подставлять открытый проект в опасную команду, потому что запрос похож на sandbox cleanup, а целевой sandbox-проект не выбран однозначно. Сначала выбери нужный проект слева или уточни название.`;
   }
-  if (destructiveOrSensitive) {
+  if (destructiveOrSensitive && intent !== "source_management") {
     const switchNote = facts.target_project_switched
       ? " Я не подставляю открытый проект в команду, потому что запрос явно похож на sandbox cleanup."
       : "";
@@ -1349,6 +1409,9 @@ function answerRu(
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "source_management":
       if (sourceActionResult?.status === "created") {
+        if (sourceActionResult.operation === "attach_source") {
+          return `${baseline}\n\nЯ подключил источник “${sourceActionResult.source_label}” к текущему memory space как запись Recallant. Это безопасная DB-only операция: файлы проекта, файлы источника, секреты и внешние подключенные сервисы не тронуты.\n\nТеперь этот источник будет виден в Source Map и provenance для будущих воспоминаний.`;
+        }
         return `${baseline}\n\nЯ создал пустое пространство памяти “${sourceActionResult.space_name}”. Это безопасная операция внутри Recallant: файлы проекта, источники, секреты и внешние подключенные сервисы не тронуты.\n\nСледующий шаг: если этому пространству нужен источник, подключи его отдельно через Source Map или попроси меня подготовить безопасный шаг подключения источника.`;
       }
       if (sourceActionResult?.status === "skipped") {
@@ -1418,7 +1481,7 @@ function answerEn(
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nI will not substitute the open project into a risky command because the request looks sandbox-related and the target sandbox project is not unambiguous. Select the target project on the left or name it explicitly first.`;
   }
-  if (destructiveOrSensitive) {
+  if (destructiveOrSensitive && intent !== "source_management") {
     const switchNote = facts.target_project_switched
       ? " I am not using the open project for the command because the request explicitly looks sandbox-related."
       : "";
@@ -1445,6 +1508,9 @@ function answerEn(
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
     case "source_management":
       if (sourceActionResult?.status === "created") {
+        if (sourceActionResult.operation === "attach_source") {
+          return `${baseline}\n\nI attached source “${sourceActionResult.source_label}” to the current memory space as a Recallant record. This is a safe DB-only operation: project files, source files, secrets, and external connectors were not touched.\n\nThe source will now appear in Source Map and provenance for future memories.`;
+        }
         return `${baseline}\n\nI created the empty memory space “${sourceActionResult.space_name}”. This is a safe Recallant-only action: project files, sources, secrets, and external connectors were not touched.\n\nNext step: if this space needs a source, attach it separately through Source Map or ask me to prepare a safe attach-source step.`;
       }
       if (sourceActionResult?.status === "skipped") {
@@ -1532,7 +1598,7 @@ function actionsForIntent(
       }
     ];
   }
-  if (destructiveOrSensitive || intent === "cleanup") {
+  if ((destructiveOrSensitive && intent !== "source_management") || intent === "cleanup") {
     if (targetProject.ambiguous) {
       return [
         {
@@ -1590,6 +1656,26 @@ function actionsForIntent(
 
   if (intent === "source_management") {
     if (sourceActionResult?.status === "created") {
+      if (sourceActionResult.operation === "attach_source") {
+        return [
+          {
+            label: language === "ru" ? "Источник подключен" : "Source attached",
+            kind: "read_only",
+            reason:
+              language === "ru"
+                ? `Источник “${sourceActionResult.source_label}” подключен к текущему memory space. Файлы и внешние сервисы не тронуты.`
+                : `Source “${sourceActionResult.source_label}” is attached to the current memory space. Files and external services were not touched.`
+          },
+          {
+            label: language === "ru" ? "Открыть Sources workspace" : "Open Sources workspace",
+            kind: "read_only",
+            reason:
+              language === "ru"
+                ? "Проверь health/status и provenance для подключенного источника."
+                : "Review health/status and provenance for the attached source."
+          }
+        ];
+      }
       return [
         {
           label: language === "ru" ? "Пространство памяти создано" : "Memory space created",
@@ -1618,6 +1704,18 @@ function actionsForIntent(
             language === "ru"
               ? `Нужно: ${sourceRequest.missing.join(", ")}. Recallant не должен угадывать путь или имя memory space.`
               : `Needed: ${sourceRequest.missing.join(", ")}. Recallant should not guess the path or memory-space name.`
+        }
+      ];
+    }
+    if (sourceActionResult?.status === "skipped") {
+      return [
+        {
+          label:
+            language === "ru"
+              ? "Использовать governed source workflow"
+              : "Use governed source workflow",
+          kind: destructiveOrSensitive ? "confirmation_required" : "read_only",
+          reason: sourceActionResult.reason
         }
       ];
     }

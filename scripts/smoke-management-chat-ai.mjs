@@ -303,22 +303,79 @@ try {
     destructive_or_sensitive: false,
     global_rule_request: false
   });
+  let attachedSourceInput = null;
   const sourceAttach = await buildManagementChatResponse({
     message: "Attach /ai/docs as a source to the current memory space",
-    dashboard: baseDashboard
+    dashboard: baseDashboard,
+    database: {
+      attachProjectSource: async (input) => {
+        attachedSourceInput = input;
+        return {
+          id: "source-attached-docs",
+          project_id: input.project_id,
+          source_kind: input.source_kind,
+          label: input.label,
+          uri: input.uri,
+          status: "active"
+        };
+      }
+    }
   });
   assert(
     sourceAttach.understanding.source === "local_ai" &&
       sourceAttach.intent === "source_management" &&
-      sourceAttach.result_type === "read_only_answer",
+      sourceAttach.result_type === "safe_action" &&
+      sourceAttach.source_action_result?.status === "created" &&
+      sourceAttach.source_action_result?.operation === "attach_source",
     `Concrete source attach intent failed: ${JSON.stringify(sourceAttach)}`
   );
   assert(
-    String(sourceAttach.answer).includes("attaching a source") &&
-      String(sourceAttach.proposed_actions[0]?.command).includes("recallant source attach") &&
-      String(sourceAttach.proposed_actions[0]?.command).includes("/ai/docs") &&
+    attachedSourceInput?.project_id === currentProjectId &&
+      attachedSourceInput?.source_kind === "workspace_path" &&
+      attachedSourceInput?.label === "docs" &&
+      attachedSourceInput?.uri === "/ai/docs" &&
+      attachedSourceInput?.metadata?.safe_db_only_attach === true,
+    `Concrete source attach wrote wrong DB input: ${JSON.stringify(attachedSourceInput)}`
+  );
+  assert(
+    String(sourceAttach.answer).includes("safe DB-only operation") &&
+      sourceAttach.proposed_actions[0]?.label === "Source attached" &&
+      sourceAttach.proposed_actions.every((action) => !action.command) &&
       sourceAttach.proposed_actions[1]?.label === "Open Sources workspace",
-    `Concrete source attach answer did not produce a safe plan: ${JSON.stringify(sourceAttach)}`
+    `Concrete source attach answer did not explain safe execution: ${JSON.stringify(sourceAttach)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "source_management",
+    confidence: 0.91,
+    summary: "Owner wants to attach a connector source.",
+    target_hint: "current",
+    destructive_or_sensitive: true,
+    global_rule_request: false
+  });
+  const connectorSourceAttach = await buildManagementChatResponse({
+    message: "Attach gdrive:project-docs as a Google Drive connector source",
+    dashboard: baseDashboard,
+    database: {
+      attachProjectSource: async () => {
+        throw new Error("connector source attach must not execute directly from chat");
+      }
+    }
+  });
+  assert(
+    connectorSourceAttach.intent === "source_management" &&
+      connectorSourceAttach.result_type === "confirmation_required" &&
+      connectorSourceAttach.source_action_result?.status === "skipped",
+    `Connector source attach should stay policy-gated: ${JSON.stringify(connectorSourceAttach)}`
+  );
+  assert(
+    String(connectorSourceAttach.answer).includes("governed source workflow") &&
+      connectorSourceAttach.proposed_actions[0]?.kind === "confirmation_required" &&
+      !connectorSourceAttach.proposed_actions.some((action) =>
+        String(action.command ?? "").includes("detach")
+      ),
+    `Connector source attach should not become cleanup/detach guidance: ${JSON.stringify(connectorSourceAttach)}`
   );
 
   queuedResponses.push({
@@ -421,7 +478,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 10, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 11, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

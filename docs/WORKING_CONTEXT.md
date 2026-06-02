@@ -9,10 +9,10 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~69%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~65%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~66%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~54%` complete. The source-binding model and source API
+- Stage 3 — Memory Spaces and Sources: `~55%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
@@ -392,10 +392,11 @@ Latest implementation checkpoints:
   `npm run review-ui:smoke` and `npm run review-ui:playwright`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
-  clarification when a memory-space name or source location is missing, and concrete source attach
-  requests produce a safe `Sources` workspace / `recallant source attach` plan without executing the
-  write directly from chat. Verified by `npm run management-chat-ai:smoke` and
-  `npm run review-ui:smoke`.
+  clarification when a memory-space name or source location is missing. Concrete local/repo/
+  document/manual source attach requests can now execute as safe Recallant DB-only actions when the
+  owner gives an exact source reference; files, source files, secrets, and connectors are not
+  touched. Connector/server/security-like source requests still stay behind the governed source
+  workflow. Verified by `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
 - 2026-06-02 Management Chat source-health follow-up: source-management answers now include ready,
   needs-attention, and detached source counts, so Ask Recallant can explain source health in plain
   language instead of only reporting a total source count.
@@ -406,8 +407,10 @@ Latest implementation checkpoints:
   `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
 - 2026-06-02 Management Chat safe source-action follow-up: Ask Recallant can now create an empty
   virtual memory space as a `safe_action`; the smoke verifies the response and DB state with zero
-  sources. Source attach/detach and project attach/connect still stay behind governed UI/dry-run
-  workflows. Verified by `npm run review-ui:smoke` and `npm run management-chat-ai:smoke`.
+  sources. Safe DB-only source attach is also supported when the source reference is explicit and
+  not connector/server/security-like. Project attach/connect and unsafe source flows still stay
+  behind governed UI/dry-run workflows. Verified by `npm run review-ui:smoke` and
+  `npm run management-chat-ai:smoke`.
 - 2026-06-02 Management Chat safe dry-run UI follow-up: when Ask Recallant proposes project detach
   dry-run, the Workbench renders a button that posts to the existing `/project-detach` dry-run path.
   It never sends `confirm=true`, so chat can guide cleanup without executing removal.

@@ -8,10 +8,10 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~69%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~65%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~66%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~54%` complete. Virtual spaces and source attach/detach
+- Stage 3 — Memory Spaces and Sources: `~55%` complete. Virtual spaces and source attach/detach
   flows are implemented; full source-health depth and cross-view source filtering are pending.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
@@ -56,8 +56,9 @@ smokes cover ready local sources, planned connectors, and missing paths.
 Primary workspace sources use short human-visible labels such as "Primary workspace folder"; exact
 paths, ids, and raw source values remain available in source cards and Technical details.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
-clear natural-language request; it explicitly does not attach sources or touch files, secrets, or
-external connectors in that chat action.
+clear natural-language request. It can also attach an explicitly named local/repo/document/manual
+source as a DB-only Recallant record. These chat actions do not touch project files, source files,
+secrets, or external connectors.
 Full core QA after these changes passed on 2026-06-02: `npm run smoke:core`, including product
 acceptance capture/recall, pilot report, project sources, Review UI, Management Chat AI, onboarding,
 connect, installer, and cross-client smokes.
@@ -564,10 +565,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   target clarification, developer-wide rule creation from non-exact wording, source-management
   requests, and provenance questions.
 - 2026-06-02 source-operation follow-up: source-management asks now return `needs_clarification`
-  when the owner has not provided a memory-space name or exact source location, and concrete source
-  attach asks produce a safe plan for the `Sources` workspace or `recallant source attach` without
-  executing the write directly from chat. Verified by `npm run management-chat-ai:smoke` and
-  `npm run review-ui:smoke`.
+  when the owner has not provided a memory-space name or exact source location. Concrete local/repo/
+  document/manual source attach asks can execute as safe Recallant DB-only actions when the source
+  reference is exact; files, source files, secrets, and connectors are not touched. Connector/server/
+  security-like source requests remain behind the governed source workflow. Verified by
+  `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
 - 2026-06-02 source-health chat follow-up: source-management answers now include ready,
   needs-attention, and detached source counts so Ask Recallant can explain source health in human
   language.
@@ -577,9 +579,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   browser-QA evidence commands. Verified by `npm run management-chat-ai:smoke` and
   `npm run review-ui:smoke`.
 - 2026-06-02 safe source-action follow-up: Ask Recallant can create an empty virtual memory space
-  as a `safe_action` from chat. It does not attach sources or touch files/secrets/connectors; those
-  remain governed source workflows. `review-ui:smoke` verifies the API response and zero-source DB
-  state; `management-chat-ai:smoke` still passes.
+  as a `safe_action` from chat. It can also attach an explicitly named local/repo/document/manual
+  source as a DB-only Recallant record. These actions do not touch project files, source files,
+  secrets, or connectors. Connector/server/security-like source operations remain governed
+  workflows. `review-ui:smoke` verifies the virtual-space API response and zero-source DB state;
+  `management-chat-ai:smoke` verifies DB-only source attach.
 - 2026-06-02 safe dry-run UI follow-up: Ask Recallant project-detach dry-run proposals now render a
   Workbench button that posts to `/project-detach` without confirmation, so the owner can run the
   preliminary check from the interface while actual removal remains separately confirmed.

@@ -66,10 +66,10 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~69% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~65% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~66% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~54% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~55% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
@@ -98,8 +98,8 @@ Current implemented slices include:
   creation from non-exact wording. It also verifies source-management and provenance intents, so
   Ask Recallant can guide Memory Space/source operations and explain where source-linked facts came
   from without exposing raw technical rows by default. The source-management path now asks for
-  clarification when a memory-space name or source location is missing, and produces a safe attach
-  plan for concrete source paths without executing it directly from chat.
+  clarification when a memory-space name or source location is missing, and can safely attach an
+  explicitly named local/repo/document/manual source as a DB-only Recallant record.
 - Ask Recallant now has a covered safe-action path for creating an empty virtual memory space from
   natural language. The action is Recallant-only: it creates the logical space and explicitly does
   not touch files, sources, secrets, or external connectors.
@@ -138,6 +138,10 @@ Current implemented slices include:
 - Source Map now includes a human-readable health summary for ready-to-cite, needs-setup, and
   needs-attention sources, with UI and Playwright smoke fixtures covering ready local sources,
   planned connectors, and missing local/server paths.
+- Ask Recallant can now safely attach an explicitly named local/repo/document/manual source to the
+  current memory space as a Recallant database record. It does not touch project files, source
+  files, secrets, or connectors; connector/server/security-like source requests remain routed to the
+  governed source workflow instead of automatic execution.
 - Primary workspace sources now show a short human title on the visible Workbench layer instead of
   generated project/source labels; exact paths and ids remain available in the source card and
   Technical details.
@@ -414,8 +418,10 @@ Stage 2 first slice is now implemented:
   executing them directly from chat.
 - Stage 2/3 safe source-action follow-up is implemented: Ask Recallant can create an empty virtual
   memory space as a `safe_action` because it only writes Recallant metadata and does not touch
-  project files, sources, secrets, connectors, paid API, or production services. Source attach,
-  source detach, and project attach/connect remain guided/dry-run workflows.
+  project files, sources, secrets, connectors, paid API, or production services. Ask Recallant can
+  also attach an explicitly named local/repo/document/manual source as a DB-only Recallant record.
+  Source detach, project attach/connect, and connector/server/security-like source operations remain
+  governed/dry-run workflows.
 - Stage 2/3 source-health answer follow-up is implemented: Ask Recallant source-management facts
   now include ready, needs-attention, and detached source counts so natural-language source
   questions can explain source health without exposing raw source rows.
