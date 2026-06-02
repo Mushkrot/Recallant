@@ -141,8 +141,10 @@ recallant connect codex --install-local-hooks
 ```
 
 This creates `.recallant/hooks/`. The scripts are fail-soft: if `recallant` is unavailable or the
-hook times out, they exit `0` so normal agent work is not interrupted. Client-specific global hook
-installation is still separate; the local hook kit only provides safe targets that adapters can call.
+hook times out, they exit `0` so normal agent work is not interrupted. If the primary capture path
+cannot reach Recallant while the CLI is available, the scripts try to write a local spool record
+under `.recallant/spool/` before exiting. Client-specific global hook installation is still
+separate; the local hook kit only provides safe targets that adapters can call.
 
 ## Startup Smoke
 

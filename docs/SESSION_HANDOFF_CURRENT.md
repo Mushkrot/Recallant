@@ -576,6 +576,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   result, pre-compaction checkpoint, generic event capture, and stop/closeout; `connect:smoke`
   verifies those hooks write prompt/tool/checkpoint/closeout events through a temporary Recallant
   wrapper.
+- 2026-06-02 hook spool follow-up: project-local hook primary commands now pass
+  `--spool-dir "$PROJECT_DIR/.recallant/spool"`, and hook scripts attempt a local `spool-append`
+  fallback when primary capture fails while `recallant` is available. `connect:smoke` verifies the
+  fallback writes project-local JSONL and still exits 0.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 

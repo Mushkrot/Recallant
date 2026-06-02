@@ -2528,13 +2528,19 @@ async function resolveConnectDeveloperId(input: { projectId: string }) {
   }
 }
 
-function failSoftHookScript(input: { command: string; stdinText?: boolean }) {
+function failSoftHookScript(input: {
+  command: string;
+  stdinText?: boolean;
+  fallbackEventKind?: string;
+}) {
   const stdin = input.stdinText ? 'TEXT="$(cat)"' : 'TEXT="${RECALLANT_HOOK_TEXT:-hook event}"';
+  const fallbackEventKind = input.fallbackEventKind ?? "hook_event";
   return `#!/usr/bin/env sh
 set +e
 
 PROJECT_DIR="\${RECALLANT_PROJECT_DIR:-$(pwd)}"
 TIMEOUT_SECONDS="\${RECALLANT_HOOK_TIMEOUT_SECONDS:-2}"
+FALLBACK_EVENT_KIND="\${RECALLANT_HOOK_FALLBACK_EVENT_KIND:-${fallbackEventKind}}"
 ${stdin}
 
 if ! command -v recallant >/dev/null 2>&1; then
@@ -2543,8 +2549,18 @@ fi
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$TIMEOUT_SECONDS" ${input.command} >/dev/null 2>&1
+  PRIMARY_STATUS="$?"
 else
   ${input.command} >/dev/null 2>&1
+  PRIMARY_STATUS="$?"
+fi
+
+if [ "$PRIMARY_STATUS" -ne 0 ]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$TIMEOUT_SECONDS" recallant spool-append --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind event --event-kind "$FALLBACK_EVENT_KIND" --text "$TEXT" >/dev/null 2>&1
+  else
+    recallant spool-append --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind event --event-kind "$FALLBACK_EVENT_KIND" --text "$TEXT" >/dev/null 2>&1
+  fi
 fi
 
 exit 0
@@ -2554,42 +2570,50 @@ exit 0
 function localHookKitFiles() {
   const eventScript = failSoftHookScript({
     command:
-      'recallant agent-event --project-dir "$PROJECT_DIR" --kind "${1:-action}" --text "$TEXT"',
-    stdinText: true
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind "${1:-action}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_hook_event"
   });
   const promptScript = failSoftHookScript({
     command:
-      'recallant agent-event --project-dir "$PROJECT_DIR" --kind prompt --title "User prompt captured by hook" --text "$TEXT"',
-    stdinText: true
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind prompt --title "User prompt captured by hook" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_prompt"
   });
   const toolResultScript = failSoftHookScript({
     command:
-      'recallant agent-event --project-dir "$PROJECT_DIR" --kind tool_result --title "Tool result captured by hook" --text "$TEXT"',
-    stdinText: true
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind tool_result --title "Tool result captured by hook" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_tool_result"
   });
   const startScript = failSoftHookScript({
     command:
-      'recallant agent-start --project-dir "$PROJECT_DIR" --task-hint "${1:-hook session start}"'
+      'recallant agent-start --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --task-hint "${1:-hook session start}"',
+    fallbackEventKind: "agent_session_start"
   });
   const checkpointScript = failSoftHookScript({
     command:
-      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}"',
-    stdinText: true
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}"',
+    stdinText: true,
+    fallbackEventKind: "agent_checkpoint"
   });
   const closeoutScript = failSoftHookScript({
     command:
-      'recallant agent-closeout --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}" --summary "$TEXT"',
-    stdinText: true
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}" --summary "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_closeout"
   });
   const preCompactionScript = failSoftHookScript({
     command:
-      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume after compaction from Recallant context.}"',
-    stdinText: true
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume after compaction from Recallant context.}"',
+    stdinText: true,
+    fallbackEventKind: "agent_pre_compaction"
   });
   const stopScript = failSoftHookScript({
     command:
-      'recallant agent-closeout --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume from Recallant context in the next session.}" --summary "$TEXT"',
-    stdinText: true
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume from Recallant context in the next session.}" --summary "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_closeout"
   });
   const readme = `# Recallant Local Hook Kit
 
@@ -2599,6 +2623,8 @@ They are fail-soft by design:
 
 - if \`recallant\` is unavailable, they exit 0;
 - if a hook times out, they exit 0;
+- if the primary capture command fails while \`recallant\` is available, they try
+  to write a local spool record under \`.recallant/spool/\`;
 - they never write global client config;
 - set \`RECALLANT_PROJECT_DIR\` when a client runs hooks outside the project folder;
 - set \`RECALLANT_HOOK_TIMEOUT_SECONDS\` to tune the default 2 second timeout.

@@ -241,6 +241,25 @@ const hookEnv = {
   RECALLANT_PROJECT_DIR: projectDir
 };
 
+const hookSpoolFallback = spawnSync(`${projectDir}/.recallant/hooks/tool-result.sh`, [], {
+  input: "Tool result spooled locally after primary hook capture failed.",
+  env: {
+    ...hookEnv,
+    RECALLANT_DATABASE_URL: "postgres://recallant:bad@127.0.0.1:1/recallant_agent_work"
+  },
+  encoding: "utf8"
+});
+assert(
+  hookSpoolFallback.status === 0,
+  `Hook fallback should still exit 0 when primary capture fails: ${hookSpoolFallback.stderr}`
+);
+const hookSpoolText = await readFile(`${projectDir}/.recallant/spool/spool.jsonl`, "utf8");
+assert(
+  hookSpoolText.includes("Tool result spooled locally") &&
+    hookSpoolText.includes("agent_tool_result"),
+  `Hook fallback did not write local spool JSONL: ${hookSpoolText}`
+);
+
 function runHook(name, args = [], input = "") {
   const result = spawnSync(`${projectDir}/.recallant/hooks/${name}`, args, {
     input,

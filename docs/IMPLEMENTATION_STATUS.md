@@ -128,10 +128,12 @@ Current implemented slices include:
   `agent-closeout` instead of treating project registration as sufficient readiness.
 - Connect local hook kit: `recallant connect --install-local-hooks` can write optional
   project-local fail-soft hook scripts under `.recallant/hooks/` without touching global client
-  config. Scripts exit 0 when `recallant` is unavailable or times out. The kit now includes explicit
-  targets for session start, owner prompt, tool result, generic event capture, pre-compaction
-  checkpoint, and stop/closeout, and server-mode closeout writes an explicit `agent_closeout` event
-  before closing the session.
+  config. Scripts exit 0 when `recallant` is unavailable or times out. Primary hook commands use the
+  project-local `.recallant/spool` path for offline capture, and failed primary commands attempt a
+  local `spool-append` fallback before exiting 0. The kit now includes explicit targets for session
+  start, owner prompt, tool result, generic event capture, pre-compaction checkpoint, and
+  stop/closeout, and server-mode closeout writes an explicit `agent_closeout` event before closing
+  the session.
 - Review dashboard capture readiness telemetry: projects now expose whether they are only
   registered or have actually run capture, including last context read, last memory write, last
   checkpoint, capture event count, and captured decision count.
@@ -439,7 +441,8 @@ Latest Workbench validation on 2026-06-01:
   `doctor --require-capture` before capture and passing it after real capture; `npm run
   phase7:smoke` verifies ordinary doctor output still includes non-required capture readiness
 - Stage 4 local hook-kit validation: `npm run connect:smoke` verifies local hook-kit dry-run,
-  install, no global-config writes, and fail-soft exit 0 when `recallant` is unavailable
+  install, no global-config writes, fail-soft exit 0 when `recallant` is unavailable, and
+  project-local spool fallback when primary hook capture cannot reach the database
 
 Latest Stage 5 pilot-report validation on 2026-06-01:
 

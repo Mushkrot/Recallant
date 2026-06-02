@@ -350,6 +350,10 @@ Latest implementation checkpoints:
   `qa_summary.all_required_scenarios_passed`, and reads the artifact back before passing.
 - 2026-06-01 Context-pack provenance follow-up: binding rules and working memories returned by `memory_get_context_pack` now include redacted `source_refs` and a compact `provenance` object with source count, primary source kind/id, source path when available, and a short summary. This lets agents answer "where did this come from?" without reading raw artifacts or project history files. Verified by `npm run phase6:smoke:graph`.
 - 2026-06-01 Connect local hook-kit follow-up: `recallant connect --install-local-hooks` now installs only project-local fail-soft helper scripts under `.recallant/hooks/` and still writes no global client config. The hook scripts exit 0 when `recallant` is unavailable or a timeout occurs, giving client adapters a safe hook target without risking normal agent work. The kit includes session start, owner prompt, tool result, generic capture, pre-compaction checkpoint, and stop/closeout targets; server-mode closeout writes an explicit closeout event. Verified by `npm run connect:smoke`.
+- 2026-06-02 Connect hook-spool follow-up: project-local hooks now pass the project-local
+  `.recallant/spool` path to primary capture commands and attempt `spool-append` fallback when
+  primary capture fails while `recallant` is available. `npm run connect:smoke` verifies the
+  fallback writes project-local JSONL and exits 0.
 - 2026-06-02 Claude Code connect follow-up: `recallant connect claude-code` now writes/merges a
   project-local `.mcp.json` instead of using the generic fallback. It preserves existing MCP
   servers, adds only `mcpServers.recallant`, creates a local backup before changing an existing

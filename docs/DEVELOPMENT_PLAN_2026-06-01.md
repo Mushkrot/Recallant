@@ -286,6 +286,10 @@ Acceptance:
   project-local hook kit under `.recallant/hooks/` without touching global
   client config. The scripts are fail-soft: missing `recallant` or timeout exits
   0 so normal agent work is not broken.
+- Done: hook primary capture commands now write offline records to the project
+  spool path `.recallant/spool` when the server/database path is unavailable.
+  If a primary hook command fails while `recallant` is still available, the
+  script also attempts a local `spool-append` fallback before exiting 0.
 - Done: the local hook kit now exposes explicit lifecycle targets for session
   start, owner prompt, tool result, generic event capture, pre-compaction
   checkpoint, and stop/closeout. Server-mode closeout now also records an
