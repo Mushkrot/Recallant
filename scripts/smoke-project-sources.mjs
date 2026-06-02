@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
@@ -51,6 +52,8 @@ const virtualProjectId = virtualSpace.memory_space.project_id;
 const emptySources = runCli(["source", "list", "--project-id", virtualProjectId]);
 assert(emptySources.count === 0, `Virtual memory space should start with zero sources: ${JSON.stringify(emptySources)}`);
 
+const workspacePath = `/tmp/recallant-workspace-source-${randomUUID()}`;
+mkdirSync(workspacePath, { recursive: true });
 const workspaceSource = runCli([
   "source",
   "attach",
@@ -59,7 +62,7 @@ const workspaceSource = runCli([
   "--source-kind",
   "workspace_path",
   "--uri",
-  `/tmp/recallant-workspace-source-${randomUUID()}`,
+  workspacePath,
   "--label",
   "Smoke Workspace",
   "--primary"
@@ -82,8 +85,43 @@ const manualSource = runCli([
 ]);
 assert(manualSource.source?.source_kind === "manual", `Manual source attach failed: ${JSON.stringify(manualSource)}`);
 
+const missingSource = runCli([
+  "source",
+  "attach",
+  "--project-id",
+  virtualProjectId,
+  "--source-kind",
+  "server_path",
+  "--uri",
+  `/tmp/recallant-missing-source-${randomUUID()}`,
+  "--label",
+  "Missing Smoke Path"
+]);
+assert(
+  missingSource.source?.source_health?.status === "needs_attention" &&
+    missingSource.source?.source_health?.label === "Local path not found",
+  `Missing local source should be reported as needs attention: ${JSON.stringify(missingSource)}`
+);
+
 const listedSources = runCli(["source", "list", "--project-id", virtualProjectId]);
-assert(listedSources.count === 2, `Expected two attached sources: ${JSON.stringify(listedSources)}`);
+assert(listedSources.count === 3, `Expected three attached sources: ${JSON.stringify(listedSources)}`);
+assert(
+  listedSources.sources.some(
+    (source) =>
+      source.id === workspaceSource.source.id &&
+      source.source_health?.status === "ready" &&
+      source.source_health?.label === "Primary local source ready"
+  ),
+  `Existing local source should be ready: ${JSON.stringify(listedSources)}`
+);
+assert(
+  listedSources.sources.some(
+    (source) =>
+      source.id === missingSource.source.id &&
+      source.source_health?.status === "needs_attention"
+  ),
+  `Missing local source should remain visible as needs attention: ${JSON.stringify(listedSources)}`
+);
 
 const detached = runCli([
   "source",
@@ -97,7 +135,7 @@ assert(detached.source?.status === "detached", `Source detach failed: ${JSON.str
 
 const afterDetach = runCli(["source", "list", "--project-id", virtualProjectId]);
 assert(
-  afterDetach.sources.some((source) => source.status === "detached") &&
+    afterDetach.sources.some((source) => source.status === "detached") &&
     afterDetach.sources.some((source) => source.status === "active"),
   `Detach should not delete memory space or other source: ${JSON.stringify(afterDetach)}`
 );
@@ -106,15 +144,17 @@ const listedSpaces = runCli(["memory-space", "list"]);
 const listedVirtual = listedSpaces.memory_spaces.find((space) => space.project_id === virtualProjectId);
 assert(listedVirtual, `Virtual memory space missing from list: ${JSON.stringify(listedSpaces)}`);
 assert(
-  listedVirtual.sources.length === 2,
+  listedVirtual.sources.length === 3,
   `Memory space list should include source bindings: ${JSON.stringify(listedVirtual)}`
 );
 
+const ensuredPath = `/tmp/recallant-ensure-source-${randomUUID()}`;
+mkdirSync(ensuredPath, { recursive: true });
 const db = new RecallantDb({
   databaseUrl,
   developerId,
   projectId: randomUUID(),
-  projectPath: `/tmp/recallant-ensure-source-${randomUUID()}`
+  projectPath: ensuredPath
 });
 try {
   const ensured = await db.ensureProject();

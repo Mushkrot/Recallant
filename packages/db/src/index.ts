@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { Pool, type PoolClient } from "pg";
 
 export const recallantDatabasePackage = "recallant-db";
@@ -975,7 +977,10 @@ export class RecallantDb {
   }
 
   async attachProjectSource(input: ProjectSourceInput) {
-    return withTransaction(this.pool, async (client) => this.upsertProjectSource(client, input));
+    const source = await withTransaction(this.pool, async (client) =>
+      this.upsertProjectSource(client, input)
+    );
+    return source ? this.enrichProjectSource(source) : null;
   }
 
   async listProjectSources(projectId: string) {
@@ -1012,7 +1017,7 @@ export class RecallantDb {
         })
       ]
     );
-    return result.rows[0] ?? null;
+    return result.rows[0] ? this.enrichProjectSource(result.rows[0]) : null;
   }
 
   private enrichProjectSource<T extends Record<string, unknown>>(source: T) {
@@ -1057,6 +1062,37 @@ export class RecallantDb {
         "The source is recorded, but connector capture/authorization is not active in this slice.";
       actionNeeded =
         "Keep it as a planned source until connector capability binding is implemented.";
+    } else if (["workspace_path", "repo", "server_path"].includes(sourceKind) && isAbsolute(uri)) {
+      if (!existsSync(uri)) {
+        healthStatus = "needs_attention";
+        healthLabel = "Local path not found";
+        healthReason =
+          "Recallant can keep this source as provenance, but the recorded local path is not reachable right now.";
+        actionNeeded = "Check the path, mount, or source binding before relying on this source.";
+      } else {
+        let stats: ReturnType<typeof statSync> | null = null;
+        try {
+          stats = statSync(uri);
+        } catch {
+          healthStatus = "needs_attention";
+          healthLabel = "Local path not readable";
+          healthReason =
+            "The recorded local path exists, but Recallant cannot read its filesystem status.";
+          actionNeeded = "Check permissions or attach a source path Recallant can inspect.";
+        }
+        const expectsDirectory = ["workspace_path", "repo"].includes(sourceKind);
+        if (stats && expectsDirectory && !stats.isDirectory()) {
+          healthStatus = "needs_attention";
+          healthLabel = "Path is not a folder";
+          healthReason =
+            "This source is expected to point at a folder or repository, but the recorded path is not a directory.";
+          actionNeeded = "Attach the correct folder or change the source kind.";
+        } else if (stats) {
+          healthLabel = isPrimary ? "Primary local source ready" : "Local source ready";
+          healthReason =
+            "The recorded local path exists and Recallant can use it as source provenance.";
+        }
+      }
     }
 
     return {

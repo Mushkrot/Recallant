@@ -365,7 +365,7 @@ try {
     "Source Map",
     "Memory space sources",
     "Sources for selected space",
-    "Primary source ready",
+    "Primary local source ready",
     "Source ready",
     "Show source memories",
     "Use as provenance filter",
@@ -525,7 +525,7 @@ try {
           (source) =>
             source.source_kind === "workspace_path" &&
             source.source_health?.status === "ready" &&
-            source.source_health?.label === "Primary source ready"
+            source.source_health?.label === "Primary local source ready"
         ) &&
         project.sources?.some(
           (source) =>

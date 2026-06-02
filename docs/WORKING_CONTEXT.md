@@ -12,7 +12,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 2 — AI-native Management Chat: `~60%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~40%` complete. The source-binding model and source API
+- Stage 3 — Memory Spaces and Sources: `~45%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~70%` complete. Connect separation, hook install
@@ -348,6 +348,10 @@ Latest implementation checkpoints:
   `source_id` to filter source-linked import candidates, inbox items, and active rules while leaving
   global conflict signals visible. Verified by `npm run project-sources:smoke`,
   `npm run review-ui:smoke`, and `npm run review-ui:playwright`.
+- 2026-06-02 local source health follow-up: absolute local `workspace_path`, `repo`, and
+  `server_path` sources now get real filesystem health labels without reading file contents:
+  local source ready, missing path, unreadable path, or wrong folder/file shape. Verified by
+  `npm run project-sources:smoke`, `npm run review-ui:smoke`, and `npm run review-ui:playwright`.
 - 2026-06-02 Workbench composition follow-up: Ask Recallant is the first central work surface, with
   a compact current memory-space profile beside it on desktop and first on mobile. Selected-source
   health and create/attach/detach source flows moved into a wide `Sources` workspace. Selected

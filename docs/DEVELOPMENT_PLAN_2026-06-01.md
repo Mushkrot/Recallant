@@ -234,6 +234,10 @@ Acceptance:
   a source filter. The filter can select an attached source and limit source-
   linked import candidates, inbox items, and active rules while leaving global
   conflict signals visible.
+- Done: source health now probes absolute local `workspace_path`, `repo`, and
+  `server_path` bindings without reading source contents. Existing paths show
+  local-source-ready status; missing paths and wrong folder/file shapes show
+  needs-attention guidance.
 - Remaining: deeper source health probes for real connectors/server paths and
   richer source filtering across search/replay views.
 

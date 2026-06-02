@@ -11,7 +11,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 2 — AI-native Management Chat: `~60%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~40%` complete. Virtual spaces and source attach/detach
+- Stage 3 — Memory Spaces and Sources: `~45%` complete. Virtual spaces and source attach/detach
   flows are implemented; full source-health depth and cross-view source filtering are pending.
 - Stage 4 — Client Connect and Hook Capture: `~70%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
@@ -45,6 +45,9 @@ The latest Workbench source slice adds human-readable source health/status, sour
 summaries in Review rows, and a `source_id` Review/dashboard filter for source-linked import
 candidates, inbox items, and active rules. It is verified by `npm run project-sources:smoke`,
 `npm run review-ui:smoke`, and `npm run review-ui:playwright`.
+The local source-health follow-up checks absolute local `workspace_path`, `repo`, and `server_path`
+bindings without reading source contents, so the UI can distinguish ready local sources from
+missing, unreadable, or wrong-shape paths.
 Production `recallant.service` was restarted on 2026-06-01 after the Workbench UI changes because
 the live browser still showed the older in-memory `Recallant Review Command Center`. Post-restart
 checks passed: local `/health`, unauthenticated `/review` `401`, authenticated local `/review`

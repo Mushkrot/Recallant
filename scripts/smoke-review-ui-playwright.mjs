@@ -74,6 +74,7 @@ async function run() {
   assert(defaultHttpConfig.recallant_auth_required === true, "Review UI smoke must require auth");
 
   await mkdir(reportDir, { recursive: true });
+  await mkdir(projectPath, { recursive: true });
 
   const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
   await db.ensureProject(projectPath);
