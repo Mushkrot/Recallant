@@ -63,15 +63,15 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~73% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~74% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~69% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~57% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~58% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
-  source provenance UX, and full cross-view usage filtering are still incomplete.
+  deeper connector/server-path probes, and source-aware search/recovery filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
@@ -142,6 +142,10 @@ Current implemented slices include:
 - Activity / Replay source-provenance slice: source-linked memory-write activity now includes a
   compact source summary, and selected source filters also filter source-linked memory writes in
   Activity / Replay while keeping session/context/checkpoint signals visible.
+- Source-filtered Workbench slice: Sources, Activity / Replay, and Review now share a visible
+  source-filter control with plain-language "Showing all sources" / "Filtered to ..." status. The
+  focused Activity view is browser-tested with a selected source, source summary, and preserved
+  context-read visibility.
 - Source health now checks absolute local `workspace_path`, `repo`, and `server_path` bindings
   without reading source contents, so Workbench can show local source ready, missing path,
   unreadable path, or wrong folder/file shape guidance.

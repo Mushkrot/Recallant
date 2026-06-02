@@ -83,6 +83,13 @@ async function run() {
 
   const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
   await db.ensureProject(projectPath);
+  const importedDocSource = await db.attachProjectSource({
+    project_id: projectId,
+    source_kind: "document_collection",
+    label: "AGENTS.md",
+    uri: "AGENTS.md",
+    metadata: { smoke: "playwright", purpose: "source-filtered activity visual state" }
+  });
   await db.attachProjectSource({
     project_id: projectId,
     source_kind: "connector",
@@ -140,6 +147,21 @@ async function run() {
     body: "Recallant Workbench should be checked with browser-level desktop and mobile layout smoke tests.",
     created_by: "agent",
     source_refs: [{ source_kind: "event", source_id: userEvent.event_id, quote: "visual QA" }]
+  });
+  await db.createAgentMemory({
+    memory_type: "environment_fact",
+    scope: "project",
+    title: "AGENTS.md source is visible in Activity",
+    body: "Source-filtered Activity / Replay should show memory writes that came from AGENTS.md.",
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "external",
+        source_id: importedDocSource.id,
+        quote: "AGENTS.md",
+        metadata: { project_source_id: importedDocSource.id, source_path: "AGENTS.md" }
+      }
+    ]
   });
   const rule = await db.createAgentMemory({
     memory_type: "procedure",
@@ -237,6 +259,8 @@ async function run() {
     await desktop.getByText("ready to cite").waitFor();
     await desktop.getByText("need setup").waitFor();
     await desktop.getByText("need attention").waitFor();
+    await visibleBox(desktop.locator(".source-filter-panel").first(), "desktop source filter");
+    await desktop.getByText("Showing all sources").first().waitFor();
     await visibleBox(desktop.locator("#review"), "desktop Review");
     await visibleBox(desktop.locator("#review .review-overview"), "desktop Review overview");
     await visibleBox(desktop.locator("#settings"), "desktop Settings");
@@ -268,7 +292,7 @@ async function run() {
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=sources`, {
       waitUntil: "networkidle"
     });
-    await desktop.getByRole("heading", { name: "Sources" }).waitFor();
+    await desktop.getByRole("heading", { name: "Source Map" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Sources view");
     const focusedSourcesBox = await visibleBox(
       desktop.locator("#sources"),
@@ -286,6 +310,31 @@ async function run() {
     await absent(desktop.locator("#command-center"), "focused Sources command center");
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
+      fullPage: true
+    });
+
+    await desktop.goto(
+      `${baseUrl}/review?project_id=${projectId}&view=activity&source_id=${importedDocSource.id}`,
+      {
+        waitUntil: "networkidle"
+      }
+    );
+    await desktop.getByRole("heading", { name: "Activity / Replay" }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused source-filtered Activity view");
+    const focusedActivityBox = await visibleBox(
+      desktop.locator("#activity-replay"),
+      "desktop focused source-filtered Activity"
+    );
+    assert(
+      focusedActivityBox.width >= 980,
+      `desktop focused source-filtered Activity is too narrow: ${JSON.stringify(focusedActivityBox)}`
+    );
+    await desktop.getByText("Filtered to AGENTS.md").waitFor();
+    await desktop.getByText("Source: AGENTS.md").waitFor();
+    await desktop.getByText("Context was read").waitFor();
+    await absent(desktop.locator("#ask-recallant"), "focused Activity Ask panel");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
       fullPage: true
     });
 
@@ -372,6 +421,7 @@ async function run() {
             join(reportDir, "recallant-workbench-desktop.png"),
             join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
             join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
             join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
             join(reportDir, "recallant-workbench-mobile-chat.png")
@@ -382,6 +432,7 @@ async function run() {
             "central_ask_recallant_panel",
             "desktop_focused_ask_view",
             "desktop_focused_sources_view",
+            "desktop_focused_source_filtered_activity_view",
             "desktop_focused_settings_view",
             "long_russian_chat_answer_readable",
             "mobile_no_horizontal_scroll",

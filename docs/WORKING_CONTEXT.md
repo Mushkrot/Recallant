@@ -6,15 +6,15 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~73%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~69%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~57%` complete. The source-binding model and source API
-  are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
-  filtering are still partly open.
+- Stage 3 — Memory Spaces and Sources: `~58%` complete. The source-binding model and source API
+  are implemented, but source-health completeness, source-aware search/recovery, and deeper
+  connector/server-path handling are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
@@ -421,6 +421,9 @@ Latest implementation checkpoints:
   includes a compact source summary. When a source filter is selected, Activity / Replay filters
   source-linked memory writes to that source while still showing session/context/checkpoint signals
   so capture visibility is not hidden.
+- 2026-06-02 Source-filtered Workbench follow-up: Sources, Activity / Replay, and Review now share
+  a visible source-filter panel. The UI says whether it is showing all sources or filtered to a
+  selected source, and Playwright checks the focused source-filtered Activity view.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing. Concrete local/repo/
   document/manual source attach requests can now execute as safe Recallant DB-only actions when the

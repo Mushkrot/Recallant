@@ -2,12 +2,12 @@
 
 ## Current Session
 
-Status: Focused Workbench views are implemented and now have browser-level QA coverage.
+Status: Source-filtered Workbench views are implemented and covered by browser-level QA.
 Current focus: Continue turning the Workbench into a professional, human-readable control surface
 while keeping Playwright checks for layout regressions.
 Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
 and realistic pilot reports.
-Last updated: 2026-06-02T06:02:07Z.
+Last updated: 2026-06-02T06:13:25Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -37,6 +37,8 @@ Last updated: 2026-06-02T06:02:07Z.
   collapsed Technical value/API-safe metadata, but not as visible headings.
 - Activity / Replay should preserve capture visibility while also showing provenance for
   source-linked memory writes and honoring selected source filters for those memory-write rows.
+- Source filters should be a visible Workbench control, not only an API/query parameter. Activity,
+  Review, and Sources should explain whether the owner is seeing all sources or a selected source.
 - Explicit owner requests to save low-risk rules for all projects create developer-scope
   `instruction_grade` memories that future Context Packs include across projects.
 - Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
@@ -147,6 +149,10 @@ Last updated: 2026-06-02T06:02:07Z.
 - Activity / Replay source-provenance verification on 2026-06-02: `npm run build`,
   `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run review-ui:playwright`,
   `npm run lint`, `npm run format:check`, and `git diff --check` passed.
+- Source-filtered Workbench verification on 2026-06-02: `npm run build`,
+  `npm run review-ui:smoke`, `npm run review-ui:playwright`, `npm run lint`,
+  `npm run format:check`, and `git diff --check` passed. Playwright now captures
+  `recallant-workbench-desktop-focused-activity-source.png`.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

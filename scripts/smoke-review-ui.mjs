@@ -390,6 +390,8 @@ try {
     "Sources",
     "Source Map",
     "Memory space sources",
+    "Source view",
+    "Showing all sources",
     "Sources for selected space",
     "Primary workspace folder",
     "Primary local source ready",
@@ -529,6 +531,7 @@ try {
     ".command-grid { display: grid",
     ".signal-strip { display: grid",
     ".source-overview { display: grid",
+    ".source-filter-panel { display: grid",
     ".source-workspace-grid { display: grid",
     ".review-overview { display: grid",
     ".review-lanes { display: grid",
@@ -721,6 +724,25 @@ try {
     )
   ) {
     throw new Error(`Source filter API smoke failed: ${JSON.stringify(sourceFilteredJson)}`);
+  }
+
+  const sourceFilteredActivityView = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=activity&source_id=${importedDocSource.id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const sourceFilteredActivityText = await sourceFilteredActivityView.text();
+  if (
+    sourceFilteredActivityView.status !== 200 ||
+    !sourceFilteredActivityText.includes("Filtered to AGENTS.md") ||
+    !sourceFilteredActivityText.includes("Source: AGENTS.md") ||
+    !sourceFilteredActivityText.includes("Context was read") ||
+    sourceFilteredActivityText.includes("Source: Missing server docs path")
+  ) {
+    throw new Error(
+      `Source-filtered Activity view failed: ${sourceFilteredActivityView.status}; ${sourceFilteredActivityText.slice(0, 700)}`
+    );
   }
 
   const allDomainRules = await fetch(

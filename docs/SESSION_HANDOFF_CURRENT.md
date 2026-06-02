@@ -6,13 +6,14 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~73%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~69%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~57%` complete. Virtual spaces and source attach/detach
-  flows are implemented; full source-health depth and cross-view source filtering are pending.
+- Stage 3 — Memory Spaces and Sources: `~58%` complete. Virtual spaces, source attach/detach,
+  source filters, and source-linked Activity visibility are implemented; deeper connector/server
+  source health plus source-aware search/recovery are pending.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
@@ -71,6 +72,10 @@ details/API-safe metadata instead of default headings.
 Activity / Replay now shows compact source summaries for source-linked memory writes. Selecting a
 source filter also filters source-linked memory-write activity to that source while preserving
 session/context/checkpoint activity.
+Sources, Activity / Replay, and Review now share a visible source-filter panel. It tells the owner
+whether the Workbench is showing all sources or filtered to a selected source. Playwright now checks
+the focused source-filtered Activity view and saves
+`/ai/playwright/reports/recallant-workbench-desktop-focused-activity-source.png`.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,

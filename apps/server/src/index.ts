@@ -1134,6 +1134,68 @@ function sourceHealthCounts(sources: Array<Record<string, unknown>>) {
   return counts;
 }
 
+function sourceFilterState(data: ReviewDashboardData) {
+  const sourceFilters = asRecord(data.source_filters);
+  const sources = asArray(sourceFilters.sources) as Array<Record<string, unknown>>;
+  const selectedSourceId = String(sourceFilters.selected_source_id ?? "all");
+  const selectedSourceRecord = asRecord(sourceFilters.selected_source);
+  const selectedSource =
+    Object.keys(selectedSourceRecord).length > 0
+      ? selectedSourceRecord
+      : (sources.find(
+          (source) => String(source.source_id ?? source.id ?? "") === selectedSourceId
+        ) ?? {});
+  const selectedLabel =
+    selectedSourceId !== "all"
+      ? sourceDisplayTitle(selectedSource) || shortId(selectedSourceId)
+      : "All sources";
+  return {
+    sources,
+    selectedSource,
+    selectedSourceId,
+    selectedLabel,
+    isFiltered: selectedSourceId !== "all"
+  };
+}
+
+function renderSourceFilterControl(data: ReviewDashboardData, view: WorkbenchView, note?: string) {
+  const state = sourceFilterState(data);
+  if (state.sources.length === 0) {
+    return `<div class="source-filter-panel">
+      <div>
+        <span class="section-kicker">Source view</span>
+        <h3>No source filter yet</h3>
+        <p>This memory space has no attached sources. Recallant is showing the whole memory space.</p>
+      </div>
+    </div>`;
+  }
+  const chip = (label: string, sourceId: unknown) => {
+    const normalized = String(sourceId ?? "all");
+    const active = normalized === "all" ? !state.isFiltered : normalized === state.selectedSourceId;
+    return `<a class="source-filter-chip ${active ? "active" : ""}" href="${escapeHtml(
+      reviewPathWithParams(data.current_project_id, { view, source_id: normalized })
+    )}">${escapeHtml(label)}</a>`;
+  };
+  const sourceChips = state.sources
+    .slice(0, 12)
+    .map((source) => chip(sourceDisplayTitle(source), source.source_id ?? source.id))
+    .join("");
+  const defaultNote = state.isFiltered
+    ? "Review rows and source-linked memory writes are limited to this source. Session, context, and checkpoint activity stays visible so recording state is not hidden."
+    : "Showing the whole memory space. Pick a source when you want to inspect where a fact came from or narrow review work.";
+  return `<div class="source-filter-panel">
+    <div>
+      <span class="section-kicker">Source view</span>
+      <h3>${escapeHtml(state.isFiltered ? `Filtered to ${state.selectedLabel}` : "Showing all sources")}</h3>
+      <p>${escapeHtml(note ?? defaultNote)}</p>
+    </div>
+    <div class="source-filter-chips">
+      ${chip("All sources", "all")}
+      ${sourceChips}
+    </div>
+  </div>`;
+}
+
 function renderSourceResult(source?: SourceRenderState) {
   if (!source?.result && !source?.message) return "";
   const result = asRecord(source.result);
@@ -1325,12 +1387,7 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
 function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
   const sources = currentProjectSources(data);
   const counts = sourceHealthCounts(sources);
-  const sourceFilters = asRecord(data.source_filters);
-  const selectedSource = asRecord(sourceFilters.selected_source);
-  const selectedSourceLabel =
-    Object.keys(selectedSource).length > 0
-      ? sourceDisplayTitle(selectedSource)
-      : (sourceFilters.selected_source_id ?? "All sources");
+  const filterState = sourceFilterState(data);
   return `<section class="panel source-workbench" id="sources">
     <div class="section-head">
       <div>
@@ -1345,8 +1402,9 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
       <span><strong>${escapeHtml(counts.ready)}</strong> ready to cite</span>
       <span><strong>${escapeHtml(counts.needsSetup)}</strong> need setup</span>
       <span><strong>${escapeHtml(counts.needsAttention)}</strong> need attention</span>
-      <span><strong>${escapeHtml(selectedSourceLabel)}</strong> selected source</span>
+      <span><strong>${escapeHtml(filterState.selectedLabel)}</strong> selected source</span>
     </div>
+    ${renderSourceFilterControl(data, "sources")}
     <div class="source-workspace-grid">
       <div>
         <h3>Sources for selected space</h3>
@@ -1756,6 +1814,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   const ruleCount = rowCount(data.rules);
   const hasOpenDecision = importCount + inboxCount + conflictCount > 0;
   return `<div class="review-workspace">
+    ${renderSourceFilterControl(data, "review")}
     <div class="review-overview">
       ${renderReviewSummaryTile(
         "Import candidates",
@@ -1831,10 +1890,11 @@ function renderActivityReplay(data: ReviewDashboardData) {
   const rows = Array.isArray(data.recent_activity)
     ? (data.recent_activity as Array<Record<string, unknown>>)
     : [];
+  const sourceFilter = renderSourceFilterControl(data, "activity");
   if (rows.length === 0) {
-    return `<p class="empty">No recent Recallant activity has been captured for this memory space yet.</p>`;
+    return `${sourceFilter}<p class="empty">No recent Recallant activity has been captured for this memory space yet.</p>`;
   }
-  return `<div class="activity-list">
+  return `${sourceFilter}<div class="activity-list">
     ${rows
       .map(
         (row) => `<article class="activity-item">
@@ -2259,6 +2319,12 @@ function renderDashboard(
     .source-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 0 0 14px; }
     .source-overview span { border: 1px solid #d4e1dd; border-radius: 7px; padding: 9px; background: #fff; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
     .source-overview strong { display: block; color: #166454; font-size: 15px; }
+    .source-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr); gap: 12px; align-items: start; border: 1px solid #d4e1dd; border-radius: 8px; padding: 12px; margin: 0 0 14px; background: #fff; }
+    .source-filter-panel h3 { margin: 0 0 6px; font-size: 14px; }
+    .source-filter-panel p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .source-filter-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+    .source-filter-chip { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 5px 8px; color: #303845; background: #f8fafc; font-size: 12px; text-decoration: none; }
+    .source-filter-chip.active { border-color: #166454; background: #eef8f5; color: #145a4d; font-weight: 700; }
     .source-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
     .source-management { display: grid; gap: 10px; }
     .source-list { display: grid; gap: 8px; }
@@ -2380,7 +2446,7 @@ function renderDashboard(
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
+    @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid { grid-template-columns: 1fr; } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
     @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .signal-strip { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
   </style>
 </head>
