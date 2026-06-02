@@ -84,7 +84,10 @@ Current implemented slices include:
   dependency checks; neutral `managed-server` installs use generic Linux paths instead of owner
   `/ai` paths; production compose/backup wrappers honor the selected profile env/data paths;
   README/Quickstart use the canonical repository URL; `docs/RELEASE.md` records the release/version
-  policy; and `npm run public-readiness:smoke` guards the public onboarding contract.
+  policy; `npm run public-readiness:smoke` guards the public onboarding contract; and
+  `npm run public-clean-host:smoke` adds an isolated clean-host-style preflight for install planning
+  and temporary CLI wrapper execution. `docs/PUBLIC_SCREENSHOTS.md` records the public screenshot
+  source and redaction policy; actual public screenshots still need final generation/manual review.
   This is not yet a public-release claim: clean-host validation, final screenshots, release URL/
   version policy, rollback testing on a non-owner host, and final client mandatory-startup parity
   remain open.
@@ -989,6 +992,10 @@ Latest product-UX readiness checkpoint:
   - `scripts/recallant-prod-compose.sh`, `docker-compose.production.yml`, and
     `scripts/recallant-production-backup.sh` now respect profile-driven env/data paths instead of
     forcing `/ai` paths for every managed install.
+  - `npm run public-clean-host:smoke` verifies temporary HOME/PREFIX/DATA paths, side-effect-free
+    dry-runs, managed-server overrides, and a safe installed CLI wrapper command.
+  - `docs/PUBLIC_SCREENSHOTS.md` requires synthetic fixture screenshots and blocks owner paths,
+    private hostnames, owner email addresses, secrets, real project names, and real memory excerpts.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
     for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
     URL in README/Quickstart.

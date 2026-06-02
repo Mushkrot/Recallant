@@ -35,11 +35,13 @@ A release candidate must prove:
 
 - README and Quickstart use the canonical repository URL;
 - installer dry-run works for `single-user` and `managed-server`;
+- `npm run public-clean-host:smoke` passes as the local clean-host preflight;
 - install succeeds on a clean non-owner Linux host or container;
 - `recallant doctor` runs through the installed CLI;
 - a clean project can attach, connect, record, checkpoint, close out, and later recall;
 - Workbench opens privately and shows capture active;
-- public screenshots contain no private paths, tokens, project names, or owner email addresses;
+- public screenshots follow [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md) and contain no private
+  paths, tokens, project names, hostnames, or owner email addresses;
 - rollback instructions have been tested on a non-owner host;
 - security docs have been reviewed for public-facing instructions.
 

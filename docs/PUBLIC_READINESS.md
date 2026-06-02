@@ -12,10 +12,13 @@ First packaging slice implemented:
 - neutral public server installs can use `managed-server`, while the legacy/current
   `owner-server` profile remains owner-specific;
 - production compose and backup scripts honor the selected profile env/data paths;
+- clean-host preflight smoke verifies isolated HOME/PREFIX/DATA install planning plus installed CLI
+  wrapper execution without touching owner-server paths;
 - installer dry-run is side-effect free and no longer requires Docker only to preview the plan;
 - root README points to the short install/attach path;
 - README and Quickstart now use the canonical repository URL instead of placeholder clone commands;
 - release/version policy and release-candidate gates are recorded in [RELEASE.md](RELEASE.md);
+- public screenshot/redaction policy is recorded in [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md);
 - Quickstart is now the ordinary user path;
 - self-hosting details are separated from owner-server operational facts;
 - owner-server `/ai` assumptions are documented as one profile, not as the product default;
@@ -56,10 +59,19 @@ paths, or architecture ADRs to complete this path.
 - the Quickstart contains install, attach, connect, capture-proof, Workbench, Ask Recallant, and
   safe detach steps;
 - self-hosting and owner-server documentation are separate;
+- public screenshot policy exists and blocks owner paths, private hostnames, emails, tokens, real
+  project names, and real memory excerpts;
 - installer dry-run for both profiles remains side-effect free;
 - managed-server dry-run uses generic Linux paths rather than owner `/ai` paths;
 - compose and backup wrappers use profile-driven paths rather than only owner `/ai` paths;
 - installer dry-run can print a plan even when Docker is not available in `PATH`.
+
+`npm run public-clean-host:smoke` checks an isolated clean-host-style preflight:
+
+- single-user dry-run uses a temporary HOME;
+- managed-server dry-run accepts explicit env/data/prefix overrides;
+- dry-run creates no env, data, or CLI paths;
+- the CLI wrapper can be installed into a temporary prefix and run a safe command.
 
 This smoke does not prove the whole product is public-ready. It prevents the packaging path from
 regressing while Stage 7 continues.

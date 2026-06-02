@@ -173,6 +173,22 @@ mustInclude(
   "docs/RELEASE.md"
 );
 
+const screenshots = await read("docs/PUBLIC_SCREENSHOTS.md");
+mustInclude(
+  screenshots,
+  [
+    "npm run review-ui:playwright",
+    "Required Screenshots Before Public Release",
+    "Redaction Rules",
+    "/ai/recallant",
+    "recallant.unicloud.ca",
+    "owner email addresses",
+    "secrets, tokens, database URLs",
+    "raw memory excerpts from real owner projects"
+  ],
+  "docs/PUBLIC_SCREENSHOTS.md"
+);
+
 assert(!readme.includes("<recallant-repo-url>"), "README.md still contains a placeholder repo URL");
 assert(
   !quickstart.includes("<recallant-repo-url>"),

@@ -474,10 +474,19 @@ Acceptance:
   commands.
 - Done: [RELEASE.md](RELEASE.md) records the pre-release version policy,
   semantic-versioning direction, and release-candidate gate.
+- Done: `npm run public-clean-host:smoke` adds an isolated clean-host-style
+  preflight for single-user and managed-server install planning plus temporary
+  CLI-wrapper execution. This is not a replacement for a real clean VM/container
+  install, but it protects the release-candidate path from local-path regressions.
+- Done: [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md) defines the public
+  screenshot source, required screenshot set, and redaction rules for private
+  paths, hostnames, owner emails, secrets, real project names, and real memory
+  excerpts.
 
 Remaining before a real public-release claim:
 
-- Public-quality screenshots from the final Workbench visual direction.
+- Generate and manually approve public-quality screenshots from the final
+  Workbench visual direction.
 - Clean-host install validation outside the owner server.
 - Rollback docs tested on a non-owner host.
 - Full mandatory startup parity for supported clients.
