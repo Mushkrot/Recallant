@@ -29,7 +29,10 @@ This is the current handoff for the next Recallant session. Start here after rea
   `docs/RELEASE.md` records the release/version policy. `npm run public-clean-host:smoke` adds a
   clean-host-style preflight, but a real non-owner VM/container install is still pending before a
   public-release claim. `docs/PUBLIC_SCREENSHOTS.md` defines the screenshot/redaction policy, but
-  final public screenshots still need generation and manual approval.
+  final public screenshots still need full manual approval. `npm run review-ui:playwright` passed on
+  2026-06-02 and generated fresh synthetic screenshot candidates under `/ai/playwright/reports`; the
+  focused Ask screenshot was spot-checked as synthetic and free of owner paths/hostnames/emails/
+  secrets.
 
 ## Current State
 
@@ -143,7 +146,8 @@ README/Quickstart now use `https://github.com/Mushkrot/Recallant.git`, and `docs
 records the pre-release version policy plus the release-candidate gate. `npm run
 public-clean-host:smoke` verifies isolated HOME/PREFIX/DATA dry-runs plus temporary CLI wrapper
 execution. `docs/PUBLIC_SCREENSHOTS.md` defines the required public screenshot set and redaction
-rules.
+rules. Latest screenshot candidates are in `/ai/playwright/reports` from the 2026-06-02
+`review-ui:playwright` run.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

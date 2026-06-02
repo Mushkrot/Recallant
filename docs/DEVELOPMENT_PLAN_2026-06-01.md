@@ -482,11 +482,16 @@ Acceptance:
   screenshot source, required screenshot set, and redaction rules for private
   paths, hostnames, owner emails, secrets, real project names, and real memory
   excerpts.
+- Done: `npm run review-ui:playwright` passed on 2026-06-02 and generated
+  fresh synthetic Workbench screenshot candidates under `/ai/playwright/reports`.
+  The focused Ask screenshot was manually spot-checked as synthetic and free of
+  owner paths, hostnames, emails, and secrets; final public approval of the full
+  image set remains a release-candidate task.
 
 Remaining before a real public-release claim:
 
-- Generate and manually approve public-quality screenshots from the final
-  Workbench visual direction.
+- Final manual approval of public-quality screenshots from the generated
+  Workbench candidate set.
 - Clean-host install validation outside the owner server.
 - Rollback docs tested on a non-owner host.
 - Full mandatory startup parity for supported clients.

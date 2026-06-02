@@ -19,6 +19,8 @@ First packaging slice implemented:
 - README and Quickstart now use the canonical repository URL instead of placeholder clone commands;
 - release/version policy and release-candidate gates are recorded in [RELEASE.md](RELEASE.md);
 - public screenshot/redaction policy is recorded in [PUBLIC_SCREENSHOTS.md](PUBLIC_SCREENSHOTS.md);
+- latest Workbench Playwright screenshot QA generated synthetic desktop/mobile candidates under
+  `/ai/playwright/reports` on 2026-06-02;
 - Quickstart is now the ordinary user path;
 - self-hosting details are separated from owner-server operational facts;
 - owner-server `/ai` assumptions are documented as one profile, not as the product default;
@@ -26,7 +28,7 @@ First packaging slice implemented:
 
 Still pending before a public release claim:
 
-- public-quality screenshots from the final Workbench visual direction;
+- final manual approval of public-quality screenshots from the latest Workbench visual direction;
 - broader external-user install run on a clean VM/container;
 - final rollback docs tested on a non-owner host;
 - complete mandatory startup parity for the supported clients;

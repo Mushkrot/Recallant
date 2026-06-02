@@ -87,10 +87,13 @@ Current implemented slices include:
   policy; `npm run public-readiness:smoke` guards the public onboarding contract; and
   `npm run public-clean-host:smoke` adds an isolated clean-host-style preflight for install planning
   and temporary CLI wrapper execution. `docs/PUBLIC_SCREENSHOTS.md` records the public screenshot
-  source and redaction policy; actual public screenshots still need final generation/manual review.
-  This is not yet a public-release claim: clean-host validation, final screenshots, release URL/
-  version policy, rollback testing on a non-owner host, and final client mandatory-startup parity
-  remain open.
+  source and redaction policy; `npm run review-ui:playwright` generated fresh synthetic
+  desktop/mobile screenshot candidates under `/ai/playwright/reports` on 2026-06-02, with a focused
+  Ask screenshot spot-check showing no owner paths/hostnames/emails/secrets. Final manual approval
+  of the full image set remains open.
+  This is not yet a public-release claim: real clean-host install validation, final sanitized
+  screenshots, rollback testing on a non-owner host, refreshed public-facing security review, and
+  final client mandatory-startup parity remain open.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
   `memory_cross_project_recall` with explicit modes for same-project, developer rules, environment,
   similar projects, and all-project review. Similar-project results are source-linked examples with
@@ -996,6 +999,9 @@ Latest product-UX readiness checkpoint:
     dry-runs, managed-server overrides, and a safe installed CLI wrapper command.
   - `docs/PUBLIC_SCREENSHOTS.md` requires synthetic fixture screenshots and blocks owner paths,
     private hostnames, owner email addresses, secrets, real project names, and real memory excerpts.
+  - `npm run review-ui:playwright` passed and generated seven Workbench screenshot candidates:
+    desktop overview, focused Ask, focused Sources, source-filtered Activity, focused Settings,
+    desktop chat, and mobile chat.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
     for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
     URL in README/Quickstart.

@@ -455,6 +455,9 @@ recallant.service`, local `/health`, and authenticated Review route check for
   single-user/managed-server dry-runs and temporary CLI wrapper execution.
 - Added `docs/PUBLIC_SCREENSHOTS.md` to define synthetic screenshot sources, required public
   screenshots, and redaction rules before any images are used in public docs/releases.
+- `npm run review-ui:playwright` passed on 2026-06-02 and generated fresh synthetic Workbench
+  screenshot candidates under `/ai/playwright/reports`; focused Ask was spot-checked as synthetic
+  and free of owner paths, private hostnames, owner emails, and secrets.
 - README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
   clone commands.
 - Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning
