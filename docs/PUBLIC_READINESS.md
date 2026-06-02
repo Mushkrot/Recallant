@@ -8,7 +8,9 @@ architecture documents.
 
 First packaging slice implemented:
 
-- installer profiles exist for `single-user` and `owner-server`;
+- installer profiles exist for `single-user`, `managed-server`, and `owner-server`;
+- neutral public server installs can use `managed-server`, while the legacy/current
+  `owner-server` profile remains owner-specific;
 - installer dry-run is side-effect free and no longer requires Docker only to preview the plan;
 - root README points to the short install/attach path;
 - Quickstart is now the ordinary user path;
@@ -53,6 +55,7 @@ paths, or architecture ADRs to complete this path.
   safe detach steps;
 - self-hosting and owner-server documentation are separate;
 - installer dry-run for both profiles remains side-effect free;
+- managed-server dry-run uses generic Linux paths rather than owner `/ai` paths;
 - installer dry-run can print a plan even when Docker is not available in `PATH`.
 
 This smoke does not prove the whole product is public-ready. It prevents the packaging path from

@@ -446,9 +446,12 @@ recallant.service`, local `/health`, and authenticated Review route check for
   public-release blockers.
 - Installer `--dry-run` now exits before Node/npm/Docker dependency checks so a new user can preview
   the plan before Docker is available.
+- Added `--profile managed-server` as the neutral public managed Linux profile with
+  `/etc/recallant/recallant.env` and `/var/lib/recallant`; `--profile owner-server` remains for the
+  owner's `/ai` production host.
 - Added `npm run public-readiness:smoke`, which checks README/Quickstart/Self-hosting/
-  Owner-server/Public-readiness docs and installer dry-run behavior for both profiles plus the
-  no-Docker-preview path.
+  Owner-server/Public-readiness docs and installer dry-run behavior for single-user, managed-server,
+  owner-server, plus the no-Docker-preview path.
 - `npm run installer:smoke` now has a sandbox-safe fallback when Node cannot spawn `/bin/bash`; in
   normal environments it still executes the installer dry-run.
 - Verification so far: `npm run public-readiness:smoke` and `npm run installer:smoke` passed.

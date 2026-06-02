@@ -24,26 +24,36 @@ CLI: ~/.local/bin/recallant
 systemd: disabled by default
 ```
 
-### Owner-server / managed Linux server
+### Managed Linux server
 
 Use this when Recallant is run as a managed service:
 
 ```bash
-sudo ./scripts/install-recallant.sh --dry-run --profile owner-server
-sudo ./scripts/install-recallant.sh --profile owner-server
+sudo ./scripts/install-recallant.sh --dry-run --profile managed-server
+sudo ./scripts/install-recallant.sh --profile managed-server
 ```
 
 Default locations:
 
 ```text
-env file: /opt/secure-configs/recallant.env
-data dir: /ai/recallant-data
+env file: /etc/recallant/recallant.env
+data dir: /var/lib/recallant
 CLI: /usr/local/bin/recallant
 systemd: recallant.service when available
 ```
 
-The owner-server profile is a deployment profile, not the universal product assumption. The
-owner's live `/ai` host has extra security and port-inventory rules in [OWNER_SERVER.md](OWNER_SERVER.md).
+### Owner-server compatibility profile
+
+The `owner-server` profile is kept for the current owner's `/ai` production host and existing
+operator workflow:
+
+```bash
+sudo ./scripts/install-recallant.sh --dry-run --profile owner-server
+```
+
+That profile uses owner-specific defaults such as `/ai/recallant-data` and
+`/opt/secure-configs/recallant.env`. It is documented in [OWNER_SERVER.md](OWNER_SERVER.md) and
+should not be treated as the generic public install path.
 
 ## What The Installer Does
 

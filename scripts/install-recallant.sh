@@ -16,7 +16,7 @@ Usage: scripts/install-recallant.sh [options]
 
 Options:
   --dry-run                  Print the install plan without changing files, Docker, or systemd.
-  --profile <name>           owner-server (default) or single-user.
+  --profile <name>           single-user, managed-server, or owner-server.
   --recallant-home <path>    Repository/runtime path to install from.
   --env-file <path>          Environment file path.
   --data-dir <path>          Recallant data directory.
@@ -74,6 +74,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$INSTALL_PROFILE" in
+  managed-server)
+    ENV_FILE="${ENV_FILE:-/etc/recallant/recallant.env}"
+    DATA_DIR="${DATA_DIR:-/var/lib/recallant}"
+    INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-/usr/local/bin}"
+    ;;
   owner-server)
     ENV_FILE="${ENV_FILE:-/opt/secure-configs/recallant.env}"
     DATA_DIR="${DATA_DIR:-/ai/recallant-data}"

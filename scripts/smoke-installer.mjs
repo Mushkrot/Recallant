@@ -42,10 +42,16 @@ function staticDryRunPlan(args, env = {}) {
     option("--env-file") ??
     (profile === "single-user"
       ? join(home, ".config", "recallant", "recallant.env")
-      : "/opt/secure-configs/recallant.env");
+      : profile === "managed-server"
+        ? "/etc/recallant/recallant.env"
+        : "/opt/secure-configs/recallant.env");
   const dataDir =
     option("--data-dir") ??
-    (profile === "single-user" ? join(home, ".local", "share", "recallant") : "/ai/recallant-data");
+    (profile === "single-user"
+      ? join(home, ".local", "share", "recallant")
+      : profile === "managed-server"
+        ? "/var/lib/recallant"
+        : "/ai/recallant-data");
   const prefix =
     option("--install-cli-prefix") ??
     (profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin");
@@ -120,6 +126,20 @@ for (const marker of [
 assert(!(await exists(ownerEnv)), "Owner installer dry-run created env file");
 assert(!(await exists(ownerData)), "Owner installer dry-run created data dir");
 assert(!(await exists(ownerPrefix)), "Owner installer dry-run created CLI prefix");
+
+const managedPlan = run(["--dry-run", "--profile", "managed-server"], {
+  SUDO_USER: "recallant-smoke"
+});
+for (const marker of [
+  "profile: managed-server",
+  "env_file: /etc/recallant/recallant.env",
+  "data_dir: /var/lib/recallant",
+  "install_cli_prefix: /usr/local/bin",
+  "systemd_mode: auto",
+  "will_install_systemd: auto"
+]) {
+  assert(managedPlan.includes(marker), `Managed-server installer dry-run output missing ${marker}`);
+}
 
 const singleRoot = await mkdtemp(join(tmpdir(), "recallant-installer-single-"));
 const singleHome = join(singleRoot, "home");

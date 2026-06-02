@@ -45,9 +45,15 @@ function staticDryRunPlan(args, env = {}) {
   const envFile =
     profile === "single-user"
       ? join(home, ".config", "recallant", "recallant.env")
+      : profile === "managed-server"
+        ? "/etc/recallant/recallant.env"
       : "/opt/secure-configs/recallant.env";
   const dataDir =
-    profile === "single-user" ? join(home, ".local", "share", "recallant") : "/ai/recallant-data";
+    profile === "single-user"
+      ? join(home, ".local", "share", "recallant")
+      : profile === "managed-server"
+        ? "/var/lib/recallant"
+        : "/ai/recallant-data";
   const prefix = profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin";
   const systemd = profile === "single-user" ? "manual" : "auto";
   return `Recallant install plan
@@ -113,7 +119,8 @@ mustInclude(
   selfHosting,
   [
     "Single-user",
-    "Owner-server / managed Linux server",
+    "Managed Linux server",
+    "Owner-server compatibility profile",
     "Dry-run",
     "Rollback And Recovery",
     "configured: Recallant files or client settings exist",
@@ -142,6 +149,7 @@ mustInclude(
   [
     "README",
     "installer dry-run",
+    "`managed-server`",
     "recallant doctor --require-capture",
     "Workbench confirms capture active",
     "npm run public-readiness:smoke"
@@ -162,6 +170,20 @@ mustInclude(
     "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
   ],
   "owner-server installer dry-run"
+);
+
+const managedPlan = runInstallerDryRun(["--dry-run", "--profile", "managed-server"], {
+  SUDO_USER: "recallant-smoke"
+});
+mustInclude(
+  managedPlan,
+  [
+    "profile: managed-server",
+    "env_file: /etc/recallant/recallant.env",
+    "data_dir: /var/lib/recallant",
+    "will_install_systemd: auto"
+  ],
+  "managed-server installer dry-run"
 );
 
 const singlePlan = runInstallerDryRun(["--dry-run", "--profile", "single-user"], {

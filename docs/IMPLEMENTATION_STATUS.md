@@ -81,7 +81,8 @@ Current implemented slices include:
 - Stage 7 — Packaging and Public Readiness: first packaging slice implemented. README and
   Quickstart now describe the outside-user path from install preview through capture-active proof;
   self-hosting and owner-server docs are separated; installer dry-run can preview plans before
-  dependency checks; and `npm run public-readiness:smoke` guards the public onboarding contract.
+  dependency checks; neutral `managed-server` installs use generic Linux paths instead of owner
+  `/ai` paths; and `npm run public-readiness:smoke` guards the public onboarding contract.
   This is not yet a public-release claim: clean-host validation, final screenshots, release URL/
   version policy, rollback testing on a non-owner host, and final client mandatory-startup parity
   remain open.
@@ -979,8 +980,10 @@ Latest product-UX readiness checkpoint:
     not the product default.
   - `docs/PUBLIC_READINESS.md` tracks Stage 7 acceptance, current status, and remaining release
     blockers.
+  - `--profile managed-server` is the neutral public managed Linux profile; `--profile owner-server`
+    remains the current owner-host compatibility profile.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
-    for both profiles and the no-Docker-preview path.
+    for single-user, managed-server, owner-server, and the no-Docker-preview path.
 - `scripts/install-recallant.sh --dry-run --profile owner-server|single-user` prints the exact
   install plan and exits before file, Docker, database, or systemd writes. Dry-run now exits before
   dependency checks, so a new user can preview the plan even before Docker is available in `PATH`.

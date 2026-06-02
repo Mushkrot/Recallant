@@ -23,7 +23,8 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 7 — Packaging and Public Readiness: first public-packaging slice is implemented. README,
   Quickstart, Self-hosting, Owner-server, and Public-readiness docs now describe the outside-user
   path separately from owner-server `/ai` operations, and `npm run public-readiness:smoke` guards
-  the packaging contract. It is not a public-release claim yet.
+  the packaging contract. The neutral `managed-server` install profile now uses generic Linux paths
+  while `owner-server` remains owner-host compatibility. It is not a public-release claim yet.
 
 ## Current State
 
@@ -126,9 +127,12 @@ Stage 7 first packaging slice is now implemented and smoke-guarded:
 `docs/QUICKSTART.md` is the short outside-user path; `docs/SELF_HOSTING.md` separates profiles,
 rollback, verification, and security defaults; `docs/OWNER_SERVER.md` records the owner's `/ai`
 profile separately; `docs/PUBLIC_READINESS.md` tracks Stage 7 status and release blockers; and
-`npm run public-readiness:smoke` verifies documentation markers plus installer dry-run for both
-profiles and the no-Docker-preview path. Installer `--dry-run` now exits before dependency checks,
-so previewing the install plan does not require Docker to be available.
+`npm run public-readiness:smoke` verifies documentation markers plus installer dry-run for
+single-user, managed-server, owner-server, and the no-Docker-preview path. Installer `--dry-run` now
+exits before dependency checks, so previewing the install plan does not require Docker to be
+available.
+The installer also has a neutral `managed-server` profile with `/etc/recallant/recallant.env` and
+`/var/lib/recallant`; the current `owner-server` profile remains for the owner's `/ai` host.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

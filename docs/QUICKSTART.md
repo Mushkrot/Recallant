@@ -27,11 +27,11 @@ cd recallant
 Dry-run prints what would be created and then exits. It must not create files, start Docker,
 modify a database, or install a service.
 
-Use `owner-server` only when installing a managed server profile with systemd and shared data
+Use `managed-server` when installing a neutral Linux server profile with systemd and shared data
 paths:
 
 ```bash
-./scripts/install-recallant.sh --dry-run --profile owner-server
+./scripts/install-recallant.sh --dry-run --profile managed-server
 ```
 
 ## 2. Install
@@ -45,7 +45,7 @@ Single-user private install:
 Managed Linux server install:
 
 ```bash
-sudo ./scripts/install-recallant.sh --profile owner-server
+sudo ./scripts/install-recallant.sh --profile managed-server
 ```
 
 The installer builds Recallant, creates a private environment file if one does not exist, starts the

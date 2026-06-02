@@ -461,6 +461,11 @@ Acceptance:
 - Done: `npm run public-readiness:smoke` verifies README/Quickstart/Self-hosting/
   Owner-server/Public-readiness documentation markers plus installer dry-run for
   both profiles and the no-Docker-preview path.
+- Done: added a neutral `managed-server` installer profile using generic Linux
+  paths (`/etc/recallant/recallant.env`, `/var/lib/recallant`) so outside users
+  do not have to treat the owner's `/ai` layout as the default managed-server
+  install. The existing `owner-server` profile remains available for the current
+  owner host and compatibility.
 
 Remaining before a real public-release claim:
 
