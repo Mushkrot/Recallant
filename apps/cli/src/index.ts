@@ -18,7 +18,7 @@ import {
   readImportTextForCandidate
 } from "./discovery.js";
 import { runAttach } from "./attach.js";
-import { clientTargetConfig } from "./client-targets.js";
+import { clientTargetConfig, connectClientTargetConfig } from "./client-targets.js";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 
@@ -2734,7 +2734,7 @@ async function runConnect(argv: readonly string[]) {
   const developerId = await resolveConnectDeveloperId({
     projectId: config.project_id
   });
-  const targetConfig = clientTargetConfig(target, config.project_id, developerId);
+  const targetConfig = connectClientTargetConfig(target, config.project_id, developerId);
   const targetPath = join(dir, targetConfig.config_file);
   const existing = await readOptional(targetPath);
   const desiredConfig = targetConfig.merge_mcp_servers

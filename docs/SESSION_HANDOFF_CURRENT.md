@@ -584,6 +584,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `--project-dir` still checked the process working directory spool. The default spool path now
   resolves through the project directory, and `local-cleanup:smoke`, `spool:smoke`,
   `connect:smoke`, and full `smoke:core` pass.
+- 2026-06-02 Cursor connect follow-up: `recallant connect cursor` now uses a dedicated
+  project-local `.cursor/mcp.json` merge path. It preserves existing MCP servers, creates a local
+  backup before changing an existing file, supports dry-run, stays idempotent, and writes no global
+  config. `connect:smoke` covers the path.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 

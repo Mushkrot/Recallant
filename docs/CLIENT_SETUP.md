@@ -67,14 +67,20 @@ Official reference:
 
 - [Cursor MCP documentation](https://docs.cursor.com/context/mcp)
 
-Use the generic target until a dedicated Cursor writer is added:
+Use the dedicated project-local target:
 
 ```bash
-recallant attach . --target generic
+recallant connect cursor --project-dir .
 ```
 
-Copy the generated `.recallant/generic-mcp.json` `mcpServers.recallant` block into
-`.cursor/mcp.json` for project-specific setup. Keep the same `command`, `args`, and `env` values.
+Recallant writes or merges `.cursor/mcp.json` in the project. It preserves existing MCP servers,
+adds only `mcpServers.recallant`, and creates a local backup before changing an existing file.
+Preview the exact change first:
+
+```bash
+recallant connect cursor --project-dir . --dry-run
+```
+
 Open or reload the folder after saving the config.
 
 ## Claude Code

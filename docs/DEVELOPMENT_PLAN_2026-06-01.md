@@ -273,11 +273,14 @@ Acceptance:
   merges only the `mcpServers.recallant` entry, preserves existing MCP servers,
   creates a local backup when changing an existing file, supports dry-run, and
   is idempotent.
-- Done: other non-Codex clients still use the generic MCP fallback until
+- Done: Cursor now has a dedicated project-local `.cursor/mcp.json` writer with
+  the same merge/backup/dry-run/idempotency guarantees.
+- Done: remaining non-Codex clients still use the generic MCP fallback until
   dedicated writers are implemented.
 - Done: `npm run connect:smoke` verifies sandbox attach, Codex dry-run/
   idempotency, actual connect, Claude Code `.mcp.json` merge/backup/idempotency,
-  and generic fallback dry-run.
+  Cursor `.cursor/mcp.json` merge/backup/idempotency, and generic fallback
+  dry-run.
 - Done: `recallant doctor --require-capture` now fails with exit code 2 when
   the selected project is only registered or capture is partial, and passes only
   when Recallant sees context read, memory write, and checkpoint evidence from

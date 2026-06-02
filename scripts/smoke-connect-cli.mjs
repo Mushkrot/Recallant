@@ -168,6 +168,60 @@ assert(
   `Claude second connect should be idempotent: ${JSON.stringify(claudeIdempotent)}`
 );
 
+await mkdir(`${projectDir}/.cursor`, { recursive: true });
+await writeFile(
+  `${projectDir}/.cursor/mcp.json`,
+  `${JSON.stringify(
+    {
+      mcpServers: {
+        existing_search: {
+          command: "search-helper",
+          args: ["stdio"]
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
+);
+
+const cursorDryRun = runCli(["connect", "cursor", "--project-dir", projectDir, "--dry-run"]);
+assert(
+  cursorDryRun.config_file === ".cursor/mcp.json" &&
+    cursorDryRun.config_format === "cursor_mcp_json" &&
+    cursorDryRun.client_specific === true &&
+    cursorDryRun.merge_mcp_servers === true &&
+    cursorDryRun.writes_files === false,
+  `Cursor connect should use project-local dedicated .cursor/mcp.json merge: ${JSON.stringify(cursorDryRun)}`
+);
+assert(
+  cursorDryRun.planned_changes.some((change) => change.action === "backup_file") &&
+    cursorDryRun.planned_changes.some(
+      (change) => change.action === "merge_file" && change.path === ".cursor/mcp.json"
+    ),
+  `Cursor dry-run should show local backup plus .cursor/mcp.json merge: ${JSON.stringify(cursorDryRun)}`
+);
+
+const cursorConnected = runCli(["connect", "cursor", "--project-dir", projectDir]);
+assert(
+  cursorConnected.writes_files === true &&
+    cursorConnected.planned_changes.some((change) => change.action === "backup_file") &&
+    cursorConnected.planned_changes.some((change) => change.action === "merge_file"),
+  `Cursor connect should merge local .cursor/mcp.json with backup: ${JSON.stringify(cursorConnected)}`
+);
+const cursorConfig = JSON.parse(await readFile(`${projectDir}/.cursor/mcp.json`, "utf8"));
+assert(
+  cursorConfig.mcpServers?.existing_search?.command === "search-helper" &&
+    cursorConfig.mcpServers?.recallant?.args?.includes("mcp-server"),
+  `Cursor .cursor/mcp.json merge did not preserve existing server and add Recallant: ${JSON.stringify(cursorConfig)}`
+);
+const cursorIdempotent = runCli(["connect", "cursor", "--project-dir", projectDir]);
+assert(
+  cursorIdempotent.writes_files === false &&
+    cursorIdempotent.planned_changes.some((change) => change.action === "no_change"),
+  `Cursor second connect should be idempotent: ${JSON.stringify(cursorIdempotent)}`
+);
+
 const hookDryRun = runCli([
   "connect",
   "codex",

@@ -382,8 +382,9 @@ Stage 4 first slice is now implemented:
 - `connect` is idempotent. For Codex, `attach` already creates `.recallant/codex-mcp.json` for
   compatibility, so `connect codex` normally reports `no_change`. Claude Code now has a dedicated
   project-local `.mcp.json` writer that merges only `mcpServers.recallant`, preserves existing MCP
-  servers, creates a local backup when changing an existing file, and stays idempotent. Other
-  non-Codex clients use the generic MCP fallback until dedicated writers are added.
+  servers, creates a local backup when changing an existing file, and stays idempotent. Cursor now
+  has the same dedicated project-local merge path for `.cursor/mcp.json`. Other non-Codex clients
+  use the generic MCP fallback until dedicated writers are added.
 - The command does not write global client config. Project-local fail-soft hook kit installation is
   available through `--install-local-hooks`.
 - `npm run connect:smoke` covers sandbox attach, Codex dry-run/idempotency, actual connect, and
@@ -446,6 +447,8 @@ Latest Workbench validation on 2026-06-01:
 - Stage 4 local hook-kit validation: `npm run connect:smoke` verifies local hook-kit dry-run,
   install, no global-config writes, fail-soft exit 0 when `recallant` is unavailable, and
   project-local spool fallback when primary hook capture cannot reach the database
+- Stage 4 Cursor connect validation: `npm run connect:smoke` verifies dedicated `.cursor/mcp.json`
+  dry-run, merge, local backup, existing MCP server preservation, and idempotency
 - 2026-06-02 full core validation after hook-spool path fix: `npm run build`, `npm run lint`,
   `npm run format:check`, `git diff --check`, targeted `npm run local-cleanup:smoke`,
   `npm run spool:smoke`, `npm run connect:smoke`, and full `npm run smoke:core`
