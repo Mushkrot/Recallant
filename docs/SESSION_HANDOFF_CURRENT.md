@@ -11,9 +11,9 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 2 — AI-native Management Chat: `~70%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~59%` complete. Virtual spaces, source attach/detach,
+- Stage 3 — Memory Spaces and Sources: `~60%` complete. Virtual spaces, source attach/detach,
   source filters, and source-linked Activity visibility are implemented; deeper connector/server
-  source health plus broader source-aware raw search/recovery are pending.
+  live verification plus broader source-aware raw search/recovery are pending.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
@@ -51,6 +51,10 @@ bindings without reading source contents, so the UI can distinguish ready local 
 missing, unreadable, or wrong-shape paths.
 Connector source health now uses planned/governed setup language rather than generic missing-path
 copy, and explicitly reminds that raw secrets stay outside Recallant memory.
+Remote source health now treats remote server/repo references as governed setup work rather than
+local files: `server_path` refs need an access binding, remote repos need sync/import, connectors
+can show ready only with governed capability metadata, and document collections show provenance-ready
+copy without implying connector capture is active.
 The Source Map now also shows health counts in human language: active sources, ready-to-cite
 sources, sources that need setup, and sources that need attention. The Review UI and Playwright
 smokes cover ready local sources, planned connectors, and missing paths.

@@ -69,9 +69,9 @@ Current implemented slices include:
 - Stage 2 — AI-native Management Chat: ~70% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~59% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~60% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
-  deeper connector/server-path probes, and broader source-aware raw search/recovery flows are still incomplete.
+  live connector verification, and broader source-aware raw search/recovery flows are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
@@ -153,6 +153,10 @@ Current implemented slices include:
 - Source health now checks absolute local `workspace_path`, `repo`, and `server_path` bindings
   without reading source contents, so Workbench can show local source ready, missing path,
   unreadable path, or wrong folder/file shape guidance.
+- Remote source health now treats remote `server_path` references as governed access-binding work
+  instead of resolving them as local paths. Remote repo references are marked as needing sync/import,
+  connector references can become ready only when governed capability-binding metadata exists, and
+  document collections show provenance-ready copy without pretending connector capture is active.
 - Connector project sources now report as planned/governed setup instead of generic missing
   location, and the health copy explicitly says raw secrets must stay outside Recallant memory.
 - Source Map now includes a human-readable health summary for ready-to-cite, needs-setup, and

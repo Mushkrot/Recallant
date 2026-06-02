@@ -12,9 +12,9 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 2 — AI-native Management Chat: `~70%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~59%` complete. The source-binding model and source API
-  are implemented, but source-health completeness, broader source-aware raw search/recovery, and
-  deeper connector/server-path handling are still partly open.
+- Stage 3 — Memory Spaces and Sources: `~60%` complete. The source-binding model and source API
+  are implemented, but live connector verification, broader source-aware raw search/recovery, and
+  deeper external-source handling are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
@@ -355,6 +355,10 @@ Latest implementation checkpoints:
 - 2026-06-02 connector source-health follow-up: connector sources are shown as planned/governed
   setup instead of generic missing locations, with explicit copy that raw secrets must stay outside
   Recallant memory. Verified by `npm run project-sources:smoke`.
+- 2026-06-02 remote source-health follow-up: remote `server_path` references no longer get resolved
+  by the CLI as local paths, remote server sources show "access binding needed", remote repos show
+  "sync/import needed", connector sources can show ready only with governed capability metadata, and
+  document collections use provenance-ready copy without implying connector capture is active.
 - 2026-06-02 Source Map health-summary follow-up: the Workbench now summarizes sources as active,
   ready to cite, needing setup, and needing attention, and both HTML/API and Playwright fixtures
   cover ready local sources, planned connectors, and missing paths.

@@ -74,6 +74,10 @@ fallback.
 project memory. Source bindings may point to different machines or services; Recallant stores the
 binding and provenance, not a promise that the path is always locally reachable.
 
+Remote references such as `ssh://server/path`, `github:owner/repo`, and connector/document ids are
+provenance/source bindings. Health checks must not probe remote systems or secrets unless a
+governed capability binding explicitly allows it.
+
 ### 2.1.1 Scope and audience model
 
 ADR-0040 accepts a multi-axis scope/audience model. Existing `scope=project|developer` columns are the compatibility/default subset, not the full architecture.

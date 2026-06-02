@@ -1026,7 +1026,20 @@ export class RecallantDb {
     const sourceKind = String(source.source_kind ?? "other");
     const label = typeof source.label === "string" ? source.label : "";
     const uri = typeof source.uri === "string" ? source.uri : "";
+    const metadata =
+      source.metadata && typeof source.metadata === "object"
+        ? (source.metadata as Record<string, unknown>)
+        : {};
     const isPrimary = source.is_primary === true;
+    const hasCapabilityBinding = Boolean(
+      metadata.capability_binding_id ||
+      ["ready", "active", "configured"].includes(
+        String(metadata.capability_binding_status ?? "").toLowerCase()
+      )
+    );
+    const isRemoteReference =
+      /^(?:[a-z][a-z0-9+.-]*:|[A-Za-z0-9_.-]+:\/|[A-Za-z0-9_.-]+:~?\/)/.test(uri) ||
+      /^https?:\/\//i.test(uri);
     const locationRequired = [
       "workspace_path",
       "repo",
@@ -1051,12 +1064,19 @@ export class RecallantDb {
       healthReason = "This source is not in normal active state.";
       actionNeeded = "Review the source state before relying on it.";
     } else if (sourceKind === "connector") {
-      healthStatus = "needs_setup";
-      healthLabel = "Connector source needs setup";
-      healthReason =
-        "The connector reference is recorded, but connector capture/authorization is not active in this slice. Raw secrets must stay outside Recallant memory.";
-      actionNeeded =
-        "Keep it as a planned source until connector capability binding is implemented through governed confirmation.";
+      if (hasCapabilityBinding) {
+        healthLabel = "Connector reference ready";
+        healthReason =
+          "A governed capability binding is recorded for this connector. Raw secrets stay outside Recallant memory.";
+        actionNeeded = "Use governed recall/import flows when connector data is needed.";
+      } else {
+        healthStatus = "needs_setup";
+        healthLabel = "Connector source needs setup";
+        healthReason =
+          "The connector reference is recorded, but connector capture/authorization is not active in this slice. Raw secrets must stay outside Recallant memory.";
+        actionNeeded =
+          "Keep it as a planned source until connector capability binding is implemented through governed confirmation.";
+      }
     } else if (locationRequired && !uri) {
       healthStatus = "needs_setup";
       healthLabel = "Location missing";
@@ -1094,6 +1114,30 @@ export class RecallantDb {
             "The recorded local path exists and Recallant can use it as source provenance.";
         }
       }
+    } else if (sourceKind === "server_path" && uri) {
+      if (hasCapabilityBinding) {
+        healthLabel = "Server source reference ready";
+        healthReason =
+          "Recallant has a governed server/source binding reference. Health does not probe remote paths or secrets.";
+        actionNeeded = "Use governed access/import workflows when this server source is needed.";
+      } else {
+        healthStatus = "needs_setup";
+        healthLabel = "Server source needs access binding";
+        healthReason =
+          "The server path is recorded as provenance, but Recallant will not probe remote/server paths without a governed capability binding.";
+        actionNeeded =
+          "Attach a governed capability binding or a reachable local/server path before relying on live access.";
+      }
+    } else if (sourceKind === "repo" && uri && isRemoteReference) {
+      healthStatus = "needs_setup";
+      healthLabel = "Repository source needs sync or import";
+      healthReason =
+        "The remote repository reference is recorded, but Recallant has not verified a local checkout or governed import/sync path.";
+      actionNeeded = "Attach a local repo path or run a governed repository import/sync workflow.";
+    } else if (sourceKind === "document_collection" && uri) {
+      healthLabel = "Document source reference ready";
+      healthReason =
+        "The document collection reference can be shown as provenance. Connector-backed capture still requires separate governed setup.";
     }
 
     return {

@@ -241,8 +241,12 @@ Acceptance:
   `server_path` bindings without reading source contents. Existing paths show
   local-source-ready status; missing paths and wrong folder/file shapes show
   needs-attention guidance.
-- Remaining: deeper source health probes for real connectors/server paths and
-  richer source filtering across search/replay views.
+- Done: remote source health now avoids unsafe probing. Remote server paths are
+  shown as needing governed access binding, remote repos as needing sync/import,
+  connector sources as setup-needed unless governed capability metadata exists,
+  and document collections as provenance-ready references.
+- Remaining: live connector verification, governed remote-source access checks,
+  and broader source-aware raw search/recovery flows.
 
 ## Stage 4 - Client Connect And Hook Capture
 

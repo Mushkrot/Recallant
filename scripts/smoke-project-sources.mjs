@@ -42,7 +42,10 @@ const virtualSpace = runCli([
   "--memory-domain",
   "personal_life"
 ]);
-assert(virtualSpace.ok === true, `Virtual memory space create failed: ${JSON.stringify(virtualSpace)}`);
+assert(
+  virtualSpace.ok === true,
+  `Virtual memory space create failed: ${JSON.stringify(virtualSpace)}`
+);
 assert(
   virtualSpace.memory_space.primary_path === null,
   `Virtual memory space should have no folder: ${JSON.stringify(virtualSpace)}`
@@ -50,7 +53,10 @@ assert(
 const virtualProjectId = virtualSpace.memory_space.project_id;
 
 const emptySources = runCli(["source", "list", "--project-id", virtualProjectId]);
-assert(emptySources.count === 0, `Virtual memory space should start with zero sources: ${JSON.stringify(emptySources)}`);
+assert(
+  emptySources.count === 0,
+  `Virtual memory space should start with zero sources: ${JSON.stringify(emptySources)}`
+);
 
 const workspacePath = `/tmp/recallant-workspace-source-${randomUUID()}`;
 mkdirSync(workspacePath, { recursive: true });
@@ -83,7 +89,10 @@ const manualSource = runCli([
   "--label",
   "Manual Smoke Notes"
 ]);
-assert(manualSource.source?.source_kind === "manual", `Manual source attach failed: ${JSON.stringify(manualSource)}`);
+assert(
+  manualSource.source?.source_kind === "manual",
+  `Manual source attach failed: ${JSON.stringify(manualSource)}`
+);
 
 const connectorSource = runCli([
   "source",
@@ -100,6 +109,42 @@ assert(
     connectorSource.source?.source_health?.label === "Connector source needs setup" &&
     String(connectorSource.source?.source_health?.reason).includes("Raw secrets must stay outside"),
   `Connector source should require governed setup without storing secrets: ${JSON.stringify(connectorSource)}`
+);
+
+const remoteRepoSource = runCli([
+  "source",
+  "attach",
+  "--project-id",
+  virtualProjectId,
+  "--source-kind",
+  "repo",
+  "--uri",
+  "github:example/recallant-source-smoke",
+  "--label",
+  "Remote Smoke Repo"
+]);
+assert(
+  remoteRepoSource.source?.source_health?.status === "needs_setup" &&
+    remoteRepoSource.source?.source_health?.label === "Repository source needs sync or import",
+  `Remote repo source should require governed sync/import: ${JSON.stringify(remoteRepoSource)}`
+);
+
+const remoteServerSource = runCli([
+  "source",
+  "attach",
+  "--project-id",
+  virtualProjectId,
+  "--source-kind",
+  "server_path",
+  "--uri",
+  "mainserver:/opt/smoke-docs",
+  "--label",
+  "Remote Smoke Server Path"
+]);
+assert(
+  remoteServerSource.source?.source_health?.status === "needs_setup" &&
+    remoteServerSource.source?.source_health?.label === "Server source needs access binding",
+  `Remote server source should require governed access binding: ${JSON.stringify(remoteServerSource)}`
 );
 
 const missingSource = runCli([
@@ -121,7 +166,10 @@ assert(
 );
 
 const listedSources = runCli(["source", "list", "--project-id", virtualProjectId]);
-assert(listedSources.count === 4, `Expected four attached sources: ${JSON.stringify(listedSources)}`);
+assert(
+  listedSources.count === 6,
+  `Expected six attached sources: ${JSON.stringify(listedSources)}`
+);
 assert(
   listedSources.sources.some(
     (source) =>
@@ -134,8 +182,7 @@ assert(
 assert(
   listedSources.sources.some(
     (source) =>
-      source.id === missingSource.source.id &&
-      source.source_health?.status === "needs_attention"
+      source.id === missingSource.source.id && source.source_health?.status === "needs_attention"
   ),
   `Missing local source should remain visible as needs attention: ${JSON.stringify(listedSources)}`
 );
@@ -147,6 +194,22 @@ assert(
       source.source_health?.label === "Connector source needs setup"
   ),
   `Connector source should remain visible as planned setup: ${JSON.stringify(listedSources)}`
+);
+assert(
+  listedSources.sources.some(
+    (source) =>
+      source.id === remoteRepoSource.source.id &&
+      source.source_health?.label === "Repository source needs sync or import"
+  ),
+  `Remote repo source should remain visible as sync/import setup: ${JSON.stringify(listedSources)}`
+);
+assert(
+  listedSources.sources.some(
+    (source) =>
+      source.id === remoteServerSource.source.id &&
+      source.source_health?.label === "Server source needs access binding"
+  ),
+  `Remote server source should remain visible as access-binding setup: ${JSON.stringify(listedSources)}`
 );
 
 const detached = runCli([
@@ -161,16 +224,18 @@ assert(detached.source?.status === "detached", `Source detach failed: ${JSON.str
 
 const afterDetach = runCli(["source", "list", "--project-id", virtualProjectId]);
 assert(
-    afterDetach.sources.some((source) => source.status === "detached") &&
+  afterDetach.sources.some((source) => source.status === "detached") &&
     afterDetach.sources.some((source) => source.status === "active"),
   `Detach should not delete memory space or other source: ${JSON.stringify(afterDetach)}`
 );
 
 const listedSpaces = runCli(["memory-space", "list"]);
-const listedVirtual = listedSpaces.memory_spaces.find((space) => space.project_id === virtualProjectId);
+const listedVirtual = listedSpaces.memory_spaces.find(
+  (space) => space.project_id === virtualProjectId
+);
 assert(listedVirtual, `Virtual memory space missing from list: ${JSON.stringify(listedSpaces)}`);
 assert(
-  listedVirtual.sources.length === 4,
+  listedVirtual.sources.length === 6,
   `Memory space list should include source bindings: ${JSON.stringify(listedVirtual)}`
 );
 
@@ -190,7 +255,9 @@ try {
     `ensureProject did not create a primary workspace source: ${JSON.stringify(ensuredSources)}`
   );
   const dashboard = await db.getReviewDashboard({ project_id: ensured.projectId });
-  const dashboardProject = dashboard.projects.find((project) => project.project_id === ensured.projectId);
+  const dashboardProject = dashboard.projects.find(
+    (project) => project.project_id === ensured.projectId
+  );
   assert(
     dashboardProject?.sources?.some((source) => source.source_kind === "workspace_path"),
     `Dashboard did not expose project sources: ${JSON.stringify(dashboardProject)}`

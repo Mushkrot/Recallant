@@ -395,7 +395,7 @@ try {
     "Sources for selected space",
     "Primary workspace folder",
     "Primary local source ready",
-    "Source ready",
+    "Document source reference ready",
     "Connector source needs setup",
     "Local path not found",
     "ready to cite",

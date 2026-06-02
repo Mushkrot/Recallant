@@ -3103,6 +3103,22 @@ function parseProjectKind(raw: string | undefined) {
   return value as "repo" | "subproject" | "workspace" | "personal_domain" | "other";
 }
 
+function isRemoteSourceReference(value: string) {
+  return (
+    /^(?:[a-z][a-z0-9+.-]*:\/\/|[a-z][a-z0-9+.-]*:|[A-Za-z0-9_.-]+:~?\/)/i.test(value) &&
+    !/^[A-Za-z]:[\\/]/.test(value)
+  );
+}
+
+function normalizeSourceUri(sourceKind: ProjectSourceKind, rawUri: string | undefined) {
+  if (!rawUri) return rawUri;
+  if (sourceKind === "workspace_path") return resolve(rawUri);
+  if (sourceKind === "server_path") {
+    return isRemoteSourceReference(rawUri) ? rawUri : resolve(rawUri);
+  }
+  return rawUri;
+}
+
 async function runMemorySpace(argv: readonly string[]) {
   const subcommand = argv[3] ?? "list";
   const database = createRecallantDbFromEnv();
@@ -3165,8 +3181,7 @@ async function runSourceCommand(argv: readonly string[]) {
       if (!projectId) throw new Error("VALIDATION_ERROR: source attach requires --project-id");
       const sourceKind = parseProjectSourceKind(parseFlag(argv, "--source-kind"));
       const rawUri = parseFlag(argv, "--uri");
-      const uri =
-        rawUri && ["workspace_path", "server_path"].includes(sourceKind) ? resolve(rawUri) : rawUri;
+      const uri = normalizeSourceUri(sourceKind, rawUri);
       const label =
         parseFlag(argv, "--label") ??
         (uri ? uri.split("/").filter(Boolean).at(-1) : undefined) ??
