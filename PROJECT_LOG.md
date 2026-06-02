@@ -7,7 +7,7 @@ Current focus: Continue turning the Workbench into a professional, human-readabl
 while keeping Playwright checks for layout regressions.
 Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
 and realistic pilot reports.
-Last updated: 2026-06-02T05:46:49Z.
+Last updated: 2026-06-02T05:49:15Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -133,6 +133,10 @@ Last updated: 2026-06-02T05:46:49Z.
   `npm run management-chat-ai:smoke`, `npm run review-ui:smoke`, `npm run lint`,
   `npm run format:check`, and `git diff --check` passed after adding a Google Drive governed-memory
   lookup scenario with current-project and cross-project source provenance.
+- Full core verification on 2026-06-02T05:49:15Z: `npm run smoke:core` passed after the focused
+  Workbench visual QA, Management Chat policy guard, and governed-memory lookup changes. Pilot
+  report QA summary remained green for clean project, copied sandbox, production-sensitive preflight,
+  and source-linked cross-project recall.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

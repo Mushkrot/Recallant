@@ -111,6 +111,11 @@ Current implemented slices include:
   owner-summary changes: `npm run smoke:core` passed end-to-end again. The run included
   project-sources, Management Chat AI, Review UI, Product Acceptance capture/recall, Pilot Report
   clean/copied/production-sensitive scenarios, connect, installer, and cross-client smokes.
+- 2026-06-02 full core QA checkpoint after focused Workbench visual QA, Management Chat policy
+  guard, and governed-memory chat lookup changes: `npm run smoke:core` passed end-to-end. The pilot
+  report included clean attach/capture/recall/detach, copied sandbox with untouched original,
+  production-sensitive guided preflight, and source-linked cross-project recall with non-binding
+  examples.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.

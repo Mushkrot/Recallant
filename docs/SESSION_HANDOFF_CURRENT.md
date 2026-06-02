@@ -75,6 +75,11 @@ connect, installer, and cross-client smokes.
 Full core QA after the later focused Workbench views, Ask source attach, and doctor owner-summary
 changes also passed on 2026-06-02: `npm run smoke:core`, including Management Chat AI, Review UI,
 Product Acceptance capture/recall, Pilot Report, connect, installer, and cross-client smokes.
+Full core QA after focused Workbench visual QA, Management Chat policy guard, and
+governed-memory chat lookup changes also passed on 2026-06-02: `npm run smoke:core`. The generated
+pilot report again proved clean attach/capture/recall/detach, copied sandbox original untouched,
+production-sensitive guided preflight, and source-linked cross-project recall with non-binding
+examples.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.
