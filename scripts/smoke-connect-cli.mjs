@@ -307,6 +307,39 @@ assert(
     hookManifest.ready_proof?.includes("--require-capture"),
   `Hook manifest should expose machine-readable startup targets: ${JSON.stringify(hookManifest)}`
 );
+
+await writeFile(
+  `${projectDir}/.recallant/hooks/manifest.json`,
+  `${JSON.stringify({ ...hookManifest, fail_soft: false }, null, 2)}\n`
+);
+const invalidManifestDoctor = runCliRaw(["doctor", "--project-dir", projectDir]);
+assert(
+  invalidManifestDoctor.status === 0 &&
+    invalidManifestDoctor.json?.client_connection?.status === "mcp_only" &&
+    invalidManifestDoctor.json?.client_connection?.hook_kit?.status === "invalid_manifest" &&
+    invalidManifestDoctor.json?.client_connection?.hook_kit?.ready === false,
+  `Invalid hook manifest should not be hook-ready: ${JSON.stringify(
+    invalidManifestDoctor.json?.client_connection
+  )}`
+);
+await writeFile(
+  `${projectDir}/.recallant/hooks/manifest.json`,
+  `${JSON.stringify(hookManifest, null, 2)}\n`
+);
+
+await chmod(`${projectDir}/.recallant/hooks/tool-result.sh`, 0o644);
+const invalidPermissionDoctor = runCliRaw(["doctor", "--project-dir", projectDir]);
+assert(
+  invalidPermissionDoctor.status === 0 &&
+    invalidPermissionDoctor.json?.client_connection?.status === "mcp_only" &&
+    invalidPermissionDoctor.json?.client_connection?.hook_kit?.status === "invalid_permissions" &&
+    invalidPermissionDoctor.json?.client_connection?.hook_kit?.ready === false,
+  `Non-executable hook script should not be hook-ready: ${JSON.stringify(
+    invalidPermissionDoctor.json?.client_connection
+  )}`
+);
+await chmod(`${projectDir}/.recallant/hooks/tool-result.sh`, 0o755);
+
 const hookFailSoft = spawnSync(`${projectDir}/.recallant/hooks/capture-event.sh`, ["action"], {
   input: "hook smoke should not break agent workflow",
   env: { PATH: "/bin:/usr/bin", RECALLANT_PROJECT_DIR: projectDir },

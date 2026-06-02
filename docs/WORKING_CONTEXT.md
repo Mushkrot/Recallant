@@ -9,13 +9,13 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~70%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~73%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~60%` complete. The source-binding model and source API
-  are implemented, but live connector verification, broader source-aware raw search/recovery, and
-  deeper external-source handling are still partly open.
-- Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
+- Stage 3 — Memory Spaces and Sources: `~63%` complete. The source-binding model and source API
+  are implemented, but live connector verification, broader source-aware recovery, and deeper
+  external-source handling are still partly open.
+- Stage 4 — Client Connect and Hook Capture: `~85%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
 - Stage 5 — Real Pilots and QA: `~73%` complete. Pilot automation for clean/copied/production-sensitive
@@ -359,6 +359,27 @@ Latest implementation checkpoints:
   by the CLI as local paths, remote server sources show "access binding needed", remote repos show
   "sync/import needed", connector sources can show ready only with governed capability metadata, and
   document collections use provenance-ready copy without implying connector capture is active.
+- 2026-06-02 raw evidence source-filter follow-up: `memory_search` accepts `source_id`, filters
+  lexical/vector candidates and graph-expanded neighbors to chunks with matching event/raw-artifact/
+  governed-memory provenance, and returns compact hit provenance. The DB smoke scenario is written,
+  but live execution needs rerun after local Postgres access is available outside the current
+  sandbox/usage-limit condition.
+- 2026-06-02 MCP smoke stabilization: `npm run mcp:smoke` now uses the official SDK in-memory
+  transport for handshake/tool-list/tool-call verification, asserts `memory_search.source_id`, and
+  no longer depends on nested child stdin behavior in the restricted sandbox. The production
+  `recallant mcp-server` stdio lifecycle remains the client runtime and now exits when stdin
+  closes.
+- 2026-06-02 hook-readiness hardening: `recallant doctor` no longer treats a project-local hook kit
+  as ready just because files exist. It now also requires executable hook scripts and a valid
+  manifest. `connect:smoke` includes invalid-manifest and invalid-permission assertions, but the
+  current sandbox blocked the DB-backed smoke at dev Postgres with `connect EPERM 127.0.0.1:15433`.
+- 2026-06-02 Management Chat no-port smoke follow-up: `management-chat-ai:smoke` now mocks Ollama
+  with in-process `fetch` instead of a localhost listener. It adds covered questions for "is this
+  project actually capturing memory?" and "why is this rule not applying?", including governed
+  memory lookup with the active source filter.
+- 2026-06-02 Management Chat Review triage follow-up: Ask Recallant now answers "what should I
+  review next?" as a decision queue with conflicts/duplicates, owner-decision items, and import
+  candidates in a safe order. The local-AI smoke covers this with read-only next-step cards.
 - 2026-06-02 Source Map health-summary follow-up: the Workbench now summarizes sources as active,
   ready to cite, needing setup, and needing attention, and both HTML/API and Playwright fixtures
   cover ready local sources, planned connectors, and missing paths.

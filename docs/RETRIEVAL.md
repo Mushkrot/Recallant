@@ -30,6 +30,10 @@ Raw workflow artifacts are not normal recall payloads. Search may return bounded
 - `recall_intent`: logical intent such as `same_project`, `developer_rules`, `environment`,
   `similar_projects`, or `all_projects_review`. Early implementations may map this to `scope` plus
   filters, but responses must still label cross-project results clearly.
+- `source_id`: optional project source id. When present, raw evidence search only returns chunks
+  that can be traced to that source through event source metadata, raw artifact metadata, or governed
+  memory source refs. This is how agents and the Workbench answer "what came from this folder,
+  document, connector, or manual source?" without mixing unrelated sources.
 - `scope_kind` / `audience` filters may further narrow results according to ADR-0040. The simple `scope=project|developer|all` API is a convenience layer; server-side policy must still respect environment, connector_account, capability, client_adapter, and audience constraints.
 - `top_k`: policy default, bounded by configured server cap.
 - `max_chars_total`: policy default, bounded by configured server cap.
@@ -47,6 +51,7 @@ List of hits. Each hit includes:
 - `text_excerpt`
 - `source_event_id`
 - `occurred_at`
+- `provenance`: compact source summary/path/source id when known
 - `why`: `vector`, `lexical`, `graph`, or `rerank`
 
 ## 2. Hybrid algorithm (v1 baseline)
@@ -54,6 +59,8 @@ List of hits. Each hit includes:
 1. **Lexical:** use `ts_rank_cd` or an equivalent query over `chunks.tsv` to build candidate set `C_lex`, limited by policy.
 2. **Vector:** take top `N_vec` by cosine distance from `embeddings`, limited by policy.
 3. **Fusion:** union `C_lex` and `C_vec`, deduplicate by `chunk_id`, and exclude chunks where `archived_at IS NOT NULL`.
+   If `source_id` is provided, both candidate sets apply the same source-provenance filter before
+   ranking. Graph-expanded neighbors must also satisfy the source filter.
 4. **Rerank:** compute combined score with decay and supersede penalty:
 
    ```text

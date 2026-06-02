@@ -1,54 +1,44 @@
-import { Buffer } from "node:buffer";
-import { createServer } from "node:http";
-import { once } from "node:events";
 import { buildManagementChatResponse } from "../apps/server/dist/management-chat.js";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function readBody(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 const queuedResponses = [];
 const seenRequests = [];
-const server = createServer(async (request, response) => {
-  if (request.url !== "/api/chat" || request.method !== "POST") {
-    response.writeHead(404);
-    response.end("not found");
-    return;
+const previousFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const requestUrl = new globalThis.URL(String(url));
+  if (requestUrl.pathname !== "/api/chat" || init?.method !== "POST") {
+    return new globalThis.Response("not found", { status: 404 });
   }
-  const body = await readBody(request);
+  const body = String(init?.body ?? "{}");
   seenRequests.push(JSON.parse(body));
   const next = queuedResponses.shift();
   if (!next) {
-    response.writeHead(500, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: "no queued mock response" }));
-    return;
+    return new globalThis.Response(JSON.stringify({ error: "no queued mock response" }), {
+      status: 500,
+      headers: { "content-type": "application/json" }
+    });
   }
-  response.writeHead(200, { "content-type": "application/json" });
-  response.end(
+  return new globalThis.Response(
     JSON.stringify({
       message: {
         content: JSON.stringify(next)
       }
-    })
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }
   );
-});
-
-server.listen(0, "127.0.0.1");
-await once(server, "listening");
-const address = server.address();
-if (!address || typeof address === "string") throw new Error("Mock Ollama server did not bind");
+};
 
 const previousAi = process.env.RECALLANT_MANAGEMENT_CHAT_AI;
 const previousUrl = process.env.RECALLANT_OLLAMA_URL;
 const previousModel = process.env.RECALLANT_MANAGEMENT_CHAT_MODEL;
 process.env.RECALLANT_MANAGEMENT_CHAT_AI = "on";
-process.env.RECALLANT_OLLAMA_URL = `http://127.0.0.1:${address.port}`;
+process.env.RECALLANT_OLLAMA_URL = "http://mock-ollama.local";
 process.env.RECALLANT_MANAGEMENT_CHAT_MODEL = "mock-intent:latest";
 
 function restoreEnv(name, value) {
@@ -674,6 +664,119 @@ try {
   );
 
   queuedResponses.push({
+    language: "ru",
+    intent: "connection_check",
+    confidence: 0.9,
+    summary: "Owner asks whether the selected project is connected and actually capturing memory.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const connectionCheck = await buildManagementChatResponse({
+    message: "Проверь, нормально ли проект подключен и пишет память",
+    dashboard: baseDashboard
+  });
+  assert(
+    connectionCheck.understanding.source === "local_ai" &&
+      connectionCheck.intent === "connection_check" &&
+      connectionCheck.result_type === "read_only_answer" &&
+      connectionCheck.facts.capture_ready === true &&
+      String(connectionCheck.answer).includes("уже пишет рабочую память") &&
+      String(connectionCheck.answer).includes("Последний context read") &&
+      String(connectionCheck.answer).includes("Последняя запись памяти"),
+    `Connection check did not explain capture readiness: ${JSON.stringify(connectionCheck)}`
+  );
+
+  queuedResponses.push({
+    language: "ru",
+    intent: "rule_diagnostics",
+    confidence: 0.9,
+    summary: "Owner asks why an expected rule is not being applied.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  let ruleDiagnosticsRecallInput;
+  const ruleDiagnostics = await buildManagementChatResponse({
+    message: "Почему правило про capture status не применяется?",
+    dashboard: baseDashboard,
+    database: {
+      recallAgentMemories: async (input) => {
+        ruleDiagnosticsRecallInput = input;
+        return {
+          trace_id: "trace-rule-diagnostics",
+          truncated: false,
+          memories: [
+            {
+              memory_id: "memory-rule-capture-status",
+              title: "Agents must check capture status",
+              body: "Agents should verify capture status before claiming Recallant is ready.",
+              status: "stale",
+              use_policy: "evidence_only",
+              scope: "developer",
+              scope_kind: "developer",
+              provenance: { summary: "From source AGENTS.md", source_path: "AGENTS.md" },
+              source_refs: []
+            }
+          ]
+        };
+      }
+    }
+  });
+  assert(
+    ruleDiagnostics.understanding.source === "local_ai" &&
+      ruleDiagnostics.intent === "rule_diagnostics" &&
+      ruleDiagnostics.result_type === "read_only_answer" &&
+      ruleDiagnostics.memory_lookup_result?.status === "found" &&
+      ruleDiagnosticsRecallInput?.include_stale === true &&
+      ruleDiagnosticsRecallInput?.source_id === "source-agents-md" &&
+      String(ruleDiagnostics.answer).includes("только Active rule") &&
+      String(ruleDiagnostics.answer).includes("Agents must check capture status") &&
+      String(ruleDiagnostics.answer).includes("AGENTS.md"),
+    `Rule diagnostics did not use governed lookup/source filter: ${JSON.stringify(ruleDiagnostics)}`
+  );
+
+  queuedResponses.push({
+    language: "ru",
+    intent: "review",
+    confidence: 0.87,
+    summary: "Owner asks what exactly should be reviewed next.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const reviewTriage = await buildManagementChatResponse({
+    message: "Что именно сейчас надо разобрать в Review?",
+    dashboard: {
+      ...baseDashboard,
+      critical: {
+        ...baseDashboard.critical,
+        pending_review: 3
+      },
+      import_candidates: [{ title: "README.md" }, { title: "PROJECT_LOG.md" }],
+      duplicate_conflicts: [{ title: "Conflicting agent startup rule" }],
+      rules: [{ title: "Active startup rule" }]
+    }
+  });
+  assert(
+    reviewTriage.understanding.source === "local_ai" &&
+      reviewTriage.intent === "review" &&
+      reviewTriage.result_type === "read_only_answer" &&
+      reviewTriage.facts.pending_review === 3 &&
+      reviewTriage.facts.import_candidates === 2 &&
+      reviewTriage.facts.conflicts_or_duplicates === 1,
+    `Review triage facts failed: ${JSON.stringify(reviewTriage)}`
+  );
+  assert(
+    String(reviewTriage.answer).includes("Что требует решения") &&
+      String(reviewTriage.answer).includes("сначала разобрать конфликты") &&
+      reviewTriage.proposed_actions[0]?.label === "Сначала конфликты / дубликаты" &&
+      reviewTriage.proposed_actions[1]?.label === "Затем Needs your decision" &&
+      reviewTriage.proposed_actions[2]?.label === "Потом импорт-кандидаты",
+    `Review triage answer/actions failed: ${JSON.stringify(reviewTriage)}`
+  );
+
+  queuedResponses.push({
     language: "en",
     intent: "provenance",
     confidence: 0.88,
@@ -699,13 +802,12 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 16, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 19, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_MODEL", previousModel);
-  server.close();
-  await once(server, "close");
+  globalThis.fetch = previousFetch;
 }
 
 process.stdout.write("Management chat AI smoke passed\n");

@@ -210,6 +210,87 @@ for (const scopedImport of scopedImports) {
   scopedResults.set(scopedImport.token, result);
 }
 
+const sourceFilteredA = await scopedDb.attachProjectSource({
+  project_id: projectId,
+  source_kind: "document_collection",
+  label: "Raw Search Source A",
+  uri: "docs/raw-search-source-a.md",
+  metadata: { source_path: "docs/raw-search-source-a.md" }
+});
+const sourceFilteredB = await scopedDb.attachProjectSource({
+  project_id: projectId,
+  source_kind: "document_collection",
+  label: "Raw Search Source B",
+  uri: "docs/raw-search-source-b.md",
+  metadata: { source_path: "docs/raw-search-source-b.md" }
+});
+if (!sourceFilteredA?.id || !sourceFilteredB?.id) {
+  throw new Error(
+    `Source-filter fixtures failed: ${JSON.stringify({ sourceFilteredA, sourceFilteredB })}`
+  );
+}
+const sourceAImport = await scopedDb.importSource({
+  project_path: process.cwd(),
+  source_path: "docs/raw-search-source-a.md",
+  source_type: "smoke_fixture",
+  source_sha256: randomUUID(),
+  import_text: "source_filter_shared_raw_token belongs to source A only.",
+  bounded_excerpt: "source_filter_shared_raw_token source A",
+  result_class: "environment_fact",
+  scope_kind: "project",
+  scope_id: projectId,
+  audience: [{ kind: "all_agents", id: null }],
+  risk: "low",
+  risks: [],
+  secret_references: [],
+  metadata: { project_source_id: sourceFilteredA.id }
+});
+const sourceBImport = await scopedDb.importSource({
+  project_path: process.cwd(),
+  source_path: "docs/raw-search-source-b.md",
+  source_type: "smoke_fixture",
+  source_sha256: randomUUID(),
+  import_text: "source_filter_shared_raw_token belongs to source B only.",
+  bounded_excerpt: "source_filter_shared_raw_token source B",
+  result_class: "environment_fact",
+  scope_kind: "project",
+  scope_id: projectId,
+  audience: [{ kind: "all_agents", id: null }],
+  risk: "low",
+  risks: [],
+  secret_references: [],
+  metadata: { project_source_id: sourceFilteredB.id }
+});
+await callTool(50, "memory_link", {
+  src_kind: "chunk",
+  src_id: sourceAImport.chunk_ids[0],
+  dst_kind: "chunk",
+  dst_id: sourceBImport.chunk_ids[0],
+  relation_type: "related",
+  weight: 1,
+  metadata: { smoke: "source-filter-graph-guard" }
+});
+const sourceFilteredRaw = await callTool(51, "memory_search", {
+  session_id: started.session_id,
+  source_id: sourceFilteredA.id,
+  query: "source_filter_shared_raw_token",
+  mode: "lexical_only",
+  top_k: 5,
+  graph_expand: true,
+  graph_budget_nodes: 4,
+  max_chars_total: 2000
+});
+if (
+  sourceFilteredRaw.source_filter?.source_id !== sourceFilteredA.id ||
+  !sourceFilteredRaw.hits.some((hit) => hit.source_event_id === sourceAImport.event_id) ||
+  sourceFilteredRaw.hits.some((hit) => hit.source_event_id === sourceBImport.event_id) ||
+  !sourceFilteredRaw.hits.some(
+    (hit) => hit.provenance?.source_path === "docs/raw-search-source-a.md"
+  )
+) {
+  throw new Error(`Source-filtered raw search failed: ${JSON.stringify(sourceFilteredRaw)}`);
+}
+
 const lexical = await callTool(6, "memory_search", {
   session_id: started.session_id,
   query: "rare_xylophone_token",

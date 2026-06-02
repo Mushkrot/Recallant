@@ -185,6 +185,14 @@ Acceptance:
 - Done: source-management answers now include ready, needs-attention, and
   detached source counts, so Ask Recallant can explain source health instead of
   only reporting a total source count.
+- Done: Management Chat AI smoke now runs without opening a localhost listener,
+  using an in-process mock `fetch`. It also covers connection-readiness and
+  rule-diagnostics owner questions with governed-memory lookup and the active
+  source filter.
+- Done: Review questions now produce decision-oriented triage instead of a
+  generic explanation. Ask Recallant summarizes conflicts/duplicates, owner-
+  decision items, and import candidates in a safe order and returns read-only
+  next-step cards. The local-AI smoke covers this path.
 - Remaining: broaden live local-AI semantic tests against real installed models
   and continue improving multi-project/source-target clarification UX.
 
@@ -245,8 +253,12 @@ Acceptance:
   shown as needing governed access binding, remote repos as needing sync/import,
   connector sources as setup-needed unless governed capability metadata exists,
   and document collections as provenance-ready references.
+- Done: raw evidence search now accepts a selected `source_id`, applies the
+  source-provenance filter to lexical/vector candidates and graph-expanded
+  neighbors, and returns compact hit provenance. This is the raw-search
+  counterpart to source-filtered governed memory recall.
 - Remaining: live connector verification, governed remote-source access checks,
-  and broader source-aware raw search/recovery flows.
+  and broader source-aware recovery flows.
 
 ## Stage 4 - Client Connect And Hook Capture
 
@@ -324,6 +336,17 @@ Acceptance:
   `recallant` is unavailable, then runs the hooks through a temporary Recallant
   wrapper and verifies prompt, tool-result, checkpoint, closeout events, and
   manifest contract in Postgres.
+- Done: `npm run mcp:smoke` now uses the official SDK in-memory transport for
+  core protocol QA, verifies the Recallant MCP handshake/tool list, asserts the
+  `memory_search.source_id` schema, and calls `memory_heartbeat`. This avoids
+  false failures from nested child stdin behavior in restricted sandbox runs;
+  the production `recallant mcp-server` stdio lifecycle remains available for
+  real clients and now exits when stdin closes.
+- Done: `recallant doctor` hook readiness now requires all generated hook files,
+  executable scripts, and a valid manifest before reporting hooks as ready.
+  `connect:smoke` includes invalid-manifest and invalid-permission regressions,
+  but the DB-backed smoke must be rerun with local dev Postgres access because
+  the restricted sandbox blocked it with `connect EPERM 127.0.0.1:15433`.
 - Remaining: safe global/client config writers, local backups for global config,
   dedicated client hook installation where each client supports it, and richer
   hook spooling/replay diagnostics.

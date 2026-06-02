@@ -285,6 +285,7 @@ Example standard-profile input:
 {
   "query": "string",
   "mode": "hybrid|vector_only|lexical_only",
+  "source_id": "uuid|null",
   "scope": "project|developer|all",
   "scope_kind": "domain|developer|environment|project|repo|subproject|session|connector_account|capability|client_adapter|null",
   "audience": "all_agents|specific_client|context_pack|background_worker|review_ui|human_owner|import_pipeline|connector|null",
@@ -296,6 +297,11 @@ Example standard-profile input:
 ```
 
 `scope` is a convenience filter. `scope_kind` and `audience` further narrow applicability according to ADR-0040. Default search is current project plus applicable developer/environment/capability/client-adapter records according to server policy, not a blind cross-project scan.
+
+`source_id` optionally narrows raw evidence search to chunks that can be traced to the selected
+project source through event source metadata, raw artifact metadata, or governed memory source refs.
+This is the raw-evidence counterpart to the Workbench source filter and to
+`memory_recall_agent_memories.source_id`.
 
 `top_k`, `max_chars_total`, and `graph_budget_nodes` are bounded by configured retrieval policy. Example numbers in this spec are not architecture invariants; see [ADR-0015-configurable-operational-heuristics.md](ADR-0015-configurable-operational-heuristics.md).
 
@@ -311,9 +317,20 @@ Example standard-profile input:
       "source_event_id": "uuid",
       "raw_artifact_refs": ["uuid"],
       "occurred_at": "iso8601",
+      "provenance": {
+        "summary": "From source docs/example.md",
+        "source_path": "docs/example.md|null",
+        "source_kind": "document_collection|null",
+        "project_source_id": "uuid|null"
+      },
       "why": "vector|lexical|graph|rerank"
     }
   ],
+  "source_filter": {
+    "source_id": "uuid",
+    "label": "Source label",
+    "source_kind": "document_collection"
+  },
   "truncated": true
 }
 ```

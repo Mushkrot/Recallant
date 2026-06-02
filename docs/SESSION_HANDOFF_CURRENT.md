@@ -8,13 +8,13 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~74%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~70%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~73%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~60%` complete. Virtual spaces, source attach/detach,
+- Stage 3 — Memory Spaces and Sources: `~63%` complete. Virtual spaces, source attach/detach,
   source filters, and source-linked Activity visibility are implemented; deeper connector/server
-  live verification plus broader source-aware raw search/recovery are pending.
-- Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
+  live verification plus broader source-aware recovery are pending.
+- Stage 4 — Client Connect and Hook Capture: `~85%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
 - Stage 5 — Real Pilots and QA: `~73%` complete. Pilot-report automation for clean, copied, and
@@ -83,10 +83,29 @@ the focused source-filtered Activity view and saves
 `memory_recall_agent_memories` now accepts `source_id`, and Ask Recallant carries the active
 Workbench source filter into same-project governed-memory lookup. Lookup answers disclose the
 current memory-space source filter before showing matching memories.
+`memory_search` now also accepts `source_id`, filters lexical/vector raw evidence and graph-expanded
+neighbors by source provenance, and returns compact hit provenance. The targeted Phase 5 smoke
+scenario for two same-token sources plus graph leakage protection is implemented; rerun
+`npm run phase5:smoke` with local Postgres access when approvals/usage allow it. The latest sandbox
+rerun failed before DB logic with `connect EPERM 127.0.0.1:15433`.
+`npm run mcp:smoke` now uses the official SDK in-memory transport instead of nested child stdio,
+verifies the Recallant MCP handshake/tool list, checks `memory_search.source_id`, and calls
+`memory_heartbeat`. The production `recallant mcp-server` stdio path still remains the runtime path
+for clients and now closes when stdin ends.
+Hook-kit readiness now requires all generated files, executable scripts, and a valid manifest before
+doctor reports hooks as ready. `connect:smoke` has invalid-manifest and invalid-permission
+assertions for this, but the latest sandbox run failed before reaching them because dev Postgres was
+blocked with `connect EPERM 127.0.0.1:15433`.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,
 secrets, or external connectors.
+`management-chat-ai:smoke` now uses an in-process mock `fetch` instead of binding a localhost mock
+server, so it can run in restricted/no-port environments. It covers connection-readiness questions
+and rule-diagnostics questions with governed-memory lookup and the active source filter.
+Ask Recallant now also answers Review questions as a decision queue: conflicts/duplicates first,
+then owner-decision items, then import candidates. The response uses read-only next-step cards and
+is covered by `management-chat-ai:smoke` through the local-AI path.
 Full core QA after these changes passed on 2026-06-02: `npm run smoke:core`, including product
 acceptance capture/recall, pilot report, project sources, Review UI, Management Chat AI, onboarding,
 connect, installer, and cross-client smokes.

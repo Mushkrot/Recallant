@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
-import { createInterface } from "node:readline";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
 
 const expectedTools = [
   "memory_start_session",
@@ -26,93 +26,75 @@ const expectedTools = [
   "memory_closeout"
 ];
 
-const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
-  cwd: process.cwd(),
-  stdio: ["pipe", "pipe", "pipe"]
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const client = new Client({
+  name: "recallant-smoke",
+  version: "0.0.0"
 });
+const server = createRecallantMcpServer();
 
-const lines = createInterface({ input: child.stdout });
-const responses = new Map();
+let completed = false;
+let runError = null;
+let cleanupError = null;
+try {
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
 
-lines.on("line", (line) => {
-  if (!line.trim()) return;
-  const message = JSON.parse(line);
-  if (message.id !== undefined) responses.set(message.id, message);
-});
-
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
-
-function send(message) {
-  child.stdin.write(`${JSON.stringify(message)}\n`);
-}
-
-async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (responses.has(id)) return responses.get(id);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+  const list = await client.listTools({}, { timeout: 5_000 });
+  const actualTools = new Set(list.tools?.map((tool) => tool.name) ?? []);
+  const missingTools = expectedTools.filter((name) => !actualTools.has(name));
+  const extraTools = [...actualTools].filter((name) => !expectedTools.includes(name));
+  if (missingTools.length > 0 || extraTools.length > 0) {
+    throw new Error(
+      `Unexpected MCP tools: ${JSON.stringify({
+        missing: missingTools,
+        extra: extraTools,
+        actual: [...actualTools].sort()
+      })}`
+    );
   }
-  throw new Error(`Timed out waiting for MCP response id=${id}. stderr=${stderr}`);
-}
 
-send({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "recallant-smoke", version: "0.0.0" }
+  const searchTool = list.tools?.find((tool) => tool.name === "memory_search");
+  const searchProperties = searchTool?.inputSchema?.properties ?? {};
+  if (!Object.hasOwn(searchProperties, "source_id")) {
+    throw new Error(`memory_search schema is missing source_id: ${JSON.stringify(searchTool)}`);
   }
-});
 
-const init = await waitForResponse(1);
-if (init.result?.serverInfo?.name !== "recallant") {
-  throw new Error(`Unexpected server name: ${JSON.stringify(init)}`);
-}
-
-send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
-send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-
-const list = await waitForResponse(2);
-const actualTools = new Set(list.result?.tools?.map((tool) => tool.name) ?? []);
-const missingTools = expectedTools.filter((name) => !actualTools.has(name));
-const extraTools = [...actualTools].filter((name) => !expectedTools.includes(name));
-if (missingTools.length > 0 || extraTools.length > 0) {
-  throw new Error(
-    `Unexpected MCP tools: ${JSON.stringify({
-      missing: missingTools,
-      extra: extraTools,
-      actual: [...actualTools].sort()
-    })}`
+  const call = await client.callTool(
+    {
+      name: "memory_heartbeat",
+      arguments: {
+        session_id: "00000000-0000-4000-8000-000000000001",
+        status: "active"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
   );
-}
-
-send({
-  jsonrpc: "2.0",
-  id: 3,
-  method: "tools/call",
-  params: {
-    name: "memory_heartbeat",
-    arguments: {
-      session_id: "00000000-0000-4000-8000-000000000001",
-      status: "active"
-    }
+  const text = call.content?.[0]?.text ?? "";
+  const heartbeat = JSON.parse(text);
+  if (heartbeat.tool !== "memory_heartbeat" && heartbeat.ok !== true) {
+    throw new Error(`Unexpected tool call response: ${JSON.stringify(call)}`);
   }
-});
-
-const call = await waitForResponse(3);
-const text = call.result?.content?.[0]?.text ?? "";
-const heartbeat = JSON.parse(text);
-if (heartbeat.tool !== "memory_heartbeat" && heartbeat.ok !== true) {
-  throw new Error(`Unexpected tool call response: ${JSON.stringify(call)}`);
+  completed = true;
+} catch (error) {
+  runError = error;
 }
 
-child.stdin.end();
-child.kill();
-await once(child, "close");
+try {
+  await client.close();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!completed || !message.includes("Connection closed")) cleanupError = error;
+}
+
+try {
+  await server.close();
+} catch (error) {
+  cleanupError ??= error;
+}
+
+if (runError) throw runError;
+if (cleanupError) throw cleanupError;
 
 process.stdout.write("MCP smoke passed\n");

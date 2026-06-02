@@ -1757,7 +1757,14 @@ function answerRu(
       }
       return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
-      return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
+      if (
+        facts.pending_review === 0 &&
+        facts.import_candidates === 0 &&
+        facts.conflicts_or_duplicates === 0
+      ) {
+        return `${baseline}\n\nСейчас нет срочной очереди Review. Обычные низкорисковые воспоминания не должны превращаться в ручную работу. Если агент ведет себя странно, тогда проверь Active Rules и источник правила.`;
+      }
+      return `${baseline}\n\nЧто требует решения: конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, элементов на решение владельца: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}.\n\nСамый безопасный порядок: сначала разобрать конфликты и дубликаты, затем элементы “Needs your decision”, затем импорт-кандидаты. Active Rules трогай только если конкретное правило не применяется или выглядит устаревшим.`;
     case "project_onboarding":
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nЯ понял это как подключение проекта или обязательного startup/capture слоя, но не хватает данных: ${workflowRequest.missing.join(", ")}. Уточни путь к папке проекта. Я не буду угадывать путь, потому что attach/connect меняет локальные файлы проекта.`;
@@ -1872,7 +1879,14 @@ function answerEn(
       }
       return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
-      return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
+      if (
+        facts.pending_review === 0 &&
+        facts.import_candidates === 0 &&
+        facts.conflicts_or_duplicates === 0
+      ) {
+        return `${baseline}\n\nThere is no urgent Review queue right now. Low-risk routine memories should not become manual work. If an agent behaves oddly, check Active Rules and the rule source.`;
+      }
+      return `${baseline}\n\nNeeds owner decision: conflicts/duplicates: ${facts.conflicts_or_duplicates}, review items: ${facts.pending_review}, import candidates: ${facts.import_candidates}.\n\nSafest order: resolve conflicts and duplicates first, then items marked “Needs your decision”, then import candidates. Touch Active Rules only when a specific rule is not applying or looks stale.`;
     case "project_onboarding":
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nI understood this as project onboarding or mandatory startup/capture setup, but I need more detail: ${workflowRequest.missing.join(", ")}. Provide the project folder path. I will not guess the path because attach/connect changes local project files.`;
@@ -2176,6 +2190,51 @@ function actionsForIntent(
           language === "ru"
             ? `Показывает source refs/provenance. Текущий source filter: ${facts.selected_source_name}.`
             : `Shows source refs and provenance. Current source filter: ${facts.selected_source_name}.`
+      }
+    ];
+  }
+
+  if (intent === "review") {
+    const actions: ManagementChatAction[] = [];
+    if (facts.conflicts_or_duplicates > 0) {
+      actions.push({
+        label: language === "ru" ? "Сначала конфликты / дубликаты" : "Resolve conflicts first",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? `Есть ${facts.conflicts_or_duplicates} конфликтов/дубликатов; их лучше решить до promotion правил.`
+            : `There are ${facts.conflicts_or_duplicates} conflict/duplicate item(s); resolve them before promoting rules.`
+      });
+    }
+    if (facts.pending_review > 0) {
+      actions.push({
+        label: language === "ru" ? "Затем Needs your decision" : "Then Needs your decision",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? `Есть ${facts.pending_review} элементов, где нужно решение владельца.`
+            : `There are ${facts.pending_review} item(s) that need owner decision.`
+      });
+    }
+    if (facts.import_candidates > 0) {
+      actions.push({
+        label: language === "ru" ? "Потом импорт-кандидаты" : "Then import candidates",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? `Есть ${facts.import_candidates} импорт-кандидатов; держи старую историю evidence-only, пока явно не повысишь ее.`
+            : `There are ${facts.import_candidates} import candidate(s); keep old history evidence-only unless explicitly promoted.`
+      });
+    }
+    if (actions.length > 0) return actions;
+    return [
+      {
+        label: language === "ru" ? "Очередь Review чистая" : "Review queue is clear",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? "Сейчас нет срочного решения владельца."
+            : "No urgent owner decision is waiting right now."
       }
     ];
   }

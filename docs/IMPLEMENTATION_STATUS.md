@@ -66,13 +66,13 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~74% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~70% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~73% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~60% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~63% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
-  live connector verification, and broader source-aware raw search/recovery flows are still incomplete.
-- Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
+  live connector verification, and broader source-aware recovery flows are still incomplete.
+- Stage 4 — Client Connect and Hook Capture: ~85% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
 - Stage 5 — Real Pilots and QA: ~73% completed. Core pilot automation exists (clean and copied
@@ -100,6 +100,14 @@ Current implemented slices include:
   from without exposing raw technical rows by default. The source-management path now asks for
   clarification when a memory-space name or source location is missing, and can safely attach an
   explicitly named local/repo/document/manual source as a DB-only Recallant record.
+- The Management Chat AI smoke now uses an in-process mock `fetch` instead of binding a localhost
+  HTTP server. It therefore runs without opening ports, covers connection-readiness and
+  rule-diagnostics questions, and proves source-filtered governed-memory lookup for the rule
+  diagnostic path.
+- Management Chat Review triage slice: Ask Recallant now treats Review questions as a decision
+  queue, not just an explanation of the Review concept. It summarizes conflicts/duplicates,
+  owner-decision items, and import candidates in a safe order and returns read-only next-step cards.
+  `management-chat-ai:smoke` covers this through the local-AI interpretation path.
 - Ask Recallant now has a covered safe-action path for creating an empty virtual memory space from
   natural language. The action is Recallant-only: it creates the logical space and explicitly does
   not touch files, sources, secrets, or external connectors.
@@ -150,6 +158,18 @@ Current implemented slices include:
   the selected source in recall trace metadata, and Management Chat passes the active Workbench
   source filter into same-project governed-memory lookup. Ask Recallant answers now disclose the
   current memory-space source filter before showing matching memories.
+- Source-aware raw evidence search slice: `memory_search` now accepts `source_id`, applies the same
+  source-provenance filter to lexical/vector candidates and graph-expanded neighbors, and returns a
+  compact provenance summary on hits. This lets agents and the Workbench ask for raw evidence from a
+  selected folder/document/source without silently mixing unrelated sources. The targeted
+  `phase5:smoke` scenario was added for this path; live DB execution still needs a rerun because the
+  current sandbox blocked local Postgres access. The latest rerun failed before DB logic with
+  `connect EPERM 127.0.0.1:15433`.
+- MCP protocol smoke stabilization: `npm run mcp:smoke` now uses the official SDK in-memory
+  transport, verifies the Recallant MCP handshake/tool list, asserts that `memory_search` exposes
+  `source_id`, and calls `memory_heartbeat`. This keeps the core smoke reliable in restricted
+  headless/sandbox environments where nested child stdin can be unreliable, while the production
+  `recallant mcp-server` stdio lifecycle still stays alive for clients and closes when stdin ends.
 - Source health now checks absolute local `workspace_path`, `repo`, and `server_path` bindings
   without reading source contents, so Workbench can show local source ready, missing path,
   unreadable path, or wrong folder/file shape guidance.
@@ -230,6 +250,11 @@ Current implemented slices include:
   closeout writes an explicit `agent_closeout` event before closing the session.
 - `recallant doctor` / client connection readiness now validates the local hook manifest contract
   and reports missing, invalid, or valid manifest state as part of hook-kit readiness.
+- Hook-kit readiness now also requires a valid manifest and executable generated hook scripts before
+  reporting hooks as ready. Invalid manifests or non-executable scripts keep the client connection
+  at MCP-only/not-ready instead of falsely reporting `mcp_and_hooks_ready`. The connect smoke has
+  assertions for both regressions, but this DB-backed smoke needs rerun outside the current sandbox
+  because dev Postgres access failed with `connect EPERM 127.0.0.1:15433`.
 - `recallant doctor` now includes an owner-facing summary that separates "attached/configured" from
   "actually recording". The summary reports whether the project is attached, whether the client MCP
   config is present, whether hook capture is ready, whether capture has been proven, and the next

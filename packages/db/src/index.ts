@@ -14,6 +14,10 @@ export type RecallantDbConfig = {
 
 export type JsonObject = Record<string, unknown>;
 
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
 export type StartSessionInput = {
   client_kind: string;
   client_version?: string | null;
@@ -240,6 +244,14 @@ export type DetachProjectInput = {
 type ProjectContext = {
   developerId: string;
   projectId: string;
+};
+
+type SourceFilter = {
+  source_id: string;
+  label: string | null;
+  uri: string | null;
+  source_kind: string | null;
+  match_values: string[];
 };
 
 export type ProjectSourceKind =
@@ -1193,6 +1205,9 @@ export class RecallantDb {
     }
     return {
       source_id: String(row.id),
+      label: typeof row.label === "string" ? row.label : null,
+      uri: typeof row.uri === "string" ? row.uri : null,
+      source_kind: typeof row.source_kind === "string" ? row.source_kind : null,
       match_values: Array.from(values)
     };
   }
@@ -1200,7 +1215,7 @@ export class RecallantDb {
   private addSourceFilterClause(
     clauses: string[],
     values: unknown[],
-    sourceFilter: { source_id: string; match_values: string[] } | null,
+    sourceFilter: SourceFilter | null,
     memoryAlias = "m"
   ) {
     if (!sourceFilter) return;
@@ -1221,6 +1236,68 @@ export class RecallantDb {
             OR source_filter_refs.metadata->>'source_path' = ANY($${valuesParam}::text[])
             OR source_filter_refs.metadata->>'path' = ANY($${valuesParam}::text[])
           )
+      )
+    `);
+  }
+
+  private addSourceEvidenceFilterClause(input: {
+    clauses: string[];
+    values: unknown[];
+    sourceFilter: SourceFilter | null;
+    chunkAlias?: string;
+    eventAlias?: string;
+    paramOffset?: number;
+  }) {
+    if (!input.sourceFilter) return;
+    const chunkAlias = input.chunkAlias ?? "c";
+    const eventAlias = input.eventAlias ?? "ev";
+    const paramOffset = input.paramOffset ?? 0;
+    input.values.push(input.sourceFilter.source_id);
+    const sourceIdParam = paramOffset + input.values.length;
+    input.values.push(input.sourceFilter.match_values);
+    const valuesParam = paramOffset + input.values.length;
+    input.clauses.push(`
+      (
+        ${eventAlias}.payload->'source_ref'->>'project_source_id' = $${sourceIdParam}
+        OR ${eventAlias}.payload->'source_ref'->>'source_id' = $${sourceIdParam}
+        OR ${eventAlias}.payload->'metadata'->>'project_source_id' = $${sourceIdParam}
+        OR ${eventAlias}.payload->'metadata'->>'source_id' = $${sourceIdParam}
+        OR ${eventAlias}.payload->'source_ref'->>'path' = ANY($${valuesParam}::text[])
+        OR ${eventAlias}.payload->'source_ref'->>'uri' = ANY($${valuesParam}::text[])
+        OR ${eventAlias}.payload->'metadata'->>'source_path' = ANY($${valuesParam}::text[])
+        OR ${eventAlias}.payload->'metadata'->>'path' = ANY($${valuesParam}::text[])
+        OR EXISTS (
+          SELECT 1
+          FROM raw_artifacts source_filter_artifacts
+          WHERE source_filter_artifacts.source_event_id = ${chunkAlias}.source_event_id
+            AND (
+              source_filter_artifacts.uri = ANY($${valuesParam}::text[])
+              OR source_filter_artifacts.metadata->>'project_source_id' = $${sourceIdParam}
+              OR source_filter_artifacts.metadata->>'source_id' = $${sourceIdParam}
+              OR source_filter_artifacts.metadata->>'source_path' = ANY($${valuesParam}::text[])
+              OR source_filter_artifacts.metadata->>'path' = ANY($${valuesParam}::text[])
+            )
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM agent_memory_source_refs source_filter_memory_refs
+          JOIN agent_memories source_filter_memories
+            ON source_filter_memories.id = source_filter_memory_refs.memory_id
+          WHERE source_filter_memories.project_id = ${chunkAlias}.project_id
+            AND source_filter_memories.use_policy <> 'do_not_use'
+            AND (
+              source_filter_memory_refs.source_id IN (
+                ${chunkAlias}.id::text,
+                ${chunkAlias}.source_event_id::text
+              )
+              AND (
+                source_filter_memory_refs.metadata->>'project_source_id' = $${sourceIdParam}
+                OR source_filter_memory_refs.metadata->>'source_id' = $${sourceIdParam}
+                OR source_filter_memory_refs.metadata->>'source_path' = ANY($${valuesParam}::text[])
+                OR source_filter_memory_refs.metadata->>'path' = ANY($${valuesParam}::text[])
+              )
+            )
+        )
       )
     `);
   }
@@ -1448,6 +1525,7 @@ export class RecallantDb {
     top_k?: number;
     max_chars_total?: number;
     session_id?: string | null;
+    source_id?: string | null;
     scope?: string;
     scope_kind?: string | null;
     audience?: string | null;
@@ -1491,6 +1569,7 @@ export class RecallantDb {
     const mode = input.mode ?? "hybrid";
     const topK = input.top_k ?? 8;
     const candidateLimit = Math.max(topK * 2, 8);
+    const sourceFilter = await this.sourceFilter(input.source_id);
     const filter = this.buildSearchFilter({
       projectId: context.projectId,
       developerId: context.developerId,
@@ -1498,6 +1577,7 @@ export class RecallantDb {
       scopeKind: input.scope_kind ?? null,
       audience: input.audience ?? null,
       includeArchived: input.include_archived === true,
+      sourceFilter,
       startIndex: 2
     });
     const candidates = new Map<
@@ -1507,6 +1587,7 @@ export class RecallantDb {
         text: string;
         source_event_id: string;
         occurred_at: string;
+        event_payload: unknown;
         vectorScore: number;
         lexicalScore: number;
         paths: Set<string>;
@@ -1548,10 +1629,12 @@ export class RecallantDb {
           text: string;
           source_event_id: string;
           occurred_at: string;
+          event_payload: unknown;
           distance: number;
         }>(
           `
-          SELECT c.id, c.text, c.source_event_id, ev.occurred_at, e.vector <=> $1::vector AS distance
+          SELECT c.id, c.text, c.source_event_id, ev.occurred_at, ev.payload AS event_payload,
+                 e.vector <=> $1::vector AS distance
           FROM chunks c
           JOIN events ev ON ev.id = c.source_event_id
           JOIN embeddings e ON e.chunk_id = c.id
@@ -1567,6 +1650,7 @@ export class RecallantDb {
             text: row.text,
             source_event_id: row.source_event_id,
             occurred_at: row.occurred_at,
+            event_payload: row.event_payload,
             vectorScore: Math.max(0, 1 - Number(row.distance)),
             lexicalScore: 0,
             paths: new Set(["vector"])
@@ -1581,10 +1665,11 @@ export class RecallantDb {
         text: string;
         source_event_id: string;
         occurred_at: string;
+        event_payload: unknown;
         rank: number;
       }>(
         `
-          SELECT c.id, c.text, c.source_event_id, ev.occurred_at,
+          SELECT c.id, c.text, c.source_event_id, ev.occurred_at, ev.payload AS event_payload,
                  ts_rank_cd(c.tsv, plainto_tsquery('simple', $1)) AS rank
           FROM chunks c
           JOIN events ev ON ev.id = c.source_event_id
@@ -1599,6 +1684,7 @@ export class RecallantDb {
         const existing = candidates.get(row.id);
         if (existing) {
           existing.lexicalScore = Number(row.rank);
+          existing.event_payload = existing.event_payload ?? row.event_payload;
           existing.paths.add("lexical");
         } else {
           candidates.set(row.id, {
@@ -1606,6 +1692,7 @@ export class RecallantDb {
             text: row.text,
             source_event_id: row.source_event_id,
             occurred_at: row.occurred_at,
+            event_payload: row.event_payload,
             vectorScore: 0,
             lexicalScore: Number(row.rank),
             paths: new Set(["lexical"])
@@ -1620,6 +1707,7 @@ export class RecallantDb {
         text: candidate.text,
         source_event_id: candidate.source_event_id,
         occurred_at: candidate.occurred_at,
+        event_payload: candidate.event_payload,
         score:
           (candidate.vectorScore * 0.65 + candidate.lexicalScore * 0.35) *
           retrievalDecay(candidate.occurred_at),
@@ -1660,6 +1748,7 @@ export class RecallantDb {
         projectId: context.projectId,
         seedChunkIds: rows.map((row) => row.id),
         budget: input.graph_budget_nodes ?? 8,
+        sourceFilter,
         existingChunkIds: new Set(rows.map((row) => row.id))
       });
       rows.push(...graphRows);
@@ -1682,6 +1771,7 @@ export class RecallantDb {
         why: row.path,
         superseded_by: row.superseded_by,
         occurred_at: row.occurred_at,
+        provenance: this.eventSourceProvenance(row.event_payload),
         text_excerpt: excerpt,
         excerpt
       });
@@ -1699,6 +1789,13 @@ export class RecallantDb {
     return {
       hits,
       truncated: rows.length > hits.length,
+      source_filter: sourceFilter
+        ? {
+            source_id: sourceFilter.source_id,
+            label: sourceFilter.label,
+            source_kind: sourceFilter.source_kind
+          }
+        : null,
       route: { provider: route.provider, model: route.model, dims: route.dims }
     };
   }
@@ -3751,6 +3848,7 @@ export class RecallantDb {
     scopeKind: string | null;
     audience: string | null;
     includeArchived?: boolean;
+    sourceFilter?: SourceFilter | null;
     startIndex: number;
   }) {
     const clauses = [`c.developer_id = $${input.startIndex}::uuid`];
@@ -3790,21 +3888,77 @@ export class RecallantDb {
         ))`
       );
     }
+    this.addSourceEvidenceFilterClause({
+      clauses,
+      values: params,
+      sourceFilter: input.sourceFilter ?? null,
+      chunkAlias: "c",
+      eventAlias: "ev",
+      paramOffset: input.startIndex - 1
+    });
     return { whereSql: clauses.join(" AND "), params };
+  }
+
+  private eventSourceProvenance(payload: unknown) {
+    const record =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const sourceRef =
+      record.source_ref && typeof record.source_ref === "object"
+        ? (record.source_ref as Record<string, unknown>)
+        : {};
+    const metadata =
+      record.metadata && typeof record.metadata === "object"
+        ? (record.metadata as Record<string, unknown>)
+        : {};
+    const sourcePath =
+      stringOrNull(sourceRef.path) ??
+      stringOrNull(metadata.source_path) ??
+      stringOrNull(metadata.path) ??
+      stringOrNull(sourceRef.uri) ??
+      stringOrNull(metadata.uri);
+    const sourceKind = stringOrNull(sourceRef.kind) ?? stringOrNull(metadata.source_kind);
+    const projectSourceId =
+      stringOrNull(sourceRef.project_source_id) ??
+      stringOrNull(metadata.project_source_id) ??
+      stringOrNull(sourceRef.source_id) ??
+      stringOrNull(metadata.source_id);
+    return {
+      summary: sourcePath
+        ? `From source ${sourcePath}`
+        : projectSourceId
+          ? `From source ${projectSourceId.slice(0, 8)}`
+          : "From captured Recallant evidence",
+      source_path: sourcePath,
+      source_kind: sourceKind,
+      project_source_id: projectSourceId
+    };
   }
 
   private async expandGraphRows(input: {
     projectId: string;
     seedChunkIds: string[];
     budget: number;
+    sourceFilter?: SourceFilter | null;
     existingChunkIds: Set<string>;
   }) {
     if (input.budget <= 0) return [];
+    const values: unknown[] = [input.projectId, input.seedChunkIds];
+    const clauses = ["c.archived_at IS NULL"];
+    this.addSourceEvidenceFilterClause({
+      clauses,
+      values,
+      sourceFilter: input.sourceFilter ?? null,
+      chunkAlias: "c",
+      eventAlias: "ev"
+    });
+    values.push(input.budget);
+    const budgetParam = values.length;
     const result = await this.pool.query<{
       id: string;
       text: string;
       source_event_id: string;
       occurred_at: string;
+      event_payload: unknown;
       weight: number;
     }>(
       `
@@ -3823,14 +3977,15 @@ export class RecallantDb {
             )
           GROUP BY chunk_id
         )
-        SELECT c.id, c.text, c.source_event_id, ev.occurred_at, n.weight
+        SELECT c.id, c.text, c.source_event_id, ev.occurred_at, ev.payload AS event_payload,
+               n.weight
         FROM neighbors n
         JOIN chunks c ON c.id::text = n.chunk_id
         JOIN events ev ON ev.id = c.source_event_id
-        WHERE c.archived_at IS NULL
-        LIMIT $3
+        WHERE ${clauses.join(" AND ")}
+        LIMIT $${budgetParam}
       `,
-      [input.projectId, input.seedChunkIds, input.budget]
+      values
     );
     return result.rows
       .filter((row) => !input.existingChunkIds.has(row.id))
@@ -3839,6 +3994,7 @@ export class RecallantDb {
         text: row.text,
         source_event_id: row.source_event_id,
         occurred_at: row.occurred_at,
+        event_payload: row.event_payload,
         score: Number(row.weight) * 0.2,
         path: "graph",
         superseded_by: null

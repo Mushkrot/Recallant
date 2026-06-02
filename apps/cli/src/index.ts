@@ -612,10 +612,21 @@ async function hookKitReadiness(projectDir: string) {
   const files = localHookKitFiles();
   const checked = [];
   for (const file of files) {
-    const present = (await readOptional(join(projectDir, file.path))) !== null;
-    checked.push({ path: file.path, present, executable_expected: file.executable === true });
+    const filePath = join(projectDir, file.path);
+    const fileStat = await stat(filePath).catch(() => null);
+    const present = fileStat !== null;
+    const executableExpected = file.executable === true;
+    const executable = !executableExpected || Boolean(fileStat && (fileStat.mode & 0o111) !== 0);
+    checked.push({
+      path: file.path,
+      present,
+      executable_expected: executableExpected,
+      executable
+    });
   }
   const presentCount = checked.filter((file) => file.present).length;
+  const allFilesPresent = presentCount === files.length;
+  const executableReady = checked.every((file) => file.executable);
   const manifestPath = ".recallant/hooks/manifest.json";
   const manifestContent = await readOptional(join(projectDir, manifestPath));
   let manifest = {
@@ -648,10 +659,19 @@ async function hookKitReadiness(projectDir: string) {
       manifest = { ...manifest, status: "invalid_json" };
     }
   }
+  const ready = allFilesPresent && executableReady && manifest.valid;
+  const status = ready
+    ? "installed"
+    : presentCount === 0
+      ? "not_installed"
+      : allFilesPresent && !executableReady
+        ? "invalid_permissions"
+        : allFilesPresent && !manifest.valid
+          ? "invalid_manifest"
+          : "partial";
   return {
-    status:
-      presentCount === files.length ? "installed" : presentCount > 0 ? "partial" : "not_installed",
-    ready: presentCount === files.length,
+    status,
+    ready,
     installed_count: presentCount,
     expected_count: files.length,
     capture_targets: captureTargetNames,

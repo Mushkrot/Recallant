@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import process from "node:process";
 
 import { recallantTools } from "./tools.js";
 
@@ -103,6 +104,19 @@ export function createRecallantMcpServer() {
 
 export async function runRecallantStdioServer() {
   const server = createRecallantMcpServer();
+  server.server.onerror = (error) => {
+    process.stderr.write(
+      `Recallant MCP error: ${error instanceof Error ? error.message : String(error)}\n`
+    );
+  };
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  process.stdin.resume();
+  const keepAlive = setInterval(() => undefined, 60_000);
+  await new Promise<void>((resolve) => {
+    process.stdin.once("end", resolve);
+    process.stdin.once("close", resolve);
+  });
+  clearInterval(keepAlive);
+  await server.close();
 }
