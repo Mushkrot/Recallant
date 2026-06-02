@@ -626,6 +626,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes a `qa_summary` for
   the clean project, copied sandbox, and production-sensitive preflight scenarios, and reads the
   artifact back before passing.
+- 2026-06-02 connect/hook evidence follow-up: the clean and copied-sandbox pilot reports now also
+  run `connect codex --install-local-hooks`, exercise project-local hook targets for session start,
+  user prompt, tool result, decision, and pre-compaction checkpoint, recall the hook-captured
+  decision in a later context pack, and pass `doctor --require-capture` with
+  `client_connection=mcp_and_hooks_ready`.
 
 Latest validation for the Workbench/source/chat follow-up slice:
 

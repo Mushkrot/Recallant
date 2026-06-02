@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -140,6 +140,135 @@ async function dashboardFor(projectId, projectPath) {
   }
 }
 
+async function installHookCliWrapper(projectDir) {
+  const hookBin = join(projectDir, ".recallant", "hook-bin");
+  await mkdir(hookBin, { recursive: true });
+  const wrapperPath = join(hookBin, "recallant");
+  await writeFile(
+    wrapperPath,
+    `#!/usr/bin/env sh\nexec node ${JSON.stringify(cliPath)} "$@"\n`
+  );
+  await chmod(wrapperPath, 0o755);
+  return {
+    ...commandEnv(),
+    PATH: `${hookBin}:${process.env.PATH ?? ""}`,
+    RECALLANT_PROJECT_DIR: projectDir
+  };
+}
+
+function runProjectHook(projectDir, hookEnv, name, args = [], input = "") {
+  const result = spawnSync(join(projectDir, ".recallant", "hooks", name), args, {
+    input,
+    env: hookEnv,
+    encoding: "utf8"
+  });
+  assert(
+    result.status === 0,
+    `hook ${name} should be fail-soft and exit 0: ${result.stderr}\n${result.stdout}`
+  );
+}
+
+async function runConnectHookEvidence(projectDir, marker, label) {
+  const hookMarker = `${marker}-HOOK`;
+  const dryRun = await cli(projectDir, [
+    "connect",
+    "codex",
+    "--project-dir",
+    projectDir,
+    "--install-local-hooks",
+    "--dry-run"
+  ]);
+  assert(
+    dryRun.dry_run === true &&
+      dryRun.writes_files === false &&
+      dryRun.mandatory_startup_layer?.status === "mcp_and_hooks_planned",
+    `${label}: connect dry-run did not plan MCP+hooks safely: ${JSON.stringify(dryRun)}`
+  );
+
+  const connected = await cli(projectDir, [
+    "connect",
+    "codex",
+    "--project-dir",
+    projectDir,
+    "--install-local-hooks"
+  ]);
+  assert(
+    connected.hook_status === "local_hook_kit_installed" &&
+      connected.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
+      connected.writes_global_config === false,
+    `${label}: connect did not install project-local hooks safely: ${JSON.stringify(connected)}`
+  );
+
+  const hookEnv = await installHookCliWrapper(projectDir);
+  runProjectHook(projectDir, hookEnv, "start-session.sh", [`${hookMarker} hook session`]);
+  runProjectHook(
+    projectDir,
+    hookEnv,
+    "user-prompt.sh",
+    [],
+    `Owner prompt ${hookMarker}: verify Recallant hook capture.`
+  );
+  runProjectHook(
+    projectDir,
+    hookEnv,
+    "tool-result.sh",
+    [],
+    `Tool result ${hookMarker}: command completed and should be captured.`
+  );
+  runProjectHook(
+    projectDir,
+    hookEnv,
+    "capture-event.sh",
+    ["decision"],
+    `Hook decision ${hookMarker}: connect hooks must write durable memory before owner QA.`
+  );
+  runProjectHook(
+    projectDir,
+    hookEnv,
+    "pre-compaction.sh",
+    [],
+    `Pre-compaction checkpoint ${hookMarker}: resume from Recallant context.`
+  );
+
+  const context = await cli(projectDir, ["context", "--task-hint", `${hookMarker} hook recall`]);
+  const workingMemories = context.sections?.working_memories ?? [];
+  assert(
+    workingMemories.some((memory) => String(memory.body).includes(hookMarker)),
+    `${label}: hook-captured decision was not recalled in a later context pack`
+  );
+
+  const doctor = await cli(projectDir, ["doctor", "--require-capture"]);
+  assert(
+    doctor.capture_readiness?.ready === true &&
+      doctor.client_connection?.status === "mcp_and_hooks_ready",
+    `${label}: doctor did not prove MCP+hooks capture active: ${JSON.stringify(doctor)}`
+  );
+
+  return {
+    connect_dry_run: {
+      status: dryRun.mandatory_startup_layer.status,
+      writes_files: dryRun.writes_files,
+      writes_global_config: dryRun.writes_global_config
+    },
+    connect_installed: {
+      status: connected.mandatory_startup_layer.status,
+      hook_status: connected.hook_status,
+      writes_global_config: connected.writes_global_config
+    },
+    hook_targets_exercised: [
+      "session_start",
+      "user_prompt",
+      "tool_result",
+      "decision",
+      "pre_compaction_checkpoint"
+    ],
+    remembered_marker: hookMarker,
+    recalled_hook_decision: true,
+    doctor_status: doctor.capture_readiness.status,
+    client_connection: doctor.client_connection.status
+  };
+}
+
 async function runCapturedSession(projectDir, projectId, marker, label) {
   const started = await cli(projectDir, ["agent-start", "--task-hint", `${marker} ${label}`]);
   assert(started.session_id, `${label}: agent-start did not return a session id`);
@@ -261,6 +390,7 @@ async function runCleanEmptyPilot() {
   );
 
   const capture = await runCapturedSession(projectDir, attach.project_id, marker, "clean pilot");
+  const connect = await runConnectHookEvidence(projectDir, marker, "clean pilot");
   const detachDryRun = await cli(projectDir, [
     "detach",
     "--project-id",
@@ -280,6 +410,7 @@ async function runCleanEmptyPilot() {
     attached: true,
     sources_detected: attach.discovery_summary?.candidates ?? 0,
     imported_sources: attach.imported?.length ?? 0,
+    connect,
     capture,
     cleanup: {
       dry_run_first: detachDryRun.status,
@@ -305,6 +436,7 @@ async function runCopiedExistingPilot() {
   assert(attach.backup?.manifest_path, "copied pilot should create local backup before file edits");
 
   const capture = await runCapturedSession(sandboxDir, attach.project_id, marker, "copied pilot");
+  const connect = await runConnectHookEvidence(sandboxDir, marker, "copied pilot");
   const detachDryRun = await cli(sandboxDir, [
     "detach",
     "--project-id",
@@ -338,6 +470,7 @@ async function runCopiedExistingPilot() {
     imported_sources: attach.imported?.length ?? 0,
     imported_paths: attach.imported?.map((item) => item.path) ?? [],
     local_backup_created: Boolean(attach.backup?.manifest_path),
+    connect,
     capture,
     cleanup: {
       dry_run_first: detachDryRun.status,
@@ -417,10 +550,14 @@ try {
     scenario_count: Object.keys(report.pilots).length,
     clean_attach_capture_recall_detach:
       report.pilots.clean_empty_project.capture.recalled_in_later_session === true &&
+      report.pilots.clean_empty_project.connect.recalled_hook_decision === true &&
+      report.pilots.clean_empty_project.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.clean_empty_project.cleanup.dry_run_first === "pending_confirmation" &&
       report.pilots.clean_empty_project.cleanup.confirmed_status === "detached",
     copied_sandbox_original_untouched:
       report.pilots.copied_existing_sandbox.untouched_original === true &&
+      report.pilots.copied_existing_sandbox.connect.recalled_hook_decision === true &&
+      report.pilots.copied_existing_sandbox.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.copied_existing_sandbox.local_backup_created === true,
     production_sensitive_preflight_safe:
       report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&

@@ -474,22 +474,24 @@ Latest Workbench validation on 2026-06-01:
   `npm run format:check`, `git diff --check`, targeted `npm run local-cleanup:smoke`,
   `npm run spool:smoke`, `npm run connect:smoke`, and full `npm run smoke:core`
 
-Latest Stage 5 pilot-report validation on 2026-06-01:
+Latest Stage 5 pilot-report validation on 2026-06-02:
 
 - `npm run pilot-report:smoke`
 - It passed with a JSON report showing:
-  - clean empty project: attached, remembered decision/action/test/checkpoint,
-    recalled in a later session, `doctor_status=capture_active`, detached after
-    dry-run, `files_changed=0`, `physically_deleted_records=0`;
+  - clean empty project: attached, connected through `connect codex --install-local-hooks`,
+    exercised project-local hook targets for session start, user prompt, tool result, decision, and
+    pre-compaction checkpoint, recalled the hook-captured decision, remembered decision/action/test/
+    checkpoint through the CLI capture path, recalled in a later session, `doctor_status=capture_active`,
+    detached after dry-run, `files_changed=0`, `physically_deleted_records=0`;
   - copied existing sandbox: 6 sources detected/imported, local backup created,
-    remembered/recalled pilot memory, detached after dry-run, original fixture
-    untouched;
+    connected through project-local MCP+hooks, recalled a hook-captured decision, remembered/recalled
+    pilot memory, detached after dry-run, original fixture untouched;
   - production-sensitive preflight: requested `autopilot`, effective `guided`,
     `needs_confirmation`, `writes_files=false`, `writes_database=false`, project
     files untouched.
 - Latest artifact write/readback was verified on 2026-06-02; the report included
-  `qa_summary.all_required_scenarios_passed=true` and a `report_path` under
-  `/tmp/recallant-pilot-reports`.
+  `qa_summary.all_required_scenarios_passed=true`, per-pilot `connect` evidence with
+  `client_connection=mcp_and_hooks_ready`, and a `report_path` under `/tmp/recallant-pilot-reports`.
 
 Latest contract-hardening validation on 2026-05-31:
 
