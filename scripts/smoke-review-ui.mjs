@@ -362,10 +362,13 @@ try {
     "AI control surface",
     "Current memory space",
     "Sources",
+    "Source Map",
     "Memory space sources",
     "Sources for selected space",
     "Primary source ready",
     "Source ready",
+    "Show source memories",
+    "Use as provenance filter",
     "Create a memory space",
     "Attach a source to selected space",
     "Detach source",
@@ -423,7 +426,7 @@ try {
     "Private, policy protected",
     "Governed operations",
     "Operations",
-    "provenance filter",
+    "selected source",
     "Local search by meaning"
   ];
   const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
@@ -433,7 +436,8 @@ try {
     );
   }
   const requiredLayoutContracts = [
-    "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr)",
+    "main { display: grid; grid-template-columns: minmax(0, 1fr)",
+    ".workbench-body { display: grid",
     ".ask-layout { display: grid",
     ".primary-workspace { display: grid",
     ".command-grid { display: grid",

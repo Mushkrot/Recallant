@@ -1168,19 +1168,28 @@ function renderSelectedSources(data: ReviewDashboardData) {
     ${sources
       .map((source) => {
         const health = sourceHealth(source);
+        const sourceId = source.source_id ?? source.id;
+        const sourceMemoryPath = reviewPathWithParams(data.current_project_id, {
+          source_id: sourceId
+        });
         return `<article class="source-card">
           <div>
             <strong>${escapeHtml(source.display_label ?? source.label ?? sourceKindLabel(source.source_kind))}</strong>
             <span class="source-health ${escapeHtml(health.status)}">${escapeHtml(health.label)}</span>
+            <span class="source-kind">${escapeHtml(sourceKindLabel(source.source_kind))}</span>
             <p>${escapeHtml(source.uri ?? "No location recorded")}</p>
             <p>${escapeHtml(health.reason)}</p>
             <p class="source-action">${escapeHtml(health.action)}</p>
+            <div class="source-card-actions">
+              <a href="${escapeHtml(sourceMemoryPath)}#review">Show source memories</a>
+              <a href="${escapeHtml(sourceMemoryPath)}#sources">Use as provenance filter</a>
+            </div>
           </div>
           ${
             source.status === "active"
               ? `<form method="post" action="/source-detach">
                   <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
-                  <input type="hidden" name="source_id" value="${escapeHtml(source.source_id ?? source.id)}" />
+                  <input type="hidden" name="source_id" value="${escapeHtml(sourceId)}" />
                   <button type="submit">Detach source</button>
                 </form>`
               : ""
@@ -1278,15 +1287,15 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
     <div class="section-head">
       <div>
         <span class="section-kicker">Memory space sources</span>
-        <h2>Sources</h2>
+        <h2>Source Map</h2>
       </div>
-      <p>Attach folders, repositories, documents, connectors, or virtual/manual sources without merging unrelated memory.</p>
+      <p>These are the folders, repositories, documents, connectors, and virtual inputs Recallant may cite for this memory space. Detaching a source does not delete the memory.</p>
     </div>
     ${renderSourceResult(source)}
     <div class="source-overview">
-      <span><strong>${escapeHtml(active.length)}</strong> active</span>
-      <span><strong>${escapeHtml(detached.length)}</strong> detached</span>
-      <span><strong>${escapeHtml(selectedSourceLabel)}</strong> provenance filter</span>
+      <span><strong>${escapeHtml(active.length)}</strong> active sources</span>
+      <span><strong>${escapeHtml(detached.length)}</strong> detached sources</span>
+      <span><strong>${escapeHtml(selectedSourceLabel)}</strong> selected source</span>
     </div>
     <div class="source-workspace-grid">
       <div>
@@ -1895,7 +1904,7 @@ function renderDashboard(
     body { margin: 0; background: #eef2f1; }
     header { padding: 20px 32px; border-bottom: 1px solid #d5dddb; background: #fbfdfc; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); gap: 22px; padding: 22px; align-items: start; max-width: 1760px; margin: 0 auto; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 22px; align-items: start; max-width: 1760px; margin: 0 auto; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     h3 { letter-spacing: 0; }
@@ -1904,6 +1913,7 @@ function renderDashboard(
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
     .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr); gap: 18px; align-items: start; }
+    .workbench-body { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 22px; align-items: start; }
     .workbench-main { display: grid; gap: 16px; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
@@ -1991,12 +2001,15 @@ function renderDashboard(
     .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .source-card strong, .source-result strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
     .source-card span { display: inline-block; font-size: 12px; margin-bottom: 3px; }
+    .source-kind { color: #6a7280; margin-left: 5px; }
     .source-health { border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; background: #f8fafc; color: #445064; }
     .source-health.ready { border-color: #bad8cf; background: #eef8f5; color: #166454; }
     .source-health.needs-setup, .source-health.needs-attention { border-color: #e3d3a5; background: #fff9e8; color: #715118; }
     .source-health.detached { border-color: #d6dde7; background: #f8fafc; color: #6a7280; }
     .source-card p, .source-result p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
     .source-card .source-action { color: #6a7280; }
+    .source-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .source-card-actions a { border: 1px solid #cfd8e5; border-radius: 999px; padding: 3px 7px; background: #fff; color: #303845; font-size: 11px; }
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -2051,10 +2064,10 @@ function renderDashboard(
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
-    .ask-panel { border-color: #b8d4cc; background: #fdfefe; padding: 0; overflow: hidden; }
-    .ask-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.7fr); gap: 0; align-items: stretch; }
-    .ask-work { padding: 24px; }
-    .ask-work h2 { font-size: 24px; margin-bottom: 14px; }
+    .ask-panel { border-color: #accfc5; background: #fdfefe; padding: 0; overflow: hidden; box-shadow: 0 8px 24px rgba(32, 36, 44, 0.06); }
+    .ask-layout { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(320px, 0.8fr); gap: 0; align-items: stretch; }
+    .ask-work { padding: 28px; }
+    .ask-work h2 { font-size: 28px; margin-bottom: 14px; }
     .memory-profile { border-left: 1px solid #d9e4df; padding: 24px 20px; color: #303845; background: #f4f8f7; }
     .memory-profile h3 { margin: 0 0 7px; font-size: 15px; overflow-wrap: anywhere; }
     .memory-profile .state { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 11px; margin-bottom: 8px; }
@@ -2063,7 +2076,7 @@ function renderDashboard(
     .memory-profile-metrics span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 11px; }
     .memory-profile-metrics strong { display: block; color: #20242c; font-size: 13px; }
     .chat-form { display: grid; gap: 10px; }
-    .chat-form textarea { resize: vertical; min-height: 210px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 13px; font: inherit; font-size: 15px; color: #20242c; background: #fff; }
+    .chat-form textarea { resize: vertical; min-height: 260px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 13px; font: inherit; font-size: 15px; color: #20242c; background: #fff; }
     .chat-submit-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     .chat-submit-row span { color: #607080; font-size: 12px; }
     .chat-form button { justify-self: start; border-color: #8fb9ad; background: #eef8f5; color: #145a4d; font-weight: 700; }
@@ -2088,8 +2101,8 @@ function renderDashboard(
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } }
+    @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
   </style>
 </head>
 <body>
@@ -2097,8 +2110,8 @@ function renderDashboard(
     <div>
       <h1>Recallant Workbench</h1>
       <nav class="workbench-nav" aria-label="Workbench sections">
-        <a href="#memory-spaces">Memory Spaces</a>
         <a href="#ask-recallant">Ask Recallant</a>
+        <a href="#memory-spaces">Memory Spaces</a>
         <a href="#command-center">Command Center</a>
         <a href="#sources">Sources</a>
         <a href="#activity-replay">Activity / Replay</a>
@@ -2112,38 +2125,38 @@ function renderDashboard(
     </div>
   </header>
   <main>
-    <aside class="left-rail">
-      <section class="panel" id="memory-spaces">
-        <h2>Memory Spaces</h2>
-        ${renderMemorySpaces(data)}
-      </section>
-      <section class="panel">
-        <h2>Current Signals</h2>
-        <div class="status">
-          <span class="pill">Active ${escapeHtml(data.critical?.active_sessions ?? 0)}</span>
-          <span class="pill">Interrupted ${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</span>
-          <span class="pill">Review ${escapeHtml(data.critical?.pending_review ?? 0)}</span>
-          <span class="pill">Conflicts ${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</span>
-          <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
+    <section class="panel ask-panel" id="ask-recallant">
+      <div class="ask-layout">
+        <div class="ask-work">
+          <span class="section-kicker">AI control surface</span>
+          <h2>Ask Recallant</h2>
+          ${renderManagementChat(data, chat)}
         </div>
-      </section>
-      <section class="panel">
-        <h2>Project Actions</h2>
-        ${renderProjectActions(data)}
-      </section>
-    </aside>
-    <section class="workbench-main">
-      <div class="primary-workspace">
-        <section class="panel ask-panel" id="ask-recallant">
-          <div class="ask-layout">
-            <div class="ask-work">
-              <span class="section-kicker">AI control surface</span>
-              <h2>Ask Recallant</h2>
-              ${renderManagementChat(data, chat)}
-            </div>
-            ${renderCurrentMemoryProfile(data)}
+        ${renderCurrentMemoryProfile(data)}
+      </div>
+    </section>
+    <section class="workbench-body" aria-label="Recallant workspace">
+      <aside class="left-rail">
+        <section class="panel" id="memory-spaces">
+          <h2>Memory Spaces</h2>
+          ${renderMemorySpaces(data)}
+        </section>
+        <section class="panel">
+          <h2>Current Signals</h2>
+          <div class="status">
+            <span class="pill">Active ${escapeHtml(data.critical?.active_sessions ?? 0)}</span>
+            <span class="pill">Interrupted ${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</span>
+            <span class="pill">Review ${escapeHtml(data.critical?.pending_review ?? 0)}</span>
+            <span class="pill">Conflicts ${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</span>
+            <span class="pill">Paid API ${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</span>
           </div>
         </section>
+        <section class="panel">
+          <h2>Project Actions</h2>
+          ${renderProjectActions(data)}
+        </section>
+      </aside>
+      <section class="workbench-main">
         <section class="panel" id="command-center">
           <h2>Command Center</h2>
           <div class="command-grid">
@@ -2157,50 +2170,50 @@ function renderDashboard(
             </div>
           </div>
         </section>
-      </div>
-      ${renderSourceWorkbench(data, source)}
-      <section class="panel" id="activity-replay">
-        <h2>Activity / Replay</h2>
-        ${renderActivityReplay(data)}
-      </section>
-      <section class="panel" id="review">
-        <h2>Review</h2>
-        <h3>Import Candidates</h3>
-        ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
-        <h3>Review Inbox</h3>
-        ${renderRows(data.inbox, "No candidate or high-risk memories require review.", data.current_project_id)}
-        <h3>Conflicts / Duplicates</h3>
-        ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.", data.current_project_id)}
-        <h3>Active Rules</h3>
-        ${renderRuleFilters(data)}
-        ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
-      </section>
-      <section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
-        <div class="section-head">
-          <div>
-            <span class="section-kicker">Governed operations</span>
-            <h2>Operations</h2>
+        ${renderSourceWorkbench(data, source)}
+        <section class="panel" id="activity-replay">
+          <h2>Activity / Replay</h2>
+          ${renderActivityReplay(data)}
+        </section>
+        <section class="panel" id="review">
+          <h2>Review</h2>
+          <h3>Import Candidates</h3>
+          ${renderRows(data.import_candidates, "No imported candidates require review.", data.current_project_id)}
+          <h3>Review Inbox</h3>
+          ${renderRows(data.inbox, "No candidate or high-risk memories require review.", data.current_project_id)}
+          <h3>Conflicts / Duplicates</h3>
+          ${renderRows(data.duplicate_conflicts, "No conflicts or duplicates detected.", data.current_project_id)}
+          <h3>Active Rules</h3>
+          ${renderRuleFilters(data)}
+          ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
+        </section>
+        <section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
+          <div class="section-head">
+            <div>
+              <span class="section-kicker">Governed operations</span>
+              <h2>Operations</h2>
+            </div>
+            <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
           </div>
-          <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
-        </div>
-        <div class="operation-panels">
-          <details class="operation-panel" open>
-            <summary><span>Selected Detail</span></summary>
-            ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
-          </details>
-          <details class="operation-panel">
-            <summary><span>Cost / Paid API</span></summary>
-            ${renderCosts(data)}
-          </details>
-          <details class="operation-panel">
-            <summary><span>Cleanup / Forget</span></summary>
-            ${renderCleanup(data, detach)}
-          </details>
-          <details class="operation-panel" id="settings">
-            <summary><span>Settings</span></summary>
-            ${renderSettings(data, setting)}
-          </details>
-        </div>
+          <div class="operation-panels">
+            <details class="operation-panel">
+              <summary><span>Selected Detail</span></summary>
+              ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
+            </details>
+            <details class="operation-panel">
+              <summary><span>Cost / Paid API</span></summary>
+              ${renderCosts(data)}
+            </details>
+            <details class="operation-panel">
+              <summary><span>Cleanup / Forget</span></summary>
+              ${renderCleanup(data, detach)}
+            </details>
+            <details class="operation-panel" id="settings">
+              <summary><span>Settings</span></summary>
+              ${renderSettings(data, setting)}
+            </details>
+          </div>
+        </section>
       </section>
     </section>
   </main>

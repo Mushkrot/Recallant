@@ -331,8 +331,11 @@ Stage 1 Workbench follow-up slice is now implemented:
 - The later 2026-06-02 Workbench refinement makes Ask Recallant a larger command surface, adds a
   source overview/provenance-filter strip, and turns detail/cost/cleanup/settings into compact
   governed Operations panels so service controls no longer dominate the main workspace.
-- `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new Ask -> Sources ->
-  secondary workspace order, source management surface, no horizontal scroll, and readable long
+- The 2026-06-02 Ask-first Workbench follow-up makes Ask Recallant a full-width top work surface
+  above the Memory Spaces / Command Center / Sources workspace, closes governed Operations by
+  default, and presents Sources as a Source Map with source-memory and provenance-filter shortcuts.
+- `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new Ask-first -> Sources
+  -> secondary workspace order, source management surface, no horizontal scroll, and readable long
   chat answers.
 
 Stage 2 first slice is now implemented:

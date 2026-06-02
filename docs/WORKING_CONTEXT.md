@@ -341,6 +341,11 @@ Latest implementation checkpoints:
   work surface, Sources now includes an active/detached/provenance-filter overview, and
   detail/cost/cleanup/settings are compact governed Operations panels instead of prominent service
   cards. Verified by `npm run review-ui:smoke` and `npm run review-ui:playwright`.
+- 2026-06-02 Ask-first Workbench follow-up: Ask Recallant now spans the top of the Workbench before
+  Memory Spaces / Command Center / Sources, making the AI control surface the obvious entrypoint.
+  Source management is framed as a Source Map with shortcuts to source-linked memories and
+  provenance filtering; governed Operations stay collapsed below the main memory workspace.
+  Verified by `npm run review-ui:smoke` and `npm run review-ui:playwright`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing, and concrete source attach

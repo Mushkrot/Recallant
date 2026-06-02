@@ -197,12 +197,12 @@ async function run() {
       desktop.locator(".secondary-workspace"),
       "desktop secondary workspace"
     );
-    assert(askBox.width >= 520, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
+    assert(askBox.width >= 980, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
     assert(
-      askBox.x > leftRailBox.x + leftRailBox.width &&
+      askBox.y < leftRailBox.y &&
         askBox.y < sourcesBox.y &&
         sourcesBox.y < secondaryBox.y,
-      `desktop Workbench order is not Ask -> Sources -> secondary panels: ${JSON.stringify({
+      `desktop Workbench order is not Ask-first with Sources before secondary panels: ${JSON.stringify({
         askBox,
         leftRailBox,
         sourcesBox,

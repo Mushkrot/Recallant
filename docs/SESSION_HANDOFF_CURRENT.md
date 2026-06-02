@@ -500,6 +500,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   Sources workspace now shows active/detached/provenance-filter summary, and
   Selected Detail/Cost/Cleanup/Settings live in compact governed Operations panels. `review-ui:smoke`
   and `review-ui:playwright` pass and screenshots are under `/ai/playwright/reports`.
+- 2026-06-02 Ask-first Workbench follow-up: Ask Recallant now spans the top of the Workbench before
+  the Memory Spaces / Command Center / Sources workspace. Source management is presented as a
+  Source Map with shortcuts to source-linked memories and provenance filtering, and governed
+  Operations are collapsed below the main work area. `review-ui:smoke` and `review-ui:playwright`
+  pass with updated screenshots under `/ai/playwright/reports`.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 
