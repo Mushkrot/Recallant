@@ -66,7 +66,7 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~72% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~67% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~68% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
 - Stage 3 — Memory Spaces and Sources: ~55% completed. Logical memory space model and source binding
@@ -172,6 +172,11 @@ Current implemented slices include:
   chat builds the dry-run command for that sandbox project instead of blindly using the open
   project. If the sandbox target is missing or ambiguous, chat refuses to build a risky command and
   asks the owner to clarify the target.
+- Management chat policy-guard pass: local AI still performs semantic interpretation, but
+  deterministic server policy now overrides obvious under-classification for cleanup, developer-wide
+  rule, onboarding, source-management, and pilot-QA requests. The AI smoke now includes deliberately
+  misclassified cleanup and global-rule responses and proves they still become the governed dry-run
+  or developer-scope rule workflow.
 - Review action controls are now executable for the full governed-memory action set instead of
   showing advanced actions as disabled labels. Browser/API paths route through
   `reviewAgentMemory` for accept, reject, archive, unarchive, mark stale, promote instruction,

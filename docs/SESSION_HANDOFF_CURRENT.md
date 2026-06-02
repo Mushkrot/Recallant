@@ -8,7 +8,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~67%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~68%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
 - Stage 3 — Memory Spaces and Sources: `~55%` complete. Virtual spaces and source attach/detach
@@ -186,6 +186,9 @@ The current Review/Management UI and chat target is complete for the first imple
   target is ambiguous, chat asks for clarification instead of using the open project.
 - chat now attempts local Ollama AI interpretation first and labels deterministic fallback when the
   model is unavailable;
+- deterministic server policy now overrides obvious local-AI under-classification for cleanup,
+  developer-wide rule, onboarding, source-management, and pilot-QA requests, so a bad intent label
+  from the local model does not turn a risky or globally binding request into a plain answer;
 - explicit owner requests to save a low-risk rule for all projects create developer-scope
   `instruction_grade` memories that future context packs include as binding rules.
 

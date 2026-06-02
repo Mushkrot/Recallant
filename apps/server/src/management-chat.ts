@@ -509,6 +509,21 @@ function normalizeTargetHint(value: unknown, fallback: ChatInterpretation["targe
     : fallback;
 }
 
+function policyGuardedIntent(
+  aiIntent: ManagementChatIntent,
+  deterministicIntent: ManagementChatIntent
+): ManagementChatIntent {
+  if (aiIntent === deterministicIntent) return aiIntent;
+  if (
+    ["cleanup", "global_rule", "project_onboarding", "source_management", "pilot_qa"].includes(
+      deterministicIntent
+    )
+  ) {
+    return deterministicIntent;
+  }
+  return aiIntent;
+}
+
 async function interpretMessage(
   message: string,
   dashboard: DashboardLike
@@ -579,9 +594,11 @@ async function interpretMessage(
         if (!response.ok) throw new Error(`Ollama ${model} HTTP ${response.status}`);
         const payload = (await response.json()) as { message?: { content?: string } };
         const parsed = parseJsonObject(String(payload.message?.content ?? ""));
-        const intent = normalizeIntent(parsed.intent, fallback.intent);
+        const aiIntent = normalizeIntent(parsed.intent, fallback.intent);
+        const intent = policyGuardedIntent(aiIntent, fallback.intent);
         const language = normalizeLanguage(parsed.language, fallback.language);
         const confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.7)));
+        const guardedByPolicy = intent !== aiIntent;
         return {
           source: "local_ai",
           model,
@@ -590,12 +607,22 @@ async function interpretMessage(
           confidence,
           summary:
             stringValue(parsed.summary) ||
-            (language === "ru"
-              ? "Понято локальной AI-моделью."
-              : "Understood by the local AI model."),
+            (guardedByPolicy
+              ? language === "ru"
+                ? "Понято локальной AI-моделью; безопасная политика уточнила тип запроса."
+                : "Understood by local AI; safety policy refined the request type."
+              : language === "ru"
+                ? "Понято локальной AI-моделью."
+                : "Understood by the local AI model."),
           target_hint: normalizeTargetHint(parsed.target_hint, fallback.target_hint),
-          destructive_or_sensitive: Boolean(parsed.destructive_or_sensitive),
-          global_rule_request: Boolean(parsed.global_rule_request) || intent === "global_rule",
+          destructive_or_sensitive:
+            Boolean(parsed.destructive_or_sensitive) ||
+            fallback.destructive_or_sensitive ||
+            isDestructiveOrSensitive(message, intent),
+          global_rule_request:
+            Boolean(parsed.global_rule_request) ||
+            fallback.global_rule_request ||
+            intent === "global_rule",
           rule_text:
             typeof parsed.rule_text === "string" && parsed.rule_text.trim()
               ? parsed.rule_text.trim()

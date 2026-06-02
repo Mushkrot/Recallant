@@ -150,6 +150,33 @@ try {
   );
 
   queuedResponses.push({
+    language: "ru",
+    intent: "general",
+    confidence: 0.44,
+    summary: "Mock model under-classified a risky cleanup request.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const guardedCleanup = await buildManagementChatResponse({
+    message: "Удали gutendocx sandbox из Recallant",
+    dashboard: baseDashboard
+  });
+  assert(
+    guardedCleanup.understanding.source === "local_ai" &&
+      guardedCleanup.intent === "cleanup" &&
+      guardedCleanup.result_type === "dry_run_required" &&
+      guardedCleanup.confirmation_required === true &&
+      guardedCleanup.destructive_or_sensitive === true,
+    `Deterministic policy did not guard misclassified cleanup: ${JSON.stringify(guardedCleanup)}`
+  );
+  assert(
+    guardedCleanup.facts.target_project_id === sandboxProjectId &&
+      String(guardedCleanup.proposed_actions[0]?.command).includes(sandboxProjectId),
+    `Guarded cleanup targeted the wrong project: ${JSON.stringify(guardedCleanup)}`
+  );
+
+  queuedResponses.push({
     language: "en",
     intent: "cleanup",
     confidence: 0.92,
@@ -279,6 +306,45 @@ try {
   assert(
     savedRule?.audience?.some((audience) => audience.kind === "all_agents"),
     `Saved rule audience mismatch: ${JSON.stringify(savedRule)}`
+  );
+
+  let guardedSavedRule = null;
+  queuedResponses.push({
+    language: "ru",
+    intent: "general",
+    confidence: 0.48,
+    summary: "Mock model under-classified a developer-wide rule request.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const guardedGlobalRule = await buildManagementChatResponse({
+    message: "Сохрани правило для всех проектов: агенты должны проверять capture status.",
+    dashboard: baseDashboard,
+    database: {
+      createAgentMemory: async (input) => {
+        guardedSavedRule = input;
+        return {
+          memory_id: "88888888-8888-4888-8888-888888888888",
+          use_policy: "instruction_grade"
+        };
+      }
+    }
+  });
+  assert(
+    guardedGlobalRule.understanding.source === "local_ai" &&
+      guardedGlobalRule.intent === "global_rule" &&
+      guardedGlobalRule.result_type === "safe_action" &&
+      guardedGlobalRule.global_rule_result?.status === "created",
+    `Deterministic policy did not guard misclassified global rule: ${JSON.stringify(
+      guardedGlobalRule
+    )}`
+  );
+  assert(
+    guardedSavedRule?.scope === "developer" &&
+      guardedSavedRule?.audience?.some((audience) => audience.kind === "all_agents") &&
+      guardedGlobalRule.global_rule_result?.use_policy === "instruction_grade",
+    `Guarded global rule wrote wrong DB input: ${JSON.stringify(guardedSavedRule)}`
   );
 
   queuedResponses.push({
@@ -543,7 +609,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 13, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 15, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);
