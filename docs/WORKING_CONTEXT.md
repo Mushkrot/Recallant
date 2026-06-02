@@ -347,6 +347,11 @@ Latest implementation checkpoints:
   requests produce a safe `Sources` workspace / `recallant source attach` plan without executing the
   write directly from chat. Verified by `npm run management-chat-ai:smoke` and
   `npm run review-ui:smoke`.
+- 2026-06-02 Management Chat onboarding/QA follow-up: Ask Recallant now has first-class
+  `project_onboarding` and `pilot_qa` intents. Missing new-project paths trigger clarification,
+  concrete project paths produce attach/connect/doctor dry-run plans, and pilot-QA asks produce
+  product-acceptance, pilot-report, and browser-QA evidence commands. Verified by
+  `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-02 Pilot-report artifact follow-up: `npm run pilot-report:smoke` now persists that JSON

@@ -43,6 +43,8 @@ export type ManagementChatIntent =
   | "provenance"
   | "review"
   | "global_rule"
+  | "project_onboarding"
+  | "pilot_qa"
   | "connection_check"
   | "memory_summary"
   | "rule_diagnostics"
@@ -140,6 +142,14 @@ type SourceRequestAnalysis = {
   command?: string;
 };
 
+type WorkflowRequestAnalysis = {
+  operation: "attach_project" | "connect_capture" | "pilot_qa";
+  missing: string[];
+  project_dir: string;
+  client: string;
+  commands: string[];
+};
+
 export async function buildManagementChatResponse(input: {
   message: string;
   dashboard: DashboardLike;
@@ -154,6 +164,10 @@ export async function buildManagementChatResponse(input: {
   const facts = dashboardFacts(dashboard, targetProject);
   const sourceRequest =
     intent === "source_management" ? analyzeSourceRequest(message, facts) : undefined;
+  const workflowRequest =
+    intent === "project_onboarding" || intent === "pilot_qa"
+      ? analyzeWorkflowRequest(message, dashboard, intent)
+      : undefined;
   const policyBlockReason = blockedByPolicyReason(message, language);
   const destructiveOrSensitive =
     Boolean(policyBlockReason) ||
@@ -178,7 +192,8 @@ export async function buildManagementChatResponse(input: {
     confirmationRequired,
     policyBlockReason,
     globalRuleResult,
-    sourceRequest
+    sourceRequest,
+    workflowRequest
   });
   const proposedActions = actionsForIntent(
     intent,
@@ -189,7 +204,8 @@ export async function buildManagementChatResponse(input: {
     destructiveOrSensitive,
     globalRuleResult,
     policyBlockReason,
-    sourceRequest
+    sourceRequest,
+    workflowRequest
   );
   const answer = answerForIntent(
     intent,
@@ -199,7 +215,8 @@ export async function buildManagementChatResponse(input: {
     interpretation,
     globalRuleResult,
     policyBlockReason,
-    sourceRequest
+    sourceRequest,
+    workflowRequest
   );
   return {
     language,
@@ -234,6 +251,42 @@ function includesAny(message: string, words: string[]) {
 function detectIntent(message: string): ManagementChatIntent {
   if (!message) return "general";
   if (detectGlobalRuleRequest(message)) return "global_rule";
+  if (
+    includesAny(message, [
+      "pilot",
+      "пилот",
+      "qa",
+      "smoke",
+      "acceptance",
+      "test report",
+      "отчет по тест",
+      "прогони тест",
+      "прогон тест",
+      "проверь сценар"
+    ])
+  ) {
+    return "pilot_qa";
+  }
+  if (
+    includesAny(message, [
+      "attach project",
+      "connect project",
+      "connect client",
+      "mandatory startup",
+      "startup layer",
+      "hook",
+      "hooks",
+      "подключи проект",
+      "подключить проект",
+      "подключи клиента",
+      "подключить клиента",
+      "обязательный слой",
+      "стартовый слой",
+      "новый проект"
+    ])
+  ) {
+    return "project_onboarding";
+  }
   if (
     includesAny(message, ["почему", "why"]) &&
     includesAny(message, ["правил", "rule", "applied", "примен"])
@@ -409,6 +462,8 @@ function normalizeIntent(value: unknown, fallback: ManagementChatIntent): Manage
     "provenance",
     "review",
     "global_rule",
+    "project_onboarding",
+    "pilot_qa",
     "connection_check",
     "memory_summary",
     "rule_diagnostics",
@@ -477,7 +532,7 @@ async function interpretMessage(
                   "Return strict JSON only.",
                   "Do not execute actions.",
                   "Classify the owner's message by meaning, including Russian text and typos.",
-                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,source_management,provenance,review,global_rule,connection_check,memory_summary,rule_diagnostics,general.",
+                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,source_management,provenance,review,global_rule,project_onboarding,pilot_qa,connection_check,memory_summary,rule_diagnostics,general.",
                   "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
                   "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
                   "target_hint should be current,sandbox,none,or ambiguous.",
@@ -635,12 +690,20 @@ function resultTypeForIntent(input: {
   policyBlockReason?: string;
   globalRuleResult?: ManagementChatResponse["global_rule_result"];
   sourceRequest?: SourceRequestAnalysis;
+  workflowRequest?: WorkflowRequestAnalysis;
 }): ManagementChatResultType {
   if (input.policyBlockReason) return "blocked_by_policy";
   if (input.targetProject.ambiguous && input.destructiveOrSensitive) return "needs_clarification";
   if (input.intent === "source_management" && input.sourceRequest?.missing.length) {
     return "needs_clarification";
   }
+  if (
+    (input.intent === "project_onboarding" || input.intent === "pilot_qa") &&
+    input.workflowRequest?.missing.length
+  ) {
+    return "needs_clarification";
+  }
+  if (input.intent === "project_onboarding") return "dry_run_required";
   if (input.intent === "global_rule") {
     if (input.globalRuleResult?.status === "created") return "safe_action";
     if (input.globalRuleResult?.status === "needs_review") return "confirmation_required";
@@ -865,6 +928,68 @@ function sourceLabelFromMessage(message: string, sourceUri: string, sourceKind: 
   return labels[sourceKind] ?? "Memory source";
 }
 
+function clientFromMessage(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("cursor")) return "cursor";
+  if (normalized.includes("claude")) return "claude-code";
+  if (normalized.includes("generic")) return "generic";
+  return "codex";
+}
+
+function messageLooksNewProject(message: string) {
+  return includesAny(message, [
+    "new project",
+    "attach project",
+    "подключи проект",
+    "подключить проект",
+    "новый проект",
+    "новую папку",
+    "новой папк"
+  ]);
+}
+
+function analyzeWorkflowRequest(
+  message: string,
+  dashboard: DashboardLike,
+  intent: ManagementChatIntent
+): WorkflowRequestAnalysis {
+  const explicitPath = extractPathLike(message);
+  const projectDir = explicitPath || currentProjectPath(dashboard);
+  const client = clientFromMessage(message);
+  if (intent === "pilot_qa") {
+    return {
+      operation: "pilot_qa",
+      missing: [],
+      project_dir: projectDir,
+      client,
+      commands: [
+        "npm run product-acceptance:smoke",
+        "npm run pilot-report:smoke",
+        "npm run review-ui:playwright"
+      ]
+    };
+  }
+  const wantsAttach = messageLooksNewProject(message) || Boolean(explicitPath);
+  const missing = wantsAttach && !explicitPath ? ["project folder path"] : [];
+  const commands = wantsAttach
+    ? [
+        `recallant attach ${projectDir} --sandbox --dry-run`,
+        `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
+        `recallant doctor --project-dir ${projectDir} --require-capture`
+      ]
+    : [
+        `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
+        `recallant doctor --project-dir ${projectDir} --require-capture`
+      ];
+  return {
+    operation: wantsAttach ? "attach_project" : "connect_capture",
+    missing,
+    project_dir: projectDir,
+    client,
+    commands
+  };
+}
+
 function analyzeSourceRequest(
   message: string,
   facts: ManagementChatResponse["facts"]
@@ -1017,7 +1142,8 @@ function answerForIntent(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
-  sourceRequest?: SourceRequestAnalysis
+  sourceRequest?: SourceRequestAnalysis,
+  workflowRequest?: WorkflowRequestAnalysis
 ) {
   if (language === "ru")
     return answerRu(
@@ -1027,7 +1153,8 @@ function answerForIntent(
       interpretation,
       globalRuleResult,
       policyBlockReason,
-      sourceRequest
+      sourceRequest,
+      workflowRequest
     );
   return answerEn(
     intent,
@@ -1036,7 +1163,8 @@ function answerForIntent(
     interpretation,
     globalRuleResult,
     policyBlockReason,
-    sourceRequest
+    sourceRequest,
+    workflowRequest
   );
 }
 
@@ -1067,7 +1195,8 @@ function answerRu(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
-  sourceRequest?: SourceRequestAnalysis
+  sourceRequest?: SourceRequestAnalysis,
+  workflowRequest?: WorkflowRequestAnalysis
 ) {
   const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
   if (policyBlockReason) {
@@ -1122,6 +1251,13 @@ function answerRu(
       return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
+    case "project_onboarding":
+      if (workflowRequest?.missing.length) {
+        return `${baseline}\n\nЯ понял это как подключение проекта или обязательного startup/capture слоя, но не хватает данных: ${workflowRequest.missing.join(", ")}. Уточни путь к папке проекта. Я не буду угадывать путь, потому что attach/connect меняет локальные файлы проекта.`;
+      }
+      return `${baseline}\n\nЯ понял это как подключение Recallant к проекту и агентскому клиенту. Безопасная цепочка: сначала attach/connect dry-run, затем установка project-local hook targets, затем doctor --require-capture. Полная готовность считается доказанной только после context read, memory write и checkpoint.`;
+    case "pilot_qa":
+      return `${baseline}\n\nЯ понял это как QA/pilot запрос. Безопасный порядок: product acceptance smoke, pilot report smoke, затем browser QA для Workbench. Эти проверки должны дать отчет: что подключено, что запомнилось, что вспомнилось позже, что было отцеплено, и какие оригиналы не были тронуты.`;
     case "connection_check":
       return `${baseline}\n\nПроверка подключения: ${
         facts.capture_ready
@@ -1148,7 +1284,8 @@ function answerEn(
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
-  sourceRequest?: SourceRequestAnalysis
+  sourceRequest?: SourceRequestAnalysis,
+  workflowRequest?: WorkflowRequestAnalysis
 ) {
   const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
   if (policyBlockReason) {
@@ -1203,6 +1340,13 @@ function answerEn(
       return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
+    case "project_onboarding":
+      if (workflowRequest?.missing.length) {
+        return `${baseline}\n\nI understood this as project onboarding or mandatory startup/capture setup, but I need more detail: ${workflowRequest.missing.join(", ")}. Provide the project folder path. I will not guess the path because attach/connect changes local project files.`;
+      }
+      return `${baseline}\n\nI understood this as connecting Recallant to a project and agent client. Safe sequence: attach/connect dry-run first, then project-local hook targets, then doctor --require-capture. Full readiness is proven only after context read, memory write, and checkpoint evidence exist.`;
+    case "pilot_qa":
+      return `${baseline}\n\nI understood this as a QA/pilot request. Safe order: product acceptance smoke, pilot report smoke, then Workbench browser QA. These checks should report what was attached, what was remembered, what was recalled later, what was detached, and which originals stayed untouched.`;
     case "connection_check":
       return `${baseline}\n\nConnection check: ${
         facts.capture_ready
@@ -1231,7 +1375,8 @@ function actionsForIntent(
   destructiveOrSensitive: boolean,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
-  sourceRequest?: SourceRequestAnalysis
+  sourceRequest?: SourceRequestAnalysis,
+  workflowRequest?: WorkflowRequestAnalysis
 ): ManagementChatAction[] {
   if (policyBlockReason) {
     return [
@@ -1368,6 +1513,66 @@ function actionsForIntent(
             : "Use it to create a memory space, attach a source, or detach a source without deleting memory."
       }
     ];
+  }
+
+  if (intent === "project_onboarding") {
+    if (workflowRequest?.missing.length) {
+      return [
+        {
+          label: language === "ru" ? "Уточнить путь проекта" : "Clarify project path",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? `Нужно: ${workflowRequest.missing.join(", ")}. Attach/connect не должен работать по догадке.`
+              : `Needed: ${workflowRequest.missing.join(", ")}. Attach/connect should not run against a guessed path.`
+        }
+      ];
+    }
+    const commands = workflowRequest?.commands ?? [];
+    return commands.map((command, index) => ({
+      label:
+        language === "ru"
+          ? index === 0
+            ? "Сначала dry-run"
+            : index === 1
+              ? "Затем connect/hooks dry-run"
+              : "Проверить capture readiness"
+          : index === 0
+            ? "Dry-run first"
+            : index === 1
+              ? "Then connect/hooks dry-run"
+              : "Verify capture readiness",
+      kind: index < commands.length - 1 ? "dry_run" : "read_only",
+      command,
+      reason:
+        language === "ru"
+          ? "Это не должно выполняться прямо из чата; команда показывает безопасный следующий шаг."
+          : "This should not execute directly from chat; the command shows the safe next step."
+    }));
+  }
+
+  if (intent === "pilot_qa") {
+    const commands = workflowRequest?.commands ?? [];
+    return commands.map((command, index) => ({
+      label:
+        language === "ru"
+          ? index === 0
+            ? "Product acceptance"
+            : index === 1
+              ? "Pilot report"
+              : "Browser QA"
+          : index === 0
+            ? "Product acceptance"
+            : index === 1
+              ? "Pilot report"
+              : "Browser QA",
+      kind: "read_only",
+      command,
+      reason:
+        language === "ru"
+          ? "Проверка должна проходить автономно и давать evidence, а не просить владельца быть QA."
+          : "The check should run autonomously and produce evidence instead of making the owner do QA."
+    }));
   }
 
   if (intent === "provenance") {

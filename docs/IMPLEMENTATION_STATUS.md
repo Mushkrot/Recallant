@@ -354,6 +354,12 @@ Stage 2 first slice is now implemented:
   checking whether the selected project is actually recording, showing what the agent has
   remembered, explaining why an active rule may not apply, and treating Google Drive/example lookup
   as controlled cross-project recall guidance.
+- Stage 2 onboarding/QA follow-up is implemented: Ask Recallant now recognizes project onboarding
+  and pilot-QA requests as first-class intents. Incomplete new-project onboarding asks for the
+  missing project folder path instead of guessing. Concrete onboarding requests produce an
+  attach/connect/doctor dry-run plan, including client-specific connect such as Cursor. Pilot-QA
+  requests produce product-acceptance, pilot-report, and browser-QA evidence commands without
+  executing them directly from chat.
 
 Stage 3 first slice is now implemented:
 

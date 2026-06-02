@@ -525,6 +525,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   attach asks produce a safe plan for the `Sources` workspace or `recallant source attach` without
   executing the write directly from chat. Verified by `npm run management-chat-ai:smoke` and
   `npm run review-ui:smoke`.
+- 2026-06-02 onboarding/QA follow-up: Management Chat now classifies project onboarding and pilot QA
+  as first-class intents. Missing new-project paths ask for clarification; concrete paths produce
+  attach/connect/doctor dry-run plans; pilot QA asks produce product-acceptance, pilot-report, and
+  browser-QA evidence commands. Verified by `npm run management-chat-ai:smoke` and
+  `npm run review-ui:smoke`.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 

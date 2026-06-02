@@ -850,6 +850,87 @@ try {
     throw new Error(`Connection check chat failed: ${JSON.stringify(connectionCheckChatJson)}`);
   }
 
+  const onboardingMissingPathChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Подключи новый проект к Recallant"
+    })
+  });
+  const onboardingMissingPathJson = await onboardingMissingPathChat.json();
+  if (
+    onboardingMissingPathChat.status !== 200 ||
+    onboardingMissingPathJson.intent !== "project_onboarding" ||
+    onboardingMissingPathJson.result_type !== "needs_clarification" ||
+    onboardingMissingPathJson.proposed_actions.some((action) => action.command) ||
+    !String(onboardingMissingPathJson.answer).includes("путь к папке проекта")
+  ) {
+    throw new Error(
+      `Onboarding missing path chat failed: ${JSON.stringify(onboardingMissingPathJson)}`
+    );
+  }
+
+  const onboardingConcreteChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Подключи /ai/new_project через Cursor и mandatory startup layer"
+    })
+  });
+  const onboardingConcreteJson = await onboardingConcreteChat.json();
+  if (
+    onboardingConcreteChat.status !== 200 ||
+    onboardingConcreteJson.intent !== "project_onboarding" ||
+    onboardingConcreteJson.result_type !== "dry_run_required" ||
+    !String(onboardingConcreteJson.proposed_actions[0]?.command).includes(
+      "recallant attach /ai/new_project --sandbox --dry-run"
+    ) ||
+    !String(onboardingConcreteJson.proposed_actions[1]?.command).includes(
+      "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
+    ) ||
+    !String(onboardingConcreteJson.proposed_actions[2]?.command).includes(
+      "recallant doctor --project-dir /ai/new_project --require-capture"
+    )
+  ) {
+    throw new Error(
+      `Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`
+    );
+  }
+
+  const pilotQaChat = await fetch(`${baseUrl}/api/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      message: "Прогони pilot QA и дай evidence report"
+    })
+  });
+  const pilotQaJson = await pilotQaChat.json();
+  if (
+    pilotQaChat.status !== 200 ||
+    pilotQaJson.intent !== "pilot_qa" ||
+    pilotQaJson.result_type !== "read_only_answer" ||
+    !pilotQaJson.proposed_actions.some((action) =>
+      String(action.command).includes("npm run pilot-report:smoke")
+    ) ||
+    !pilotQaJson.proposed_actions.some((action) =>
+      String(action.command).includes("npm run review-ui:playwright")
+    )
+  ) {
+    throw new Error(`Pilot QA chat failed: ${JSON.stringify(pilotQaJson)}`);
+  }
+
   const rememberedChat = await fetch(`${baseUrl}/api/management-chat`, {
     method: "POST",
     headers: {

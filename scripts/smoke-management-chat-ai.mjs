@@ -270,6 +270,80 @@ try {
   );
 
   queuedResponses.push({
+    language: "ru",
+    intent: "project_onboarding",
+    confidence: 0.9,
+    summary: "Owner wants to attach a new project but did not provide a path.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const incompleteOnboarding = await buildManagementChatResponse({
+    message: "Подключи новый проект к Recallant",
+    dashboard: baseDashboard
+  });
+  assert(
+    incompleteOnboarding.intent === "project_onboarding" &&
+      incompleteOnboarding.result_type === "needs_clarification" &&
+      String(incompleteOnboarding.answer).includes("не хватает данных") &&
+      !incompleteOnboarding.proposed_actions.some((action) => action.command),
+    `Incomplete onboarding should ask for project path: ${JSON.stringify(incompleteOnboarding)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "project_onboarding",
+    confidence: 0.93,
+    summary: "Owner wants to attach and connect a concrete project path.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const concreteOnboarding = await buildManagementChatResponse({
+    message: "Connect /ai/new_project with Cursor and mandatory startup hooks",
+    dashboard: baseDashboard
+  });
+  assert(
+    concreteOnboarding.intent === "project_onboarding" &&
+      concreteOnboarding.result_type === "dry_run_required" &&
+      String(concreteOnboarding.proposed_actions[0]?.command).includes(
+        "recallant attach /ai/new_project --sandbox --dry-run"
+      ) &&
+      String(concreteOnboarding.proposed_actions[1]?.command).includes(
+        "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
+      ) &&
+      String(concreteOnboarding.proposed_actions[2]?.command).includes(
+        "recallant doctor --project-dir /ai/new_project --require-capture"
+      ),
+    `Concrete onboarding did not produce attach/connect/doctor plan: ${JSON.stringify(concreteOnboarding)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "pilot_qa",
+    confidence: 0.9,
+    summary: "Owner wants autonomous pilot QA evidence.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const pilotQa = await buildManagementChatResponse({
+    message: "Run pilot QA and produce the evidence report",
+    dashboard: baseDashboard
+  });
+  assert(
+    pilotQa.intent === "pilot_qa" &&
+      pilotQa.result_type === "read_only_answer" &&
+      pilotQa.proposed_actions.some((action) =>
+        String(action.command).includes("npm run pilot-report:smoke")
+      ) &&
+      pilotQa.proposed_actions.some((action) =>
+        String(action.command).includes("npm run review-ui:playwright")
+      ),
+    `Pilot QA did not produce evidence commands: ${JSON.stringify(pilotQa)}`
+  );
+
+  queuedResponses.push({
     language: "en",
     intent: "provenance",
     confidence: 0.88,
@@ -295,7 +369,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 6, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 9, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);
