@@ -516,6 +516,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   verify local-AI semantic interpretation for colloquial Russian sandbox cleanup, ambiguous sandbox
   target clarification, developer-wide rule creation from non-exact wording, source-management
   requests, and provenance questions.
+- 2026-06-02 source-operation follow-up: source-management asks now return `needs_clarification`
+  when the owner has not provided a memory-space name or exact source location, and concrete source
+  attach asks produce a safe plan for the `Sources` workspace or `recallant source attach` without
+  executing the write directly from chat. Verified by `npm run management-chat-ai:smoke` and
+  `npm run review-ui:smoke`.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 

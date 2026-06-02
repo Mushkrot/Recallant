@@ -80,14 +80,16 @@ Current implemented slices include:
   ambiguous sandbox-target clarification without a runnable risky command, and developer-wide rule
   creation from non-exact wording. It also verifies source-management and provenance intents, so
   Ask Recallant can guide Memory Space/source operations and explain where source-linked facts came
-  from without exposing raw technical rows by default.
+  from without exposing raw technical rows by default. The source-management path now asks for
+  clarification when a memory-space name or source location is missing, and produces a safe attach
+  plan for concrete source paths without executing it directly from chat.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.
-- Review/Management UI layout pass: the management chat moved into the left rail so unused space
-  becomes useful, chat answers are capped in their own scroll area instead of pushing the whole
-  page down, cost records are summarized with technical rows collapsed, and Russian risky-action
-  chat responses no longer show English confirmation/action labels.
+- Review/Management UI layout pass: management chat is now the first central Workbench surface,
+  secondary panels sit below the main workspace, chat answers are capped in their own scroll area
+  instead of pushing the whole page down, cost records are summarized with technical rows collapsed,
+  and Russian risky-action chat responses no longer show English confirmation/action labels.
 - Server-wide Playwright QA tooling: global Playwright `1.60.0` is installed as an on-demand CLI on
   the owner server. `/usr/local/bin/playwright` uses shared browser binaries under
   `/ai/playwright/browsers`, with optional screenshots/reports under `/ai/playwright/reports`.

@@ -232,14 +232,41 @@ try {
   assert(
     sourceManagement.understanding.source === "local_ai" &&
       sourceManagement.intent === "source_management" &&
-      sourceManagement.result_type === "read_only_answer",
+      sourceManagement.result_type === "needs_clarification",
     `Source management intent failed: ${JSON.stringify(sourceManagement)}`
   );
   assert(
     sourceManagement.facts.source_count === 2 &&
-      String(sourceManagement.answer).includes("Memory Spaces") &&
-      sourceManagement.proposed_actions[0]?.label.includes("Memory Spaces"),
-    `Source management answer did not guide through Memory Spaces: ${JSON.stringify(sourceManagement)}`
+      String(sourceManagement.answer).includes("не хватает данных") &&
+      !sourceManagement.proposed_actions.some((action) => action.command),
+    `Incomplete source management request did not ask for clarification: ${JSON.stringify(sourceManagement)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "source_management",
+    confidence: 0.92,
+    summary: "Owner wants to attach a concrete local folder as a source.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const sourceAttach = await buildManagementChatResponse({
+    message: "Attach /ai/docs as a source to the current memory space",
+    dashboard: baseDashboard
+  });
+  assert(
+    sourceAttach.understanding.source === "local_ai" &&
+      sourceAttach.intent === "source_management" &&
+      sourceAttach.result_type === "read_only_answer",
+    `Concrete source attach intent failed: ${JSON.stringify(sourceAttach)}`
+  );
+  assert(
+    String(sourceAttach.answer).includes("attaching a source") &&
+      String(sourceAttach.proposed_actions[0]?.command).includes("recallant source attach") &&
+      String(sourceAttach.proposed_actions[0]?.command).includes("/ai/docs") &&
+      sourceAttach.proposed_actions[1]?.label === "Open Sources workspace",
+    `Concrete source attach answer did not produce a safe plan: ${JSON.stringify(sourceAttach)}`
   );
 
   queuedResponses.push({
@@ -268,7 +295,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 5, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 6, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

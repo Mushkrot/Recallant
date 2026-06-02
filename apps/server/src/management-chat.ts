@@ -130,6 +130,16 @@ type ChatInterpretation = {
   error?: string;
 };
 
+type SourceRequestAnalysis = {
+  operation: "create_space" | "attach_source" | "detach_source" | "inspect_sources";
+  missing: string[];
+  source_kind: string;
+  source_label: string;
+  source_uri: string;
+  space_name: string;
+  command?: string;
+};
+
 export async function buildManagementChatResponse(input: {
   message: string;
   dashboard: DashboardLike;
@@ -142,6 +152,8 @@ export async function buildManagementChatResponse(input: {
   const intent = interpretation.intent;
   const targetProject = resolveTargetProject(message, dashboard, interpretation);
   const facts = dashboardFacts(dashboard, targetProject);
+  const sourceRequest =
+    intent === "source_management" ? analyzeSourceRequest(message, facts) : undefined;
   const policyBlockReason = blockedByPolicyReason(message, language);
   const destructiveOrSensitive =
     Boolean(policyBlockReason) ||
@@ -165,7 +177,8 @@ export async function buildManagementChatResponse(input: {
     destructiveOrSensitive,
     confirmationRequired,
     policyBlockReason,
-    globalRuleResult
+    globalRuleResult,
+    sourceRequest
   });
   const proposedActions = actionsForIntent(
     intent,
@@ -175,7 +188,8 @@ export async function buildManagementChatResponse(input: {
     language,
     destructiveOrSensitive,
     globalRuleResult,
-    policyBlockReason
+    policyBlockReason,
+    sourceRequest
   );
   const answer = answerForIntent(
     intent,
@@ -184,7 +198,8 @@ export async function buildManagementChatResponse(input: {
     destructiveOrSensitive,
     interpretation,
     globalRuleResult,
-    policyBlockReason
+    policyBlockReason,
+    sourceRequest
   );
   return {
     language,
@@ -619,9 +634,13 @@ function resultTypeForIntent(input: {
   confirmationRequired: boolean;
   policyBlockReason?: string;
   globalRuleResult?: ManagementChatResponse["global_rule_result"];
+  sourceRequest?: SourceRequestAnalysis;
 }): ManagementChatResultType {
   if (input.policyBlockReason) return "blocked_by_policy";
   if (input.targetProject.ambiguous && input.destructiveOrSensitive) return "needs_clarification";
+  if (input.intent === "source_management" && input.sourceRequest?.missing.length) {
+    return "needs_clarification";
+  }
   if (input.intent === "global_rule") {
     if (input.globalRuleResult?.status === "created") return "safe_action";
     if (input.globalRuleResult?.status === "needs_review") return "confirmation_required";
@@ -797,6 +816,127 @@ function extractRuleText(message: string) {
     .trim();
 }
 
+function firstQuotedValue(message: string) {
+  const match = message.match(/["'«“]([^"'»”]+)["'»”]/u);
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractPathLike(message: string) {
+  const match = message.match(
+    /(?:^|\s)((?:\/[^\s,;]+)|(?:https?:\/\/[^\s,;]+)|(?:github:[^\s,;]+)|(?:gdrive:[^\s,;]+)|(?:gmail:[^\s,;]+)|(?:calendar:[^\s,;]+))/iu
+  );
+  return match?.[1]?.trim() ?? "";
+}
+
+function sourceKindFromMessage(message: string, sourceUri: string) {
+  if (
+    includesAny(message, ["google drive", "gdrive", "gmail", "calendar", "connector", "коннектор"])
+  ) {
+    return "connector";
+  }
+  if (includesAny(message, ["github:", "repo", "repository", "репозитор"])) {
+    return "repo";
+  }
+  if (includesAny(message, ["server path", "server", "сервер"])) {
+    return "server_path";
+  }
+  if (includesAny(message, ["document", "documents", "docs", "документ"])) {
+    return sourceUri ? "document_collection" : "manual";
+  }
+  if (sourceUri.startsWith("/")) return "workspace_path";
+  return "manual";
+}
+
+function sourceLabelFromMessage(message: string, sourceUri: string, sourceKind: string) {
+  const quoted = firstQuotedValue(message);
+  if (quoted) return quoted;
+  if (sourceUri) {
+    const parts = sourceUri.split("/").filter(Boolean);
+    return parts.at(-1) ?? sourceUri;
+  }
+  const labels: Record<string, string> = {
+    connector: "Connector source",
+    document_collection: "Document source",
+    repo: "Repository source",
+    server_path: "Server source",
+    workspace_path: "Workspace source",
+    manual: "Manual source"
+  };
+  return labels[sourceKind] ?? "Memory source";
+}
+
+function analyzeSourceRequest(
+  message: string,
+  facts: ManagementChatResponse["facts"]
+): SourceRequestAnalysis {
+  const wantsDetach = includesAny(message, [
+    "detach source",
+    "remove source",
+    "delete source",
+    "отцеп",
+    "удали источник",
+    "убери источник"
+  ]);
+  const wantsCreate = includesAny(message, [
+    "create",
+    "new memory space",
+    "virtual space",
+    "создай",
+    "новое простран",
+    "виртуальн"
+  ]);
+  const wantsAttach = includesAny(message, [
+    "attach",
+    "connect",
+    "add source",
+    "подключ",
+    "добав",
+    "папк",
+    "folder",
+    "source",
+    "источник"
+  ]);
+  const sourceUri = extractPathLike(message);
+  const sourceKind = sourceKindFromMessage(message, sourceUri);
+  const sourceLabel = sourceLabelFromMessage(message, sourceUri, sourceKind);
+  const spaceName = wantsCreate ? firstQuotedValue(message) : "";
+  const operation = wantsDetach
+    ? "detach_source"
+    : wantsCreate
+      ? "create_space"
+      : wantsAttach
+        ? "attach_source"
+        : "inspect_sources";
+  const missing: string[] = [];
+  if (operation === "create_space" && !spaceName) {
+    missing.push("memory space name");
+  }
+  if (
+    (operation === "attach_source" || (operation === "create_space" && wantsAttach)) &&
+    !sourceUri
+  ) {
+    missing.push("source location or connector reference");
+  }
+  if (operation === "detach_source" && facts.selected_source_name === "all sources") {
+    missing.push("exact source to detach");
+  }
+  const command =
+    operation === "attach_source" && sourceUri
+      ? `recallant source attach --project-id ${facts.current_project_id} --source-kind ${sourceKind} --label "${sourceLabel}" --uri "${sourceUri}"`
+      : operation === "detach_source" && facts.selected_source_name !== "all sources"
+        ? "Use the Sources workspace detach button for the selected source."
+        : undefined;
+  return {
+    operation,
+    missing,
+    source_kind: sourceKind,
+    source_label: sourceLabel,
+    source_uri: sourceUri,
+    space_name: spaceName,
+    command
+  };
+}
+
 function ruleTitle(ruleText: string, language: ManagementChatLanguage) {
   const compact = ruleText.replace(/\s+/g, " ").trim();
   const prefix = language === "ru" ? "Правило для всех проектов" : "Rule for all projects";
@@ -876,7 +1016,8 @@ function answerForIntent(
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
-  policyBlockReason?: string
+  policyBlockReason?: string,
+  sourceRequest?: SourceRequestAnalysis
 ) {
   if (language === "ru")
     return answerRu(
@@ -885,7 +1026,8 @@ function answerForIntent(
       destructiveOrSensitive,
       interpretation,
       globalRuleResult,
-      policyBlockReason
+      policyBlockReason,
+      sourceRequest
     );
   return answerEn(
     intent,
@@ -893,7 +1035,8 @@ function answerForIntent(
     destructiveOrSensitive,
     interpretation,
     globalRuleResult,
-    policyBlockReason
+    policyBlockReason,
+    sourceRequest
   );
 }
 
@@ -923,7 +1066,8 @@ function answerRu(
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
-  policyBlockReason?: string
+  policyBlockReason?: string,
+  sourceRequest?: SourceRequestAnalysis
 ) {
   const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
   if (policyBlockReason) {
@@ -967,7 +1111,13 @@ function answerRu(
     case "cross_project":
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "source_management":
-      return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Источники управляются в Memory Spaces: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
+      if (sourceRequest?.missing.length) {
+        return `${baseline}\n\nЯ понял это как управление источниками, но мне не хватает данных: ${sourceRequest.missing.join(", ")}. Уточни имя memory space и/или точный путь, repo, connector reference или document collection. Я не буду угадывать источник, потому что это может привязать память не туда.`;
+      }
+      if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
+        return `${baseline}\n\nЯ понял это как подключение источника к текущему memory space. Это безопасная операция записи в Recallant, но я не выполняю ее прямо из чата. Используй широкий Sources workspace или выполни команду из предложенного шага. Источник будет показан в provenance, а память проекта не смешается с другими spaces.`;
+      }
+      return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Источники управляются в Sources workspace: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
     case "provenance":
       return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
@@ -997,7 +1147,8 @@ function answerEn(
   destructiveOrSensitive: boolean,
   interpretation: ChatInterpretation,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
-  policyBlockReason?: string
+  policyBlockReason?: string,
+  sourceRequest?: SourceRequestAnalysis
 ) {
   const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
   if (policyBlockReason) {
@@ -1041,7 +1192,13 @@ function answerEn(
     case "cross_project":
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
     case "source_management":
-      return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Manage them in Memory Spaces: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
+      if (sourceRequest?.missing.length) {
+        return `${baseline}\n\nI understood this as source management, but I need more detail: ${sourceRequest.missing.join(", ")}. Name the memory space and/or provide the exact path, repo, connector reference, or document collection. I will not guess the source because that could bind memory to the wrong place.`;
+      }
+      if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
+        return `${baseline}\n\nI understood this as attaching a source to the current memory space. This is a safe Recallant write, but I will not execute it directly from chat. Use the wide Sources workspace or run the proposed command. The source will appear in provenance, and project memory will stay isolated from other spaces.`;
+      }
+      return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Manage them in the Sources workspace: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
     case "provenance":
       return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
@@ -1073,7 +1230,8 @@ function actionsForIntent(
   language: ManagementChatLanguage,
   destructiveOrSensitive: boolean,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
-  policyBlockReason?: string
+  policyBlockReason?: string,
+  sourceRequest?: SourceRequestAnalysis
 ): ManagementChatAction[] {
   if (policyBlockReason) {
     return [
@@ -1164,14 +1322,50 @@ function actionsForIntent(
   }
 
   if (intent === "source_management") {
+    if (sourceRequest?.missing.length) {
+      return [
+        {
+          label: language === "ru" ? "Уточнить источник" : "Clarify source details",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? `Нужно: ${sourceRequest.missing.join(", ")}. Recallant не должен угадывать путь или имя memory space.`
+              : `Needed: ${sourceRequest.missing.join(", ")}. Recallant should not guess the path or memory-space name.`
+        }
+      ];
+    }
+    if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
+      return [
+        {
+          label:
+            language === "ru"
+              ? "Подключить source через Recallant"
+              : "Attach source through Recallant",
+          kind: "read_only",
+          command: sourceRequest.command,
+          reason:
+            language === "ru"
+              ? "Эта команда добавляет источник к текущему memory space. Она не удаляет память и не меняет файлы проекта."
+              : "This command adds a source to the current memory space. It does not delete memory or change project files."
+        },
+        {
+          label: language === "ru" ? "Открыть Sources workspace" : "Open Sources workspace",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? "Широкая панель Sources показывает health/status и provenance для выбранного memory space."
+              : "The wide Sources workspace shows health/status and provenance for the selected memory space."
+        }
+      ];
+    }
     return [
       {
-        label: language === "ru" ? "Открыть Memory Spaces" : "Open Memory Spaces",
+        label: language === "ru" ? "Открыть Sources workspace" : "Open Sources workspace",
         kind: "read_only",
         reason:
           language === "ru"
-            ? "Там можно создать virtual memory space, attach source или detach source без удаления памяти."
-            : "Use it to create a virtual memory space, attach a source, or detach a source without deleting memory."
+            ? "Там можно создать memory space, attach source или detach source без удаления памяти."
+            : "Use it to create a memory space, attach a source, or detach a source without deleting memory."
       }
     ];
   }

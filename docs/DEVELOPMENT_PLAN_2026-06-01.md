@@ -171,6 +171,11 @@ Acceptance:
 - Done: `management-chat-ai:smoke` verifies local-AI semantic classification
   for source-management and provenance requests in addition to cleanup,
   ambiguity, and developer-wide rule capture.
+- Done: source-management requests now distinguish incomplete natural-language
+  asks from concrete source operations. Missing memory-space names or source
+  locations return `needs_clarification` with no runnable command; concrete
+  source attach requests return a safe plan pointing to the `Sources` workspace
+  or `recallant source attach` without executing from chat.
 - Remaining: broaden live local-AI semantic tests against real installed models
   and continue improving multi-project/source-target clarification UX.
 

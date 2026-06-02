@@ -338,6 +338,11 @@ Latest implementation checkpoints:
   rather than a cramped right rail. Verified by `npm run review-ui:smoke` and
   `npm run review-ui:playwright`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
+- 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
+  clarification when a memory-space name or source location is missing, and concrete source attach
+  requests produce a safe `Sources` workspace / `recallant source attach` plan without executing the
+  write directly from chat. Verified by `npm run management-chat-ai:smoke` and
+  `npm run review-ui:smoke`.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-01 Context-pack provenance follow-up: binding rules and working memories returned by `memory_get_context_pack` now include redacted `source_refs` and a compact `provenance` object with source count, primary source kind/id, source path when available, and a short summary. This lets agents answer "where did this come from?" without reading raw artifacts or project history files. Verified by `npm run phase6:smoke:graph`.
