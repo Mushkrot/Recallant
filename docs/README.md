@@ -18,6 +18,8 @@ is operational evidence, not the generic public quickstart.
 
 → [PUBLIC_READINESS.md](PUBLIC_READINESS.md) tracks Stage 7 packaging and public-readiness status.
 
+→ [RELEASE.md](RELEASE.md) records the repository URL, version policy, and release-candidate gate.
+
 Current operator note: Pre-Pilot Readiness, the first copied-project pilot, autonomous
 attach/detach, controlled cross-project recall, one-command owner-server CLI install/attach UX,
 AI-backed Management UI/chat with deterministic safety gates, detached local cleanup, installed CLI
@@ -48,38 +50,39 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 13. [DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md](DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md) — current documentation reconciliation and stale-status audit.
 14. [DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md) — next development plan after the first green acceptance surface.
 15. [PUBLIC_READINESS.md](PUBLIC_READINESS.md) — Stage 7 packaging/public-readiness status and smoke guardrail.
-16. [SELF_HOSTING.md](SELF_HOSTING.md) — install profiles, rollback, and self-hosted verification.
-17. [OWNER_SERVER.md](OWNER_SERVER.md) — owner-server deployment profile and operational constraints.
-18. [PRD.md](PRD.md) — goals, scope, and success criteria.
-19. [NON_GOALS.md](NON_GOALS.md) — explicit non-goals.
-20. [GLOSSARY.md](GLOSSARY.md) — terms and stable identifiers.
-21. [ARCHITECTURE.md](ARCHITECTURE.md) — components and data flows.
-22. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — Recallant server topology on Linux/Tailscale/private networks.
-23. [SETTINGS.md](SETTINGS.md) — server/developer/project/session/client settings architecture.
-24. [RUNTIME_STACK.md](RUNTIME_STACK.md) — TypeScript/Python tradeoffs and controlled hybrid runtime.
-25. [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md) — Postgres/domain/schema boundaries and future splits.
-26. [BACKUP_RESTORE.md](BACKUP_RESTORE.md) — practical backup/restore policy and restore verification.
-27. [MODEL_ROUTING.md](MODEL_ROUTING.md) — local and cloud models, routing, fallback.
-28. [DATA_MODEL.md](DATA_MODEL.md) — canonical database schema.
-29. [INGESTION.md](INGESTION.md) — how events enter the system.
-30. [IMPORT_POLICY.md](IMPORT_POLICY.md) — explicit imports and future connectors.
-31. [RETRIEVAL.md](RETRIEVAL.md) — agent search and response bounds.
-32. [MEMORY_GOVERNANCE.md](MEMORY_GOVERNANCE.md) — automatic memory creation, review, and instruction-grade policy.
-33. [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md) — inbox/rules/review workflow, duplicates, conflicts, rule hygiene, erasure.
-34. [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md) — how Recallant avoids filling model context with unnecessary files.
-35. [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md) — full closeout and natural-language intent recognition.
-36. [MCP_SPEC.md](MCP_SPEC.md) — MCP tool contract.
-37. [SECURITY.md](SECURITY.md) — threats and safety rules.
-38. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
-39. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
-40. [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental AgentMemory reference review for client connect, hooks, skills, viewer/replay, and evals.
-41. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
-42. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
-43. [QUICKSTART.md](QUICKSTART.md) — user journey: install, attach, connect, prove capture, Workbench, Ask Recallant.
-44. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
-45. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
-46. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
-47. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
+16. [RELEASE.md](RELEASE.md) — repository URL, version policy, and release-candidate gate.
+17. [SELF_HOSTING.md](SELF_HOSTING.md) — install profiles, rollback, and self-hosted verification.
+18. [OWNER_SERVER.md](OWNER_SERVER.md) — owner-server deployment profile and operational constraints.
+19. [PRD.md](PRD.md) — goals, scope, and success criteria.
+20. [NON_GOALS.md](NON_GOALS.md) — explicit non-goals.
+21. [GLOSSARY.md](GLOSSARY.md) — terms and stable identifiers.
+22. [ARCHITECTURE.md](ARCHITECTURE.md) — components and data flows.
+23. [DEPLOYMENT_TOPOLOGY.md](DEPLOYMENT_TOPOLOGY.md) — Recallant server topology on Linux/Tailscale/private networks.
+24. [SETTINGS.md](SETTINGS.md) — server/developer/project/session/client settings architecture.
+25. [RUNTIME_STACK.md](RUNTIME_STACK.md) — TypeScript/Python tradeoffs and controlled hybrid runtime.
+26. [STORAGE_STRATEGY.md](STORAGE_STRATEGY.md) — Postgres/domain/schema boundaries and future splits.
+27. [BACKUP_RESTORE.md](BACKUP_RESTORE.md) — practical backup/restore policy and restore verification.
+28. [MODEL_ROUTING.md](MODEL_ROUTING.md) — local and cloud models, routing, fallback.
+29. [DATA_MODEL.md](DATA_MODEL.md) — canonical database schema.
+30. [INGESTION.md](INGESTION.md) — how events enter the system.
+31. [IMPORT_POLICY.md](IMPORT_POLICY.md) — explicit imports and future connectors.
+32. [RETRIEVAL.md](RETRIEVAL.md) — agent search and response bounds.
+33. [MEMORY_GOVERNANCE.md](MEMORY_GOVERNANCE.md) — automatic memory creation, review, and instruction-grade policy.
+34. [MEMORY_MANAGEMENT.md](MEMORY_MANAGEMENT.md) — inbox/rules/review workflow, duplicates, conflicts, rule hygiene, erasure.
+35. [CONTEXT_BUDGET.md](CONTEXT_BUDGET.md) — how Recallant avoids filling model context with unnecessary files.
+36. [SESSION_CLOSEOUT.md](SESSION_CLOSEOUT.md) — full closeout and natural-language intent recognition.
+37. [MCP_SPEC.md](MCP_SPEC.md) — MCP tool contract.
+38. [SECURITY.md](SECURITY.md) — threats and safety rules.
+39. [OBSERVABILITY.md](OBSERVABILITY.md) — logs and metrics.
+40. [UPSTREAM_INTEGRATION.md](UPSTREAM_INTEGRATION.md) — OB1 as preferred foundation and upstream borrowing rules.
+41. [UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md](UPSTREAM_AGENTMEMORY_REVIEW_2026-06-01.md) — supplemental AgentMemory reference review for client connect, hooks, skills, viewer/replay, and evals.
+42. [REPO_CONTRACT.md](REPO_CONTRACT.md) — `AGENTS.md` / `PROJECT_LOG.md`, MCP client config, and session flow.
+43. [AGENT_ONBOARDING_CONTRACT.md](AGENT_ONBOARDING_CONTRACT.md) — exact Recallant startup, capture, checkpoint, closeout, and file ownership contract.
+44. [QUICKSTART.md](QUICKSTART.md) — user journey: install, attach, connect, prove capture, Workbench, Ask Recallant.
+45. [CLEANUP.md](CLEANUP.md) — score decay, archiving, self-cleaning, `recallant analyze`, `recallant cleanup`.
+46. [AGENT_IMPLEMENTATION_GUIDE.md](AGENT_IMPLEMENTATION_GUIDE.md) — implementation phases.
+47. [TASK_GRAPH.md](TASK_GRAPH.md) — task dependencies.
+48. [TEST_CONTRACT.md](TEST_CONTRACT.md) — required tests.
 
 ## ADR (Architecture Decision Records)
 
@@ -139,6 +142,7 @@ verification, deploy polish, and product improvement rather than stale spec-chec
 - [DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md](DOCUMENTATION_ALIGNMENT_AUDIT_2026-06-01.md) — current audit of stale status wording versus actual implementation state.
 - [DEVELOPMENT_PLAN_2026-06-01.md](DEVELOPMENT_PLAN_2026-06-01.md) — current forward plan: human workbench quality, AI-native management, source bindings, client connect/hooks, pilots, broader memory domains, and packaging.
 - [PUBLIC_READINESS.md](PUBLIC_READINESS.md) — current Stage 7 packaging/readiness status.
+- [RELEASE.md](RELEASE.md) — public repository URL, versioning, and release-candidate gate.
 
 Raw research dumps and old chat-derived notes are kept under [archive/README.md](archive/README.md). They are evidence, not canonical reading material.
 

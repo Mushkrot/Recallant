@@ -19,7 +19,7 @@ separately in [OWNER_SERVER.md](OWNER_SERVER.md).
 Clone the repository and preview the install plan first:
 
 ```bash
-git clone <recallant-repo-url> recallant
+git clone https://github.com/Mushkrot/Recallant.git recallant
 cd recallant
 ./scripts/install-recallant.sh --dry-run --profile single-user
 ```

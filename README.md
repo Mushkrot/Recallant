@@ -14,7 +14,7 @@ path, document set, connector, or no folder at all.
 Preview the install:
 
 ```bash
-git clone <recallant-repo-url> recallant
+git clone https://github.com/Mushkrot/Recallant.git recallant
 cd recallant
 ./scripts/install-recallant.sh --dry-run --profile single-user
 ```
@@ -22,7 +22,7 @@ cd recallant
 Install on a private server or workstation:
 
 ```bash
-git clone <recallant-repo-url> recallant
+git clone https://github.com/Mushkrot/Recallant.git recallant
 cd recallant
 ./scripts/install-recallant.sh --profile single-user
 ```

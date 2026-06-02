@@ -466,10 +466,14 @@ Acceptance:
   do not have to treat the owner's `/ai` layout as the default managed-server
   install. The existing `owner-server` profile remains available for the current
   owner host and compatibility.
+- Done: README and Quickstart now use the canonical HTTPS repository URL
+  `https://github.com/Mushkrot/Recallant.git` instead of placeholder clone
+  commands.
+- Done: [RELEASE.md](RELEASE.md) records the pre-release version policy,
+  semantic-versioning direction, and release-candidate gate.
 
 Remaining before a real public-release claim:
 
-- Real public repository URL, release/version policy, and public install URL.
 - Public-quality screenshots from the final Workbench visual direction.
 - Clean-host install validation outside the owner server.
 - Rollback docs tested on a non-owner host.

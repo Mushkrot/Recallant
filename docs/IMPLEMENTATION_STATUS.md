@@ -82,7 +82,9 @@ Current implemented slices include:
   Quickstart now describe the outside-user path from install preview through capture-active proof;
   self-hosting and owner-server docs are separated; installer dry-run can preview plans before
   dependency checks; neutral `managed-server` installs use generic Linux paths instead of owner
-  `/ai` paths; and `npm run public-readiness:smoke` guards the public onboarding contract.
+  `/ai` paths; README/Quickstart use the canonical repository URL; `docs/RELEASE.md` records the
+  release/version policy; and `npm run public-readiness:smoke` guards the public onboarding
+  contract.
   This is not yet a public-release claim: clean-host validation, final screenshots, release URL/
   version policy, rollback testing on a non-owner host, and final client mandatory-startup parity
   remain open.
@@ -980,10 +982,13 @@ Latest product-UX readiness checkpoint:
     not the product default.
   - `docs/PUBLIC_READINESS.md` tracks Stage 7 acceptance, current status, and remaining release
     blockers.
+  - `docs/RELEASE.md` records the canonical repository URL, pre-release version policy, semantic
+    versioning direction, and release-candidate gate.
   - `--profile managed-server` is the neutral public managed Linux profile; `--profile owner-server`
     remains the current owner-host compatibility profile.
   - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
-    for single-user, managed-server, owner-server, and the no-Docker-preview path.
+    for single-user, managed-server, owner-server, no-Docker-preview path, and no placeholder clone
+    URL in README/Quickstart.
 - `scripts/install-recallant.sh --dry-run --profile owner-server|single-user` prints the exact
   install plan and exits before file, Docker, database, or systemd writes. Dry-run now exits before
   dependency checks, so a new user can preview the plan even before Docker is available in `PATH`.

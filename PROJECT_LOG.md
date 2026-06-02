@@ -449,6 +449,10 @@ recallant.service`, local `/health`, and authenticated Review route check for
 - Added `--profile managed-server` as the neutral public managed Linux profile with
   `/etc/recallant/recallant.env` and `/var/lib/recallant`; `--profile owner-server` remains for the
   owner's `/ai` production host.
+- README and Quickstart now use `https://github.com/Mushkrot/Recallant.git` instead of placeholder
+  clone commands.
+- Added `docs/RELEASE.md` for the repository URL, pre-release version policy, semantic-versioning
+  direction, release-candidate gate, and public-default exclusions.
 - Added `npm run public-readiness:smoke`, which checks README/Quickstart/Self-hosting/
   Owner-server/Public-readiness docs and installer dry-run behavior for single-user, managed-server,
   owner-server, plus the no-Docker-preview path.

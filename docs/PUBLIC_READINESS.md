@@ -13,6 +13,8 @@ First packaging slice implemented:
   `owner-server` profile remains owner-specific;
 - installer dry-run is side-effect free and no longer requires Docker only to preview the plan;
 - root README points to the short install/attach path;
+- README and Quickstart now use the canonical repository URL instead of placeholder clone commands;
+- release/version policy and release-candidate gates are recorded in [RELEASE.md](RELEASE.md);
 - Quickstart is now the ordinary user path;
 - self-hosting details are separated from owner-server operational facts;
 - owner-server `/ai` assumptions are documented as one profile, not as the product default;
@@ -20,7 +22,6 @@ First packaging slice implemented:
 
 Still pending before a public release claim:
 
-- real public repository URL and release/version policy;
 - public-quality screenshots from the final Workbench visual direction;
 - broader external-user install run on a clean VM/container;
 - final rollback docs tested on a non-owner host;

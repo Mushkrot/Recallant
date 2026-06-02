@@ -88,6 +88,7 @@ mustInclude(
   readme,
   [
     "docs/QUICKSTART.md",
+    "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "./scripts/install-recallant.sh --dry-run --profile single-user",
     "recallant attach .",
     "Governed external memory"
@@ -100,6 +101,7 @@ mustInclude(
   quickstart,
   [
     "Preview the install",
+    "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "./scripts/install-recallant.sh --dry-run --profile single-user",
     "recallant attach .",
     "recallant connect codex --project-dir . --dry-run",
@@ -155,6 +157,26 @@ mustInclude(
     "npm run public-readiness:smoke"
   ],
   "docs/PUBLIC_READINESS.md"
+);
+
+const release = await read("docs/RELEASE.md");
+mustInclude(
+  release,
+  [
+    "https://github.com/Mushkrot/Recallant.git",
+    "package.json",
+    "semantic versioning",
+    "Release Candidate Gate",
+    "clean non-owner Linux host",
+    "What Must Not Be Released As Public Defaults"
+  ],
+  "docs/RELEASE.md"
+);
+
+assert(!readme.includes("<recallant-repo-url>"), "README.md still contains a placeholder repo URL");
+assert(
+  !quickstart.includes("<recallant-repo-url>"),
+  "docs/QUICKSTART.md still contains a placeholder repo URL"
 );
 
 const ownerPlan = runInstallerDryRun(["--dry-run", "--profile", "owner-server"], {

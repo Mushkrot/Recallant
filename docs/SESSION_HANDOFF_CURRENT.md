@@ -24,7 +24,9 @@ This is the current handoff for the next Recallant session. Start here after rea
   Quickstart, Self-hosting, Owner-server, and Public-readiness docs now describe the outside-user
   path separately from owner-server `/ai` operations, and `npm run public-readiness:smoke` guards
   the packaging contract. The neutral `managed-server` install profile now uses generic Linux paths
-  while `owner-server` remains owner-host compatibility. It is not a public-release claim yet.
+  while `owner-server` remains owner-host compatibility. README/Quickstart use the canonical
+  repository URL, and `docs/RELEASE.md` records the release/version policy. It is not a
+  public-release claim yet.
 
 ## Current State
 
@@ -133,6 +135,8 @@ exits before dependency checks, so previewing the install plan does not require 
 available.
 The installer also has a neutral `managed-server` profile with `/etc/recallant/recallant.env` and
 `/var/lib/recallant`; the current `owner-server` profile remains for the owner's `/ai` host.
+README/Quickstart now use `https://github.com/Mushkrot/Recallant.git`, and `docs/RELEASE.md`
+records the pre-release version policy plus the release-candidate gate.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.
@@ -182,8 +186,9 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 11. Run `git status --short --branch`.
 12. Run `git log --oneline -8`.
 13. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
-14. Review `docs/PUBLIC_READINESS.md`, `docs/QUICKSTART.md`, and `docs/SELF_HOSTING.md` if the next
-    task touches Stage 7 packaging, install, or public onboarding.
+14. Review `docs/PUBLIC_READINESS.md`, `docs/RELEASE.md`, `docs/QUICKSTART.md`, and
+    `docs/SELF_HOSTING.md` if the next task touches Stage 7 packaging, install, release policy, or
+    public onboarding.
 
 ## Active Work Order
 
