@@ -496,6 +496,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   rail is a lower secondary workspace, and mobile puts Ask Recallant before the memory-space
   navigator. `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new layout
   order and readability.
+- 2026-06-02 Workbench refinement follow-up: Ask Recallant is larger and visually primary, the
+  Sources workspace now shows active/detached/provenance-filter summary, and
+  Selected Detail/Cost/Cleanup/Settings live in compact governed Operations panels. `review-ui:smoke`
+  and `review-ui:playwright` pass and screenshots are under `/ai/playwright/reports`.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 

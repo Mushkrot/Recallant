@@ -1264,6 +1264,16 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
 }
 
 function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
+  const sources = currentProjectSources(data);
+  const active = sources.filter((row) => row.status === "active");
+  const detached = sources.filter((row) => row.status === "detached");
+  const sourceFilters = asRecord(data.source_filters);
+  const selectedSource = asRecord(sourceFilters.selected_source);
+  const selectedSourceLabel =
+    selectedSource.display_label ??
+    selectedSource.label ??
+    sourceFilters.selected_source_id ??
+    "All sources";
   return `<section class="panel source-workbench" id="sources">
     <div class="section-head">
       <div>
@@ -1273,6 +1283,11 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
       <p>Attach folders, repositories, documents, connectors, or virtual/manual sources without merging unrelated memory.</p>
     </div>
     ${renderSourceResult(source)}
+    <div class="source-overview">
+      <span><strong>${escapeHtml(active.length)}</strong> active</span>
+      <span><strong>${escapeHtml(detached.length)}</strong> detached</span>
+      <span><strong>${escapeHtml(selectedSourceLabel)}</strong> provenance filter</span>
+    </div>
     <div class="source-workspace-grid">
       <div>
         <h3>Sources for selected space</h3>
@@ -1763,8 +1778,11 @@ function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState)
         ? `<input type="hidden" name="memory_id" value="${escapeHtml(selectedMemoryId)}" />`
         : ""
     }
-    <textarea name="message" rows="4" placeholder="Ask what to review next, explain settings, or propose cleanup.">${escapeHtml(chat?.question ?? "")}</textarea>
-    <button type="submit">Ask</button>
+    <textarea name="message" rows="4" placeholder="Ask Recallant what to check, change, connect, remember, or clean up.">${escapeHtml(chat?.question ?? "")}</textarea>
+    <div class="chat-submit-row">
+      <button type="submit">Ask Recallant</button>
+      <span>Private, policy protected</span>
+    </div>
   </form>
   ${
     chat?.response
@@ -1787,7 +1805,7 @@ function renderManagementChat(data: ReviewDashboardData, chat?: ChatRenderState)
           }
           ${renderChatActions(chat.response.proposed_actions, chat.response.language)}
         </article>`
-      : `<p class="empty">Ask in normal language. Recallant will answer read-only questions directly and turn risky requests into a dry-run/confirmation plan.</p>`
+      : `<p class="empty">No answer yet.</p>`
   }`;
 }
 
@@ -1873,19 +1891,19 @@ function renderDashboard(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Recallant Workbench</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f3f5f4; color: #20242c; }
-    body { margin: 0; background: #f3f5f4; }
-    header { padding: 22px 32px; border-bottom: 1px solid #d7dedb; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-    h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); gap: 20px; padding: 20px; align-items: start; max-width: 1720px; margin: 0 auto; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #eef2f1; color: #20242c; }
+    body { margin: 0; background: #eef2f1; }
+    header { padding: 20px 32px; border-bottom: 1px solid #d5dddb; background: #fbfdfc; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    main { display: grid; grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); gap: 22px; padding: 22px; align-items: start; max-width: 1760px; margin: 0 auto; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     h3 { letter-spacing: 0; }
     a { color: inherit; text-decoration: none; }
-    .panel { background: #fff; border: 1px solid #d7dedb; border-radius: 8px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.04); }
+    .panel { background: #fff; border: 1px solid #d7dedb; border-radius: 8px; padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.04); }
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
     .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
-    .command-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr); gap: 14px; align-items: start; }
+    .command-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr); gap: 18px; align-items: start; }
     .workbench-main { display: grid; gap: 16px; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
@@ -1906,8 +1924,13 @@ function renderDashboard(
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
     .left-rail { align-self: start; position: sticky; top: 12px; }
-    .secondary-workspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .secondary-workspace .panel { margin-bottom: 0; }
+    .secondary-workspace { display: block; }
+    .operations-workspace { background: transparent; border: 0; box-shadow: none; padding: 2px 0 0; }
+    .operation-panels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+    .operation-panel { border: 1px solid #d7dedb; border-radius: 8px; background: #fff; padding: 12px; margin: 0; }
+    .operation-panel summary { border: 0; padding: 0; margin: 0; }
+    .operation-panel summary span { font-size: 14px; font-weight: 750; }
+    .operation-panel[open] { grid-column: span 2; }
     .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 12px; }
     .section-head h2 { margin-bottom: 0; }
     .section-head p { max-width: 520px; margin: 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
@@ -1957,7 +1980,10 @@ function renderDashboard(
     .source-form input, .source-form select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; background: #fff; color: #20242c; min-width: 0; }
     .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
     .source-form .checkbox-line input { width: auto; }
-    .source-workbench { border-color: #cdded9; }
+    .source-workbench { border-color: #cdded9; background: #fbfdfc; }
+    .source-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
+    .source-overview span { border: 1px solid #d4e1dd; border-radius: 7px; padding: 9px; background: #fff; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .source-overview strong { display: block; color: #166454; font-size: 15px; }
     .source-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
     .source-management { display: grid; gap: 10px; }
     .source-list { display: grid; gap: 8px; }
@@ -2025,19 +2051,22 @@ function renderDashboard(
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
-    .ask-panel { border-color: #bdd7cf; background: #feffff; }
-    .ask-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 18px; align-items: start; }
-    .ask-work h2 { font-size: 18px; margin-bottom: 12px; }
-    .memory-profile { border-left: 1px solid #d9e4df; padding-left: 16px; color: #303845; }
+    .ask-panel { border-color: #b8d4cc; background: #fdfefe; padding: 0; overflow: hidden; }
+    .ask-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.7fr); gap: 0; align-items: stretch; }
+    .ask-work { padding: 24px; }
+    .ask-work h2 { font-size: 24px; margin-bottom: 14px; }
+    .memory-profile { border-left: 1px solid #d9e4df; padding: 24px 20px; color: #303845; background: #f4f8f7; }
     .memory-profile h3 { margin: 0 0 7px; font-size: 15px; overflow-wrap: anywhere; }
     .memory-profile .state { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 11px; margin-bottom: 8px; }
     .memory-profile p { margin: 7px 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
     .memory-profile-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
     .memory-profile-metrics span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 11px; }
     .memory-profile-metrics strong { display: block; color: #20242c; font-size: 13px; }
-    .chat-form { display: grid; gap: 8px; }
-    .chat-form textarea { resize: vertical; min-height: 144px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 11px; font: inherit; font-size: 14px; color: #20242c; background: #fff; }
-    .chat-form button { justify-self: start; }
+    .chat-form { display: grid; gap: 10px; }
+    .chat-form textarea { resize: vertical; min-height: 210px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 13px; font: inherit; font-size: 15px; color: #20242c; background: #fff; }
+    .chat-submit-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .chat-submit-row span { color: #607080; font-size: 12px; }
+    .chat-form button { justify-self: start; border-color: #8fb9ad; background: #eef8f5; color: #145a4d; font-weight: 700; }
     .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 680px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
     .chat-answer p { margin: 0 0 9px; color: #303845; font-size: 13px; line-height: 1.45; }
@@ -2059,8 +2088,8 @@ function renderDashboard(
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid, .secondary-workspace { grid-template-columns: 1fr; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; padding-left: 0; padding-top: 14px; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .secondary-workspace { display: block; } .secondary-workspace .panel { margin-bottom: 14px; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } }
+    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid { grid-template-columns: 1fr; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } }
   </style>
 </head>
 <body>
@@ -2146,23 +2175,32 @@ function renderDashboard(
         ${renderRuleFilters(data)}
         ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
       </section>
-      <section class="secondary-workspace" aria-label="Secondary workbench panels">
-      <section class="panel">
-        <h2>Selected Detail</h2>
-        ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
-      </section>
-      <section class="panel">
-        <h2>Cost / Paid API</h2>
-        ${renderCosts(data)}
-      </section>
-      <section class="panel">
-        <h2>Cleanup / Forget</h2>
-        ${renderCleanup(data, detach)}
-      </section>
-      <section class="panel" id="settings">
-        <h2>Settings</h2>
-        ${renderSettings(data, setting)}
-      </section>
+      <section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Governed operations</span>
+            <h2>Operations</h2>
+          </div>
+          <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
+        </div>
+        <div class="operation-panels">
+          <details class="operation-panel" open>
+            <summary><span>Selected Detail</span></summary>
+            ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
+          </details>
+          <details class="operation-panel">
+            <summary><span>Cost / Paid API</span></summary>
+            ${renderCosts(data)}
+          </details>
+          <details class="operation-panel">
+            <summary><span>Cleanup / Forget</span></summary>
+            ${renderCleanup(data, detach)}
+          </details>
+          <details class="operation-panel" id="settings">
+            <summary><span>Settings</span></summary>
+            ${renderSettings(data, setting)}
+          </details>
+        </div>
       </section>
     </section>
   </main>

@@ -419,7 +419,11 @@ try {
     "Cost by project/provider/model/purpose",
     "Pending paid API approvals",
     "local cleanup dry-run",
-    "Ask what to review next",
+    "Ask Recallant what to check",
+    "Private, policy protected",
+    "Governed operations",
+    "Operations",
+    "provenance filter",
     "Local search by meaning"
   ];
   const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
@@ -429,12 +433,14 @@ try {
     );
   }
   const requiredLayoutContracts = [
-    "grid-template-columns: minmax(300px, 340px) minmax(0, 1fr)",
+    "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr)",
     ".ask-layout { display: grid",
     ".primary-workspace { display: grid",
     ".command-grid { display: grid",
+    ".source-overview { display: grid",
     ".source-workspace-grid { display: grid",
-    ".secondary-workspace { display: grid",
+    ".secondary-workspace { display: block",
+    ".operation-panels { display: grid",
     ".chat-answer { border-top",
     "max-height: 680px",
     "@media (max-width: 1180px)",
@@ -445,7 +451,9 @@ try {
   );
   const askRecallantIndex = htmlText.indexOf('id="ask-recallant"');
   const sourcesIndex = htmlText.indexOf('id="sources"');
-  const secondaryWorkspaceIndex = htmlText.indexOf('class="secondary-workspace"');
+  const secondaryWorkspaceIndex = htmlText.indexOf(
+    'class="secondary-workspace operations-workspace"'
+  );
   const visibleTechnicalLeaks = [
     "<h3>embedding_route</h3>",
     "<h3>instruction_grade</h3>",
@@ -489,7 +497,8 @@ try {
     ) ||
     !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
     !json.import_candidates.some(
-      (memory) => memory.memory_id === importMemoryId && memory.provenance?.source_path === "AGENTS.md"
+      (memory) =>
+        memory.memory_id === importMemoryId && memory.provenance?.source_path === "AGENTS.md"
     ) ||
     json.selected_detail?.memory?.id !== importMemoryId ||
     !json.selected_detail?.source_refs?.some((ref) => ref.source_id === importSource.event_id) ||
@@ -520,7 +529,8 @@ try {
         )
     ) ||
     !json.source_filters?.sources?.some(
-      (source) => source.source_id === importedDocSource.id && source.source_health?.status === "ready"
+      (source) =>
+        source.source_id === importedDocSource.id && source.source_health?.status === "ready"
     ) ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"
