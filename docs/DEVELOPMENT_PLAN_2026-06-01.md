@@ -252,8 +252,17 @@ Acceptance:
   project-local hook kit under `.recallant/hooks/` without touching global
   client config. The scripts are fail-soft: missing `recallant` or timeout exits
   0 so normal agent work is not broken.
+- Done: the local hook kit now exposes explicit lifecycle targets for session
+  start, owner prompt, tool result, generic event capture, pre-compaction
+  checkpoint, and stop/closeout. Server-mode closeout now also records an
+  explicit closeout event before closing the session.
+- Done: `npm run connect:smoke` proves the hook scripts are fail-soft when
+  `recallant` is unavailable, then runs the hooks through a temporary Recallant
+  wrapper and verifies prompt, tool-result, checkpoint, and closeout events in
+  Postgres.
 - Remaining: safe global/client config writers, local backups for global config,
-  dedicated client hook installation, and richer hook capture/spooling.
+  dedicated client hook installation where each client supports it, and richer
+  hook spooling/replay diagnostics.
 
 ## Stage 5 - More Real Pilots
 

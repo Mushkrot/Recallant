@@ -555,7 +555,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - Follow-up local hook kit: `recallant connect --install-local-hooks` installs optional
   project-local scripts under `.recallant/hooks/` only. It writes no global client config, reports
   `hook_status=local_hook_kit_installed`, and the scripts exit 0 if `recallant` is missing or a
-  timeout occurs.
+  timeout occurs. The kit now includes explicit targets for session start, owner prompt, tool
+  result, pre-compaction checkpoint, generic event capture, and stop/closeout; `connect:smoke`
+  verifies those hooks write prompt/tool/checkpoint/closeout events through a temporary Recallant
+  wrapper.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 

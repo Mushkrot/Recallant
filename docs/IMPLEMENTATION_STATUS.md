@@ -124,7 +124,10 @@ Current implemented slices include:
   `agent-closeout` instead of treating project registration as sufficient readiness.
 - Connect local hook kit: `recallant connect --install-local-hooks` can write optional
   project-local fail-soft hook scripts under `.recallant/hooks/` without touching global client
-  config. Scripts exit 0 when `recallant` is unavailable or times out.
+  config. Scripts exit 0 when `recallant` is unavailable or times out. The kit now includes explicit
+  targets for session start, owner prompt, tool result, generic event capture, pre-compaction
+  checkpoint, and stop/closeout, and server-mode closeout writes an explicit `agent_closeout` event
+  before closing the session.
 - Review dashboard capture readiness telemetry: projects now expose whether they are only
   registered or have actually run capture, including last context read, last memory write, last
   checkpoint, capture event count, and captured decision count.

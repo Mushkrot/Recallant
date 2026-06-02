@@ -164,3 +164,16 @@ recallant agent-event --kind decision --text "<important decision>"
 recallant agent-checkpoint --summary "<current state>"
 recallant agent-closeout --summary "<what changed and what is next>"
 ```
+
+For clients that can run project-local hooks, `recallant connect --install-local-hooks` installs
+fail-soft wrappers under `.recallant/hooks/`:
+
+- `start-session.sh` records the session start and reads a Context Pack.
+- `user-prompt.sh` records owner prompts as prompt capture events.
+- `tool-result.sh` records meaningful tool or command results.
+- `capture-event.sh` remains the generic decision/action/test capture target.
+- `pre-compaction.sh` writes a checkpoint before context compaction.
+- `stop-session.sh` and `closeout.sh` close out a session and leave an explicit closeout event.
+
+These hooks exit 0 when Recallant is unavailable or times out. They are safe local integration
+targets, not global client config writers.

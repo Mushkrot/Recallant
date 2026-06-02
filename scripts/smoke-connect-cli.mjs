@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
@@ -161,11 +162,17 @@ assert(
   `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
 );
 const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
+const promptHookScript = await readFile(`${projectDir}/.recallant/hooks/user-prompt.sh`, "utf8");
+const toolHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-result.sh`, "utf8");
 assert(
   hookScript.includes("exit 0") &&
     hookScript.includes("timeout") &&
     hookScript.includes("agent-event"),
   `Capture hook should be fail-soft and call agent-event: ${hookScript}`
+);
+assert(
+  promptHookScript.includes("--kind prompt") && toolHookScript.includes("--kind tool_result"),
+  `Prompt/tool hooks should target explicit capture kinds: ${promptHookScript} ${toolHookScript}`
 );
 const hookFailSoft = spawnSync(`${projectDir}/.recallant/hooks/capture-event.sh`, ["action"], {
   input: "hook smoke should not break agent workflow",
@@ -177,25 +184,45 @@ assert(
   `Hook script should exit 0 when recallant is unavailable: ${hookFailSoft.stderr}`
 );
 
-runCli(["agent-start", "--project-dir", projectDir, "--task-hint", "connect smoke capture"]);
-runCli([
-  "agent-event",
-  "--project-dir",
-  projectDir,
-  "--kind",
-  "decision",
-  "--text",
-  "Connect smoke decision: doctor --require-capture must prove actual Recallant capture."
-]);
-runCli([
-  "agent-checkpoint",
-  "--project-dir",
-  projectDir,
-  "--focus",
-  "Connect smoke captured a real session",
-  "--next-step",
-  "Use doctor --require-capture as an automated readiness gate."
-]);
+const hookBin = `${projectDir}/hook-bin`;
+await mkdir(hookBin, { recursive: true });
+const wrapperPath = `${hookBin}/recallant`;
+await writeFile(
+  wrapperPath,
+  `#!/usr/bin/env sh\nexec node ${JSON.stringify(`${process.cwd()}/apps/cli/dist/index.js`)} "$@"\n`
+);
+await chmod(wrapperPath, 0o755);
+const hookEnv = {
+  ...env,
+  PATH: `${hookBin}:${process.env.PATH ?? ""}`,
+  RECALLANT_PROJECT_DIR: projectDir
+};
+
+function runHook(name, args = [], input = "") {
+  const result = spawnSync(`${projectDir}/.recallant/hooks/${name}`, args, {
+    input,
+    env: hookEnv,
+    encoding: "utf8"
+  });
+  assert(result.status === 0, `${name} should exit 0: ${result.stderr}`);
+}
+
+runHook("start-session.sh", ["connect smoke hook session"]);
+runHook(
+  "user-prompt.sh",
+  [],
+  "Owner prompt captured through the Recallant local hook kit."
+);
+runHook(
+  "tool-result.sh",
+  [],
+  "Tool result captured through the Recallant local hook kit."
+);
+runHook(
+  "pre-compaction.sh",
+  [],
+  "Pre-compaction checkpoint captured through the Recallant local hook kit."
+);
 const requireCaptureAfter = runCliRaw(["doctor", "--project-dir", projectDir, "--require-capture"]);
 assert(
   requireCaptureAfter.status === 0,
@@ -206,5 +233,36 @@ assert(
     requireCaptureAfter.json?.capture_readiness?.status === "capture_active",
   `doctor --require-capture missing active readiness: ${JSON.stringify(requireCaptureAfter.json)}`
 );
+runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
+
+const client = new pg.Client({ connectionString: databaseUrl });
+await client.connect();
+try {
+  const captured = await client.query(
+    `
+      SELECT kind, payload->'metadata'->>'capture_kind' AS capture_kind
+      FROM events
+      WHERE project_id = $1
+      ORDER BY created_at ASC
+    `,
+    [attached.project_id]
+  );
+  const capturedPairs = new Set(
+    captured.rows.map((row) => `${row.kind}:${row.capture_kind ?? ""}`)
+  );
+  for (const expected of [
+    "turn_user:agent_prompt",
+    "tool_result:agent_tool_result",
+    "checkpoint:agent_checkpoint",
+    "system:agent_closeout"
+  ]) {
+    assert(
+      capturedPairs.has(expected),
+      `Hook capture missing ${expected}: ${JSON.stringify(captured.rows)}`
+    );
+  }
+} finally {
+  await client.end();
+}
 
 process.stdout.write("Connect CLI smoke passed\n");

@@ -370,10 +370,22 @@ function classifyCloseoutIntent(message: string, hasActiveSession: boolean) {
 
 function eventKindForAgentKind(kind: string) {
   const normalized = kind.trim().toLowerCase();
+  if (normalized === "prompt" || normalized === "user_prompt") return "turn_user";
+  if (normalized === "assistant_response" || normalized === "assistant") return "turn_assistant";
+  if (normalized === "tool" || normalized === "tool_result" || normalized === "command_result") {
+    return "tool_result";
+  }
   if (normalized === "test" || normalized === "verification") return "tool_result";
   if (normalized === "file_change") return "file_change";
   if (normalized === "checkpoint") return "checkpoint";
-  if (normalized === "context_read" || normalized === "closeout") return "system";
+  if (
+    normalized === "context_read" ||
+    normalized === "closeout" ||
+    normalized === "pre_compaction" ||
+    normalized === "stop"
+  ) {
+    return "system";
+  }
   return "other";
 }
 
@@ -2295,6 +2307,19 @@ async function runAgentCloseout(argv: readonly string[]) {
     return;
   }
   try {
+    const event = await database.appendEvent({
+      session_id: state.session_id,
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
+      metadata: { capture_kind: "agent_closeout", checkpoint_payload: payload },
+      raw_artifacts: [],
+      dedup_key: dedupHash("agent-closeout", {
+        session_id: state.session_id,
+        payload,
+        created_at: new Date().toISOString()
+      })
+    });
     const closeout = await database.closeout(
       state.session_id,
       payload,
@@ -2306,7 +2331,9 @@ async function runAgentCloseout(argv: readonly string[]) {
       ...state,
       status: "closed",
       updated_at: now,
-      last_checkpoint_at: now
+      last_checkpoint_at: now,
+      last_memory_write_at: now,
+      last_event_id: String(event.event_id)
     });
     process.stdout.write(
       `${JSON.stringify(
@@ -2530,6 +2557,16 @@ function localHookKitFiles() {
       'recallant agent-event --project-dir "$PROJECT_DIR" --kind "${1:-action}" --text "$TEXT"',
     stdinText: true
   });
+  const promptScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --kind prompt --title "User prompt captured by hook" --text "$TEXT"',
+    stdinText: true
+  });
+  const toolResultScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --kind tool_result --title "Tool result captured by hook" --text "$TEXT"',
+    stdinText: true
+  });
   const startScript = failSoftHookScript({
     command:
       'recallant agent-start --project-dir "$PROJECT_DIR" --task-hint "${1:-hook session start}"'
@@ -2542,6 +2579,16 @@ function localHookKitFiles() {
   const closeoutScript = failSoftHookScript({
     command:
       'recallant agent-closeout --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}" --summary "$TEXT"',
+    stdinText: true
+  });
+  const preCompactionScript = failSoftHookScript({
+    command:
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume after compaction from Recallant context.}"',
+    stdinText: true
+  });
+  const stopScript = failSoftHookScript({
+    command:
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume from Recallant context in the next session.}" --summary "$TEXT"',
     stdinText: true
   });
   const readme = `# Recallant Local Hook Kit
@@ -2559,9 +2606,12 @@ They are fail-soft by design:
 Client integrations can call:
 
 - \`start-session.sh "<task hint>"\` at session start;
-- \`capture-event.sh action|decision|test < input.txt\` after meaningful prompts/tool results;
-- \`checkpoint.sh < summary.txt\` before compaction or pause;
-- \`closeout.sh < summary.txt\` when a session stops.
+- \`user-prompt.sh < prompt.txt\` when the owner sends a prompt;
+- \`tool-result.sh < result.txt\` after meaningful tool/command results;
+- \`capture-event.sh action|decision|test < input.txt\` for generic capture;
+- \`pre-compaction.sh < summary.txt\` before context compaction;
+- \`checkpoint.sh < summary.txt\` before pause or handoff;
+- \`stop-session.sh < summary.txt\` or \`closeout.sh < summary.txt\` when a session stops.
 `;
   return [
     {
@@ -2575,13 +2625,33 @@ Client integrations can call:
       executable: true
     },
     {
+      path: ".recallant/hooks/user-prompt.sh",
+      content: promptScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/tool-result.sh",
+      content: toolResultScript,
+      executable: true
+    },
+    {
       path: ".recallant/hooks/capture-event.sh",
       content: eventScript,
       executable: true
     },
     {
+      path: ".recallant/hooks/pre-compaction.sh",
+      content: preCompactionScript,
+      executable: true
+    },
+    {
       path: ".recallant/hooks/checkpoint.sh",
       content: checkpointScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/stop-session.sh",
+      content: stopScript,
       executable: true
     },
     {
