@@ -1009,7 +1009,10 @@ function sourceLabel(row: Record<string, unknown>) {
     sources.find((source) => source.status === "active") ??
     sources[0];
   if (primarySource) {
-    return `${sourceKindLabel(primarySource.source_kind)}: ${String(primarySource.label ?? primarySource.uri ?? "Unnamed source")}`;
+    if (primarySource.source_kind === "workspace_path" && primarySource.is_primary === true) {
+      return "Workspace folder attached";
+    }
+    return `${sourceKindLabel(primarySource.source_kind)}: ${sourceDisplayTitle(primarySource)}`;
   }
   const path = row.primary_path;
   if (path) return `Workspace folder: ${String(path)}`;
@@ -1029,6 +1032,15 @@ function sourceKindLabel(value: unknown) {
     other: "Source"
   };
   return labels[String(value ?? "")] ?? "Source";
+}
+
+function sourceDisplayTitle(source: Record<string, unknown>) {
+  const sourceKind = String(source.source_kind ?? "");
+  const label = String(source.display_label ?? source.label ?? "").trim();
+  if (sourceKind === "workspace_path" && source.is_primary === true) {
+    return "Primary workspace folder";
+  }
+  return label || sourceKindLabel(sourceKind);
 }
 
 function attachedSourceSummary(row: Record<string, unknown>) {
@@ -1191,7 +1203,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
         });
         return `<article class="source-card">
           <div>
-            <strong>${escapeHtml(source.display_label ?? source.label ?? sourceKindLabel(source.source_kind))}</strong>
+            <strong>${escapeHtml(sourceDisplayTitle(source))}</strong>
             <span class="source-health ${escapeHtml(health.status)}">${escapeHtml(health.label)}</span>
             <span class="source-kind">${escapeHtml(sourceKindLabel(source.source_kind))}</span>
             <p>${escapeHtml(source.uri ?? "No location recorded")}</p>
@@ -1295,10 +1307,9 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
   const sourceFilters = asRecord(data.source_filters);
   const selectedSource = asRecord(sourceFilters.selected_source);
   const selectedSourceLabel =
-    selectedSource.display_label ??
-    selectedSource.label ??
-    sourceFilters.selected_source_id ??
-    "All sources";
+    Object.keys(selectedSource).length > 0
+      ? sourceDisplayTitle(selectedSource)
+      : (sourceFilters.selected_source_id ?? "All sources");
   return `<section class="panel source-workbench" id="sources">
     <div class="section-head">
       <div>
@@ -1541,7 +1552,7 @@ function renderRuleFilters(data: ReviewDashboardData) {
     link("All sources", { source_id: "all" }),
     ...sources.slice(0, 8).map((source) => {
       const sourceId = source.source_id ?? source.id;
-      const label = source.display_label ?? source.label ?? sourceKindLabel(source.source_kind);
+      const label = sourceDisplayTitle(source);
       return link(String(label), { source_id: sourceId });
     })
   ].join(" ");
@@ -1549,7 +1560,7 @@ function renderRuleFilters(data: ReviewDashboardData) {
   const selectedSourceNote =
     current.source_id !== "all" && Object.keys(selectedSource).length > 0
       ? `<p class="filter-note">Showing source-linked memories from ${escapeHtml(
-          selectedSource.display_label ?? selectedSource.label ?? current.source_id
+          sourceDisplayTitle(selectedSource) ?? current.source_id
         )}. Conflicts are still shown globally so high-risk issues are not hidden.</p>`
       : "";
   return `<div class="rule-filters" aria-label="Active rule filters">

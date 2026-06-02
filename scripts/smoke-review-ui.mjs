@@ -378,6 +378,7 @@ try {
     "Source Map",
     "Memory space sources",
     "Sources for selected space",
+    "Primary workspace folder",
     "Primary local source ready",
     "Source ready",
     "Connector source needs setup",

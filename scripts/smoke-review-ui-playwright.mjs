@@ -226,6 +226,7 @@ async function run() {
 
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
     await visibleBox(desktop.locator("#activity-replay"), "desktop Activity / Replay");
+    await desktop.getByText("Primary workspace folder").first().waitFor();
     await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
     await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
     await desktop.getByText("ready to cite").waitFor();

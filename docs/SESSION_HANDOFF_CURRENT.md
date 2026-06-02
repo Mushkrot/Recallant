@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~69%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~65%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -53,6 +53,8 @@ copy, and explicitly reminds that raw secrets stay outside Recallant memory.
 The Source Map now also shows health counts in human language: active sources, ready-to-cite
 sources, sources that need setup, and sources that need attention. The Review UI and Playwright
 smokes cover ready local sources, planned connectors, and missing paths.
+Primary workspace sources use short human-visible labels such as "Primary workspace folder"; exact
+paths, ids, and raw source values remain available in source cards and Technical details.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request; it explicitly does not attach sources or touch files, secrets, or
 external connectors in that chat action.

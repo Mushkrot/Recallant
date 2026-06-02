@@ -6,7 +6,7 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~69%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~65%` complete. Structured result types, safe action typing,
@@ -358,6 +358,9 @@ Latest implementation checkpoints:
 - 2026-06-02 Source Map health-summary follow-up: the Workbench now summarizes sources as active,
   ready to cite, needing setup, and needing attention, and both HTML/API and Playwright fixtures
   cover ready local sources, planned connectors, and missing paths.
+- 2026-06-02 source label polish: visible Source Map and filter labels now use short human titles
+  such as "Primary workspace folder" for primary workspace sources; raw ids and exact values remain
+  in the detailed source card/Technical details.
 - 2026-06-02 Ask Recallant virtual-space follow-up: natural-language source-management requests can
   safely create an empty virtual memory space when the name is clear. The response and smoke assert
   that files, sources, secrets, and external connectors are not touched in that chat action.

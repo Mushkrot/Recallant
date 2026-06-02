@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~68% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~69% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~65% completed. Core risk-typed responses, safe-action and
@@ -138,6 +138,9 @@ Current implemented slices include:
 - Source Map now includes a human-readable health summary for ready-to-cite, needs-setup, and
   needs-attention sources, with UI and Playwright smoke fixtures covering ready local sources,
   planned connectors, and missing local/server paths.
+- Primary workspace sources now show a short human title on the visible Workbench layer instead of
+  generated project/source labels; exact paths and ids remain available in the source card and
+  Technical details.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.
