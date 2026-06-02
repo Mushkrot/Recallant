@@ -177,6 +177,19 @@ const importedDocSource = await db.attachProjectSource({
   uri: "AGENTS.md",
   metadata: { smoke: true, purpose: "source filter provenance smoke" }
 });
+const plannedConnectorSource = await db.attachProjectSource({
+  project_id: projectId,
+  source_kind: "connector",
+  label: "Google Drive planned connector",
+  metadata: { smoke: true, purpose: "connector source health smoke" }
+});
+const missingPathSource = await db.attachProjectSource({
+  project_id: projectId,
+  source_kind: "server_path",
+  label: "Missing server docs path",
+  uri: `/tmp/recallant-missing-source-${randomUUID()}`,
+  metadata: { smoke: true, purpose: "missing source health smoke" }
+});
 const candidate = await db.createAgentMemory({
   memory_type: "procedure",
   scope: "developer",
@@ -358,7 +371,7 @@ try {
     "Memory Spaces",
     "Activity / Replay",
     "Project Actions",
-    "1 active source",
+    "4 active sources",
     "AI control surface",
     "Current memory space",
     "Sources",
@@ -367,6 +380,11 @@ try {
     "Sources for selected space",
     "Primary local source ready",
     "Source ready",
+    "Connector source needs setup",
+    "Local path not found",
+    "ready to cite",
+    "need setup",
+    "need attention",
     "Show source memories",
     "Use as provenance filter",
     "Create a memory space",
@@ -535,11 +553,34 @@ try {
             source.source_id === importedDocSource.id &&
             source.source_health?.status === "ready" &&
             source.display_label === "AGENTS.md"
+        ) &&
+        project.sources?.some(
+          (source) =>
+            source.source_id === plannedConnectorSource.id &&
+            source.source_health?.status === "needs_setup" &&
+            source.source_health?.label === "Connector source needs setup"
+        ) &&
+        project.sources?.some(
+          (source) =>
+            source.source_id === missingPathSource.id &&
+            source.source_health?.status === "needs_attention" &&
+            source.source_health?.label === "Local path not found"
         )
     ) ||
     !json.source_filters?.sources?.some(
       (source) =>
         source.source_id === importedDocSource.id && source.source_health?.status === "ready"
+    ) ||
+    !json.source_filters?.sources?.some(
+      (source) =>
+        source.source_id === plannedConnectorSource.id &&
+        source.source_health?.status === "needs_setup" &&
+        String(source.source_health?.reason ?? "").includes("Raw secrets must stay outside")
+    ) ||
+    !json.source_filters?.sources?.some(
+      (source) =>
+        source.source_id === missingPathSource.id &&
+        source.source_health?.status === "needs_attention"
     ) ||
     !String(json.project_cleanup?.local_cleanup_command ?? "").includes(
       "recallant local-cleanup"

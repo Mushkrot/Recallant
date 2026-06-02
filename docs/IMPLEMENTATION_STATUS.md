@@ -69,7 +69,7 @@ Current implemented slices include:
 - Stage 2 — AI-native Management Chat: ~63% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~48% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~52% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~82% completed. Separate connect lifecycle, MCP setup,
@@ -128,6 +128,9 @@ Current implemented slices include:
   unreadable path, or wrong folder/file shape guidance.
 - Connector project sources now report as planned/governed setup instead of generic missing
   location, and the health copy explicitly says raw secrets must stay outside Recallant memory.
+- Source Map now includes a human-readable health summary for ready-to-cite, needs-setup, and
+  needs-attention sources, with UI and Playwright smoke fixtures covering ready local sources,
+  planned connectors, and missing local/server paths.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.

@@ -11,7 +11,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 2 — AI-native Management Chat: `~63%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~48%` complete. Virtual spaces and source attach/detach
+- Stage 3 — Memory Spaces and Sources: `~52%` complete. Virtual spaces and source attach/detach
   flows are implemented; full source-health depth and cross-view source filtering are pending.
 - Stage 4 — Client Connect and Hook Capture: `~82%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
@@ -50,6 +50,9 @@ bindings without reading source contents, so the UI can distinguish ready local 
 missing, unreadable, or wrong-shape paths.
 Connector source health now uses planned/governed setup language rather than generic missing-path
 copy, and explicitly reminds that raw secrets stay outside Recallant memory.
+The Source Map now also shows health counts in human language: active sources, ready-to-cite
+sources, sources that need setup, and sources that need attention. The Review UI and Playwright
+smokes cover ready local sources, planned connectors, and missing paths.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

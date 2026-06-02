@@ -78,6 +78,19 @@ async function run() {
 
   const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
   await db.ensureProject(projectPath);
+  await db.attachProjectSource({
+    project_id: projectId,
+    source_kind: "connector",
+    label: "Google Drive planned connector",
+    metadata: { smoke: "playwright", purpose: "planned connector visual state" }
+  });
+  await db.attachProjectSource({
+    project_id: projectId,
+    source_kind: "server_path",
+    label: "Missing server docs path",
+    uri: `/tmp/recallant-playwright-missing-source-${randomUUID()}`,
+    metadata: { smoke: "playwright", purpose: "missing source visual state" }
+  });
   await db.pool.query(
     `
       INSERT INTO project_settings (project_id, key, value, updated_by)
@@ -213,6 +226,11 @@ async function run() {
 
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
     await visibleBox(desktop.locator("#activity-replay"), "desktop Activity / Replay");
+    await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
+    await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
+    await desktop.getByText("ready to cite").waitFor();
+    await desktop.getByText("need setup").waitFor();
+    await desktop.getByText("need attention").waitFor();
     await visibleBox(desktop.locator("#review"), "desktop Review");
     await visibleBox(desktop.locator("#review .review-overview"), "desktop Review overview");
     await visibleBox(desktop.locator("#settings"), "desktop Settings");

@@ -1084,6 +1084,23 @@ function sourceHealth(source: Record<string, unknown>) {
   };
 }
 
+function sourceHealthCounts(sources: Array<Record<string, unknown>>) {
+  const counts = {
+    active: sources.filter((source) => source.status === "active").length,
+    detached: sources.filter((source) => source.status === "detached").length,
+    ready: 0,
+    needsSetup: 0,
+    needsAttention: 0
+  };
+  for (const source of sources) {
+    const status = sourceHealth(source).status;
+    if (status === "ready") counts.ready += 1;
+    else if (status === "needs-setup") counts.needsSetup += 1;
+    else if (status === "needs-attention") counts.needsAttention += 1;
+  }
+  return counts;
+}
+
 function renderSourceResult(source?: SourceRenderState) {
   if (!source?.result && !source?.message) return "";
   const result = asRecord(source.result);
@@ -1274,8 +1291,7 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
 
 function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
   const sources = currentProjectSources(data);
-  const active = sources.filter((row) => row.status === "active");
-  const detached = sources.filter((row) => row.status === "detached");
+  const counts = sourceHealthCounts(sources);
   const sourceFilters = asRecord(data.source_filters);
   const selectedSource = asRecord(sourceFilters.selected_source);
   const selectedSourceLabel =
@@ -1293,8 +1309,10 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
     </div>
     ${renderSourceResult(source)}
     <div class="source-overview">
-      <span><strong>${escapeHtml(active.length)}</strong> active sources</span>
-      <span><strong>${escapeHtml(detached.length)}</strong> detached sources</span>
+      <span><strong>${escapeHtml(counts.active)}</strong> active sources</span>
+      <span><strong>${escapeHtml(counts.ready)}</strong> ready to cite</span>
+      <span><strong>${escapeHtml(counts.needsSetup)}</strong> need setup</span>
+      <span><strong>${escapeHtml(counts.needsAttention)}</strong> need attention</span>
       <span><strong>${escapeHtml(selectedSourceLabel)}</strong> selected source</span>
     </div>
     <div class="source-workspace-grid">
@@ -2121,7 +2139,7 @@ function renderDashboard(
     .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
     .source-form .checkbox-line input { width: auto; }
     .source-workbench { border-color: #cdded9; background: #fbfdfc; }
-    .source-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 14px; }
+    .source-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 0 0 14px; }
     .source-overview span { border: 1px solid #d4e1dd; border-radius: 7px; padding: 9px; background: #fff; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
     .source-overview strong { display: block; color: #166454; font-size: 15px; }
     .source-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
