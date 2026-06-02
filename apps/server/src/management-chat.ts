@@ -222,6 +222,7 @@ export async function buildManagementChatResponse(input: {
     destructiveOrSensitive,
     globalRuleResult,
     policyBlockReason,
+    sourceActionResult,
     sourceRequest,
     workflowRequest
   );
@@ -1348,7 +1349,7 @@ function answerRu(
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "source_management":
       if (sourceActionResult?.status === "created") {
-        return `${baseline}\n\nЯ создал пустое memory space “${sourceActionResult.space_name}”. Это безопасная операция внутри Recallant: файлы проекта, источники, секреты и внешние connectors не тронуты.\n\nСледующий шаг: если этому space нужен источник, подключи его отдельно через Source Map или попроси меня подготовить безопасный attach-source шаг.`;
+        return `${baseline}\n\nЯ создал пустое пространство памяти “${sourceActionResult.space_name}”. Это безопасная операция внутри Recallant: файлы проекта, источники, секреты и внешние подключенные сервисы не тронуты.\n\nСледующий шаг: если этому пространству нужен источник, подключи его отдельно через Source Map или попроси меня подготовить безопасный шаг подключения источника.`;
       }
       if (sourceActionResult?.status === "skipped") {
         return `${baseline}\n\nЯ понял это как source/memory-space операцию, но не выполнил ее автоматически: ${sourceActionResult.reason}`;
@@ -1495,6 +1496,7 @@ function actionsForIntent(
   destructiveOrSensitive: boolean,
   globalRuleResult?: ManagementChatResponse["global_rule_result"],
   policyBlockReason?: string,
+  sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
   workflowRequest?: WorkflowRequestAnalysis
 ): ManagementChatAction[] {
@@ -1587,6 +1589,26 @@ function actionsForIntent(
   }
 
   if (intent === "source_management") {
+    if (sourceActionResult?.status === "created") {
+      return [
+        {
+          label: language === "ru" ? "Пространство памяти создано" : "Memory space created",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? `Создано пустое пространство “${sourceActionResult.space_name}”. Источники, файлы, секреты и внешние подключенные сервисы не тронуты.`
+              : `Created empty space “${sourceActionResult.space_name}”. Sources, files, secrets, and connectors were not touched.`
+        },
+        {
+          label: language === "ru" ? "Подключить источник отдельно" : "Attach a source separately",
+          kind: "read_only",
+          reason:
+            language === "ru"
+              ? "Если этому space нужен источник, добавь его через Source Map отдельным безопасным шагом."
+              : "If this space needs a source, add it through Source Map as a separate safe step."
+        }
+      ];
+    }
     if (sourceRequest?.missing.length) {
       return [
         {

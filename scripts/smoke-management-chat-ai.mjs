@@ -244,6 +244,56 @@ try {
     `Incomplete source management request did not ask for clarification: ${JSON.stringify(sourceManagement)}`
   );
 
+  let createdSpaceInput = null;
+  queuedResponses.push({
+    language: "ru",
+    intent: "source_management",
+    confidence: 0.94,
+    summary: "Owner wants a virtual personal operations memory space with no folder yet.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const virtualSpace = await buildManagementChatResponse({
+    message: "Создай виртуальное пространство «Personal operations»",
+    dashboard: baseDashboard,
+    database: {
+      createMemorySpace: async (input) => {
+        createdSpaceInput = input;
+        return {
+          project_id: "55555555-5555-4555-8555-555555555555",
+          name: input.name,
+          project_kind: input.projectKind,
+          memory_domain: input.memoryDomain,
+          primary_path: null
+        };
+      }
+    }
+  });
+  assert(
+    virtualSpace.understanding.source === "local_ai" &&
+      virtualSpace.intent === "source_management" &&
+      virtualSpace.result_type === "safe_action" &&
+      virtualSpace.source_action_result?.status === "created" &&
+      virtualSpace.source_action_result?.project_id === "55555555-5555-4555-8555-555555555555",
+    `Virtual memory space creation did not become a safe action: ${JSON.stringify(virtualSpace)}`
+  );
+  assert(
+    createdSpaceInput?.name === "Personal operations" &&
+      createdSpaceInput?.projectKind === "personal_domain" &&
+      createdSpaceInput?.memoryDomain === "personal_life" &&
+      createdSpaceInput?.primaryPath === undefined,
+    `Virtual memory space was created with wrong inputs: ${JSON.stringify(createdSpaceInput)}`
+  );
+  assert(
+    virtualSpace.proposed_actions[0]?.label === "Пространство памяти создано" &&
+      virtualSpace.proposed_actions[0]?.kind === "read_only" &&
+      virtualSpace.proposed_actions.every((action) => !action.command) &&
+      String(virtualSpace.answer).includes("файлы проекта") &&
+      String(virtualSpace.answer).includes("внешние подключенные сервисы не тронуты"),
+    `Virtual memory space response did not explain safe boundaries: ${JSON.stringify(virtualSpace)}`
+  );
+
   queuedResponses.push({
     language: "en",
     intent: "source_management",
@@ -371,7 +421,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 9, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 10, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

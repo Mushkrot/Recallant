@@ -66,10 +66,10 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~68% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~63% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~65% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~52% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~54% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~82% completed. Separate connect lifecycle, MCP setup,
@@ -100,6 +100,9 @@ Current implemented slices include:
   from without exposing raw technical rows by default. The source-management path now asks for
   clarification when a memory-space name or source location is missing, and produces a safe attach
   plan for concrete source paths without executing it directly from chat.
+- Ask Recallant now has a covered safe-action path for creating an empty virtual memory space from
+  natural language. The action is Recallant-only: it creates the logical space and explicitly does
+  not touch files, sources, secrets, or external connectors.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.

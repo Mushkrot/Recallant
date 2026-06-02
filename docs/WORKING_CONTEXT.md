@@ -9,10 +9,10 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~68%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~63%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~65%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~52%` complete. The source-binding model and source API
+- Stage 3 — Memory Spaces and Sources: `~54%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~82%` complete. Connect separation, hook install
@@ -358,6 +358,9 @@ Latest implementation checkpoints:
 - 2026-06-02 Source Map health-summary follow-up: the Workbench now summarizes sources as active,
   ready to cite, needing setup, and needing attention, and both HTML/API and Playwright fixtures
   cover ready local sources, planned connectors, and missing paths.
+- 2026-06-02 Ask Recallant virtual-space follow-up: natural-language source-management requests can
+  safely create an empty virtual memory space when the name is clear. The response and smoke assert
+  that files, sources, secrets, and external connectors are not touched in that chat action.
 - 2026-06-02 Workbench composition follow-up: Ask Recallant is the first central work surface, with
   a compact current memory-space profile beside it on desktop and first on mobile. Selected-source
   health and create/attach/detach source flows moved into a wide `Sources` workspace. Selected
