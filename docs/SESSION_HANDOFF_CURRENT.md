@@ -66,6 +66,9 @@ secrets, or external connectors.
 Full core QA after these changes passed on 2026-06-02: `npm run smoke:core`, including product
 acceptance capture/recall, pilot report, project sources, Review UI, Management Chat AI, onboarding,
 connect, installer, and cross-client smokes.
+Full core QA after the later focused Workbench views, Ask source attach, and doctor owner-summary
+changes also passed on 2026-06-02: `npm run smoke:core`, including Management Chat AI, Review UI,
+Product Acceptance capture/recall, Pilot Report, connect, installer, and cross-client smokes.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.

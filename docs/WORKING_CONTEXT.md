@@ -436,6 +436,10 @@ Latest implementation checkpoints:
   plain-language readiness summary that distinguishes attached/configured projects from projects
   that are actually recording memory. It reports project attachment, MCP client config, hook capture
   readiness, proven recording state, and the next practical step. Verified by `npm run connect:smoke`.
+- 2026-06-02 full core QA checkpoint after focused Workbench views, Ask source attach, and doctor
+  owner-summary changes: `npm run smoke:core` passed end-to-end, including Management Chat AI,
+  Review UI, Product Acceptance capture/recall, Pilot Report, connect, installer, and cross-client
+  smokes.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-02 Pilot-report artifact follow-up: `npm run pilot-report:smoke` now persists that JSON
   report under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes
