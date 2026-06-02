@@ -1049,19 +1049,19 @@ export class RecallantDb {
       healthLabel = `${status.replaceAll("_", " ")} source`;
       healthReason = "This source is not in normal active state.";
       actionNeeded = "Review the source state before relying on it.";
+    } else if (sourceKind === "connector") {
+      healthStatus = "needs_setup";
+      healthLabel = "Connector source needs setup";
+      healthReason =
+        "The connector reference is recorded, but connector capture/authorization is not active in this slice. Raw secrets must stay outside Recallant memory.";
+      actionNeeded =
+        "Keep it as a planned source until connector capability binding is implemented through governed confirmation.";
     } else if (locationRequired && !uri) {
       healthStatus = "needs_setup";
       healthLabel = "Location missing";
       healthReason =
         "This source type normally needs a folder, repository, connector, or document reference.";
       actionNeeded = "Add a location/reference or convert it to a manual/virtual source.";
-    } else if (sourceKind === "connector") {
-      healthStatus = "needs_setup";
-      healthLabel = "Connector source needs setup";
-      healthReason =
-        "The source is recorded, but connector capture/authorization is not active in this slice.";
-      actionNeeded =
-        "Keep it as a planned source until connector capability binding is implemented.";
     } else if (["workspace_path", "repo", "server_path"].includes(sourceKind) && isAbsolute(uri)) {
       if (!existsSync(uri)) {
         healthStatus = "needs_attention";

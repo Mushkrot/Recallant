@@ -85,6 +85,23 @@ const manualSource = runCli([
 ]);
 assert(manualSource.source?.source_kind === "manual", `Manual source attach failed: ${JSON.stringify(manualSource)}`);
 
+const connectorSource = runCli([
+  "source",
+  "attach",
+  "--project-id",
+  virtualProjectId,
+  "--source-kind",
+  "connector",
+  "--label",
+  "Google Drive planned connector"
+]);
+assert(
+  connectorSource.source?.source_health?.status === "needs_setup" &&
+    connectorSource.source?.source_health?.label === "Connector source needs setup" &&
+    String(connectorSource.source?.source_health?.reason).includes("Raw secrets must stay outside"),
+  `Connector source should require governed setup without storing secrets: ${JSON.stringify(connectorSource)}`
+);
+
 const missingSource = runCli([
   "source",
   "attach",
@@ -104,7 +121,7 @@ assert(
 );
 
 const listedSources = runCli(["source", "list", "--project-id", virtualProjectId]);
-assert(listedSources.count === 3, `Expected three attached sources: ${JSON.stringify(listedSources)}`);
+assert(listedSources.count === 4, `Expected four attached sources: ${JSON.stringify(listedSources)}`);
 assert(
   listedSources.sources.some(
     (source) =>
@@ -121,6 +138,15 @@ assert(
       source.source_health?.status === "needs_attention"
   ),
   `Missing local source should remain visible as needs attention: ${JSON.stringify(listedSources)}`
+);
+assert(
+  listedSources.sources.some(
+    (source) =>
+      source.id === connectorSource.source.id &&
+      source.source_health?.status === "needs_setup" &&
+      source.source_health?.label === "Connector source needs setup"
+  ),
+  `Connector source should remain visible as planned setup: ${JSON.stringify(listedSources)}`
 );
 
 const detached = runCli([
@@ -144,7 +170,7 @@ const listedSpaces = runCli(["memory-space", "list"]);
 const listedVirtual = listedSpaces.memory_spaces.find((space) => space.project_id === virtualProjectId);
 assert(listedVirtual, `Virtual memory space missing from list: ${JSON.stringify(listedSpaces)}`);
 assert(
-  listedVirtual.sources.length === 3,
+  listedVirtual.sources.length === 4,
   `Memory space list should include source bindings: ${JSON.stringify(listedVirtual)}`
 );
 
