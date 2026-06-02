@@ -1202,7 +1202,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
   </div>`;
 }
 
-function renderMemorySpaces(data: ReviewDashboardData, source?: SourceRenderState) {
+function renderMemorySpaces(data: ReviewDashboardData) {
   const spaceList =
     data.projects.length === 0
       ? `<p class="empty">No memory spaces yet.</p>`
@@ -1239,12 +1239,50 @@ function renderMemorySpaces(data: ReviewDashboardData, source?: SourceRenderStat
           .join("")}
       </div>`;
   return `<div class="memory-spaces">
-    ${renderSourceResult(source)}
     ${spaceList}
-    <h3>Sources for selected space</h3>
-    ${renderSelectedSources(data)}
-    ${renderMemorySpaceForms(data)}
   </div>`;
+}
+
+function renderCurrentMemoryProfile(data: ReviewDashboardData) {
+  const project = currentProject(data);
+  const state = captureState(project);
+  const sources = currentProjectSources(data);
+  const activeSources = sources.filter((source) => source.status === "active");
+  const title = projectDisplayName(project) || data.current_project_id;
+  return `<aside class="memory-profile" aria-label="Current memory space profile">
+    <span class="section-kicker">Current memory space</span>
+    <h3>${escapeHtml(title)}</h3>
+    <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+    <p>${escapeHtml(sourceLabel(project))}</p>
+    <p>${escapeHtml(sharingPolicy(project))}</p>
+    <div class="memory-profile-metrics">
+      <span><strong>${escapeHtml(activeSources.length)}</strong> active sources</span>
+      <span><strong>${escapeHtml(project.memory_count ?? 0)}</strong> memories</span>
+      <span><strong>${escapeHtml(project.event_count ?? 0)}</strong> events</span>
+    </div>
+  </aside>`;
+}
+
+function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
+  return `<section class="panel source-workbench" id="sources">
+    <div class="section-head">
+      <div>
+        <span class="section-kicker">Memory space sources</span>
+        <h2>Sources</h2>
+      </div>
+      <p>Attach folders, repositories, documents, connectors, or virtual/manual sources without merging unrelated memory.</p>
+    </div>
+    ${renderSourceResult(source)}
+    <div class="source-workspace-grid">
+      <div>
+        <h3>Sources for selected space</h3>
+        ${renderSelectedSources(data)}
+      </div>
+      <div class="source-management">
+        ${renderMemorySpaceForms(data)}
+      </div>
+    </div>
+  </section>`;
 }
 
 function selectedSettingValue(rows: Array<Record<string, unknown>>, key: string) {
@@ -1835,20 +1873,20 @@ function renderDashboard(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Recallant Workbench</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f4f6f8; color: #20242c; }
-    body { margin: 0; }
-    header { padding: 20px 30px; border-bottom: 1px solid #d9dee7; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f3f5f4; color: #20242c; }
+    body { margin: 0; background: #f3f5f4; }
+    header { padding: 22px 32px; border-bottom: 1px solid #d7dedb; background: #ffffff; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(290px, 360px) minmax(0, 1fr); gap: 18px; padding: 18px; align-items: start; max-width: 1680px; margin: 0 auto; }
+    main { display: grid; grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); gap: 20px; padding: 20px; align-items: start; max-width: 1720px; margin: 0 auto; }
     section, aside { min-width: 0; }
     h2 { font-size: 15px; margin: 0 0 10px; }
     h3 { letter-spacing: 0; }
     a { color: inherit; text-decoration: none; }
-    .panel { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .panel { background: #fff; border: 1px solid #d7dedb; border-radius: 8px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.04); }
     .workbench-nav { display: flex; gap: 8px; flex-wrap: wrap; }
     .workbench-nav a { border: 1px solid #d2dae6; border-radius: 999px; padding: 6px 9px; font-size: 12px; background: #f8fafc; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr); gap: 14px; align-items: start; }
-    .workbench-main { display: grid; gap: 14px; }
+    .workbench-main { display: grid; gap: 16px; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
     .row-link, .project-link { display: block; border-radius: 6px; }
@@ -1867,9 +1905,13 @@ function renderDashboard(
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: #f7fafb; }
-    .left-rail, .right-rail { align-self: start; }
-    .right-rail { grid-column: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .right-rail .panel { margin-bottom: 0; }
+    .left-rail { align-self: start; position: sticky; top: 12px; }
+    .secondary-workspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .secondary-workspace .panel { margin-bottom: 0; }
+    .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 12px; }
+    .section-head h2 { margin-bottom: 0; }
+    .section-head p { max-width: 520px; margin: 0; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .section-kicker { display: block; color: #166454; font-size: 11px; font-weight: 750; letter-spacing: 0; margin-bottom: 4px; text-transform: uppercase; }
     .attention-list { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .action-plan p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .cleanup-flow p, .detach-result p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
@@ -1915,6 +1957,9 @@ function renderDashboard(
     .source-form input, .source-form select { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; background: #fff; color: #20242c; min-width: 0; }
     .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
     .source-form .checkbox-line input { width: auto; }
+    .source-workbench { border-color: #cdded9; }
+    .source-workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
+    .source-management { display: grid; gap: 10px; }
     .source-list { display: grid; gap: 8px; }
     .source-card, .source-result { border: 1px solid #e1e7ef; border-radius: 7px; padding: 9px; background: #fbfcfe; }
     .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
@@ -1954,7 +1999,7 @@ function renderDashboard(
     .conflict-compare p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; }
     .conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .conflict-actions form { margin: 0; }
-    button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+    button { border: 1px solid #aeb9c8; border-radius: 6px; background: #fff; padding: 6px 9px; font: inherit; font-size: 12px; cursor: pointer; }
     button:hover { background: #f2f6fb; }
     button.danger { border-color: #b77f62; color: #8a3c15; }
     .actions.disabled span { color: #788292; background: #f9fafb; }
@@ -1980,8 +2025,18 @@ function renderDashboard(
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
+    .ask-panel { border-color: #bdd7cf; background: #feffff; }
+    .ask-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 18px; align-items: start; }
+    .ask-work h2 { font-size: 18px; margin-bottom: 12px; }
+    .memory-profile { border-left: 1px solid #d9e4df; padding-left: 16px; color: #303845; }
+    .memory-profile h3 { margin: 0 0 7px; font-size: 15px; overflow-wrap: anywhere; }
+    .memory-profile .state { display: inline-flex; border-radius: 999px; padding: 3px 8px; font-size: 11px; margin-bottom: 8px; }
+    .memory-profile p { margin: 7px 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .memory-profile-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+    .memory-profile-metrics span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 11px; }
+    .memory-profile-metrics strong { display: block; color: #20242c; font-size: 13px; }
     .chat-form { display: grid; gap: 8px; }
-    .chat-form textarea { resize: vertical; min-height: 112px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; font-size: 14px; color: #20242c; background: #fff; }
+    .chat-form textarea { resize: vertical; min-height: 144px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 11px; font: inherit; font-size: 14px; color: #20242c; background: #fff; }
     .chat-form button { justify-self: start; }
     .chat-answer { border-top: 1px solid #e5e9f0; margin-top: 12px; padding-top: 12px; max-height: 680px; overflow: auto; overscroll-behavior: contain; }
     .chat-answer h3 { font-size: 14px; margin: 0 0 8px; }
@@ -2004,8 +2059,8 @@ function renderDashboard(
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
     .empty { color: #6f7785; font-size: 13px; }
-    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .primary-workspace { grid-template-columns: 1fr; } .right-rail { grid-column: 1 / -1; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .right-rail { display: block; grid-column: auto; } .right-rail .panel { margin-bottom: 14px; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } }
+    @media (max-width: 1180px) { main { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .ask-layout, .source-workspace-grid, .secondary-workspace { grid-template-columns: 1fr; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; padding-left: 0; padding-top: 14px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { grid-template-columns: 1fr; padding: 12px; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .secondary-workspace { display: block; } .secondary-workspace .panel { margin-bottom: 14px; } .command-grid { grid-template-columns: 1fr; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -2013,10 +2068,11 @@ function renderDashboard(
     <div>
       <h1>Recallant Workbench</h1>
       <nav class="workbench-nav" aria-label="Workbench sections">
-        <a href="#command-center">Command Center</a>
         <a href="#memory-spaces">Memory Spaces</a>
-        <a href="#activity-replay">Activity / Replay</a>
         <a href="#ask-recallant">Ask Recallant</a>
+        <a href="#command-center">Command Center</a>
+        <a href="#sources">Sources</a>
+        <a href="#activity-replay">Activity / Replay</a>
         <a href="#review">Review</a>
         <a href="#settings">Settings</a>
       </nav>
@@ -2030,7 +2086,7 @@ function renderDashboard(
     <aside class="left-rail">
       <section class="panel" id="memory-spaces">
         <h2>Memory Spaces</h2>
-        ${renderMemorySpaces(data, source)}
+        ${renderMemorySpaces(data)}
       </section>
       <section class="panel">
         <h2>Current Signals</h2>
@@ -2049,9 +2105,15 @@ function renderDashboard(
     </aside>
     <section class="workbench-main">
       <div class="primary-workspace">
-        <section class="panel" id="ask-recallant">
-          <h2>Ask Recallant</h2>
-          ${renderManagementChat(data, chat)}
+        <section class="panel ask-panel" id="ask-recallant">
+          <div class="ask-layout">
+            <div class="ask-work">
+              <span class="section-kicker">AI control surface</span>
+              <h2>Ask Recallant</h2>
+              ${renderManagementChat(data, chat)}
+            </div>
+            ${renderCurrentMemoryProfile(data)}
+          </div>
         </section>
         <section class="panel" id="command-center">
           <h2>Command Center</h2>
@@ -2067,6 +2129,7 @@ function renderDashboard(
           </div>
         </section>
       </div>
+      ${renderSourceWorkbench(data, source)}
       <section class="panel" id="activity-replay">
         <h2>Activity / Replay</h2>
         ${renderActivityReplay(data)}
@@ -2083,8 +2146,7 @@ function renderDashboard(
         ${renderRuleFilters(data)}
         ${renderRows(data.rules, "No instruction-grade rules match the current filters.", data.current_project_id)}
       </section>
-    </section>
-    <aside class="right-rail">
+      <section class="secondary-workspace" aria-label="Secondary workbench panels">
       <section class="panel">
         <h2>Selected Detail</h2>
         ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
@@ -2101,7 +2163,8 @@ function renderDashboard(
         <h2>Settings</h2>
         ${renderSettings(data, setting)}
       </section>
-    </aside>
+      </section>
+    </section>
   </main>
 </body>
 </html>`;

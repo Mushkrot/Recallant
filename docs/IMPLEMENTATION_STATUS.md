@@ -305,7 +305,7 @@ Stage 1 first slice is now implemented:
   schema terms remain available under collapsed Technical details.
 - `npm run review-ui:smoke` now verifies the Workbench layout contract, responsive breakpoints,
   central Ask Recallant placement, human labels, capture activity fields, and hidden technical
-  detail boundaries. A true Playwright screenshot harness is still a future infrastructure slice.
+  detail boundaries.
 
 Stage 1 Workbench follow-up slice is now implemented:
 
@@ -315,6 +315,13 @@ Stage 1 Workbench follow-up slice is now implemented:
   below the main work area instead of squeezing chat/review content into a narrow right column.
 - The Playwright smoke now verifies the updated layout on desktop and mobile and saves screenshots
   under `/ai/playwright/reports`.
+- The 2026-06-02 composition follow-up makes Ask Recallant the first central work surface, adds a
+  compact current memory-space profile beside it, moves selected-source management into a wide
+  `Sources` workspace, places detail/cost/cleanup/settings in a lower secondary workspace, and puts
+  Ask Recallant before the memory-space navigator on mobile.
+- `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new Ask -> Sources ->
+  secondary workspace order, source management surface, no horizontal scroll, and readable long
+  chat answers.
 
 Stage 2 first slice is now implemented:
 

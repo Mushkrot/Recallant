@@ -490,6 +490,12 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
 - Follow-up Workbench slice: Ask Recallant is now the wide top work surface, while Selected Detail,
   Cost / Paid API, Cleanup / Forget, and Settings are secondary lower panels. Browser QA verifies
   desktop/mobile no-horizontal-scroll and long Russian chat readability.
+- 2026-06-02 composition follow-up: Ask Recallant is now the first central surface with a compact
+  current memory-space profile beside it. Source management is a wide `Sources` workspace with
+  selected-source health, detach controls, create-space, and attach-source flows. The former right
+  rail is a lower secondary workspace, and mobile puts Ask Recallant before the memory-space
+  navigator. `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the new layout
+  order and readability.
 
 2026-06-01 Stage 2 Management Chat first slice is implemented.
 

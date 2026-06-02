@@ -97,6 +97,23 @@ Acceptance:
 - Done: Review rows now show compact provenance summaries such as "From source
   AGENTS.md" instead of requiring the owner to open raw source refs.
 
+2026-06-02 Workbench composition slice:
+
+- Done: Ask Recallant is now the first central work surface, paired with a
+  compact current memory-space profile so the owner can talk to Recallant while
+  seeing whether the selected space is capture-active and source-linked.
+- Done: source management moved out of the left rail into a wide `Sources`
+  workspace with selected-source health, detach controls, create-space, and
+  attach-source flows.
+- Done: Selected Detail, Cost / Paid API, Cleanup / Forget, and Settings now
+  live in a lower secondary workspace instead of a side rail, reducing cramped
+  right-column reading.
+- Done: mobile layout shows Ask Recallant before the memory-space navigator, so
+  the primary control surface remains first on small screens.
+- Done: `npm run review-ui:smoke` and `npm run review-ui:playwright` verify the
+  new Ask -> Sources -> secondary workspace order, source management surface,
+  no horizontal scroll, and readable long chat answers.
+
 ## Stage 2 - AI-Native Management Layer
 
 Goal: make "Ask Recallant" a real AI-managed control surface, not keyword

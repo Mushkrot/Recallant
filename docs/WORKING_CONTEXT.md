@@ -331,6 +331,12 @@ Latest implementation checkpoints:
   `source_id` to filter source-linked import candidates, inbox items, and active rules while leaving
   global conflict signals visible. Verified by `npm run project-sources:smoke`,
   `npm run review-ui:smoke`, and `npm run review-ui:playwright`.
+- 2026-06-02 Workbench composition follow-up: Ask Recallant is the first central work surface, with
+  a compact current memory-space profile beside it on desktop and first on mobile. Selected-source
+  health and create/attach/detach source flows moved into a wide `Sources` workspace. Selected
+  Detail, Cost / Paid API, Cleanup / Forget, and Settings now sit in a lower secondary workspace
+  rather than a cramped right rail. Verified by `npm run review-ui:smoke` and
+  `npm run review-ui:playwright`.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-01 Connect/doctor follow-up: `recallant doctor --require-capture` is now the automated capture-readiness gate. It reports `capture_readiness` and exits with status 2 until a project has context read, memory write, and checkpoint evidence from local session state or dashboard readiness.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.

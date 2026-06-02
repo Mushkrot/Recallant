@@ -191,12 +191,23 @@ async function run() {
     await noHorizontalScroll(desktop, "desktop initial Workbench");
 
     const askBox = await visibleBox(desktop.locator("#ask-recallant"), "desktop Ask Recallant");
-    const rightRailBox = await visibleBox(desktop.locator(".right-rail"), "desktop right rail");
     const leftRailBox = await visibleBox(desktop.locator(".left-rail"), "desktop left rail");
+    const sourcesBox = await visibleBox(desktop.locator("#sources"), "desktop Sources");
+    const secondaryBox = await visibleBox(
+      desktop.locator(".secondary-workspace"),
+      "desktop secondary workspace"
+    );
     assert(askBox.width >= 520, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
     assert(
-      askBox.x > leftRailBox.x + leftRailBox.width && askBox.y < rightRailBox.y,
-      `desktop Ask Recallant is not in the central work area: ${JSON.stringify({ askBox, leftRailBox, rightRailBox })}`
+      askBox.x > leftRailBox.x + leftRailBox.width &&
+        askBox.y < sourcesBox.y &&
+        sourcesBox.y < secondaryBox.y,
+      `desktop Workbench order is not Ask -> Sources -> secondary panels: ${JSON.stringify({
+        askBox,
+        leftRailBox,
+        sourcesBox,
+        secondaryBox
+      })}`
     );
 
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");

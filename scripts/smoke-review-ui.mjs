@@ -359,6 +359,10 @@ try {
     "Activity / Replay",
     "Project Actions",
     "1 active source",
+    "AI control surface",
+    "Current memory space",
+    "Sources",
+    "Memory space sources",
     "Sources for selected space",
     "Primary source ready",
     "Source ready",
@@ -425,10 +429,12 @@ try {
     );
   }
   const requiredLayoutContracts = [
-    "grid-template-columns: minmax(290px, 360px) minmax(0, 1fr)",
+    "grid-template-columns: minmax(300px, 340px) minmax(0, 1fr)",
+    ".ask-layout { display: grid",
     ".primary-workspace { display: grid",
     ".command-grid { display: grid",
-    ".right-rail { grid-column: 2",
+    ".source-workspace-grid { display: grid",
+    ".secondary-workspace { display: grid",
     ".chat-answer { border-top",
     "max-height: 680px",
     "@media (max-width: 1180px)",
@@ -438,7 +444,8 @@ try {
     (marker) => !htmlText.includes(marker)
   );
   const askRecallantIndex = htmlText.indexOf('id="ask-recallant"');
-  const rightRailIndex = htmlText.indexOf('<aside class="right-rail">');
+  const sourcesIndex = htmlText.indexOf('id="sources"');
+  const secondaryWorkspaceIndex = htmlText.indexOf('class="secondary-workspace"');
   const visibleTechnicalLeaks = [
     "<h3>embedding_route</h3>",
     "<h3>instruction_grade</h3>",
@@ -448,15 +455,18 @@ try {
   if (
     missingLayoutContracts.length > 0 ||
     askRecallantIndex < 0 ||
-    rightRailIndex < 0 ||
-    askRecallantIndex > rightRailIndex ||
+    sourcesIndex < 0 ||
+    secondaryWorkspaceIndex < 0 ||
+    askRecallantIndex > sourcesIndex ||
+    sourcesIndex > secondaryWorkspaceIndex ||
     visibleTechnicalLeaks.length > 0
   ) {
     throw new Error(
       `Workbench layout contract failed: ${JSON.stringify({
         missingLayoutContracts,
         askRecallantIndex,
-        rightRailIndex,
+        sourcesIndex,
+        secondaryWorkspaceIndex,
         visibleTechnicalLeaks
       })}`
     );
