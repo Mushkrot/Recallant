@@ -377,6 +377,9 @@ Latest implementation checkpoints:
   requests produce a safe `Sources` workspace / `recallant source attach` plan without executing the
   write directly from chat. Verified by `npm run management-chat-ai:smoke` and
   `npm run review-ui:smoke`.
+- 2026-06-02 Management Chat source-health follow-up: source-management answers now include ready,
+  needs-attention, and detached source counts, so Ask Recallant can explain source health in plain
+  language instead of only reporting a total source count.
 - 2026-06-02 Management Chat onboarding/QA follow-up: Ask Recallant now has first-class
   `project_onboarding` and `pilot_qa` intents. Missing new-project paths trigger clarification,
   concrete project paths produce attach/connect/doctor dry-run plans, and pilot-QA asks produce

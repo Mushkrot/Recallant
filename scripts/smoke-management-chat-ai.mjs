@@ -237,6 +237,8 @@ try {
   );
   assert(
     sourceManagement.facts.source_count === 2 &&
+      sourceManagement.facts.source_ready_count === 2 &&
+      sourceManagement.facts.source_needs_attention_count === 0 &&
       String(sourceManagement.answer).includes("не хватает данных") &&
       !sourceManagement.proposed_actions.some((action) => action.command),
     `Incomplete source management request did not ask for clarification: ${JSON.stringify(sourceManagement)}`

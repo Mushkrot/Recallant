@@ -390,6 +390,9 @@ Stage 2 first slice is now implemented:
   memory space as a `safe_action` because it only writes Recallant metadata and does not touch
   project files, sources, secrets, connectors, paid API, or production services. Source attach,
   source detach, and project attach/connect remain guided/dry-run workflows.
+- Stage 2/3 source-health answer follow-up is implemented: Ask Recallant source-management facts
+  now include ready, needs-attention, and detached source counts so natural-language source
+  questions can explain source health without exposing raw source rows.
 
 Stage 3 first slice is now implemented:
 

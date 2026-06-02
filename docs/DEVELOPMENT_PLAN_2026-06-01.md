@@ -182,6 +182,9 @@ Acceptance:
   locations return `needs_clarification` with no runnable command; concrete
   source attach requests return a safe plan pointing to the `Sources` workspace
   or `recallant source attach` without executing from chat.
+- Done: source-management answers now include ready, needs-attention, and
+  detached source counts, so Ask Recallant can explain source health instead of
+  only reporting a total source count.
 - Remaining: broaden live local-AI semantic tests against real installed models
   and continue improving multi-project/source-target clarification UX.
 

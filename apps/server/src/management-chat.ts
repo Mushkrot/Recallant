@@ -119,6 +119,9 @@ export type ManagementChatResponse = {
     captured_decisions: number;
     memory_count: number;
     source_count: number;
+    source_ready_count: number;
+    source_needs_attention_count: number;
+    source_detached_count: number;
     selected_source_name: string;
   };
   proposed_actions: ManagementChatAction[];
@@ -838,6 +841,13 @@ function dashboardFacts(
   const captureReady = Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
   const sourceFilters = dashboard.source_filters ?? {};
   const sources = asRows(sourceFilters.sources);
+  const sourceHealth = sources.map((source) => asRecord(asRecord(source).source_health));
+  const sourceReadyCount = sourceHealth.filter((health) => health.status === "ready").length;
+  const sourceDetachedCount = sourceHealth.filter((health) => health.status === "detached").length;
+  const sourceNeedsAttentionCount = sourceHealth.filter((health) => {
+    const status = String(health.status ?? "");
+    return status.length > 0 && status !== "ready" && status !== "detached";
+  }).length;
   const selectedSource = asRecord(sourceFilters.selected_source);
   const selectedSourceName =
     stringValue(selectedSource.display_label) ||
@@ -868,6 +878,9 @@ function dashboardFacts(
     captured_decisions: asNumber(readiness.captured_decision_count),
     memory_count: asNumber(currentProject.memory_count),
     source_count: sources.length,
+    source_ready_count: sourceReadyCount,
+    source_needs_attention_count: sourceNeedsAttentionCount,
+    source_detached_count: sourceDetachedCount,
     selected_source_name: selectedSourceName
   };
 }
@@ -1346,7 +1359,7 @@ function answerRu(
       if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
         return `${baseline}\n\nЯ понял это как подключение источника к текущему memory space. Это безопасная операция записи в Recallant, но я не выполняю ее прямо из чата. Используй широкий Sources workspace или выполни команду из предложенного шага. Источник будет показан в provenance, а память проекта не смешается с другими spaces.`;
       }
-      return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Источники управляются в Sources workspace: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
+      return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Готовых источников: ${facts.source_ready_count}; требуют внимания: ${facts.source_needs_attention_count}; отцеплены: ${facts.source_detached_count}. Источники управляются в Sources workspace: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
     case "provenance":
       return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
@@ -1442,7 +1455,7 @@ function answerEn(
       if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
         return `${baseline}\n\nI understood this as attaching a source to the current memory space. This is a safe Recallant write, but I will not execute it directly from chat. Use the wide Sources workspace or run the proposed command. The source will appear in provenance, and project memory will stay isolated from other spaces.`;
       }
-      return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Manage them in the Sources workspace: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
+      return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Ready sources: ${facts.source_ready_count}; need attention: ${facts.source_needs_attention_count}; detached: ${facts.source_detached_count}. Manage them in the Sources workspace: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
     case "provenance":
       return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
