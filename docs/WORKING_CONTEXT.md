@@ -361,6 +361,10 @@ Latest implementation checkpoints:
 - 2026-06-02 Ask Recallant virtual-space follow-up: natural-language source-management requests can
   safely create an empty virtual memory space when the name is clear. The response and smoke assert
   that files, sources, secrets, and external connectors are not touched in that chat action.
+- 2026-06-02 full core QA checkpoint: after the Source Map health-summary and Ask Recallant
+  virtual-space changes, `npm run smoke:core` passed. This includes product acceptance
+  attach/connect/capture/closeout/recall, pilot report, source, Review UI, Management Chat AI,
+  onboarding, connect, installer, and cross-client smokes.
 - 2026-06-02 Workbench composition follow-up: Ask Recallant is the first central work surface, with
   a compact current memory-space profile beside it on desktop and first on mobile. Selected-source
   health and create/attach/detach source flows moved into a wide `Sources` workspace. Selected

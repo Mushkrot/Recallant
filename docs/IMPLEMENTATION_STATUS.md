@@ -103,6 +103,10 @@ Current implemented slices include:
 - Ask Recallant now has a covered safe-action path for creating an empty virtual memory space from
   natural language. The action is Recallant-only: it creates the logical space and explicitly does
   not touch files, sources, secrets, or external connectors.
+- 2026-06-02 full core QA checkpoint after Workbench/source/chat changes: `npm run smoke:core`
+  passed end-to-end, including project sources, Management Chat AI, Review UI, attach/detach,
+  cross-project recall, product acceptance capture/recall, pilot report, onboarding, connect,
+  installer, and cross-client smokes.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.

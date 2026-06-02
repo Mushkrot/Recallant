@@ -56,6 +56,9 @@ smokes cover ready local sources, planned connectors, and missing paths.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request; it explicitly does not attach sources or touch files, secrets, or
 external connectors in that chat action.
+Full core QA after these changes passed on 2026-06-02: `npm run smoke:core`, including product
+acceptance capture/recall, pilot report, project sources, Review UI, Management Chat AI, onboarding,
+connect, installer, and cross-client smokes.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.
