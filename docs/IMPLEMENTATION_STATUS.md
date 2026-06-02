@@ -72,7 +72,7 @@ Current implemented slices include:
 - Stage 3 — Memory Spaces and Sources: ~45% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
-- Stage 4 — Client Connect and Hook Capture: ~70% completed. Separate connect lifecycle, MCP setup,
+- Stage 4 — Client Connect and Hook Capture: ~80% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
 - Stage 5 — Real Pilots and QA: ~70% completed. Core pilot automation exists (clean and copied
@@ -157,6 +157,8 @@ Current implemented slices include:
   start, owner prompt, tool result, generic event capture, pre-compaction checkpoint, and
   stop/closeout, writes a machine-readable `.recallant/hooks/manifest.json`, and server-mode
   closeout writes an explicit `agent_closeout` event before closing the session.
+- `recallant doctor` / client connection readiness now validates the local hook manifest contract
+  and reports missing, invalid, or valid manifest state as part of hook-kit readiness.
 - Direct CLI capture commands now resolve the default spool path from `--project-dir` when present,
   so tests or clients launched from another working directory do not read/write the Recallant repo's
   own `.recallant/spool`.

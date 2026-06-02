@@ -313,6 +313,9 @@ Acceptance:
 - Done: the local hook kit now writes `.recallant/hooks/manifest.json` with
   fail-soft policy, no-global-config guarantee, lifecycle target scripts, spool
   path, and the `recallant doctor --require-capture` readiness proof command.
+- Done: `recallant doctor` / client connection readiness now validates the hook
+  manifest contract and reports whether the manifest is missing, invalid, or
+  valid.
 - Done: `npm run connect:smoke` proves the hook scripts are fail-soft when
   `recallant` is unavailable, then runs the hooks through a temporary Recallant
   wrapper and verifies prompt, tool-result, checkpoint, closeout events, and

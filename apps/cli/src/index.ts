@@ -616,6 +616,38 @@ async function hookKitReadiness(projectDir: string) {
     checked.push({ path: file.path, present, executable_expected: file.executable === true });
   }
   const presentCount = checked.filter((file) => file.present).length;
+  const manifestPath = ".recallant/hooks/manifest.json";
+  const manifestContent = await readOptional(join(projectDir, manifestPath));
+  let manifest = {
+    path: manifestPath,
+    status: "missing",
+    valid: false,
+    fail_soft: false,
+    writes_global_config: true,
+    ready_proof: ""
+  };
+  if (manifestContent) {
+    try {
+      const parsed = JSON.parse(manifestContent) as Record<string, unknown>;
+      const targets = objectValue(parsed.targets);
+      const valid =
+        parsed.fail_soft === true &&
+        parsed.writes_global_config === false &&
+        typeof parsed.ready_proof === "string" &&
+        parsed.ready_proof.includes("--require-capture") &&
+        captureTargetNames.every((target) => objectValue(targets[target]).script);
+      manifest = {
+        path: manifestPath,
+        status: valid ? "valid" : "invalid",
+        valid,
+        fail_soft: parsed.fail_soft === true,
+        writes_global_config: parsed.writes_global_config === true,
+        ready_proof: typeof parsed.ready_proof === "string" ? parsed.ready_proof : ""
+      };
+    } catch {
+      manifest = { ...manifest, status: "invalid_json" };
+    }
+  }
   return {
     status:
       presentCount === files.length ? "installed" : presentCount > 0 ? "partial" : "not_installed",
@@ -623,6 +655,7 @@ async function hookKitReadiness(projectDir: string) {
     installed_count: presentCount,
     expected_count: files.length,
     capture_targets: captureTargetNames,
+    manifest,
     files: checked
   };
 }

@@ -66,7 +66,8 @@ assert(
 );
 assert(
   requireCaptureBefore.json?.client_connection?.status === "mcp_only" &&
-    requireCaptureBefore.json?.client_connection?.hook_kit?.status === "not_installed",
+    requireCaptureBefore.json?.client_connection?.hook_kit?.status === "not_installed" &&
+    requireCaptureBefore.json?.client_connection?.hook_kit?.manifest?.status === "missing",
   `doctor should report MCP-only before hook installation: ${JSON.stringify(requireCaptureBefore.json?.client_connection)}`
 );
 
@@ -376,7 +377,8 @@ assert(
 );
 assert(
   requireCaptureAfter.json?.client_connection?.status === "mcp_and_hooks_ready" &&
-    requireCaptureAfter.json?.client_connection?.hook_kit?.ready === true,
+    requireCaptureAfter.json?.client_connection?.hook_kit?.ready === true &&
+    requireCaptureAfter.json?.client_connection?.hook_kit?.manifest?.valid === true,
   `doctor should report MCP+hooks after hook installation: ${JSON.stringify(requireCaptureAfter.json?.client_connection)}`
 );
 runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
