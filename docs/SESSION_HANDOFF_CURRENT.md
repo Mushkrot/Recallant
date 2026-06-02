@@ -626,6 +626,10 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   `mandatory_startup_layer`, and `doctor` output includes `client_connection`. They distinguish
   MCP-only, planned MCP+hooks, installed MCP+hooks, and capture-active proof, including covered hook
   targets and the `doctor --require-capture` command. `connect:smoke` and `phase7:smoke` pass.
+- 2026-06-02 hook manifest follow-up: `connect --install-local-hooks` now writes
+  `.recallant/hooks/manifest.json` with fail-soft policy, no-global-config guarantee, lifecycle
+  target scripts, spool path, and `doctor --require-capture` readiness proof. `connect:smoke`
+  verifies the manifest contract.
 
 2026-06-01 Stage 5 Pilot Report first automation slice is implemented.
 

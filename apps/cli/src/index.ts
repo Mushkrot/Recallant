@@ -2702,10 +2702,59 @@ Client integrations can call:
 - \`checkpoint.sh < summary.txt\` before pause or handoff;
 - \`stop-session.sh < summary.txt\` or \`closeout.sh < summary.txt\` when a session stops.
 `;
+  const manifest = `${JSON.stringify(
+    {
+      schema_version: 1,
+      name: "Recallant Local Hook Kit",
+      fail_soft: true,
+      writes_global_config: false,
+      project_dir_env: "RECALLANT_PROJECT_DIR",
+      timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
+      spool_dir: ".recallant/spool",
+      ready_proof: "recallant doctor --project-dir <project> --require-capture",
+      targets: {
+        session_start: {
+          script: ".recallant/hooks/start-session.sh",
+          input: "optional task hint argument"
+        },
+        user_prompt: {
+          script: ".recallant/hooks/user-prompt.sh",
+          input: "owner prompt on stdin"
+        },
+        tool_result: {
+          script: ".recallant/hooks/tool-result.sh",
+          input: "meaningful tool or command result on stdin"
+        },
+        generic_event: {
+          script: ".recallant/hooks/capture-event.sh",
+          input: "event kind argument plus event body on stdin"
+        },
+        pre_compaction_checkpoint: {
+          script: ".recallant/hooks/pre-compaction.sh",
+          input: "compact handoff summary on stdin"
+        },
+        checkpoint: {
+          script: ".recallant/hooks/checkpoint.sh",
+          input: "checkpoint summary on stdin"
+        },
+        stop_closeout: {
+          script: ".recallant/hooks/stop-session.sh",
+          input: "closeout summary on stdin"
+        }
+      }
+    },
+    null,
+    2
+  )}\n`;
   return [
     {
       path: ".recallant/hooks/README.md",
       content: readme,
+      executable: false
+    },
+    {
+      path: ".recallant/hooks/manifest.json",
+      content: manifest,
       executable: false
     },
     {

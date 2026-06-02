@@ -275,6 +275,9 @@ assert(
 const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
 const promptHookScript = await readFile(`${projectDir}/.recallant/hooks/user-prompt.sh`, "utf8");
 const toolHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-result.sh`, "utf8");
+const hookManifest = JSON.parse(
+  await readFile(`${projectDir}/.recallant/hooks/manifest.json`, "utf8")
+);
 assert(
   hookScript.includes("exit 0") &&
     hookScript.includes("timeout") &&
@@ -284,6 +287,14 @@ assert(
 assert(
   promptHookScript.includes("--kind prompt") && toolHookScript.includes("--kind tool_result"),
   `Prompt/tool hooks should target explicit capture kinds: ${promptHookScript} ${toolHookScript}`
+);
+assert(
+  hookManifest.fail_soft === true &&
+    hookManifest.writes_global_config === false &&
+    hookManifest.targets?.user_prompt?.script === ".recallant/hooks/user-prompt.sh" &&
+    hookManifest.targets?.tool_result?.script === ".recallant/hooks/tool-result.sh" &&
+    hookManifest.ready_proof?.includes("--require-capture"),
+  `Hook manifest should expose machine-readable startup targets: ${JSON.stringify(hookManifest)}`
 );
 const hookFailSoft = spawnSync(`${projectDir}/.recallant/hooks/capture-event.sh`, ["action"], {
   input: "hook smoke should not break agent workflow",

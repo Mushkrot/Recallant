@@ -297,10 +297,13 @@ Acceptance:
   start, owner prompt, tool result, generic event capture, pre-compaction
   checkpoint, and stop/closeout. Server-mode closeout now also records an
   explicit closeout event before closing the session.
+- Done: the local hook kit now writes `.recallant/hooks/manifest.json` with
+  fail-soft policy, no-global-config guarantee, lifecycle target scripts, spool
+  path, and the `recallant doctor --require-capture` readiness proof command.
 - Done: `npm run connect:smoke` proves the hook scripts are fail-soft when
   `recallant` is unavailable, then runs the hooks through a temporary Recallant
-  wrapper and verifies prompt, tool-result, checkpoint, and closeout events in
-  Postgres.
+  wrapper and verifies prompt, tool-result, checkpoint, closeout events, and
+  manifest contract in Postgres.
 - Remaining: safe global/client config writers, local backups for global config,
   dedicated client hook installation where each client supports it, and richer
   hook spooling/replay diagnostics.

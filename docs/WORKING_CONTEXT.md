@@ -384,6 +384,10 @@ Latest implementation checkpoints:
   config presence, project-local hook-kit readiness, fail-soft behavior, covered capture targets,
   and the exact `doctor --require-capture` proof command. Verified by `npm run connect:smoke` and
   `npm run phase7:smoke`.
+- 2026-06-02 hook manifest follow-up: `recallant connect --install-local-hooks` now writes
+  `.recallant/hooks/manifest.json` with fail-soft policy, no-global-config guarantee, lifecycle
+  target scripts, spool path, and the `doctor --require-capture` readiness proof command. Verified
+  by `npm run connect:smoke`.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-02 Pilot-report artifact follow-up: `npm run pilot-report:smoke` now persists that JSON
   report under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes
@@ -394,7 +398,7 @@ Latest implementation checkpoints:
   pre-compaction checkpoint, recall the hook-captured decision in a later context pack, and pass
   `doctor --require-capture` with `client_connection=mcp_and_hooks_ready`.
 - 2026-06-01 Context-pack provenance follow-up: binding rules and working memories returned by `memory_get_context_pack` now include redacted `source_refs` and a compact `provenance` object with source count, primary source kind/id, source path when available, and a short summary. This lets agents answer "where did this come from?" without reading raw artifacts or project history files. Verified by `npm run phase6:smoke:graph`.
-- 2026-06-01 Connect local hook-kit follow-up: `recallant connect --install-local-hooks` now installs only project-local fail-soft helper scripts under `.recallant/hooks/` and still writes no global client config. The hook scripts exit 0 when `recallant` is unavailable or a timeout occurs, giving client adapters a safe hook target without risking normal agent work. The kit includes session start, owner prompt, tool result, generic capture, pre-compaction checkpoint, and stop/closeout targets; server-mode closeout writes an explicit closeout event. Verified by `npm run connect:smoke`.
+- 2026-06-01 Connect local hook-kit follow-up: `recallant connect --install-local-hooks` now installs only project-local fail-soft helper scripts under `.recallant/hooks/` and still writes no global client config. The hook scripts exit 0 when `recallant` is unavailable or a timeout occurs, giving client adapters a safe hook target without risking normal agent work. The kit includes session start, owner prompt, tool result, generic capture, pre-compaction checkpoint, stop/closeout targets, and a machine-readable manifest; server-mode closeout writes an explicit closeout event. Verified by `npm run connect:smoke`.
 - 2026-06-02 Connect hook-spool follow-up: project-local hooks now pass the project-local
   `.recallant/spool` path to primary capture commands and attempt `spool-append` fallback when
   primary capture fails while `recallant` is available. `npm run connect:smoke` verifies the

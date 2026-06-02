@@ -149,8 +149,8 @@ Current implemented slices include:
   project-local `.recallant/spool` path for offline capture, and failed primary commands attempt a
   local `spool-append` fallback before exiting 0. The kit now includes explicit targets for session
   start, owner prompt, tool result, generic event capture, pre-compaction checkpoint, and
-  stop/closeout, and server-mode closeout writes an explicit `agent_closeout` event before closing
-  the session.
+  stop/closeout, writes a machine-readable `.recallant/hooks/manifest.json`, and server-mode
+  closeout writes an explicit `agent_closeout` event before closing the session.
 - Direct CLI capture commands now resolve the default spool path from `--project-dir` when present,
   so tests or clients launched from another working directory do not read/write the Recallant repo's
   own `.recallant/spool`.
