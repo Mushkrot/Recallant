@@ -3457,14 +3457,20 @@ export class RecallantDb {
       `,
       [dashboardProjectId]
     );
+    const activitySourceClauses: string[] = [];
+    const activitySourceValues: unknown[] = [dashboardProjectId];
+    this.addSourceFilterClause(activitySourceClauses, activitySourceValues, sourceFilter, "m");
+    const activitySourceWhere =
+      activitySourceClauses.length > 0 ? `AND ${activitySourceClauses.join(" AND ")}` : "";
     const recentActivity = await this.pool.query(
       `
-        SELECT activity_kind, title, body, occurred_at
+        SELECT activity_kind, title, body, source_summary, occurred_at
         FROM (
           SELECT
             'session' AS activity_kind,
             'Agent session started' AS title,
             client_kind || coalesce(' / ' || client_version, '') AS body,
+            NULL::text AS source_summary,
             started_at AS occurred_at
           FROM sessions
           WHERE project_id = $1
@@ -3473,6 +3479,7 @@ export class RecallantDb {
             'context_read' AS activity_kind,
             'Context was read' AS title,
             'Agent requested a startup Context Pack' AS body,
+            NULL::text AS source_summary,
             created_at AS occurred_at
           FROM events
           WHERE project_id = $1
@@ -3482,14 +3489,27 @@ export class RecallantDb {
             'memory_write' AS activity_kind,
             'Memory was written' AS title,
             title AS body,
+            (
+              SELECT coalesce(
+                r.metadata->>'source_path',
+                r.metadata->>'path',
+                r.source_kind || coalesce(' ' || left(r.source_id, 8), '')
+              )
+              FROM agent_memory_source_refs r
+              WHERE r.memory_id = m.id
+              ORDER BY r.created_at ASC
+              LIMIT 1
+            ) AS source_summary,
             updated_at AS occurred_at
-          FROM agent_memories
+          FROM agent_memories m
           WHERE project_id = $1
+            ${activitySourceWhere}
           UNION ALL
           SELECT
             'checkpoint' AS activity_kind,
             'Checkpoint updated' AS title,
             coalesce(payload->>'current_focus', payload->>'summary', 'Project checkpoint') AS body,
+            NULL::text AS source_summary,
             updated_at AS occurred_at
           FROM checkpoints
           WHERE project_id = $1
@@ -3497,7 +3517,7 @@ export class RecallantDb {
         ORDER BY occurred_at DESC NULLS LAST
         LIMIT 30
       `,
-      [dashboardProjectId]
+      activitySourceValues
     );
     const selectedMemoryId =
       input?.selected_memory_id ??

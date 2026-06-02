@@ -7,7 +7,7 @@ Current focus: Continue turning the Workbench into a professional, human-readabl
 while keeping Playwright checks for layout regressions.
 Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
 and realistic pilot reports.
-Last updated: 2026-06-02T05:57:12Z.
+Last updated: 2026-06-02T06:02:07Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -35,6 +35,8 @@ Last updated: 2026-06-02T05:57:12Z.
   governed memory and showing source/provenance, not only by explaining generic Recallant concepts.
 - Workbench Settings must show human-readable labels by default. Raw setting keys may remain in
   collapsed Technical value/API-safe metadata, but not as visible headings.
+- Activity / Replay should preserve capture visibility while also showing provenance for
+  source-linked memory writes and honoring selected source filters for those memory-write rows.
 - Explicit owner requests to save low-risk rules for all projects create developer-scope
   `instruction_grade` memories that future Context Packs include across projects.
 - Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
@@ -142,6 +144,9 @@ Last updated: 2026-06-02T05:57:12Z.
 - Settings label polish verification on 2026-06-02: `npm run build`, `npm run review-ui:smoke`,
   `npm run review-ui:playwright`, `npm run lint`, `npm run format:check`, and `git diff --check`
   passed.
+- Activity / Replay source-provenance verification on 2026-06-02: `npm run build`,
+  `npm run project-sources:smoke`, `npm run review-ui:smoke`, `npm run review-ui:playwright`,
+  `npm run lint`, `npm run format:check`, and `git diff --check` passed.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

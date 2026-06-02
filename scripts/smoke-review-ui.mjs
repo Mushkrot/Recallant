@@ -608,6 +608,9 @@ try {
     !Array.isArray(json.recent_activity) ||
     !json.recent_activity.some((row) => row.activity_kind === "context_read") ||
     !json.recent_activity.some((row) => row.activity_kind === "memory_write") ||
+    !json.recent_activity.some(
+      (row) => row.activity_kind === "memory_write" && row.source_summary
+    ) ||
     !json.projects.some(
       (project) =>
         project.project_id === projectId &&
@@ -705,7 +708,17 @@ try {
     !sourceFilteredJson.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
     sourceFilteredJson.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     !sourceFilteredJson.source_filters?.selected_source?.source_health ||
-    sourceFilteredJson.source_filters.selected_source.display_label !== "AGENTS.md"
+    sourceFilteredJson.source_filters.selected_source.display_label !== "AGENTS.md" ||
+    !sourceFilteredJson.recent_activity.some(
+      (row) =>
+        row.activity_kind === "memory_write" &&
+        String(row.source_summary ?? "").includes("AGENTS.md")
+    ) ||
+    sourceFilteredJson.recent_activity.some(
+      (row) =>
+        row.activity_kind === "memory_write" &&
+        !String(row.source_summary ?? "").includes("AGENTS.md")
+    )
   ) {
     throw new Error(`Source filter API smoke failed: ${JSON.stringify(sourceFilteredJson)}`);
   }

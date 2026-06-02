@@ -1842,6 +1842,11 @@ function renderActivityReplay(data: ReviewDashboardData) {
           <div>
             <strong>${escapeHtml(row.title)}</strong>
             <p>${escapeHtml(row.body)}</p>
+            ${
+              row.source_summary
+                ? `<p class="source-note">Source: ${escapeHtml(row.source_summary)}</p>`
+                : ""
+            }
             <time>${escapeHtml(formatDate(row.occurred_at))}</time>
           </div>
         </article>`

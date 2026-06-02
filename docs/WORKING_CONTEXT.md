@@ -12,7 +12,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 2 — AI-native Management Chat: `~69%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~56%` complete. The source-binding model and source API
+- Stage 3 — Memory Spaces and Sources: `~57%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
@@ -417,6 +417,10 @@ Latest implementation checkpoints:
   Drive?" now return matching current-project memories plus source-linked examples from other
   projects for cross-project intent, while keeping those examples non-binding evidence until applied
   through governed memory.
+- 2026-06-02 Activity / Replay source-provenance follow-up: source-linked memory-write activity now
+  includes a compact source summary. When a source filter is selected, Activity / Replay filters
+  source-linked memory writes to that source while still showing session/context/checkpoint signals
+  so capture visibility is not hidden.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing. Concrete local/repo/
   document/manual source attach requests can now execute as safe Recallant DB-only actions when the

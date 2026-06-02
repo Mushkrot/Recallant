@@ -69,7 +69,7 @@ Current implemented slices include:
 - Stage 2 — AI-native Management Chat: ~69% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~56% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~57% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
@@ -139,6 +139,9 @@ Current implemented slices include:
   readiness in plain language; Review rows show compact provenance summaries such as source path;
   and the Review dashboard/API supports `source_id` filtering for source-linked import candidates,
   inbox items, and active rules while keeping global conflict signals visible.
+- Activity / Replay source-provenance slice: source-linked memory-write activity now includes a
+  compact source summary, and selected source filters also filter source-linked memory writes in
+  Activity / Replay while keeping session/context/checkpoint signals visible.
 - Source health now checks absolute local `workspace_path`, `repo`, and `server_path` bindings
   without reading source contents, so Workbench can show local source ready, missing path,
   unreadable path, or wrong folder/file shape guidance.
