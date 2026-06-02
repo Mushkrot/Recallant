@@ -789,6 +789,39 @@ function isSandboxProject(row: DashboardRow) {
   );
 }
 
+function normalizeProjectReference(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[^\p{L}\p{N}/]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function projectReferenceCandidates(row: DashboardRow) {
+  const path = stringValue(row.primary_path);
+  const pathTail = path.split("/").filter(Boolean).at(-1) ?? "";
+  return [projectName(row, row.project_id), path, pathTail, shortId(row.project_id ?? row.id)]
+    .map((candidate) => candidate.trim())
+    .filter(
+      (candidate) => candidate.length >= 4 && normalizeProjectReference(candidate) !== "recallant"
+    );
+}
+
+function messageMentionsProject(message: string, row: DashboardRow) {
+  const normalizedMessage = normalizeProjectReference(message);
+  const compactMessage = normalizedMessage.replace(/\s+/g, "");
+  return projectReferenceCandidates(row).some((candidate) => {
+    const normalizedCandidate = normalizeProjectReference(candidate);
+    if (normalizedCandidate.length < 4) return false;
+    const compactCandidate = normalizedCandidate.replace(/\s+/g, "");
+    return (
+      normalizedMessage.includes(normalizedCandidate) ||
+      (compactCandidate.length >= 4 && compactMessage.includes(compactCandidate))
+    );
+  });
+}
+
 function resolveTargetProject(
   message: string,
   dashboard: DashboardLike,
@@ -807,6 +840,30 @@ function resolveTargetProject(
     switched: false,
     ambiguous: false
   };
+
+  const namedProjects = projects.filter((project) => messageMentionsProject(message, project));
+  if (namedProjects.length === 1) {
+    const target = namedProjects[0] ?? {};
+    const targetProjectId = projectId(target, currentProjectId);
+    return {
+      project_id: targetProjectId,
+      project_name: projectName(target, targetProjectId) || "named project",
+      current_project_id: currentProjectId,
+      current_project_name: currentProjectName || "current project",
+      reason:
+        targetProjectId === currentProjectId ? "current_project_named" : "message_named_project",
+      switched: targetProjectId !== currentProjectId,
+      ambiguous: false
+    };
+  }
+
+  if (namedProjects.length > 1) {
+    return {
+      ...currentTarget,
+      reason: "multiple_named_projects",
+      ambiguous: true
+    };
+  }
 
   if (!messageWantsSandbox(message, interpretation) || isSandboxProject(currentProject)) {
     return currentTarget;

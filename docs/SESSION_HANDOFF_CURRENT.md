@@ -8,7 +8,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~71%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~66%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~67%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
 - Stage 3 — Memory Spaces and Sources: `~55%` complete. Virtual spaces and source attach/detach
@@ -577,6 +577,11 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   reference is exact; files, source files, secrets, and connectors are not touched. Connector/server/
   security-like source requests remain behind the governed source workflow. Verified by
   `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
+- 2026-06-02 named-target follow-up: Ask Recallant resolves named project targets from visible
+  project names, paths, path tails, or short ids before building risky cleanup actions. Ambiguous
+  named matches ask for clarification and produce no runnable destructive command. Bare "Recallant"
+  is treated as the product name unless an explicit path/id is used. Verified by
+  `npm run management-chat-ai:smoke`.
 - 2026-06-02 source-health chat follow-up: source-management answers now include ready,
   needs-attention, and detached source counts so Ask Recallant can explain source health in human
   language.

@@ -9,7 +9,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~71%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~66%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~67%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
 - Stage 3 — Memory Spaces and Sources: `~55%` complete. The source-binding model and source API
@@ -401,6 +401,11 @@ Latest implementation checkpoints:
   owner gives an exact source reference; files, source files, secrets, and connectors are not
   touched. Connector/server/security-like source requests still stay behind the governed source
   workflow. Verified by `npm run management-chat-ai:smoke` and `npm run review-ui:smoke`.
+- 2026-06-02 Management Chat named-target follow-up: Ask Recallant resolves named project targets
+  from visible project names, paths, path tails, or short ids before building risky cleanup actions.
+  Ambiguous named matches ask for clarification and produce no runnable destructive command. Bare
+  "Recallant" is treated as the product name unless an explicit path/id is used. Verified by
+  `npm run management-chat-ai:smoke`.
 - 2026-06-02 Management Chat source-health follow-up: source-management answers now include ready,
   needs-attention, and detached source counts, so Ask Recallant can explain source health in plain
   language instead of only reporting a total source count.

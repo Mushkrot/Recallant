@@ -59,6 +59,8 @@ function restoreEnv(name, value) {
 const currentProjectId = "11111111-1111-4111-8111-111111111111";
 const sandboxProjectId = "22222222-2222-4222-8222-222222222222";
 const secondSandboxProjectId = "33333333-3333-4333-8333-333333333333";
+const namedProjectId = "66666666-6666-4666-8666-666666666666";
+const secondNamedProjectId = "77777777-7777-4777-8777-777777777777";
 
 const baseDashboard = {
   current_project_id: currentProjectId,
@@ -145,6 +147,69 @@ try {
     String(cleanup.proposed_actions[0]?.command).includes(sandboxProjectId) &&
       !String(cleanup.proposed_actions[0]?.command).includes(currentProjectId),
     `Cleanup command targeted the wrong project: ${JSON.stringify(cleanup.proposed_actions)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "cleanup",
+    confidence: 0.92,
+    summary: "Owner names a non-open project for cleanup.",
+    target_hint: "current",
+    destructive_or_sensitive: true,
+    global_rule_request: false
+  });
+  const namedCleanup = await buildManagementChatResponse({
+    message: "Remove docs archive from Recallant",
+    dashboard: {
+      ...baseDashboard,
+      projects: [
+        ...baseDashboard.projects,
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/ai/docs_archive" }
+      ]
+    }
+  });
+  assert(
+    namedCleanup.result_type === "dry_run_required" &&
+      namedCleanup.facts.target_project_id === namedProjectId &&
+      namedCleanup.facts.target_project_switched === true &&
+      namedCleanup.facts.target_project_reason === "message_named_project",
+    `Named cleanup should target the named project: ${JSON.stringify(namedCleanup.facts)}`
+  );
+  assert(
+    String(namedCleanup.proposed_actions[0]?.command).includes(namedProjectId) &&
+      !String(namedCleanup.proposed_actions[0]?.command).includes(currentProjectId),
+    `Named cleanup command targeted the wrong project: ${JSON.stringify(namedCleanup.proposed_actions)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "cleanup",
+    confidence: 0.9,
+    summary: "Owner names an ambiguous project family for cleanup.",
+    target_hint: "current",
+    destructive_or_sensitive: true,
+    global_rule_request: false
+  });
+  const ambiguousNamedCleanup = await buildManagementChatResponse({
+    message: "Remove docs archive from Recallant",
+    dashboard: {
+      ...baseDashboard,
+      projects: [
+        ...baseDashboard.projects,
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/ai/docs_archive" },
+        {
+          project_id: secondNamedProjectId,
+          name: "docs archive",
+          primary_path: "/ai/docs_archive_backup"
+        }
+      ]
+    }
+  });
+  assert(
+    ambiguousNamedCleanup.result_type === "needs_clarification" &&
+      ambiguousNamedCleanup.facts.target_project_ambiguous === true &&
+      ambiguousNamedCleanup.proposed_actions.every((action) => !action.command),
+    `Ambiguous named cleanup should ask for clarification: ${JSON.stringify(ambiguousNamedCleanup)}`
   );
 
   queuedResponses.push({
@@ -478,7 +543,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 11, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 13, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);
