@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~73%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~69%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -65,6 +65,9 @@ Focused Workbench browser QA now opens `Ask`, `Sources`, and `Settings` views di
 they are wide enough on desktop, checks that unrelated panels are absent, and saves dedicated
 screenshots. This caught and fixed a real focused-Settings layout regression where Settings still
 used the old half-width operations grid.
+Visible Settings rows now use human labels such as Database connection, Provider API key reference,
+Project lifecycle, Project setting, and System setting. Raw keys stay in collapsed technical
+details/API-safe metadata instead of default headings.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,

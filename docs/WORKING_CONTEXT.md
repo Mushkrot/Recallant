@@ -6,7 +6,7 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~73%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~69%` complete. Structured result types, safe action typing,
@@ -402,6 +402,10 @@ Latest implementation checkpoints:
   checks that unrelated panels are absent, and saves dedicated screenshots. This caught and fixed a
   real focused-Settings layout regression where Settings still inherited the old half-width
   operations grid.
+- 2026-06-02 Settings language polish: visible Settings rows use human labels such as Database
+  connection, Provider API key reference, Project lifecycle, Project setting, and System setting.
+  Raw setting keys remain under collapsed Technical value/API-safe metadata instead of appearing as
+  default visible headings.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat policy-guard follow-up: local AI can still classify requests by
   meaning, but server policy now overrides obvious AI under-classification for cleanup,

@@ -82,6 +82,19 @@ await db.pool.query(
   `,
   [JSON.stringify(rawProviderSecret), JSON.stringify(rawDatabaseSecret)]
 );
+await db.pool.query(
+  `
+    INSERT INTO project_settings (project_id, key, value, updated_by)
+    VALUES
+      ($1, 'capture_profile', '"detailed"', 'review-ui-smoke'),
+      ($1, 'project_lifecycle', '{"mode":"sandbox","cleanup":"dry-run first"}', 'review-ui-smoke')
+    ON CONFLICT (project_id, key) DO UPDATE
+    SET value = EXCLUDED.value,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = now()
+  `,
+  [projectId]
+);
 const session = await db.startSession({
   client_kind: "codex",
   client_version: "smoke",
@@ -414,7 +427,11 @@ try {
     "Context budget",
     "Enabled clients",
     "Project aliases",
-    "system_settings",
+    "Database connection",
+    "Provider API key reference",
+    "Project lifecycle",
+    "Project setting",
+    "System setting",
     "Ask Recallant",
     'id="ask-recallant"',
     "Agent Readiness",
@@ -534,6 +551,9 @@ try {
     "<h3>embedding_route</h3>",
     "<h3>instruction_grade</h3>",
     "<h3>needs_review</h3>",
+    "<h3>database url</h3>",
+    "<h3>provider api key</h3>",
+    "system_settings",
     "scope_kind: developer",
     "<h2>Current Signals</h2>"
   ].filter((marker) => htmlText.includes(marker));
@@ -1001,9 +1021,7 @@ try {
       "recallant doctor --project-dir /ai/new_project --require-capture"
     )
   ) {
-    throw new Error(
-      `Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`
-    );
+    throw new Error(`Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`);
   }
 
   const pilotQaChat = await fetch(`${baseUrl}/api/management-chat`, {
@@ -1848,7 +1866,7 @@ try {
     settingForm.status !== 200 ||
     !settingFormHtml.includes("Setting updated.") ||
     !settingFormHtml.includes("Review sensitivity") ||
-    !settingFormHtml.includes("project_settings")
+    !settingFormHtml.includes("Project setting")
   ) {
     throw new Error(`Project setting form update failed: ${settingForm.status} ${settingFormHtml}`);
   }

@@ -406,15 +406,36 @@ function settingLabel(key: unknown) {
   const labels: Record<string, string> = {
     capture_profile: "Capture profile",
     context_budget_profile: "Context budget",
+    database_url: "Database connection",
     embedding_route_enabled: "Semantic search",
     enabled_clients: "Enabled clients",
     embedding_route: "Local search by meaning",
     paid_api_mode: "Paid API mode",
     project_aliases: "Project aliases",
+    project_lifecycle: "Project lifecycle",
     project_paths: "Project paths",
+    provider_api_key: "Provider API key reference",
     review_sensitivity: "Review sensitivity"
   };
+  if (!labels[settingKey] && isSensitiveSettingKey(settingKey)) {
+    if (/database[_-]?url/i.test(settingKey)) return "Database connection";
+    if (/api[_-]?key/i.test(settingKey)) return "API key reference";
+    if (/token|auth/i.test(settingKey)) return "Access token reference";
+    if (/cloudflare/i.test(settingKey)) return "Cloudflare access reference";
+    if (/encryption|password/i.test(settingKey)) return "Secret reference";
+    return "Secret reference";
+  }
   return labels[settingKey] ?? settingKey.replaceAll("_", " ");
+}
+
+function settingSourceLabel(source: unknown) {
+  const value = String(source ?? "");
+  const labels: Record<string, string> = {
+    project_settings: "Project setting",
+    system_settings: "System setting",
+    developer_settings: "Developer setting"
+  };
+  return labels[value] ?? value.replaceAll("_", " ");
 }
 
 function settingSummary(row: Record<string, unknown>) {
@@ -1423,7 +1444,7 @@ function renderSettings(data: ReviewDashboardData, state?: SettingRenderState) {
             return `<article class="setting">
         <div class="setting-head">
           <h3>${escapeHtml(settingLabel(row.key))}</h3>
-          <span>${escapeHtml(row.source)}</span>
+          <span>${escapeHtml(settingSourceLabel(row.source))}</span>
         </div>
         <p class="setting-value">${escapeHtml(settingSummary(row))}</p>
         <details>

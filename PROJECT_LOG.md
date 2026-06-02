@@ -7,7 +7,7 @@ Current focus: Continue turning the Workbench into a professional, human-readabl
 while keeping Playwright checks for layout regressions.
 Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
 and realistic pilot reports.
-Last updated: 2026-06-02T05:49:15Z.
+Last updated: 2026-06-02T05:57:12Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -33,6 +33,8 @@ Last updated: 2026-06-02T05:49:15Z.
   the request still goes through the governed dry-run/rule/action workflow.
 - Ask Recallant should answer ordinary "what did we decide about X?" questions by looking up
   governed memory and showing source/provenance, not only by explaining generic Recallant concepts.
+- Workbench Settings must show human-readable labels by default. Raw setting keys may remain in
+  collapsed Technical value/API-safe metadata, but not as visible headings.
 - Explicit owner requests to save low-risk rules for all projects create developer-scope
   `instruction_grade` memories that future Context Packs include across projects.
 - Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
@@ -137,6 +139,9 @@ Last updated: 2026-06-02T05:49:15Z.
   Workbench visual QA, Management Chat policy guard, and governed-memory lookup changes. Pilot
   report QA summary remained green for clean project, copied sandbox, production-sensitive preflight,
   and source-linked cross-project recall.
+- Settings label polish verification on 2026-06-02: `npm run build`, `npm run review-ui:smoke`,
+  `npm run review-ui:playwright`, `npm run lint`, `npm run format:check`, and `git diff --check`
+  passed.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

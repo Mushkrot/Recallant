@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~72% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~73% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~69% completed. Core risk-typed responses, safe-action and
@@ -169,6 +169,10 @@ Current implemented slices include:
   verifies they stay wide enough on desktop, checks that unrelated admin panels are absent, and
   writes dedicated screenshots for each focused view. This Playwright pass caught and fixed a real
   regression where focused Settings still used the old half-width operations grid.
+- Settings language polish: visible Settings rows now use owner-readable labels such as Database
+  connection, Provider API key reference, Project lifecycle, Project setting, and System setting.
+  Raw keys such as `database_url`, `provider_api_key`, and `system_settings` remain only in
+  collapsed technical values/API-safe redacted metadata, not as default visible headings.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.
