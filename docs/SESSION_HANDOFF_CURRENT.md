@@ -8,10 +8,10 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 - Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
-- Stage 2 — AI-native Management Chat: `~68%` complete. Core risk-typed results, safe
+- Stage 2 — AI-native Management Chat: `~69%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
   deeper semantic routing are still in progress.
-- Stage 3 — Memory Spaces and Sources: `~55%` complete. Virtual spaces and source attach/detach
+- Stage 3 — Memory Spaces and Sources: `~56%` complete. Virtual spaces and source attach/detach
   flows are implemented; full source-health depth and cross-view source filtering are pending.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
@@ -189,6 +189,9 @@ The current Review/Management UI and chat target is complete for the first imple
 - deterministic server policy now overrides obvious local-AI under-classification for cleanup,
   developer-wide rule, onboarding, source-management, and pilot-QA requests, so a bad intent label
   from the local model does not turn a risky or globally binding request into a plain answer;
+- read-only meaning questions can now be enriched with governed-memory recall. A question such as
+  "what did we decide about Google Drive?" can return current-project memories plus source-linked
+  cross-project examples without turning those examples into binding rules;
 - explicit owner requests to save a low-risk rule for all projects create developer-scope
   `instruction_grade` memories that future context packs include as binding rules.
 

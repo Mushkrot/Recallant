@@ -584,6 +584,87 @@ try {
   );
 
   queuedResponses.push({
+    language: "ru",
+    intent: "cross_project",
+    confidence: 0.89,
+    summary: "Owner asks what was decided about Google Drive.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const googleDriveLookup = await buildManagementChatResponse({
+    message: "Что мы решили по Google Drive?",
+    dashboard: baseDashboard,
+    database: {
+      recallAgentMemories: async (input) => ({
+        trace_id: "trace-same-google-drive",
+        truncated: false,
+        memories: [
+          {
+            memory_id: "memory-google-drive-current",
+            title: "Google Drive access pattern",
+            body: "Use the existing connector pattern from the docs project before creating a new binding.",
+            status: "accepted",
+            use_policy: "recall_allowed",
+            scope: "project",
+            scope_kind: "project",
+            provenance: { summary: "From source AGENTS.md", source_path: "AGENTS.md" },
+            source_refs: []
+          }
+        ],
+        query: input.query
+      }),
+      crossProjectRecall: async (input) => ({
+        trace_id: "trace-cross-google-drive",
+        mode: input.mode,
+        current_project_id: currentProjectId,
+        truncated: false,
+        policy: {
+          default_context_pack_includes_cross_project_examples: false,
+          cross_project_results_are_binding_rules: false,
+          source_linked_examples_only: true
+        },
+        results: [
+          {
+            memory_id: "memory-google-drive-example",
+            title: "Docs project Google Drive connector",
+            body: "The docs project used a source-linked connector reference and kept raw secrets outside memory.",
+            status: "accepted",
+            use_policy: "recall_allowed",
+            scope: "project",
+            scope_kind: "project",
+            source_path: "Docs/GOOGLE_DRIVE.md",
+            source_project: {
+              name: "docs archive",
+              primary_path: "/ai/docs_archive"
+            },
+            source_refs: []
+          }
+        ]
+      })
+    }
+  });
+  assert(
+    googleDriveLookup.understanding.source === "local_ai" &&
+      googleDriveLookup.intent === "cross_project" &&
+      googleDriveLookup.result_type === "read_only_answer" &&
+      googleDriveLookup.memory_lookup_result?.status === "found" &&
+      googleDriveLookup.memory_lookup_result?.same_project_hits.length === 1 &&
+      googleDriveLookup.memory_lookup_result?.cross_project_examples.length === 1,
+    `Google Drive memory lookup failed: ${JSON.stringify(googleDriveLookup)}`
+  );
+  assert(
+    String(googleDriveLookup.answer).includes("Google Drive") &&
+      String(googleDriveLookup.answer).includes("В текущем memory space") &&
+      String(googleDriveLookup.answer).includes("Примеры из других проектов") &&
+      String(googleDriveLookup.answer).includes("AGENTS.md") &&
+      String(googleDriveLookup.answer).includes("Docs/GOOGLE_DRIVE.md"),
+    `Google Drive lookup answer did not include memories/provenance: ${JSON.stringify(
+      googleDriveLookup
+    )}`
+  );
+
+  queuedResponses.push({
     language: "en",
     intent: "provenance",
     confidence: 0.88,
@@ -609,7 +690,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 15, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 16, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

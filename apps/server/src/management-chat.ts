@@ -98,6 +98,7 @@ export type ManagementChatResponse = {
     source_uri?: string;
     reason: string;
   };
+  memory_lookup_result?: MemoryLookupResult;
   facts: {
     project_id: string;
     project_name: string;
@@ -156,6 +157,29 @@ type SourceRequestAnalysis = {
   command?: string;
 };
 
+type MemoryLookupHit = {
+  memory_id: string;
+  title: string;
+  body: string;
+  status: string;
+  use_policy: string;
+  scope: string;
+  scope_kind: string;
+  source_summary: string;
+  source_path: string;
+  project_name?: string;
+  project_path?: string;
+};
+
+type MemoryLookupResult = {
+  status: "found" | "not_found" | "skipped";
+  query: string;
+  same_project_hits: MemoryLookupHit[];
+  cross_project_examples: MemoryLookupHit[];
+  trace_ids: string[];
+  reason: string;
+};
+
 type WorkflowRequestAnalysis = {
   operation: "attach_project" | "connect_capture" | "pilot_qa";
   missing: string[];
@@ -204,6 +228,13 @@ export async function buildManagementChatResponse(input: {
           database: input.database
         })
       : undefined;
+  const memoryLookupResult = !policyBlockReason
+    ? await maybeLookupMemories({
+        message,
+        intent,
+        database: input.database
+      })
+    : undefined;
   const confirmationRequired =
     !policyBlockReason && (destructiveOrSensitive || globalRuleResult?.status === "needs_review");
   const resultType = resultTypeForIntent({
@@ -240,6 +271,7 @@ export async function buildManagementChatResponse(input: {
     policyBlockReason,
     sourceActionResult,
     sourceRequest,
+    memoryLookupResult,
     workflowRequest
   );
   return {
@@ -259,6 +291,7 @@ export async function buildManagementChatResponse(input: {
     policy_block_reason: policyBlockReason,
     global_rule_result: globalRuleResult,
     source_action_result: sourceActionResult,
+    memory_lookup_result: memoryLookupResult,
     facts,
     proposed_actions: proposedActions
   };
@@ -1382,6 +1415,115 @@ async function maybeRunSafeSourceAction(input: {
   };
 }
 
+function shouldLookupMemories(intent: ManagementChatIntent) {
+  return [
+    "cross_project",
+    "provenance",
+    "memory_summary",
+    "rule_diagnostics",
+    "context_pack",
+    "review"
+  ].includes(intent);
+}
+
+function lookupQueryFromMessage(message: string) {
+  const quoted = firstQuotedValue(message);
+  if (quoted) return quoted;
+  if (includesAny(message, ["google drive", "gdrive", "гугл", "драйв"])) return "Google Drive";
+  const match = message.match(/(?:about|regarding|for|по|про|о|об)\s+([^\n\r?.!,;:]{3,80})/iu);
+  const extracted = match?.[1]?.trim();
+  if (extracted) return extracted;
+  return message.replace(/\s+/g, " ").trim();
+}
+
+function memoryHitFromRow(row: Record<string, unknown>): MemoryLookupHit {
+  const provenance = asRecord(row.provenance);
+  const sourceProject = asRecord(row.source_project);
+  return {
+    memory_id: String(row.memory_id ?? row.id ?? ""),
+    title: stringValue(row.title) || "Untitled memory",
+    body: stringValue(row.body).slice(0, 420),
+    status: stringValue(row.status) || "unknown",
+    use_policy: stringValue(row.use_policy) || "unknown",
+    scope: stringValue(row.scope) || "unknown",
+    scope_kind: stringValue(row.scope_kind) || "unknown",
+    source_summary:
+      stringValue(provenance.summary) ||
+      stringValue(row.source_path) ||
+      "No source reference recorded",
+    source_path: stringValue(provenance.source_path) || stringValue(row.source_path),
+    project_name: stringValue(sourceProject.name),
+    project_path: stringValue(sourceProject.primary_path)
+  };
+}
+
+async function maybeLookupMemories(input: {
+  message: string;
+  intent: ManagementChatIntent;
+  database?: RecallantDb;
+}): Promise<MemoryLookupResult | undefined> {
+  if (!shouldLookupMemories(input.intent)) return undefined;
+  const query = lookupQueryFromMessage(input.message);
+  if (!query || !input.database) {
+    return {
+      status: "skipped",
+      query,
+      same_project_hits: [],
+      cross_project_examples: [],
+      trace_ids: [],
+      reason: input.database
+        ? "No usable lookup query was found."
+        : "Database is unavailable, so memory lookup was skipped."
+    };
+  }
+  try {
+    const sameProject = await input.database.recallAgentMemories({
+      query,
+      include_needs_review: input.intent === "review" || input.intent === "provenance",
+      include_candidates: input.intent === "review",
+      include_stale: input.intent === "rule_diagnostics",
+      top_k: 3,
+      max_chars_total: 1_800
+    });
+    const sameProjectHits = Array.isArray(sameProject.memories)
+      ? sameProject.memories.map((row) => memoryHitFromRow(row as Record<string, unknown>))
+      : [];
+    let crossProjectExamples: MemoryLookupHit[] = [];
+    let crossTraceId = "";
+    if (input.intent === "cross_project") {
+      const crossProject = await input.database.crossProjectRecall({
+        query,
+        mode: "similar_projects",
+        top_k: 3,
+        max_chars_total: 1_800
+      });
+      crossTraceId = stringValue(crossProject.trace_id);
+      crossProjectExamples = Array.isArray(crossProject.results)
+        ? crossProject.results.map((row) => memoryHitFromRow(row as Record<string, unknown>))
+        : [];
+    }
+    const traceIds = [stringValue(sameProject.trace_id), crossTraceId].filter(Boolean);
+    const found = sameProjectHits.length > 0 || crossProjectExamples.length > 0;
+    return {
+      status: found ? "found" : "not_found",
+      query,
+      same_project_hits: sameProjectHits,
+      cross_project_examples: crossProjectExamples,
+      trace_ids: traceIds,
+      reason: found ? "Governed memory lookup completed." : "No matching governed memory was found."
+    };
+  } catch (error) {
+    return {
+      status: "skipped",
+      query,
+      same_project_hits: [],
+      cross_project_examples: [],
+      trace_ids: [],
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 function answerForIntent(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
@@ -1392,6 +1534,7 @@ function answerForIntent(
   policyBlockReason?: string,
   sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
+  memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
   if (language === "ru")
@@ -1404,6 +1547,7 @@ function answerForIntent(
       policyBlockReason,
       sourceActionResult,
       sourceRequest,
+      memoryLookupResult,
       workflowRequest
     );
   return answerEn(
@@ -1415,6 +1559,7 @@ function answerForIntent(
     policyBlockReason,
     sourceActionResult,
     sourceRequest,
+    memoryLookupResult,
     workflowRequest
   );
 }
@@ -1439,6 +1584,64 @@ function targetLineEn(facts: ManagementChatResponse["facts"]) {
   return `Project: ${facts.project_name}.`;
 }
 
+function formatLookupHitRu(hit: MemoryLookupHit) {
+  const source = hit.source_path || hit.source_summary;
+  const sourceLine = source ? ` Источник: ${source}.` : "";
+  return `- ${hit.title} (${hit.status}, ${hit.use_policy}, ${hit.scope_kind || hit.scope}). ${hit.body}${sourceLine}`;
+}
+
+function formatLookupHitEn(hit: MemoryLookupHit) {
+  const source = hit.source_path || hit.source_summary;
+  const sourceLine = source ? ` Source: ${source}.` : "";
+  return `- ${hit.title} (${hit.status}, ${hit.use_policy}, ${hit.scope_kind || hit.scope}). ${hit.body}${sourceLine}`;
+}
+
+function formatMemoryLookupRu(result: MemoryLookupResult) {
+  const sections: string[] = [];
+  if (result.same_project_hits.length > 0) {
+    sections.push(
+      `В текущем memory space:\n${result.same_project_hits.map(formatLookupHitRu).join("\n")}`
+    );
+  }
+  if (result.cross_project_examples.length > 0) {
+    sections.push(
+      `Примеры из других проектов:\n${result.cross_project_examples
+        .map((hit) => {
+          const project =
+            hit.project_name || hit.project_path
+              ? ` [${hit.project_name || hit.project_path}]`
+              : "";
+          return `${formatLookupHitRu(hit)}${project}`;
+        })
+        .join("\n")}`
+    );
+  }
+  return sections.join("\n\n") || `Ничего не найдено. ${result.reason}`;
+}
+
+function formatMemoryLookupEn(result: MemoryLookupResult) {
+  const sections: string[] = [];
+  if (result.same_project_hits.length > 0) {
+    sections.push(
+      `In the current memory space:\n${result.same_project_hits.map(formatLookupHitEn).join("\n")}`
+    );
+  }
+  if (result.cross_project_examples.length > 0) {
+    sections.push(
+      `Examples from other projects:\n${result.cross_project_examples
+        .map((hit) => {
+          const project =
+            hit.project_name || hit.project_path
+              ? ` [${hit.project_name || hit.project_path}]`
+              : "";
+          return `${formatLookupHitEn(hit)}${project}`;
+        })
+        .join("\n")}`
+    );
+  }
+  return sections.join("\n\n") || `Nothing found. ${result.reason}`;
+}
+
 function answerRu(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
@@ -1448,6 +1651,7 @@ function answerRu(
   policyBlockReason?: string,
   sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
+  memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
   const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
@@ -1488,8 +1692,14 @@ function answerRu(
       }
       return `${baseline}\n\nОжидающих paid API approvals нет. Если режим paid_api_mode = confirm_each, платные вызовы остаются заблокированы до явного подтверждения.`;
     case "context_pack":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nЯ нашел релевантную память по запросу “${memoryLookupResult.query}”. Для стартового Context Pack это должно быть короткое резюме, а не вся история:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nContext Pack должен быть коротким стартовым пакетом для агента: активные правила, последние важные решения, checkpoint и подсказки что запросить дальше. Он не должен тащить всю историю проекта в окно контекста.`;
     case "cross_project":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nЯ поискал память по запросу “${memoryLookupResult.query}”. Сначала идут записи текущего проекта, затем source-linked примеры из других проектов. Примеры из других проектов не становятся правилами автоматически.\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
     case "source_management":
       if (sourceActionResult?.status === "created") {
@@ -1509,6 +1719,9 @@ function answerRu(
       }
       return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Готовых источников: ${facts.source_ready_count}; требуют внимания: ${facts.source_needs_attention_count}; отцеплены: ${facts.source_detached_count}. Источники управляются в Sources workspace: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
     case "provenance":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nЯ нашел память по запросу “${memoryLookupResult.query}” и показываю происхождение рядом с каждой записью:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
@@ -1526,8 +1739,14 @@ function answerRu(
           : "проект зарегистрирован, но полный capture loop еще не доказан."
       }\n\nПоследний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
     case "memory_summary":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nВот что Recallant нашел в governed memory по запросу “${memoryLookupResult.query}”:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
     case "rule_diagnostics":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nЯ нашел возможные связанные правила/память по запросу “${memoryLookupResult.query}”. Проверь status/use/scope: только Active rule с подходящим scope обязан применяться агентом.\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nЕсли правило не применяется, проверь три вещи: оно должно быть Active rule, его scope должен подходить этому проекту или всем проектам, и новая агентская сессия должна получить свежий Context Pack. Если правило только evidence-only, candidate, stale или needs review, агент может видеть его как факт, но не обязан выполнять как правило.`;
     case "status":
     case "general":
@@ -1547,6 +1766,7 @@ function answerEn(
   policyBlockReason?: string,
   sourceActionResult?: ManagementChatResponse["source_action_result"],
   sourceRequest?: SourceRequestAnalysis,
+  memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
   const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
@@ -1587,8 +1807,14 @@ function answerEn(
       }
       return `${baseline}\n\nThere are no pending paid API approvals. With paid_api_mode = confirm_each, paid calls remain blocked until explicitly confirmed.`;
     case "context_pack":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nI found relevant memory for “${memoryLookupResult.query}”. For a startup Context Pack, this should become a compact summary, not the whole history:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nThe Context Pack should be a compact startup packet for the agent: active rules, important recent decisions, checkpoint, and suggested next fetches. It should not load the whole project history into context.`;
     case "cross_project":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nI searched memory for “${memoryLookupResult.query}”. Current-project memories come first, followed by source-linked examples from other projects. Cross-project examples do not become rules automatically.\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
     case "source_management":
       if (sourceActionResult?.status === "created") {
@@ -1608,6 +1834,9 @@ function answerEn(
       }
       return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Ready sources: ${facts.source_ready_count}; need attention: ${facts.source_needs_attention_count}; detached: ${facts.source_detached_count}. Manage them in the Sources workspace: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
     case "provenance":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nI found memory for “${memoryLookupResult.query}” and show origin next to each record:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
@@ -1625,8 +1854,14 @@ function answerEn(
           : "this project is registered, but the full capture loop is not proven yet."
       }\n\nLast context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
     case "memory_summary":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nHere is what Recallant found in governed memory for “${memoryLookupResult.query}”:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
     case "rule_diagnostics":
+      if (memoryLookupResult?.status === "found") {
+        return `${baseline}\n\nI found possibly related rules/memory for “${memoryLookupResult.query}”. Check status/use/scope: only an Active rule with matching scope is binding for the agent.\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+      }
       return `${baseline}\n\nIf a rule is not applying, check three things: it must be an Active rule, its scope must match this project or all projects, and the next agent session must receive a fresh Context Pack. Evidence-only, candidate, stale, or needs-review records can be visible as facts, but they are not binding behavior.`;
     case "status":
     case "general":

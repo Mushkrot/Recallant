@@ -7,7 +7,7 @@ Current focus: Continue turning the Workbench into a professional, human-readabl
 while keeping Playwright checks for layout regressions.
 Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
 and realistic pilot reports.
-Last updated: 2026-06-02T05:39:40Z.
+Last updated: 2026-06-02T05:46:49Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -31,6 +31,8 @@ Last updated: 2026-06-02T05:39:40Z.
 - If local AI under-classifies an obvious cleanup, developer-wide rule, onboarding,
   source-management, or pilot-QA request, deterministic server policy must override the intent so
   the request still goes through the governed dry-run/rule/action workflow.
+- Ask Recallant should answer ordinary "what did we decide about X?" questions by looking up
+  governed memory and showing source/provenance, not only by explaining generic Recallant concepts.
 - Explicit owner requests to save low-risk rules for all projects create developer-scope
   `instruction_grade` memories that future Context Packs include across projects.
 - Installed CLI attach must treat an explicit project path as authoritative. It must not reuse the
@@ -127,6 +129,10 @@ Last updated: 2026-06-02T05:39:40Z.
 - Management Chat policy-guard verification on 2026-06-02: `npm run management-chat-ai:smoke`,
   `npm run review-ui:smoke`, `npm run lint`, `npm run format:check`, and `git diff --check` passed
   after adding deliberately misclassified cleanup/global-rule AI responses.
+- Management Chat memory-lookup verification on 2026-06-02: `npm run build`,
+  `npm run management-chat-ai:smoke`, `npm run review-ui:smoke`, `npm run lint`,
+  `npm run format:check`, and `git diff --check` passed after adding a Google Drive governed-memory
+  lookup scenario with current-project and cross-project source provenance.
 - `recallant local-cleanup` is the first local sandbox cleanup slice. It is blocked until detach,
   then removes only `.recallant/config`, `.recallant/codex-mcp.json`, and
   `.recallant/current-session.json`; it preserves bootstrap files, source files, and local attach

@@ -9,10 +9,10 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
-- Stage 2 — AI-native Management Chat: `~68%` complete. Structured result types, safe action typing,
+- Stage 2 — AI-native Management Chat: `~69%` complete. Structured result types, safe action typing,
   and risk-gated execution are in place; broad ambiguous-query handling and richer multilingual
   scenario interpretation are still being expanded.
-- Stage 3 — Memory Spaces and Sources: `~55%` complete. The source-binding model and source API
+- Stage 3 — Memory Spaces and Sources: `~56%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
@@ -408,6 +408,11 @@ Latest implementation checkpoints:
   developer-wide rule, onboarding, source-management, and pilot-QA intents. The smoke suite now
   deliberately mocks wrong AI classifications for cleanup and global-rule requests and proves
   Recallant still returns a governed dry-run or developer-scope rule workflow.
+- 2026-06-02 Management Chat memory-lookup follow-up: Ask Recallant can enrich read-only meaning
+  questions with bounded governed-memory recall. Questions such as "what did we decide about Google
+  Drive?" now return matching current-project memories plus source-linked examples from other
+  projects for cross-project intent, while keeping those examples non-binding evidence until applied
+  through governed memory.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing. Concrete local/repo/
   document/manual source attach requests can now execute as safe Recallant DB-only actions when the

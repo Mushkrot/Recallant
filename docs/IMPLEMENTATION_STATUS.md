@@ -66,10 +66,10 @@ Current implemented slices include:
 - Stage 1 — Human Workbench UI: ~72% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
-- Stage 2 — AI-native Management Chat: ~68% completed. Core risk-typed responses, safe-action and
+- Stage 2 — AI-native Management Chat: ~69% completed. Core risk-typed responses, safe-action and
   dry-run/confirmation behavior are active, but deeper semantic coverage, ambiguity-guided clarification
   for complex scenarios, and stronger end-to-end multilingual flow depth are still ongoing.
-- Stage 3 — Memory Spaces and Sources: ~55% completed. Logical memory space model and source binding
+- Stage 3 — Memory Spaces and Sources: ~56% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
@@ -177,6 +177,10 @@ Current implemented slices include:
   rule, onboarding, source-management, and pilot-QA requests. The AI smoke now includes deliberately
   misclassified cleanup and global-rule responses and proves they still become the governed dry-run
   or developer-scope rule workflow.
+- Management chat read-only memory lookup pass: for meaning questions such as "what did we decide
+  about Google Drive?", Ask Recallant now enriches the answer with bounded governed-memory lookup
+  and source provenance. Cross-project intent also fetches source-linked examples from other
+  projects while explicitly keeping them as examples/evidence, not automatic rules.
 - Review action controls are now executable for the full governed-memory action set instead of
   showing advanced actions as disabled labels. Browser/API paths route through
   `reviewAgentMemory` for accept, reject, archive, unarchive, mark stale, promote instruction,
