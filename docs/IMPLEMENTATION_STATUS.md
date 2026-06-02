@@ -72,7 +72,7 @@ Current implemented slices include:
 - Stage 3 — Memory Spaces and Sources: ~54% completed. Logical memory space model and source binding
   APIs are implemented, including virtual spaces and source attach/detach, but richer source health,
   source provenance UX, and full cross-view usage filtering are still incomplete.
-- Stage 4 — Client Connect and Hook Capture: ~82% completed. Separate connect lifecycle, MCP setup,
+- Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
 - Stage 5 — Real Pilots and QA: ~70% completed. Core pilot automation exists (clean and copied
@@ -174,6 +174,10 @@ Current implemented slices include:
   closeout writes an explicit `agent_closeout` event before closing the session.
 - `recallant doctor` / client connection readiness now validates the local hook manifest contract
   and reports missing, invalid, or valid manifest state as part of hook-kit readiness.
+- `recallant doctor` now includes an owner-facing summary that separates "attached/configured" from
+  "actually recording". The summary reports whether the project is attached, whether the client MCP
+  config is present, whether hook capture is ready, whether capture has been proven, and the next
+  practical step before/after `--require-capture`.
 - Direct CLI capture commands now resolve the default spool path from `--project-dir` when present,
   so tests or clients launched from another working directory do not read/write the Recallant repo's
   own `.recallant/spool`.
@@ -468,6 +472,9 @@ Stage 4 first slice is now implemented:
 - `recallant connect` now also reports that same state in the top-level `connection_status`, so
   humans and automation can distinguish `mcp_only`, `mcp_and_hooks_planned`, and
   `mcp_and_hooks_ready` without drilling into nested diagnostics.
+- `recallant doctor` now also exposes `owner_summary`, a plain-language readiness summary that says
+  whether Recallant is recording, merely configured, missing client/hook connection, or not attached.
+  `npm run connect:smoke` verifies the summary before capture and after active capture.
 
 The next implementation session should start from [SESSION_HANDOFF_CURRENT.md](SESSION_HANDOFF_CURRENT.md).
 

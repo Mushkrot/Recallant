@@ -70,6 +70,14 @@ assert(
     requireCaptureBefore.json?.client_connection?.hook_kit?.manifest?.status === "missing",
   `doctor should report MCP-only before hook installation: ${JSON.stringify(requireCaptureBefore.json?.client_connection)}`
 );
+assert(
+  requireCaptureBefore.json?.owner_summary?.status === "configured_not_recording" &&
+    requireCaptureBefore.json?.owner_summary?.actually_recording === false &&
+    requireCaptureBefore.json?.owner_summary?.client_configured === true &&
+    requireCaptureBefore.json?.owner_summary?.hook_capture_ready === false &&
+    requireCaptureBefore.json?.owner_summary?.headline.includes("not proven"),
+  `doctor owner summary should explain configured-but-not-recording state: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
+);
 
 const dryRun = runCli(["connect", "codex", "--project-dir", projectDir, "--dry-run"]);
 assert(dryRun.dry_run === true, `Connect dry-run flag missing: ${JSON.stringify(dryRun)}`);
@@ -382,6 +390,14 @@ assert(
     requireCaptureAfter.json?.client_connection?.hook_kit?.ready === true &&
     requireCaptureAfter.json?.client_connection?.hook_kit?.manifest?.valid === true,
   `doctor should report MCP+hooks after hook installation: ${JSON.stringify(requireCaptureAfter.json?.client_connection)}`
+);
+assert(
+  requireCaptureAfter.json?.owner_summary?.status === "recording" &&
+    requireCaptureAfter.json?.owner_summary?.actually_recording === true &&
+    requireCaptureAfter.json?.owner_summary?.client_configured === true &&
+    requireCaptureAfter.json?.owner_summary?.hook_capture_ready === true &&
+    requireCaptureAfter.json?.owner_summary?.proof.includes("Recording means"),
+  `doctor owner summary should prove active recording after capture: ${JSON.stringify(requireCaptureAfter.json?.owner_summary)}`
 );
 runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
 

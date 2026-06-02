@@ -771,6 +771,65 @@ async function checkCaptureReadiness(input: {
   };
 }
 
+function doctorOwnerSummary(input: {
+  projectDir: string;
+  postgres: { configured: boolean; reachable: boolean };
+  captureReadiness: Awaited<ReturnType<typeof checkCaptureReadiness>>;
+  clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  requireCapture: boolean;
+}) {
+  const attached = Boolean(input.captureReadiness.project_config.present);
+  const captureReady = input.captureReadiness.ready === true;
+  const hookKit = objectValue(input.clientConnection.hook_kit);
+  const configured =
+    attached &&
+    (input.clientConnection.mcp_configured === true ||
+      hookKit.ready === true ||
+      input.clientConnection.status === "mcp_and_hooks_ready");
+  const hookCaptureReady = hookKit.ready === true;
+  const clientConfigured = input.clientConnection.mcp_configured === true;
+  const connectionStatus =
+    typeof input.clientConnection.status === "string"
+      ? input.clientConnection.status
+      : "not_configured";
+  const status = captureReady
+    ? "recording"
+    : attached
+      ? configured
+        ? "configured_not_recording"
+        : "not_configured"
+      : "not_attached";
+  const headline = captureReady
+    ? "Recallant capture is active for this project."
+    : status === "configured_not_recording"
+      ? "Recallant is configured, but active capture is not proven yet."
+      : status === "not_configured"
+        ? "Project is attached, but the agent client is not fully connected yet."
+        : "Project is not attached to Recallant yet.";
+  const nextStep = captureReady
+    ? "No startup-layer action is required. Continue normal work and close out the session when done."
+    : !attached
+      ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
+      : input.clientConnection.status !== "mcp_and_hooks_ready"
+        ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks --dry-run, then install after review.`
+        : "Start an agent session through Recallant, read context, write memory, and checkpoint; then rerun doctor --require-capture.";
+  return {
+    status,
+    headline,
+    project_attached: attached,
+    client_configured: clientConfigured,
+    hook_capture_ready: hookCaptureReady,
+    connection_status: connectionStatus,
+    configured,
+    actually_recording: captureReady,
+    require_capture_gate: input.requireCapture,
+    next_step: nextStep,
+    proof:
+      "Recording means Recallant has observed context read, memory write, and checkpoint evidence.",
+    postgres_ready: input.postgres.reachable
+  };
+}
+
 async function readProjectContextProfile(projectDir: string) {
   if (!process.env.RECALLANT_DATABASE_URL) return null;
   const config = await readProjectConfig(projectDir);
@@ -1428,8 +1487,16 @@ async function runDoctor(argv: readonly string[]) {
       }
     }
     const captureReadiness = await checkCaptureReadiness({ projectDir, database });
+    const clientConnection = await clientConnectionReadiness(projectDir);
     const result = {
       ...describeCliBoundary(),
+      owner_summary: doctorOwnerSummary({
+        projectDir,
+        postgres,
+        captureReadiness,
+        clientConnection,
+        requireCapture
+      }),
       postgres,
       project_config: {
         path: join(projectDir, ".recallant", "config"),
@@ -1439,7 +1506,7 @@ async function runDoctor(argv: readonly string[]) {
         ...captureReadiness,
         required: requireCapture
       },
-      client_connection: await clientConnectionReadiness(projectDir),
+      client_connection: clientConnection,
       local_model: await checkOllama(),
       model_routes: {
         local_model: { enabled: true, provider: "ollama", route_class: "local_model" },

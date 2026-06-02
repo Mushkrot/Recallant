@@ -15,7 +15,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 3 — Memory Spaces and Sources: `~54%` complete. The source-binding model and source API
   are implemented, but source-health completeness, provenance UX depth, and cross-view source-aware
   filtering are still partly open.
-- Stage 4 — Client Connect and Hook Capture: `~82%` complete. Connect separation, hook install
+- Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
 - Stage 5 — Real Pilots and QA: `~70%` complete. Pilot automation for clean/copied/production-sensitive
@@ -425,6 +425,10 @@ Latest implementation checkpoints:
 - 2026-06-02 doctor manifest validation follow-up: `recallant doctor` / client connection
   readiness now validates the hook manifest contract and reports missing, invalid, or valid
   manifest state. Verified by `npm run connect:smoke`.
+- 2026-06-02 doctor owner-summary follow-up: `recallant doctor` now includes `owner_summary`, a
+  plain-language readiness summary that distinguishes attached/configured projects from projects
+  that are actually recording memory. It reports project attachment, MCP client config, hook capture
+  readiness, proven recording state, and the next practical step. Verified by `npm run connect:smoke`.
 - 2026-06-01 Pilot-report follow-up: `npm run pilot-report:smoke` now validates the Stage 5 pilot contract in one self-contained run. It attaches a clean empty project, captures/recalls memory, detaches safely, attaches only a copied existing-project sandbox while proving the original hash tree stays unchanged, and verifies production-sensitive attach preflight downgrades autopilot to guided without file or database writes. The generated JSON report records attached projects, detected/imported sources, remembered/recalled evidence, cleanup results, and untouched originals.
 - 2026-06-02 Pilot-report artifact follow-up: `npm run pilot-report:smoke` now persists that JSON
   report under `RECALLANT_PILOT_REPORT_DIR` or `/tmp/recallant-pilot-reports`, includes
