@@ -2175,6 +2175,8 @@ function renderDashboard(
     .operation-panel summary { border: 0; padding: 0; margin: 0; }
     .operation-panel summary span { font-size: 14px; font-weight: 750; }
     .operation-panel[open] { grid-column: span 2; }
+    .workbench-body.focused .operation-panels { grid-template-columns: minmax(0, 1fr); }
+    .workbench-body.focused .operation-panel[open] { grid-column: span 1; }
     .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 12px; }
     .section-head h2 { margin-bottom: 0; }
     .section-head p { max-width: 520px; margin: 0; color: #4f5867; font-size: 13px; line-height: 1.4; }

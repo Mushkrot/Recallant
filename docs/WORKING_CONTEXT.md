@@ -6,7 +6,7 @@ This file preserves the current conversation-level direction so a future agent d
 
 ## Stage 1-5 progress snapshot
 
-- Stage 1 — Human Workbench UI: `~71%` complete. Ask-first workbench, primary Ask panel,
+- Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench, primary Ask panel,
   cleaner labels, and reduced right-column dominance are working, but final UI polish and some
   operator readability details remain.
 - Stage 2 — AI-native Management Chat: `~67%` complete. Structured result types, safe action typing,
@@ -18,7 +18,7 @@ This file preserves the current conversation-level direction so a future agent d
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect separation, hook install
   pathways, and capture readiness gates work; full mandatory startup parity and broader installer hardening
   are still active.
-- Stage 5 — Real Pilots and QA: `~72%` complete. Pilot automation for clean/copied/production-sensitive
+- Stage 5 — Real Pilots and QA: `~73%` complete. Pilot automation for clean/copied/production-sensitive
   dry-runs is in place, but more realistic non-fixture pilots and broader scenario reporting are pending.
 
 ## Current product intent
@@ -397,6 +397,11 @@ Latest implementation checkpoints:
 - 2026-06-02 Settings focused-view polish: `view=settings` now renders only the Settings work
   surface instead of opening unrelated Selected Detail, Cost, and Cleanup panels. The full governed
   operation set remains in `All`.
+- 2026-06-02 Focused Workbench browser-QA follow-up: `npm run review-ui:playwright` now opens
+  focused Ask, Sources, and Settings views directly, verifies they remain wide enough on desktop,
+  checks that unrelated panels are absent, and saves dedicated screenshots. This caught and fixed a
+  real focused-Settings layout regression where Settings still inherited the old half-width
+  operations grid.
 - 2026-06-01 Management Chat AI-path follow-up: `npm run management-chat-ai:smoke` now starts a mock Ollama endpoint and verifies the local-AI interpreter path, not just deterministic fallback. It covers colloquial Russian sandbox cleanup, ambiguous sandbox-target clarification with no runnable risky command, and developer-wide rule creation from non-exact wording while deterministic policy remains the execution authority.
 - 2026-06-02 Management Chat source-operation follow-up: source-management requests now ask for
   clarification when a memory-space name or source location is missing. Concrete local/repo/

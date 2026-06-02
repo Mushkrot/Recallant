@@ -6,7 +6,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 
 ## Current stage completion snapshot
 
-- Stage 1 — Human Workbench UI: `~71%` complete. Ask-first workbench and capture-state visibility
+- Stage 1 — Human Workbench UI: `~72%` complete. Ask-first workbench and capture-state visibility
   are implemented; final UX polish and reduced visual clutter are still ongoing.
 - Stage 2 — AI-native Management Chat: `~67%` complete. Core risk-typed results, safe
   action/dry-run, and confirmation gates are working; wider ambiguous-intent interpretation and
@@ -16,7 +16,7 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 4 — Client Connect and Hook Capture: `~84%` complete. Connect lifecycle, MCP status, hook
   install, and capture readiness checks are active; full mandatory startup parity for all clients is
   still being hardened.
-- Stage 5 — Real Pilots and QA: `~72%` complete. Pilot-report automation for clean, copied, and
+- Stage 5 — Real Pilots and QA: `~73%` complete. Pilot-report automation for clean, copied, and
   production-sensitive dry-runs exists; next is more real-world project scenarios and richer outcome
   review.
 
@@ -61,6 +61,10 @@ Source, and Settings actions stay on the relevant focused surface instead of dro
 into the long overview.
 `view=settings` renders only the Settings work surface; Selected Detail, Cost, and Cleanup remain
 available from the full `All` overview instead of crowding the focused Settings page.
+Focused Workbench browser QA now opens `Ask`, `Sources`, and `Settings` views directly, verifies
+they are wide enough on desktop, checks that unrelated panels are absent, and saves dedicated
+screenshots. This caught and fixed a real focused-Settings layout regression where Settings still
+used the old half-width operations grid.
 Ask Recallant also has a covered safe-action path for creating an empty virtual memory space from a
 clear natural-language request. It can also attach an explicitly named local/repo/document/manual
 source as a DB-only Recallant record. These chat actions do not touch project files, source files,

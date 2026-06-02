@@ -2,13 +2,12 @@
 
 ## Current Session
 
-Status: Production `recallant.service` has been restarted and now serves the current Recallant
-Workbench UI.
-Current focus: The live site should show `Recallant Workbench` and `Ask Recallant` after browser
-refresh, rather than the older `Recallant Review Command Center` process that was still in memory.
-Next step: Continue Workbench UI/product implementation using `npm run review-ui:smoke` and
-`npm run review-ui:playwright` as the UI QA gates.
-Last updated: 2026-06-01T22:35:55Z.
+Status: Focused Workbench views are implemented and now have browser-level QA coverage.
+Current focus: Continue turning the Workbench into a professional, human-readable control surface
+while keeping Playwright checks for layout regressions.
+Next step: Continue Stage 1/2/3/5 hardening: richer Ask Recallant scenarios, source/provenance UX,
+and realistic pilot reports.
+Last updated: 2026-06-02T05:34:35Z.
 ## Active Constraints
 
 - Recallant is the main source of truth for durable project memory.
@@ -67,6 +66,10 @@ Last updated: 2026-06-01T22:35:55Z.
   authenticated Recallant Workbench fixture on a random localhost port, checks desktop and mobile
   layout in headless Chromium, submits long chat answers, verifies no horizontal overflow, and writes
   screenshots under `/ai/playwright/reports`.
+- Focused Workbench QA now opens `Ask`, `Sources`, and `Settings` directly, verifies that each
+  focused surface is wide enough, confirms unrelated panels are absent, and saves dedicated
+  screenshots. This caught and fixed a real bug where focused Settings still used the old half-width
+  operations grid.
 
 ## Verification
 
@@ -84,6 +87,9 @@ Last updated: 2026-06-01T22:35:55Z.
 - `recallant-postgres` remained healthy on `127.0.0.1:15432`
 - Playwright screenshots written to:
   - `/ai/playwright/reports/recallant-workbench-desktop.png`
+  - `/ai/playwright/reports/recallant-workbench-desktop-focused-ask.png`
+  - `/ai/playwright/reports/recallant-workbench-desktop-focused-sources.png`
+  - `/ai/playwright/reports/recallant-workbench-desktop-focused-settings.png`
   - `/ai/playwright/reports/recallant-workbench-desktop-chat.png`
   - `/ai/playwright/reports/recallant-workbench-mobile-chat.png`
 - Host process/socket checks after Playwright smoke found no remaining `playwright`/browser process

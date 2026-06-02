@@ -47,6 +47,11 @@ async function visibleBox(locator, label) {
   return box;
 }
 
+async function absent(locator, label) {
+  const count = await locator.count();
+  assert(count === 0, `${label} should not be present, found ${count}`);
+}
+
 async function run() {
   const { chromium } = loadPlaywright();
   const databaseUrl =
@@ -213,15 +218,15 @@ async function run() {
     );
     assert(askBox.width >= 980, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
     assert(
-      askBox.y < leftRailBox.y &&
-        askBox.y < sourcesBox.y &&
-        sourcesBox.y < secondaryBox.y,
-      `desktop Workbench order is not Ask-first with Sources before secondary panels: ${JSON.stringify({
-        askBox,
-        leftRailBox,
-        sourcesBox,
-        secondaryBox
-      })}`
+      askBox.y < leftRailBox.y && askBox.y < sourcesBox.y && sourcesBox.y < secondaryBox.y,
+      `desktop Workbench order is not Ask-first with Sources before secondary panels: ${JSON.stringify(
+        {
+          askBox,
+          leftRailBox,
+          sourcesBox,
+          secondaryBox
+        }
+      )}`
     );
 
     await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
@@ -240,6 +245,74 @@ async function run() {
       fullPage: true
     });
 
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
+      waitUntil: "networkidle"
+    });
+    await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused Ask view");
+    const focusedAskBox = await visibleBox(
+      desktop.locator("#ask-recallant"),
+      "desktop focused Ask Recallant"
+    );
+    assert(
+      focusedAskBox.width >= 980,
+      `desktop focused Ask Recallant is too narrow: ${JSON.stringify(focusedAskBox)}`
+    );
+    await absent(desktop.locator("#command-center"), "focused Ask command center");
+    await absent(desktop.locator("#sources"), "focused Ask sources");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
+      fullPage: true
+    });
+
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=sources`, {
+      waitUntil: "networkidle"
+    });
+    await desktop.getByRole("heading", { name: "Sources" }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused Sources view");
+    const focusedSourcesBox = await visibleBox(
+      desktop.locator("#sources"),
+      "desktop focused Sources"
+    );
+    assert(
+      focusedSourcesBox.width >= 980,
+      `desktop focused Sources is too narrow: ${JSON.stringify(focusedSourcesBox)}`
+    );
+    await desktop.locator(".workbench-body.focused").waitFor();
+    await desktop.getByText("Attach a source to selected space").waitFor();
+    await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
+    await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
+    await absent(desktop.locator("#ask-recallant"), "focused Sources Ask panel");
+    await absent(desktop.locator("#command-center"), "focused Sources command center");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
+      fullPage: true
+    });
+
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=settings`, {
+      waitUntil: "networkidle"
+    });
+    await desktop.getByRole("heading", { name: "Operations" }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused Settings view");
+    const focusedSettingsBox = await visibleBox(
+      desktop.locator("#settings"),
+      "desktop focused Settings"
+    );
+    assert(
+      focusedSettingsBox.width >= 980,
+      `desktop focused Settings is too narrow: ${JSON.stringify(focusedSettingsBox)}`
+    );
+    await desktop.locator("#settings[open]").waitFor();
+    await desktop.getByText("Edit project settings").waitFor();
+    await absent(desktop.getByText("Selected Detail"), "focused Settings selected detail");
+    await absent(desktop.getByText("Cost / Paid API"), "focused Settings cost panel");
+    await absent(desktop.getByText("Cleanup / Forget"), "focused Settings cleanup panel");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
+      fullPage: true
+    });
+
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await desktop
       .locator('#ask-recallant textarea[name="message"]')
       .fill("Удали этот sandbox проект");
@@ -297,6 +370,9 @@ async function run() {
           base_url: baseUrl,
           screenshots: [
             join(reportDir, "recallant-workbench-desktop.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
             join(reportDir, "recallant-workbench-mobile-chat.png")
           ],
@@ -304,6 +380,9 @@ async function run() {
             "auth_required",
             "desktop_no_horizontal_scroll",
             "central_ask_recallant_panel",
+            "desktop_focused_ask_view",
+            "desktop_focused_sources_view",
+            "desktop_focused_settings_view",
             "long_russian_chat_answer_readable",
             "mobile_no_horizontal_scroll",
             "mobile_chat_answer_readable"

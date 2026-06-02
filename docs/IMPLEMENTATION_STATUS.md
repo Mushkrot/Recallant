@@ -63,7 +63,7 @@ Current implemented slices include:
 
 ### Stage completion snapshot (against Stage 1-5 roadmap)
 
-- Stage 1 — Human Workbench UI: ~71% completed. Working as an ask-first workbench with cleaner
+- Stage 1 — Human Workbench UI: ~72% completed. Working as an ask-first workbench with cleaner
   labels and primary Ask panel is in place, but the final visual balance and non-technical operator
   flow polish still need one more hardening iteration.
 - Stage 2 — AI-native Management Chat: ~67% completed. Core risk-typed responses, safe-action and
@@ -75,7 +75,7 @@ Current implemented slices include:
 - Stage 4 — Client Connect and Hook Capture: ~84% completed. Separate connect lifecycle, MCP setup,
   hook installation, and capture readiness gate are implemented, while full mandatory startup parity
   and broader client/global installer hardening are still being refined.
-- Stage 5 — Real Pilots and QA: ~72% completed. Core pilot automation exists (clean and copied
+- Stage 5 — Real Pilots and QA: ~73% completed. Core pilot automation exists (clean and copied
   sandbox, production-sensitive dry-run), but the plan still requires more realistic scenario batches and
   deeper cross-project recall/restore report coverage.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
@@ -160,6 +160,10 @@ Current implemented slices include:
 - Focused Settings view now renders the Settings work surface by itself instead of opening the
   unrelated Selected Detail, Cost, and Cleanup panels. The full governed operations set remains
   available in the default `All` overview.
+- Focused Workbench browser QA now opens the Ask, Sources, and Settings work surfaces directly,
+  verifies they stay wide enough on desktop, checks that unrelated admin panels are absent, and
+  writes dedicated screenshots for each focused view. This Playwright pass caught and fixed a real
+  regression where focused Settings still used the old half-width operations grid.
 - Workbench compact Review slice: Review now starts with four human-readable queue summaries and
   uses expandable lanes for Import Candidates, Review Inbox, Conflicts / Duplicates, and Active
   Rules, reducing first-screen list overload while keeping details available.
