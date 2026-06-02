@@ -131,6 +131,12 @@ need_command() {
   fi
 }
 
+if [[ "$DRY_RUN" == "true" ]]; then
+  print_plan
+  echo "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
+  exit 0
+fi
+
 need_command node
 need_command npm
 need_command docker
@@ -141,12 +147,6 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 cd "$RECALLANT_HOME"
-
-if [[ "$DRY_RUN" == "true" ]]; then
-  print_plan
-  echo "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
-  exit 0
-fi
 
 mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/backups" "$(dirname "$ENV_FILE")"
 

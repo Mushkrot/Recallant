@@ -78,6 +78,13 @@ Current implemented slices include:
 - Stage 5 — Real Pilots and QA: ~73% completed. Core pilot automation exists (clean and copied
   sandbox, production-sensitive dry-run), but the plan still requires more realistic scenario batches and
   deeper cross-project recall/restore report coverage.
+- Stage 7 — Packaging and Public Readiness: first packaging slice implemented. README and
+  Quickstart now describe the outside-user path from install preview through capture-active proof;
+  self-hosting and owner-server docs are separated; installer dry-run can preview plans before
+  dependency checks; and `npm run public-readiness:smoke` guards the public onboarding contract.
+  This is not yet a public-release claim: clean-host validation, final screenshots, release URL/
+  version policy, rollback testing on a non-owner host, and final client mandatory-startup parity
+  remain open.
 - Phase 10 controlled cross-project recall first slice: MCP exposes
   `memory_cross_project_recall` with explicit modes for same-project, developer rules, environment,
   similar projects, and all-project review. Similar-project results are source-linked examples with
@@ -962,8 +969,21 @@ Latest product-UX readiness checkpoint:
 
 - `scripts/install-recallant.sh` provides the intended server install entrypoint:
   clone, run one installer, get Postgres, the HTTP service, and the global `recallant` CLI.
+- Stage 7 first public packaging slice is now documented and smoke-guarded:
+  - `README.md` shows preview install, install, attach, connect, and capture-active proof.
+  - `docs/QUICKSTART.md` is the short outside-user journey and no longer mixes the public path with
+    owner-server `/ai` operational details.
+  - `docs/SELF_HOSTING.md` covers install profiles, rollback/recovery, verification, and security
+    defaults.
+  - `docs/OWNER_SERVER.md` records the owner's `/ai` production profile as one deployment profile,
+    not the product default.
+  - `docs/PUBLIC_READINESS.md` tracks Stage 7 acceptance, current status, and remaining release
+    blockers.
+  - `npm run public-readiness:smoke` verifies the documentation path plus installer dry-run behavior
+    for both profiles and the no-Docker-preview path.
 - `scripts/install-recallant.sh --dry-run --profile owner-server|single-user` prints the exact
-  install plan and exits before file, Docker, database, or systemd writes.
+  install plan and exits before file, Docker, database, or systemd writes. Dry-run now exits before
+  dependency checks, so a new user can preview the plan even before Docker is available in `PATH`.
 - Full `npm run smoke:core` now passes from a clean `make db-reset` using the dedicated
   `recallant-dev` database on `127.0.0.1:15433`.
 - The full smoke suite also verifies source-linked developer-wide cross-project recall and

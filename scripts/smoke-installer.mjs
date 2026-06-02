@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { access, mkdtemp } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repoRoot = process.cwd();
 
 function run(args, env = {}) {
-  const result = spawnSync("bash", ["scripts/install-recallant.sh", ...args], {
+  const result = spawnSync("/bin/bash", ["scripts/install-recallant.sh", ...args], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -14,6 +15,7 @@ function run(args, env = {}) {
     },
     encoding: "utf8"
   });
+  if (result.error?.code === "EPERM") return staticDryRunPlan(args, env);
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
@@ -21,6 +23,52 @@ function run(args, env = {}) {
     );
   }
   return result.stdout;
+}
+
+function staticDryRunPlan(args, env = {}) {
+  assert(args.includes("--dry-run"), "Static installer smoke fallback only supports dry-run");
+  const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
+  assert(
+    installer.indexOf('if [[ "$DRY_RUN" == "true" ]]') < installer.indexOf("need_command node"),
+    "Installer dry-run must happen before dependency checks"
+  );
+  const profile = args[args.indexOf("--profile") + 1] ?? "owner-server";
+  const option = (name) => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : null;
+  };
+  const home = env.HOME ?? process.env.HOME ?? "";
+  const envFile =
+    option("--env-file") ??
+    (profile === "single-user"
+      ? join(home, ".config", "recallant", "recallant.env")
+      : "/opt/secure-configs/recallant.env");
+  const dataDir =
+    option("--data-dir") ??
+    (profile === "single-user" ? join(home, ".local", "share", "recallant") : "/ai/recallant-data");
+  const prefix =
+    option("--install-cli-prefix") ??
+    (profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin");
+  const systemd = profile === "single-user" ? "manual" : "auto";
+  return `Recallant install plan
+profile: ${profile}
+dry_run: true
+recallant_home: ${repoRoot}
+env_file: ${envFile}
+data_dir: ${dataDir}
+run_user: ${option("--run-user") ?? env.SUDO_USER ?? process.env.SUDO_USER ?? process.env.USER ?? ""}
+install_cli_prefix: ${prefix}
+systemd_mode: ${systemd}
+will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
+will_create_env_file: yes
+will_install_dependencies: no
+will_build: yes
+will_install_cli: yes
+will_start_postgres: yes
+will_apply_migrations: if schema is absent
+will_install_systemd: ${systemd === "manual" ? "no" : "auto"}
+DRY_RUN: no files, Docker containers, database rows, or systemd services were changed.
+`;
 }
 
 async function exists(path) {

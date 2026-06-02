@@ -442,6 +442,35 @@ Acceptance:
   capture-active status without reading internal architecture docs.
 - Docs clearly separate ordinary user flow from advanced/self-hosted operations.
 
+2026-06-02 first packaging slice:
+
+- Done: root README now shows the intended outside-user path: preview install,
+  install, attach a project, connect an agent client, and prove capture with
+  `recallant doctor --require-capture`.
+- Done: [QUICKSTART.md](QUICKSTART.md) is now the short ordinary user journey
+  instead of mixing public onboarding with owner-server production details.
+- Done: [SELF_HOSTING.md](SELF_HOSTING.md) separates install profiles,
+  rollback/recovery notes, verification, and security defaults.
+- Done: [OWNER_SERVER.md](OWNER_SERVER.md) records the current `/ai` production
+  profile as owner-specific operational evidence rather than the generic
+  product default.
+- Done: [PUBLIC_READINESS.md](PUBLIC_READINESS.md) tracks Stage 7 status,
+  acceptance path, and remaining release blockers.
+- Done: installer `--dry-run` exits before dependency checks, so a new user can
+  preview the install plan before Docker is installed or available in `PATH`.
+- Done: `npm run public-readiness:smoke` verifies README/Quickstart/Self-hosting/
+  Owner-server/Public-readiness documentation markers plus installer dry-run for
+  both profiles and the no-Docker-preview path.
+
+Remaining before a real public-release claim:
+
+- Real public repository URL, release/version policy, and public install URL.
+- Public-quality screenshots from the final Workbench visual direction.
+- Clean-host install validation outside the owner server.
+- Rollback docs tested on a non-owner host.
+- Full mandatory startup parity for supported clients.
+- Security review of public-facing packaging instructions.
+
 ## Verification Discipline
 
 Each stage should finish with:

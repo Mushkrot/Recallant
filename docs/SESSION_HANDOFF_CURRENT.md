@@ -20,6 +20,10 @@ This is the current handoff for the next Recallant session. Start here after rea
 - Stage 5 — Real Pilots and QA: `~73%` complete. Pilot-report automation for clean, copied, and
   production-sensitive dry-runs exists; next is more real-world project scenarios and richer outcome
   review.
+- Stage 7 — Packaging and Public Readiness: first public-packaging slice is implemented. README,
+  Quickstart, Self-hosting, Owner-server, and Public-readiness docs now describe the outside-user
+  path separately from owner-server `/ai` operations, and `npm run public-readiness:smoke` guards
+  the packaging contract. It is not a public-release claim yet.
 
 ## Current State
 
@@ -117,6 +121,14 @@ governed-memory chat lookup changes also passed on 2026-06-02: `npm run smoke:co
 pilot report again proved clean attach/capture/recall/detach, copied sandbox original untouched,
 production-sensitive guided preflight, and source-linked cross-project recall with non-binding
 examples.
+Stage 7 first packaging slice is now implemented and smoke-guarded:
+`README.md` shows preview install, install, attach, connect, and capture-active proof;
+`docs/QUICKSTART.md` is the short outside-user path; `docs/SELF_HOSTING.md` separates profiles,
+rollback, verification, and security defaults; `docs/OWNER_SERVER.md` records the owner's `/ai`
+profile separately; `docs/PUBLIC_READINESS.md` tracks Stage 7 status and release blockers; and
+`npm run public-readiness:smoke` verifies documentation markers plus installer dry-run for both
+profiles and the no-Docker-preview path. Installer `--dry-run` now exits before dependency checks,
+so previewing the install plan does not require Docker to be available.
 The latest Workbench compacting follow-up moves Current Signals into Command Center as a compact
 strip instead of a separate left-column card, leaving the rail focused on Memory Spaces and safe
 project actions.
@@ -166,6 +178,8 @@ Historical handoff material from 2026-05-21 has been archived under `docs/archiv
 11. Run `git status --short --branch`.
 12. Run `git log --oneline -8`.
 13. Review `docs/PILOT_REPORT_GUTENDOCX_2026-05-28.md` if the next task touches pilot cleanup or real-project onboarding.
+14. Review `docs/PUBLIC_READINESS.md`, `docs/QUICKSTART.md`, and `docs/SELF_HOSTING.md` if the next
+    task touches Stage 7 packaging, install, or public onboarding.
 
 ## Active Work Order
 

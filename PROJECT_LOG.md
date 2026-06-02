@@ -432,6 +432,27 @@ recallant.service`, local `/health`, and authenticated Review route check for
   4 implementation slice.
 - Added `npm run connect:smoke`; targeted smoke and full `npm run smoke:core` passed.
 
+## 2026-06-02 Stage 7 Public Packaging First Slice
+
+- Root `README.md` now shows the first outside-user path: preview install, install, attach a
+  project, connect an agent client, and prove capture with `recallant doctor --require-capture`.
+- `docs/QUICKSTART.md` was rewritten as the short user journey and no longer mixes the public path
+  with owner-server `/ai` production details.
+- Added `docs/SELF_HOSTING.md` for install profiles, rollback/recovery, verification, and security
+  defaults.
+- Added `docs/OWNER_SERVER.md` for the owner's `/ai` production profile, port/security notes, and
+  Playwright QA location.
+- Added `docs/PUBLIC_READINESS.md` to track Stage 7 acceptance, current status, and remaining
+  public-release blockers.
+- Installer `--dry-run` now exits before Node/npm/Docker dependency checks so a new user can preview
+  the plan before Docker is available.
+- Added `npm run public-readiness:smoke`, which checks README/Quickstart/Self-hosting/
+  Owner-server/Public-readiness docs and installer dry-run behavior for both profiles plus the
+  no-Docker-preview path.
+- `npm run installer:smoke` now has a sandbox-safe fallback when Node cannot spawn `/bin/bash`; in
+  normal environments it still executes the installer dry-run.
+- Verification so far: `npm run public-readiness:smoke` and `npm run installer:smoke` passed.
+
 ## Open Questions
 
 - None recorded.
