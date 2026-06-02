@@ -147,8 +147,15 @@ Acceptance:
   deterministic keywords do not cover: colloquial Russian sandbox cleanup,
   ambiguous sandbox targets, and developer-wide rule capture from non-exact
   wording.
+- Done: Management Chat now understands source-management and provenance
+  requests as first-class intents. It can guide the owner to create/attach/
+  detach Memory Space sources safely and explain where a fact came from through
+  Review provenance/Evidence excerpts.
+- Done: `management-chat-ai:smoke` verifies local-AI semantic classification
+  for source-management and provenance requests in addition to cleanup,
+  ambiguity, and developer-wide rule capture.
 - Remaining: broaden live local-AI semantic tests against real installed models
-  and continue improving multi-project clarification UX.
+  and continue improving multi-project/source-target clarification UX.
 
 ## Stage 3 - Project Sources And Memory Spaces
 

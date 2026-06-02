@@ -87,6 +87,26 @@ const baseDashboard = {
   rules: [],
   costs: [],
   settings: [],
+  source_filters: {
+    selected_source_id: "source-agents-md",
+    selected_source: {
+      source_id: "source-agents-md",
+      display_label: "AGENTS.md",
+      source_health: { status: "ready", label: "Source ready" }
+    },
+    sources: [
+      {
+        source_id: "source-agents-md",
+        display_label: "AGENTS.md",
+        source_health: { status: "ready", label: "Source ready" }
+      },
+      {
+        source_id: "source-docs",
+        display_label: "Docs folder",
+        source_health: { status: "ready", label: "Source ready" }
+      }
+    ]
+  },
   project_cleanup: {
     detach_command: `recallant detach --project-id ${currentProjectId} --dry-run`
   },
@@ -196,7 +216,59 @@ try {
     `Saved rule audience mismatch: ${JSON.stringify(savedRule)}`
   );
 
-  assert(seenRequests.length === 3, `Unexpected mock AI call count: ${seenRequests.length}`);
+  queuedResponses.push({
+    language: "ru",
+    intent: "source_management",
+    confidence: 0.9,
+    summary: "Owner wants to create or manage a virtual memory space/source.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const sourceManagement = await buildManagementChatResponse({
+    message: "Создай виртуальное пространство и подключи к нему папку с документами",
+    dashboard: baseDashboard
+  });
+  assert(
+    sourceManagement.understanding.source === "local_ai" &&
+      sourceManagement.intent === "source_management" &&
+      sourceManagement.result_type === "read_only_answer",
+    `Source management intent failed: ${JSON.stringify(sourceManagement)}`
+  );
+  assert(
+    sourceManagement.facts.source_count === 2 &&
+      String(sourceManagement.answer).includes("Memory Spaces") &&
+      sourceManagement.proposed_actions[0]?.label.includes("Memory Spaces"),
+    `Source management answer did not guide through Memory Spaces: ${JSON.stringify(sourceManagement)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "provenance",
+    confidence: 0.88,
+    summary: "Owner asks where a fact came from.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const provenance = await buildManagementChatResponse({
+    message: "Where did this fact come from and what source is selected?",
+    dashboard: baseDashboard
+  });
+  assert(
+    provenance.understanding.source === "local_ai" &&
+      provenance.intent === "provenance" &&
+      provenance.result_type === "read_only_answer",
+    `Provenance intent failed: ${JSON.stringify(provenance)}`
+  );
+  assert(
+    provenance.facts.selected_source_name === "AGENTS.md" &&
+      String(provenance.answer).includes("Evidence excerpts") &&
+      provenance.proposed_actions[0]?.label === "Open Evidence excerpts",
+    `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
+  );
+
+  assert(seenRequests.length === 5, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

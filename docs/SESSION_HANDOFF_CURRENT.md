@@ -508,7 +508,8 @@ The GutenDocx copied-project pilot is complete for the first real-project sandbo
   what the agent remembered, why a rule is not applying, and Google Drive/example lookups.
 - Follow-up AI-path validation: `npm run management-chat-ai:smoke` uses a mock Ollama endpoint to
   verify local-AI semantic interpretation for colloquial Russian sandbox cleanup, ambiguous sandbox
-  target clarification, and developer-wide rule creation from non-exact wording.
+  target clarification, developer-wide rule creation from non-exact wording, source-management
+  requests, and provenance questions.
 
 2026-06-01 Stage 3 Project Sources first slice is implemented.
 

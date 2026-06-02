@@ -13,6 +13,7 @@ type DashboardLike = {
   rules?: DashboardRow[];
   costs?: DashboardRow[];
   settings?: DashboardRow[];
+  source_filters?: DashboardRow | null;
   project_readiness?: DashboardRow | null;
   recent_activity?: DashboardRow[];
   project_cleanup?: DashboardRow | null;
@@ -38,6 +39,8 @@ export type ManagementChatIntent =
   | "cost"
   | "context_pack"
   | "cross_project"
+  | "source_management"
+  | "provenance"
   | "review"
   | "global_rule"
   | "connection_check"
@@ -106,6 +109,8 @@ export type ManagementChatResponse = {
     capture_events: number;
     captured_decisions: number;
     memory_count: number;
+    source_count: number;
+    selected_source_name: string;
   };
   proposed_actions: ManagementChatAction[];
 };
@@ -258,6 +263,40 @@ function detectIntent(message: string): ManagementChatIntent {
   }
   if (
     includesAny(message, [
+      "откуда",
+      "происхожд",
+      "source of",
+      "where did",
+      "where is this from",
+      "provenance",
+      "evidence excerpt",
+      "evidence excerpts",
+      "source ref",
+      "source refs"
+    ])
+  ) {
+    return "provenance";
+  }
+  if (
+    includesAny(message, [
+      "источник",
+      "sources",
+      "source",
+      "memory space",
+      "memory spaces",
+      "пространств",
+      "подключи папку",
+      "подключить папку",
+      "attach source",
+      "attach folder",
+      "создай вирту",
+      "virtual space"
+    ])
+  ) {
+    return "source_management";
+  }
+  if (
+    includesAny(message, [
       "других проект",
       "другого проект",
       "cross-project",
@@ -351,6 +390,8 @@ function normalizeIntent(value: unknown, fallback: ManagementChatIntent): Manage
     "cost",
     "context_pack",
     "cross_project",
+    "source_management",
+    "provenance",
     "review",
     "global_rule",
     "connection_check",
@@ -421,7 +462,7 @@ async function interpretMessage(
                   "Return strict JSON only.",
                   "Do not execute actions.",
                   "Classify the owner's message by meaning, including Russian text and typos.",
-                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,review,global_rule,connection_check,memory_summary,rule_diagnostics,general.",
+                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,source_management,provenance,review,global_rule,connection_check,memory_summary,rule_diagnostics,general.",
                   "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
                   "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
                   "target_hint should be current,sandbox,none,or ambiguous.",
@@ -600,6 +641,10 @@ function asRows(value: unknown) {
   return Array.isArray(value) ? (value as DashboardRow[]) : [];
 }
 
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as DashboardRow) : {};
+}
+
 function projectId(row: DashboardRow | null | undefined, fallback: unknown) {
   return String(row?.project_id ?? row?.id ?? fallback ?? "");
 }
@@ -688,6 +733,14 @@ function dashboardFacts(
   const lastMemoryWrite = stringValue(readiness.last_memory_write_at);
   const lastCheckpoint = stringValue(readiness.checkpoint_updated_at);
   const captureReady = Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
+  const sourceFilters = dashboard.source_filters ?? {};
+  const sources = asRows(sourceFilters.sources);
+  const selectedSource = asRecord(sourceFilters.selected_source);
+  const selectedSourceName =
+    stringValue(selectedSource.display_label) ||
+    stringValue(selectedSource.label) ||
+    stringValue(selectedSource.uri) ||
+    "all sources";
   return {
     project_id: targetProject.project_id,
     project_name: targetProject.project_name,
@@ -710,7 +763,9 @@ function dashboardFacts(
     last_checkpoint_at: lastCheckpoint || "not yet",
     capture_events: asNumber(readiness.capture_event_count),
     captured_decisions: asNumber(readiness.captured_decision_count),
-    memory_count: asNumber(currentProject.memory_count)
+    memory_count: asNumber(currentProject.memory_count),
+    source_count: sources.length,
+    selected_source_name: selectedSourceName
   };
 }
 
@@ -911,6 +966,10 @@ function answerRu(
       return `${baseline}\n\nContext Pack должен быть коротким стартовым пакетом для агента: активные правила, последние важные решения, checkpoint и подсказки что запросить дальше. Он не должен тащить всю историю проекта в окно контекста.`;
     case "cross_project":
       return `${baseline}\n\nCross-project recall работает как библиотека примеров, а не как смешанная каша памяти. Агент может попросить примеры из других проектов, но они остаются source-linked evidence, пока их явно не применили к текущему проекту.`;
+    case "source_management":
+      return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Источники управляются в Memory Spaces: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
+    case "provenance":
+      return `${baseline}\n\nИсточник факта показывается как provenance. В списках Review смотри строку вроде “From source ...”; в выбранной памяти открой Evidence excerpts. Если источник выбран фильтром, сейчас выбран: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview нужен только для важных или рискованных вещей: кандидаты в правила, конфликты, дубликаты, high-risk guidance и imported history. Обычные низкорисковые воспоминания не должны превращаться в ручную очередь.`;
     case "connection_check":
@@ -981,6 +1040,10 @@ function answerEn(
       return `${baseline}\n\nThe Context Pack should be a compact startup packet for the agent: active rules, important recent decisions, checkpoint, and suggested next fetches. It should not load the whole project history into context.`;
     case "cross_project":
       return `${baseline}\n\nCross-project recall is a library of examples, not mixed memory soup. Agents can ask for examples from other projects, but those results stay source-linked evidence until applied to the current project.`;
+    case "source_management":
+      return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Manage them in Memory Spaces: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
+    case "provenance":
+      return `${baseline}\n\nFact origin is shown as provenance. In Review lists, look for “From source ...”; in the selected memory, open Evidence excerpts. If a source filter is active, the selected source is: ${facts.selected_source_name}.`;
     case "review":
       return `${baseline}\n\nReview is for important or risky material: rule candidates, conflicts, duplicates, high-risk guidance, and imported history. Low-risk routine memories should not become manual queue work.`;
     case "connection_check":
@@ -1096,6 +1159,32 @@ function actionsForIntent(
           language === "ru"
             ? `Ожидающих paid approvals: ${facts.pending_paid_approvals}.`
             : `Pending paid approvals: ${facts.pending_paid_approvals}.`
+      }
+    ];
+  }
+
+  if (intent === "source_management") {
+    return [
+      {
+        label: language === "ru" ? "Открыть Memory Spaces" : "Open Memory Spaces",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? "Там можно создать virtual memory space, attach source или detach source без удаления памяти."
+            : "Use it to create a virtual memory space, attach a source, or detach a source without deleting memory."
+      }
+    ];
+  }
+
+  if (intent === "provenance") {
+    return [
+      {
+        label: language === "ru" ? "Открыть Evidence excerpts" : "Open Evidence excerpts",
+        kind: "read_only",
+        reason:
+          language === "ru"
+            ? `Показывает source refs/provenance. Текущий source filter: ${facts.selected_source_name}.`
+            : `Shows source refs and provenance. Current source filter: ${facts.selected_source_name}.`
       }
     ];
   }

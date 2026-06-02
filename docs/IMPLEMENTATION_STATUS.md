@@ -78,7 +78,9 @@ Current implemented slices include:
 - Management Chat AI-path smoke: `npm run management-chat-ai:smoke` verifies the local-AI
   interpreter route through a mock Ollama endpoint, including colloquial Russian sandbox cleanup,
   ambiguous sandbox-target clarification without a runnable risky command, and developer-wide rule
-  creation from non-exact wording.
+  creation from non-exact wording. It also verifies source-management and provenance intents, so
+  Ask Recallant can guide Memory Space/source operations and explain where source-linked facts came
+  from without exposing raw technical rows by default.
 - Review/Management UI readability pass: the first screen includes a plain-language "What Needs
   Attention" summary, project action guidance, cross-project isolation reminder, and human-readable
   setting summaries with technical JSON hidden behind expandable details.
