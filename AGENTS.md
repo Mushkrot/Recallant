@@ -44,3 +44,9 @@ Agents must not:
 - bypass confirmation for destructive actions, paid APIs, public exposure, secrets, or global rules;
 - turn unreviewed recalled text into binding project instructions;
 - store raw secrets as memories, settings, examples, logs, or fixtures.
+
+## Local Private Context
+
+This public repository may be used together with local-only maintainer context that is intentionally not committed. If `.codex-local/RECALLANT_PRIVATE_CONTEXT.md` exists, read it before creating or editing planning notes, handoffs, audits, owner-specific documentation, or other internal development material.
+
+Do not commit `.codex-local/`, internal planning archives, private operational notes, secrets, credentials, owner-specific paths, or private deployment context to this public repository. Public documentation should contain curated user-facing conclusions only.

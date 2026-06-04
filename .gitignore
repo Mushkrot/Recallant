@@ -62,3 +62,6 @@ temp/
 .DS_Store
 Thumbs.db
 *~
+
+# Local-only Codex owner/private context. Do not commit.
+.codex-local/
