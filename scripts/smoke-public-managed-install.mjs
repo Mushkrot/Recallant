@@ -47,7 +47,9 @@ async function getFreePort() {
   const address = server.address();
   assert(address && typeof address !== "string", "Unable to allocate free local port");
   const port = address.port;
-  await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  await new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve()))
+  );
   return port;
 }
 
@@ -106,11 +108,17 @@ try {
   const baseEnv = {
     RECALLANT_ENV_FILE: envFile
   };
-  const doctor = parseJson(run(recallant, ["doctor"], { env: baseEnv }), "managed install doctor");
-  assert(doctor.postgres?.reachable === true, `Postgres was not reachable: ${JSON.stringify(doctor)}`);
+  const doctor = parseJson(
+    run(recallant, ["doctor", "--format", "json"], { env: baseEnv }),
+    "managed install doctor"
+  );
+  assert(
+    doctor.postgres?.reachable === true,
+    `Postgres was not reachable: ${JSON.stringify(doctor)}`
+  );
 
   const attach = parseJson(
-    run(recallant, ["attach", ".", "--sandbox"], {
+    run(recallant, ["attach", ".", "--sandbox", "--format", "json"], {
       cwd: projectDir,
       env: baseEnv
     }),
@@ -119,7 +127,7 @@ try {
   assert(attach.status === "attached", `Attach failed: ${JSON.stringify(attach)}`);
 
   const connectDryRun = parseJson(
-    run(recallant, ["connect", "codex", "--project-dir", projectDir, "--dry-run"], {
+    run(recallant, ["connect", "codex", "--project-dir", projectDir, "--dry-run", "--format", "json"], {
       env: baseEnv
     }),
     "managed install connect dry-run"
@@ -130,9 +138,13 @@ try {
   );
 
   const start = parseJson(
-    run(recallant, ["agent-start", "--project-dir", projectDir, "--task-hint", "public managed install smoke"], {
-      env: baseEnv
-    }),
+    run(
+      recallant,
+      ["agent-start", "--project-dir", projectDir, "--task-hint", "public managed install smoke"],
+      {
+        env: baseEnv
+      }
+    ),
     "managed install agent-start"
   );
   assert(start.session_id, `agent-start failed: ${JSON.stringify(start)}`);
@@ -156,27 +168,53 @@ try {
   assert(event.memory?.memory_id, `agent-event did not write memory: ${JSON.stringify(event)}`);
 
   const checkpoint = parseJson(
-    run(recallant, ["agent-checkpoint", "--project-dir", projectDir, "--summary", "Public managed install smoke checkpoint."], {
-      env: baseEnv
-    }),
+    run(
+      recallant,
+      [
+        "agent-checkpoint",
+        "--project-dir",
+        projectDir,
+        "--summary",
+        "Public managed install smoke checkpoint."
+      ],
+      {
+        env: baseEnv
+      }
+    ),
     "managed install checkpoint"
   );
   assert(
-    checkpoint.ok === true && checkpoint.event_id && checkpoint.project_log_update?.status === "updated",
+    checkpoint.ok === true &&
+      checkpoint.event_id &&
+      checkpoint.project_log_update?.status === "updated",
     `checkpoint failed: ${JSON.stringify(checkpoint)}`
   );
 
   parseJson(
-    run(recallant, ["agent-closeout", "--project-dir", projectDir, "--summary", "Public managed install smoke closeout."], {
-      env: baseEnv
-    }),
+    run(
+      recallant,
+      [
+        "agent-closeout",
+        "--project-dir",
+        projectDir,
+        "--summary",
+        "Public managed install smoke closeout."
+      ],
+      {
+        env: baseEnv
+      }
+    ),
     "managed install closeout"
   );
 
   const ready = parseJson(
-    run(recallant, ["doctor", "--project-dir", projectDir, "--require-capture"], {
-      env: baseEnv
-    }),
+    run(
+      recallant,
+      ["doctor", "--project-dir", projectDir, "--require-capture", "--format", "json"],
+      {
+        env: baseEnv
+      }
+    ),
     "managed install require-capture doctor"
   );
   assert(

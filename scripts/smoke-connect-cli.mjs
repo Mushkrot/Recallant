@@ -9,8 +9,10 @@ const databaseUrl =
 
 const developerId = randomUUID();
 const projectDir = `/tmp/recallant-connect-smoke-${randomUUID()}`;
+const smokeHome = `${projectDir}/home`;
 const env = {
   ...process.env,
+  HOME: smokeHome,
   RECALLANT_DATABASE_URL: databaseUrl,
   RECALLANT_DEVELOPER_ID: developerId
 };
@@ -24,7 +26,7 @@ function runCli(args) {
   return JSON.parse(output);
 }
 
-function runCliRaw(args) {
+function runCliRaw(args, { parseJson = true } = {}) {
   const output = spawnSync("node", ["apps/cli/dist/index.js", ...args], {
     env,
     encoding: "utf8",
@@ -34,7 +36,7 @@ function runCliRaw(args) {
     status: output.status,
     stdout: output.stdout,
     stderr: output.stderr,
-    json: output.stdout.trim() ? JSON.parse(output.stdout) : null
+    json: parseJson && output.stdout.trim() ? JSON.parse(output.stdout) : null
   };
 }
 
@@ -43,7 +45,7 @@ function assert(condition, message) {
 }
 
 await rm(projectDir, { recursive: true, force: true });
-await mkdir(projectDir, { recursive: true });
+await mkdir(smokeHome, { recursive: true });
 
 const attached = runCli(["attach", projectDir, "--sandbox", "--format", "json"]);
 assert(attached.status === "attached", `Attach failed: ${JSON.stringify(attached)}`);
@@ -53,7 +55,9 @@ const requireCaptureBefore = runCliRaw([
   "doctor",
   "--project-dir",
   projectDir,
-  "--require-capture"
+  "--require-capture",
+  "--format",
+  "json"
 ]);
 assert(
   requireCaptureBefore.status === 2,
@@ -79,7 +83,29 @@ assert(
   `doctor owner summary should explain configured-but-not-recording state: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
 );
 
-const dryRun = runCli(["connect", "codex", "--project-dir", projectDir, "--dry-run"]);
+const dryRun = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--dry-run",
+  "--format",
+  "json"
+]);
+const dryRunText = runCliRaw(["connect", "codex", "--project-dir", projectDir, "--dry-run"], {
+  parseJson: false
+});
+assert(
+  dryRunText.status === 0 &&
+    dryRunText.stdout.includes("Recallant connect") &&
+    dryRunText.stdout.includes("Agent client: codex") &&
+    dryRunText.stdout.includes("Local hooks: skipped") &&
+    dryRunText.stdout.includes("Capture configured but not yet proven: yes") &&
+    dryRunText.stdout.includes("Verification command: recallant doctor --project-dir") &&
+    dryRunText.stdout.includes("Next command: recallant connect codex --project-dir") &&
+    dryRunText.stdout.includes("JSON output: recallant connect codex"),
+  `Connect human dry-run output failed: ${dryRunText.stdout} ${dryRunText.stderr}`
+);
 assert(dryRun.dry_run === true, `Connect dry-run flag missing: ${JSON.stringify(dryRun)}`);
 assert(dryRun.client === "codex", `Codex target mismatch: ${JSON.stringify(dryRun)}`);
 assert(
@@ -89,6 +115,16 @@ assert(
 assert(
   dryRun.hook_status === "not_installed",
   `Hooks should not be installed yet: ${JSON.stringify(dryRun)}`
+);
+assert(
+  dryRun.hook_integration?.native_hooks?.some(
+    (entry) => entry.client === "codex" && entry.status === "local_hook_kit_supported"
+  ) &&
+    dryRun.hook_integration?.native_hooks?.some(
+      (entry) => entry.client === "cursor" && entry.status === "unsupported_native_hooks"
+    ) &&
+    dryRun.client_connection?.hook_installation_status === "mcp_only_or_manual_hooks",
+  `Connect dry-run should expose native hook installer status matrix: ${JSON.stringify(dryRun)}`
 );
 assert(
   dryRun.capture_status === "not_observed",
@@ -110,7 +146,71 @@ assert(
   `Attach already writes the Codex project MCP config, so connect should be idempotent: ${JSON.stringify(dryRun)}`
 );
 
-const connected = runCli(["connect", "codex", "--project-dir", projectDir]);
+const globalConfigPath = `${smokeHome}/.codex/config.toml`;
+const globalDryRun = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--global",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+const globalDryRunText = runCliRaw(
+  ["connect", "codex", "--project-dir", projectDir, "--global", "--dry-run"],
+  { parseJson: false }
+);
+assert(
+  globalDryRunText.status === 0 &&
+    globalDryRunText.stdout.includes("Global client config preview") &&
+    globalDryRunText.stdout.includes(globalConfigPath) &&
+    globalDryRunText.stdout.includes("writes global config now: no"),
+  `Global connect human dry-run output should show exact target and no-write policy: ${globalDryRunText.stdout} ${globalDryRunText.stderr}`
+);
+assert(
+  globalDryRun.dry_run === true &&
+    globalDryRun.config_scope === "project_local_and_global_dry_run" &&
+    globalDryRun.writes_files === false &&
+    globalDryRun.writes_global_config === false,
+  `Global connect dry-run should not write files or global config: ${JSON.stringify(globalDryRun)}`
+);
+assert(
+  globalDryRun.project_local_config?.scope === "project_local_config" &&
+    globalDryRun.project_local_config?.config_file === ".recallant/codex-mcp.json",
+  `Global dry-run should distinguish project-local config: ${JSON.stringify(globalDryRun)}`
+);
+assert(
+  globalDryRun.global_config?.scope === "global_client_config" &&
+    globalDryRun.global_config?.target_file === globalConfigPath &&
+    globalDryRun.global_config?.planned_merge?.server_name === "recallant" &&
+    globalDryRun.global_config?.planned_merge?.preserve_existing_client_settings === true &&
+    globalDryRun.global_config?.safety?.this_goal_writes_global_config === false,
+  `Global dry-run should show exact target file and planned merge: ${JSON.stringify(globalDryRun)}`
+);
+assert(
+  globalDryRun.planned_changes.some(
+    (change) =>
+      change.action === "preview_global_merge" &&
+      change.path === globalConfigPath &&
+      change.scope === "global_client_config" &&
+      change.writes_file === false
+  ),
+  `Global dry-run planned changes should include no-write global preview: ${JSON.stringify(globalDryRun)}`
+);
+const globalBlocked = runCliRaw(["connect", "codex", "--project-dir", projectDir, "--global"], {
+  parseJson: false
+});
+assert(
+  globalBlocked.status !== 0 && globalBlocked.stderr.includes("Run --global --dry-run first"),
+  `connect --global without dry-run must be blocked: ${globalBlocked.stdout} ${globalBlocked.stderr}`
+);
+assert(
+  spawnSync("test", ["!", "-e", globalConfigPath]).status === 0,
+  `Global dry-run must not create ${globalConfigPath}`
+);
+
+const connected = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
 assert(
   connected.writes_files === false,
   `Codex connect should be idempotent after attach: ${JSON.stringify(connected)}`
@@ -121,7 +221,7 @@ assert(
   `Codex MCP config missing Recallant server: ${JSON.stringify(writtenConfig)}`
 );
 
-const idempotent = runCli(["connect", "codex", "--project-dir", projectDir]);
+const idempotent = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
 assert(
   idempotent.writes_files === false,
   `Second connect should be idempotent: ${JSON.stringify(idempotent)}`
@@ -147,7 +247,15 @@ await writeFile(
   )}\n`
 );
 
-const claudeDryRun = runCli(["connect", "claude-code", "--project-dir", projectDir, "--dry-run"]);
+const claudeDryRun = runCli([
+  "connect",
+  "claude-code",
+  "--project-dir",
+  projectDir,
+  "--dry-run",
+  "--format",
+  "json"
+]);
 assert(
   claudeDryRun.client === "claude_code",
   `Claude alias mismatch: ${JSON.stringify(claudeDryRun)}`
@@ -168,7 +276,14 @@ assert(
   `Claude dry-run should show local backup plus .mcp.json merge without writing: ${JSON.stringify(claudeDryRun)}`
 );
 
-const claudeConnected = runCli(["connect", "claude-code", "--project-dir", projectDir]);
+const claudeConnected = runCli([
+  "connect",
+  "claude-code",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   claudeConnected.writes_files === true &&
     claudeConnected.planned_changes.some((change) => change.action === "backup_file") &&
@@ -181,7 +296,14 @@ assert(
     claudeConfig.mcpServers?.recallant?.args?.includes("mcp-server"),
   `Claude .mcp.json merge did not preserve existing server and add Recallant: ${JSON.stringify(claudeConfig)}`
 );
-const claudeIdempotent = runCli(["connect", "claude-code", "--project-dir", projectDir]);
+const claudeIdempotent = runCli([
+  "connect",
+  "claude-code",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   claudeIdempotent.writes_files === false &&
     claudeIdempotent.planned_changes.some((change) => change.action === "no_change"),
@@ -205,7 +327,15 @@ await writeFile(
   )}\n`
 );
 
-const cursorDryRun = runCli(["connect", "cursor", "--project-dir", projectDir, "--dry-run"]);
+const cursorDryRun = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--dry-run",
+  "--format",
+  "json"
+]);
 assert(
   cursorDryRun.config_file === ".cursor/mcp.json" &&
     cursorDryRun.config_format === "cursor_mcp_json" &&
@@ -222,7 +352,14 @@ assert(
   `Cursor dry-run should show local backup plus .cursor/mcp.json merge: ${JSON.stringify(cursorDryRun)}`
 );
 
-const cursorConnected = runCli(["connect", "cursor", "--project-dir", projectDir]);
+const cursorConnected = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   cursorConnected.writes_files === true &&
     cursorConnected.planned_changes.some((change) => change.action === "backup_file") &&
@@ -235,11 +372,171 @@ assert(
     cursorConfig.mcpServers?.recallant?.args?.includes("mcp-server"),
   `Cursor .cursor/mcp.json merge did not preserve existing server and add Recallant: ${JSON.stringify(cursorConfig)}`
 );
-const cursorIdempotent = runCli(["connect", "cursor", "--project-dir", projectDir]);
+const cursorIdempotent = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   cursorIdempotent.writes_files === false &&
     cursorIdempotent.planned_changes.some((change) => change.action === "no_change"),
   `Cursor second connect should be idempotent: ${JSON.stringify(cursorIdempotent)}`
+);
+
+const cursorGlobalPath = `${smokeHome}/.cursor/mcp.json`;
+await mkdir(`${smokeHome}/.cursor`, { recursive: true });
+const cursorGlobalOriginal = {
+  mcpServers: {
+    global_existing: {
+      command: "global-helper",
+      args: ["stdio"]
+    }
+  },
+  uiPreferences: {
+    preserve_me: true
+  }
+};
+await writeFile(`${cursorGlobalPath}`, `${JSON.stringify(cursorGlobalOriginal, null, 2)}\n`);
+const cursorGlobalDryRun = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--global",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+assert(
+  cursorGlobalDryRun.global_config?.writer_supported === true &&
+    cursorGlobalDryRun.global_config?.target_file === cursorGlobalPath &&
+    cursorGlobalDryRun.global_config?.backup_path &&
+    cursorGlobalDryRun.global_config?.restore_command?.includes("--restore-global-backup") &&
+    cursorGlobalDryRun.global_config?.confirmation_command?.includes("--previewed-global-target") &&
+    cursorGlobalDryRun.writes_global_config === false &&
+    cursorGlobalDryRun.planned_changes.some(
+      (change) =>
+        change.action === "preview_global_merge" &&
+        change.path === cursorGlobalPath &&
+        change.writes_file === false
+    ),
+  `Cursor global dry-run should show target, backup, restore, and no-write merge: ${JSON.stringify(cursorGlobalDryRun)}`
+);
+const cursorGlobalAfterDryRun = JSON.parse(await readFile(cursorGlobalPath, "utf8"));
+assert(
+  cursorGlobalAfterDryRun.mcpServers?.recallant === undefined &&
+    cursorGlobalAfterDryRun.mcpServers?.global_existing?.command === "global-helper",
+  `Cursor global dry-run changed the global file: ${JSON.stringify(cursorGlobalAfterDryRun)}`
+);
+const cursorGlobalWriteWithoutPreview = runCliRaw(
+  ["connect", "cursor", "--project-dir", projectDir, "--global", "--confirm-global-write"],
+  { parseJson: false }
+);
+assert(
+  cursorGlobalWriteWithoutPreview.status !== 0 &&
+    cursorGlobalWriteWithoutPreview.stderr.includes("--previewed-global-target"),
+  `Cursor global write should require exact dry-run target confirmation: ${cursorGlobalWriteWithoutPreview.stdout} ${cursorGlobalWriteWithoutPreview.stderr}`
+);
+const cursorGlobalWrite = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--global",
+  "--confirm-global-write",
+  "--previewed-global-target",
+  cursorGlobalPath,
+  "--format",
+  "json"
+]);
+assert(
+  cursorGlobalWrite.writes_global_config === true &&
+    cursorGlobalWrite.global_config?.backup_path &&
+    cursorGlobalWrite.planned_changes.some(
+      (change) =>
+        change.action === "backup_global_file" &&
+        change.scope === "global_client_config" &&
+        change.writes_file === true
+    ) &&
+    cursorGlobalWrite.planned_changes.some(
+      (change) =>
+        change.action === "write_global_file" &&
+        change.path === cursorGlobalPath &&
+        change.writes_file === true
+    ),
+  `Cursor global write should be explicit, audited, and backed up: ${JSON.stringify(cursorGlobalWrite)}`
+);
+const cursorGlobalMerged = JSON.parse(await readFile(cursorGlobalPath, "utf8"));
+assert(
+  cursorGlobalMerged.mcpServers?.global_existing?.command === "global-helper" &&
+    cursorGlobalMerged.mcpServers?.recallant?.args?.includes("mcp-server") &&
+    cursorGlobalMerged.uiPreferences?.preserve_me === true,
+  `Cursor global merge did not preserve existing config and add Recallant: ${JSON.stringify(cursorGlobalMerged)}`
+);
+const cursorGlobalBackupPath = cursorGlobalWrite.global_config.backup_path;
+assert(
+  spawnSync("test", ["-f", cursorGlobalBackupPath]).status === 0,
+  `Cursor global write should create backup before changing config: ${cursorGlobalBackupPath}`
+);
+const cursorGlobalBackup = JSON.parse(await readFile(cursorGlobalBackupPath, "utf8"));
+assert(
+  cursorGlobalBackup.mcpServers?.global_existing?.command === "global-helper" &&
+    cursorGlobalBackup.mcpServers?.recallant === undefined,
+  `Cursor global backup should contain original config: ${JSON.stringify(cursorGlobalBackup)}`
+);
+const cursorGlobalWriteAgain = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--global",
+  "--confirm-global-write",
+  "--previewed-global-target",
+  cursorGlobalPath,
+  "--format",
+  "json"
+]);
+assert(
+  cursorGlobalWriteAgain.writes_global_config === false &&
+    cursorGlobalWriteAgain.planned_changes.some(
+      (change) => change.action === "no_change" && change.scope === "global_client_config"
+    ),
+  `Second Cursor global write should be idempotent: ${JSON.stringify(cursorGlobalWriteAgain)}`
+);
+await writeFile(
+  cursorGlobalPath,
+  `${JSON.stringify({ mcpServers: { recallant: { command: "broken" } } }, null, 2)}\n`
+);
+const cursorGlobalRestore = runCli([
+  "connect",
+  "cursor",
+  "--project-dir",
+  projectDir,
+  "--global",
+  "--restore-global-backup",
+  cursorGlobalBackupPath,
+  "--format",
+  "json"
+]);
+assert(
+  cursorGlobalRestore.writes_global_config === true &&
+    cursorGlobalRestore.planned_changes.some(
+      (change) =>
+        change.action === "restore_global_backup" &&
+        change.backup_path === cursorGlobalBackupPath &&
+        change.path === cursorGlobalPath
+    ),
+  `Cursor global restore should report restored backup: ${JSON.stringify(cursorGlobalRestore)}`
+);
+const cursorGlobalRestored = JSON.parse(await readFile(cursorGlobalPath, "utf8"));
+assert(
+  cursorGlobalRestored.mcpServers?.global_existing?.command === "global-helper" &&
+    cursorGlobalRestored.mcpServers?.recallant === undefined &&
+    cursorGlobalRestored.uiPreferences?.preserve_me === true,
+  `Cursor global restore did not restore the original config: ${JSON.stringify(cursorGlobalRestored)}`
 );
 
 const hookDryRun = runCli([
@@ -248,7 +545,9 @@ const hookDryRun = runCli([
   "--project-dir",
   projectDir,
   "--install-local-hooks",
-  "--dry-run"
+  "--dry-run",
+  "--format",
+  "json"
 ]);
 assert(
   hookDryRun.hook_status === "local_hook_kit_planned" &&
@@ -264,7 +563,10 @@ assert(
 );
 assert(
   hookDryRun.hook_integration?.fail_soft === true &&
-    hookDryRun.hook_integration?.mode === "local_hook_kit",
+    hookDryRun.hook_integration?.mode === "local_hook_kit" &&
+    hookDryRun.hook_integration?.native_hooks?.some(
+      (entry) => entry.client === "claude_code" && entry.ready === false
+    ),
   `Hook dry-run missing fail-soft integration summary: ${JSON.stringify(hookDryRun)}`
 );
 
@@ -273,13 +575,16 @@ const hookConnect = runCli([
   "codex",
   "--project-dir",
   projectDir,
-  "--install-local-hooks"
+  "--install-local-hooks",
+  "--format",
+  "json"
 ]);
 assert(
   hookConnect.hook_status === "local_hook_kit_installed" &&
     hookConnect.connection_status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.capture_targets?.includes("pre_compaction_checkpoint") &&
+    hookConnect.client_connection?.hook_installation_status === "local_hook_kit_ready" &&
     hookConnect.writes_global_config === false,
   `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
 );
@@ -312,7 +617,13 @@ await writeFile(
   `${projectDir}/.recallant/hooks/manifest.json`,
   `${JSON.stringify({ ...hookManifest, fail_soft: false }, null, 2)}\n`
 );
-const invalidManifestDoctor = runCliRaw(["doctor", "--project-dir", projectDir]);
+const invalidManifestDoctor = runCliRaw([
+  "doctor",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   invalidManifestDoctor.status === 0 &&
     invalidManifestDoctor.json?.client_connection?.status === "mcp_only" &&
@@ -328,7 +639,13 @@ await writeFile(
 );
 
 await chmod(`${projectDir}/.recallant/hooks/tool-result.sh`, 0o644);
-const invalidPermissionDoctor = runCliRaw(["doctor", "--project-dir", projectDir]);
+const invalidPermissionDoctor = runCliRaw([
+  "doctor",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 assert(
   invalidPermissionDoctor.status === 0 &&
     invalidPermissionDoctor.json?.client_connection?.status === "mcp_only" &&
@@ -393,22 +710,21 @@ function runHook(name, args = [], input = "") {
 }
 
 runHook("start-session.sh", ["connect smoke hook session"]);
-runHook(
-  "user-prompt.sh",
-  [],
-  "Owner prompt captured through the Recallant local hook kit."
-);
-runHook(
-  "tool-result.sh",
-  [],
-  "Tool result captured through the Recallant local hook kit."
-);
+runHook("user-prompt.sh", [], "Owner prompt captured through the Recallant local hook kit.");
+runHook("tool-result.sh", [], "Tool result captured through the Recallant local hook kit.");
 runHook(
   "pre-compaction.sh",
   [],
   "Pre-compaction checkpoint captured through the Recallant local hook kit."
 );
-const requireCaptureAfter = runCliRaw(["doctor", "--project-dir", projectDir, "--require-capture"]);
+const requireCaptureAfter = runCliRaw([
+  "doctor",
+  "--project-dir",
+  projectDir,
+  "--require-capture",
+  "--format",
+  "json"
+]);
 assert(
   requireCaptureAfter.status === 0,
   `doctor --require-capture should pass after capture: ${requireCaptureAfter.stdout} ${requireCaptureAfter.stderr}`

@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
@@ -116,6 +117,7 @@ function positionalArgs(argv: readonly string[]) {
     "--next-step",
     "--summary",
     "--title",
+    "--text",
     "--context-profile",
     "--override-reason",
     "--reason",
@@ -127,7 +129,11 @@ function positionalArgs(argv: readonly string[]) {
     "--source-kind",
     "--source-id",
     "--label",
-    "--uri"
+    "--uri",
+    "--query",
+    "--top-k",
+    "--marker",
+    "--previewed-global-target"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -140,6 +146,55 @@ function positionalArgs(argv: readonly string[]) {
     args.push(arg);
   }
   return args;
+}
+
+function parseProjectArg(argv: readonly string[], start = 3) {
+  const flagsWithValues = new Set(["--project-dir", "--format", "--client"]);
+  for (let index = start; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (flagsWithValues.has(arg)) index += 1;
+      continue;
+    }
+    return arg;
+  }
+  return null;
+}
+
+type OnboardOptions = {
+  projectDir: string;
+  client: string | null;
+  installLocalHooks: boolean;
+  verify: boolean;
+  dryRun: boolean;
+  format: "text" | "json";
+};
+
+type OnboardAttachedStep = {
+  status: "attached" | "skipped" | "needs_confirmation" | "failed" | "unknown";
+  command: string;
+  details?: string;
+};
+
+type OnboardConnectedStep = {
+  status: "connected" | "skipped" | "failed" | "needed";
+  command: string;
+  details?: string;
+};
+
+function parseOnboardOptions(argv: readonly string[]): OnboardOptions {
+  const client = parseFlag(argv, "--client");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  return {
+    projectDir: resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()),
+    client: client && client.trim() ? client : null,
+    installLocalHooks: argv.includes("--install-local-hooks") || argv.includes("--hook-kit"),
+    verify: argv.includes("--verify"),
+    dryRun: argv.includes("--dry-run"),
+    format
+  };
 }
 
 function spoolDir(argv: readonly string[]) {
@@ -178,12 +233,24 @@ async function getLocalSpoolStatus(argv: readonly string[]) {
   const records = await readJsonl(spoolPath(argv));
   const manifest = await readSpoolManifest(argv);
   const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  const lastRecord = records.at(-1) ?? null;
+  const lastUnsynced = unsynced.at(-1) ?? null;
   return {
     status: unsynced.length > 0 ? "unsynced" : records.length > 0 ? "synced" : "empty",
     spool_path: spoolPath(argv),
     manifest_path: spoolManifestPath(argv),
     record_count: records.length,
     unsynced_count: unsynced.length,
+    last_write_at:
+      typeof lastRecord?.created_at === "string"
+        ? lastRecord.created_at
+        : typeof lastRecord?.createdAt === "string"
+          ? lastRecord.createdAt
+          : null,
+    last_unsynced_local_id: lastUnsynced ? String(lastUnsynced.local_id ?? "") : null,
+    replay_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)} --dry-run`,
+    sync_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)}`,
+    prune_command: `recallant prune-spool --spool-dir ${spoolDir(argv)} --synced`,
     checked_at: new Date().toISOString()
   };
 }
@@ -694,6 +761,36 @@ async function clientConnectionReadiness(projectDir: string) {
   }
   const mcpConfigured = configs.some((config) => config.present);
   const hookKit = await hookKitReadiness(projectDir);
+  const nativeHooks = [
+    {
+      client: "codex",
+      status: "local_hook_kit_supported",
+      ready: hookKit.ready,
+      install_command: `recallant connect codex --project-dir ${projectDir} --install-local-hooks`,
+      note: "Codex currently uses the Recallant project-local fail-soft hook kit. Native global hook wiring is not written automatically."
+    },
+    {
+      client: "cursor",
+      status: "unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Cursor MCP config is supported, but native hook capture is not installed by Recallant yet."
+    },
+    {
+      client: "claude_code",
+      status: "manual_or_unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Claude Code project MCP config is supported; native hook capture still needs a later dedicated installer."
+    },
+    {
+      client: "generic",
+      status: "unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Generic MCP clients can use MCP config plus the local hook kit manually if the client supports external hooks."
+    }
+  ];
   return {
     status:
       mcpConfigured && hookKit.ready
@@ -706,6 +803,12 @@ async function clientConnectionReadiness(projectDir: string) {
     mcp_configured: mcpConfigured,
     mcp_configs: configs,
     hook_kit: hookKit,
+    native_hooks: nativeHooks,
+    hook_installation_status: hookKit.ready
+      ? "local_hook_kit_ready"
+      : hookKit.status === "not_installed"
+        ? "mcp_only_or_manual_hooks"
+        : hookKit.status,
     fail_soft: true,
     writes_global_config: false,
     proof_command: `recallant doctor --project-dir ${projectDir} --require-capture`,
@@ -717,6 +820,37 @@ function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function runLocalCliSubcommand(args: readonly string[], parseJson = true) {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) throw new Error("Internal error: CLI entrypoint path is not available.");
+  const result = spawnSync(process.execPath, [entrypoint, ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+  if (result.error) throw result.error;
+  const stdout = String(result.stdout ?? "");
+  const stderr = String(result.stderr ?? "");
+  let json: Record<string, unknown> | null = null;
+  if (parseJson && stdout.trim()) {
+    try {
+      json = JSON.parse(stdout) as Record<string, unknown>;
+    } catch {
+      json = null;
+    }
+  }
+  return {
+    status: result.status ?? 0,
+    stdout,
+    stderr,
+    json
+  };
+}
+
+function formatCommandHint(input: readonly string[]) {
+  return input.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
 }
 
 async function checkCaptureReadiness(input: {
@@ -848,6 +982,114 @@ function doctorOwnerSummary(input: {
       "Recording means Recallant has observed context read, memory write, and checkpoint evidence.",
     postgres_ready: input.postgres.reachable
   };
+}
+
+function okNo(value: boolean) {
+  return value ? "yes" : "no";
+}
+
+function doctorHumanReport(result: {
+  owner_summary: ReturnType<typeof doctorOwnerSummary>;
+  postgres: { configured: boolean; reachable: boolean };
+  project_config: { path: string; present: boolean };
+  capture_readiness: Awaited<ReturnType<typeof checkCaptureReadiness>> & { required: boolean };
+  client_connection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  local_spool_status: Awaited<ReturnType<typeof getLocalSpoolStatus>>;
+  local_model: Awaited<ReturnType<typeof checkOllama>>;
+}) {
+  const summary = result.owner_summary;
+  const localModelReady = result.local_model.reachable === true;
+  const localModelStatus = localModelReady
+    ? "available"
+    : result.local_model.error
+      ? `not available (${result.local_model.error})`
+      : "not available";
+  const databaseStatus = result.postgres.reachable
+    ? "available"
+    : result.postgres.configured
+      ? "configured but not reachable"
+      : "not configured";
+  const captureConfigured =
+    summary.configured ||
+    summary.client_configured ||
+    summary.hook_capture_ready ||
+    summary.actually_recording;
+  const spool = result.local_spool_status;
+  const lines = [
+    "Recallant doctor",
+    "",
+    `Status: ${summary.headline}`,
+    "",
+    "Checks:",
+    `- Recallant CLI: installed`,
+    `- Database: ${databaseStatus}`,
+    `- Local model: ${localModelStatus}`,
+    `- Current project: ${summary.project_attached ? "attached" : "not attached"}`,
+    `- Agent capture configured: ${okNo(captureConfigured)}`,
+    `- Agent capture active: ${okNo(summary.actually_recording)}`,
+    `- Local spool: ${spool.status}, ${spool.unsynced_count} pending`,
+    "",
+    `Next command: ${summary.next_step}`,
+    "",
+    "Details:",
+    `- Project config: ${result.project_config.present ? result.project_config.path : "not found"}`,
+    `- Client connection: ${summary.connection_status}`,
+    `- Capture status: ${result.capture_readiness.status}`,
+    `- Spool path: ${spool.spool_path}`,
+    `- Spool replay dry-run: ${spool.replay_command}`,
+    `- JSON output: recallant doctor --format json`
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function onboardHumanReport(result: {
+  project_dir: string;
+  project_already_attached: boolean;
+  attached: {
+    status: OnboardAttachedStep["status"];
+    command: string;
+    details?: string;
+  };
+  connected: {
+    status: OnboardConnectedStep["status"];
+    command: string;
+    details?: string;
+  };
+  verify: {
+    status: "passed" | "skipped" | "failed";
+    ask_answer: string | null;
+    proof: {
+      demo: "done" | "skipped" | "failed";
+      doctor: "done" | "skipped" | "failed";
+      ask: "done" | "skipped" | "failed";
+    };
+  } | null;
+  next_command: string;
+}) {
+  const lines = [
+    "Recallant onboard",
+    "",
+    `Project: ${result.project_dir}`,
+    `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
+    `Attach: ${result.attached.status}`,
+    result.attached.details ? `  - ${result.attached.details}` : null,
+    `Connect: ${result.connected.status}`,
+    result.connected.details ? `  - ${result.connected.details}` : null
+  ].filter((line) => line !== null) as string[];
+  if (result.verify) {
+    lines.push(`Verify: ${result.verify.status}`);
+    if (result.verify.ask_answer) {
+      lines.push(`Proof memory: ${result.verify.ask_answer}`);
+    }
+    lines.push(
+      `Proof status: demo=${result.verify.proof.demo}, doctor=${result.verify.proof.doctor}, ask=${result.verify.proof.ask}`
+    );
+  } else {
+    lines.push("Verify: skipped");
+  }
+  lines.push("", `Next command: ${result.next_command}`);
+  lines.push("", `JSON output: recallant onboard ${result.project_dir} --format json`);
+  return `${lines.join("\n")}\n`;
 }
 
 async function readProjectContextProfile(projectDir: string) {
@@ -1496,6 +1738,8 @@ async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const requireCapture = argv.includes("--require-capture");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
   let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
   try {
     if (database) {
@@ -1508,6 +1752,7 @@ async function runDoctor(argv: readonly string[]) {
     }
     const captureReadiness = await checkCaptureReadiness({ projectDir, database });
     const clientConnection = await clientConnectionReadiness(projectDir);
+    const localSpoolStatus = await getLocalSpoolStatus(argv);
     const result = {
       ...describeCliBoundary(),
       owner_summary: doctorOwnerSummary({
@@ -1527,6 +1772,7 @@ async function runDoctor(argv: readonly string[]) {
         required: requireCapture
       },
       client_connection: clientConnection,
+      local_spool_status: localSpoolStatus,
       local_model: await checkOllama(),
       model_routes: {
         local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
@@ -1596,7 +1842,9 @@ async function runDoctor(argv: readonly string[]) {
         "/ai/SECURITY must be consulted before public exposure"
       ]
     };
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    process.stdout.write(
+      format === "json" ? `${JSON.stringify(result, null, 2)}\n` : doctorHumanReport(result)
+    );
     if (requireCapture && !captureReadiness.ready) {
       process.exitCode = 2;
     }
@@ -2538,6 +2786,239 @@ async function runAgentCloseout(argv: readonly string[]) {
   }
 }
 
+async function runDemoCapture(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const config = await readProjectConfig(dir);
+  if (!config?.project_id) {
+    throw new Error("VALIDATION_ERROR: demo-capture requires an attached project");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for demo-capture");
+  const marker = parseFlag(argv, "--marker") ?? `DEMO-CAPTURE-${randomUUID()}`;
+  const taskHint = parseFlag(argv, "--task-hint") ?? `Recallant demo capture ${marker}`;
+  const rememberedText =
+    parseFlag(argv, "--text") ??
+    `The agent remembered this Recallant demo memory: ${marker}. This proves session start, memory write, checkpoint, and later recall.`;
+  let sessionId = "";
+  try {
+    const started = await startAgentSession(database, [
+      argv[0] ?? "",
+      argv[1] ?? "",
+      "agent-start",
+      "--project-dir",
+      dir,
+      "--task-hint",
+      taskHint,
+      "--session-label",
+      "recallant-demo-capture"
+    ]);
+    sessionId = started.state.session_id;
+    const event = await database.appendEvent({
+      session_id: sessionId,
+      client_kind: started.state.client_kind,
+      event_kind: "other",
+      text: rememberedText,
+      metadata: {
+        capture_kind: "agent_demo_memory",
+        project_dir: dir,
+        marker
+      },
+      raw_artifacts: [],
+      dedup_key: dedupHash("demo-capture-event", {
+        project_id: config.project_id,
+        marker,
+        rememberedText
+      })
+    });
+    const memory = await database.createAgentMemory({
+      project_path: dir,
+      memory_type: "decision",
+      scope: "project",
+      scope_kind: "project",
+      title: `Demo capture memory ${marker}`,
+      body: rememberedText,
+      confidence: 0.95,
+      created_by: "agent",
+      source_refs: [
+        {
+          source_kind: "event",
+          source_id: String(event.event_id),
+          quote: summarizeText(rememberedText, 500),
+          metadata: { capture_kind: "agent_demo_memory" }
+        }
+      ],
+      metadata: { created_from: "recallant_demo_capture", marker }
+    });
+    const checkpointPayload: JsonObject = {
+      schema_version: 1,
+      status: "demo_capture_complete",
+      current_focus: `Demo capture for ${marker}`,
+      next_step: `Run recallant ask "what did the agent remember?" --project-dir ${dir}`,
+      summary: `Demo capture wrote and checkpointed ${marker}.`,
+      updated_at: new Date().toISOString(),
+      source: "recallant-demo-capture"
+    };
+    const checkpoint = await database.setCheckpoint(String(config.project_id), checkpointPayload);
+    const checkpointEvent = await database.appendEvent({
+      session_id: sessionId,
+      client_kind: started.state.client_kind,
+      event_kind: "checkpoint",
+      text: `Demo checkpoint for ${marker}: ${rememberedText}`,
+      metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: checkpointPayload },
+      raw_artifacts: [],
+      dedup_key: dedupHash("demo-capture-checkpoint", {
+        project_id: config.project_id,
+        marker,
+        checkpointPayload
+      })
+    });
+    await updateProjectLogCheckpoint(dir, checkpointPayload);
+    const now = new Date().toISOString();
+    await writeAgentSessionState(dir, {
+      ...started.state,
+      status: "closed",
+      updated_at: now,
+      last_memory_write_at: now,
+      last_checkpoint_at: now,
+      last_event_id: String(checkpointEvent.event_id),
+      last_memory_id: String(memory.memory_id)
+    });
+    await database.closeout(
+      sessionId,
+      checkpointPayload,
+      "closeout",
+      await getLocalSpoolStatus(argv)
+    );
+    const recall = await database.recallAgentMemories({
+      project_id: String(config.project_id),
+      query: "what did the agent remember",
+      top_k: 5
+    });
+    const recalled = recall.memories.some((item: Record<string, unknown>) =>
+      String(item.body ?? "").includes(marker)
+    );
+    const result = {
+      ok: true,
+      action: "demo_capture",
+      project_dir: dir,
+      project_id: config.project_id,
+      marker,
+      session_id: sessionId,
+      context_pack_id: started.state.context_pack_id,
+      memory_id: memory.memory_id,
+      checkpoint_updated_at: checkpoint.updated_at,
+      recalled,
+      proof: {
+        session_started: Boolean(sessionId),
+        memory_written: Boolean(memory.memory_id),
+        checkpoint_exists: Boolean(checkpoint.updated_at),
+        later_recall_works: recalled
+      },
+      next_commands: [
+        `recallant doctor --project-dir ${dir} --require-capture`,
+        `recallant ask "what did the agent remember?" --project-dir ${dir}`
+      ]
+    };
+    if (format === "json") {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else {
+      process.stdout.write(
+        [
+          "Recallant demo capture",
+          "",
+          "Status: memory capture proof written.",
+          `Project: ${dir}`,
+          `Session started: ${result.proof.session_started ? "yes" : "no"}`,
+          `Memory written: ${result.proof.memory_written ? "yes" : "no"}`,
+          `Checkpoint exists: ${result.proof.checkpoint_exists ? "yes" : "no"}`,
+          `Later recall works: ${result.proof.later_recall_works ? "yes" : "no"}`,
+          `Marker: ${marker}`,
+          "",
+          "Next commands:",
+          `- ${result.next_commands[0]}`,
+          `- ${result.next_commands[1]}`,
+          "",
+          `JSON output: recallant demo-capture --project-dir ${dir} --format json`
+        ].join("\n") + "\n"
+      );
+    }
+  } finally {
+    await database.close();
+  }
+}
+
+async function runAsk(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const query =
+    parseFlag(argv, "--query") ??
+    positionalArgs(argv)
+      .filter((arg) => arg !== "ask")
+      .join(" ");
+  if (!query.trim()) throw new Error("VALIDATION_ERROR: ask requires a question");
+  const explicitProjectId = parseFlag(argv, "--project-id");
+  const config = explicitProjectId ? null : await readProjectConfig(dir);
+  const projectId = explicitProjectId ?? config?.project_id;
+  if (!projectId) {
+    throw new Error("VALIDATION_ERROR: ask requires an attached project or --project-id");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for ask");
+  try {
+    const recall = await database.recallAgentMemories({
+      project_id: String(projectId),
+      query,
+      top_k: Number(parseFlag(argv, "--top-k") ?? 5)
+    });
+    const memories = recall.memories.map((memory: Record<string, unknown>) => ({
+      memory_id: memory.memory_id,
+      title: memory.title,
+      body: memory.body,
+      updated_at: memory.updated_at,
+      source_refs: memory.source_refs
+    }));
+    const result = {
+      ok: true,
+      action: "ask",
+      project_dir: explicitProjectId ? null : dir,
+      project_id: projectId,
+      recall_scope: explicitProjectId ? "explicit_project_id" : "attached_project",
+      question: query,
+      recalled: memories.length > 0,
+      memories,
+      trace_id: recall.trace_id ?? null,
+      warnings: recall.warnings ?? []
+    };
+    if (format === "json") {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else {
+      const lines = [
+        "Recallant answer",
+        "",
+        `Question: ${query}`,
+        memories.length > 0
+          ? "Recallant found memory for this project:"
+          : "Recallant did not find matching project memory."
+      ];
+      for (const memory of memories) {
+        lines.push("", String(memory.title ?? "Memory"), String(memory.body ?? ""));
+      }
+      lines.push(
+        "",
+        `JSON output: recallant ask ${JSON.stringify(query)} ${
+          explicitProjectId ? `--project-id ${projectId}` : `--project-dir ${dir}`
+        } --format json`
+      );
+      process.stdout.write(`${lines.join("\n")}\n`);
+    }
+  } finally {
+    await database.close();
+  }
+}
+
 async function runSpoolAppend(argv: readonly string[]) {
   const recordKind = parseFlag(argv, "--kind") ?? "turn";
   const role = parseFlag(argv, "--role") ?? "user";
@@ -2572,6 +3053,35 @@ async function runSpoolAppend(argv: readonly string[]) {
       null,
       2
     )}\n`
+  );
+}
+
+async function runSpoolStatus(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const status = await getLocalSpoolStatus(argv);
+  if (format === "json") {
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, action: "spool_status", ...status }, null, 2)}\n`
+    );
+    return;
+  }
+  process.stdout.write(
+    [
+      "Recallant local spool",
+      "",
+      `Status: ${status.status}`,
+      `Pending records: ${status.unsynced_count}`,
+      `Total records: ${status.record_count}`,
+      `Last write: ${status.last_write_at ?? "none"}`,
+      `Spool file: ${status.spool_path}`,
+      "",
+      `Preview replay: ${status.replay_command}`,
+      `Replay now: ${status.sync_command}`,
+      `Prune synced records: ${status.prune_command}`,
+      "",
+      `JSON output: recallant spool-status --project-dir ${projectDir(argv)} --format json`
+    ].join("\n") + "\n"
   );
 }
 
@@ -2952,10 +3462,177 @@ function mergeMcpServers(
   };
 }
 
+function globalClientConfigDryRunPlan(input: {
+  target: string;
+  targetConfig: ReturnType<typeof connectClientTargetConfig>;
+  existingText?: string | null;
+}) {
+  const home = homedir();
+  const targetFiles: Record<string, string> = {
+    codex: join(home, ".codex", "config.toml"),
+    claude_code: join(home, ".claude.json"),
+    cursor: join(home, ".cursor", "mcp.json"),
+    windsurf: join(home, ".codeium", "windsurf", "mcp_config.json"),
+    generic: join(home, ".config", "recallant", "generic-mcp.json"),
+    other: join(home, ".config", "recallant", "generic-mcp.json")
+  };
+  const targetFile = targetFiles[input.target] ?? targetFiles.generic;
+  const writerSupported = input.target === "cursor";
+  const desiredGlobalConfig = mergeMcpServers(
+    input.existingText ?? null,
+    input.targetConfig.mcp_config
+  );
+  return {
+    mode: writerSupported ? "dry_run_or_confirmed_write" : "dry_run_only",
+    scope: "global_client_config",
+    writes_global_config: false,
+    target_file: targetFile,
+    target_format:
+      input.target === "codex"
+        ? "codex_global_toml"
+        : input.target === "claude_code"
+          ? "claude_code_user_json"
+          : input.target === "cursor"
+            ? "cursor_user_mcp_json"
+            : "generic_user_mcp_json",
+    project_local_config_file: input.targetConfig.config_file,
+    planned_merge: {
+      operation: "add_or_replace_recallant_mcp_server",
+      preserve_existing_client_settings: true,
+      preserve_existing_mcp_servers: true,
+      server_name: "recallant",
+      mcp_server: input.targetConfig.mcp_config.mcpServers.recallant
+    },
+    desired_config: desiredGlobalConfig,
+    writer_supported: writerSupported,
+    supported_writer_client: "cursor",
+    safety: {
+      this_goal_writes_global_config: false,
+      actual_global_write_requires_explicit_confirmation: writerSupported,
+      actual_global_write_requires_backup: writerSupported,
+      unsupported_clients_remain_dry_run_only: !writerSupported
+    },
+    note: "This is a preview only. It shows the global client file and MCP server merge Recallant would use later; it does not write the global file."
+  };
+}
+
+function connectHumanReport(result: Record<string, unknown>) {
+  const client = String(result.client ?? "agent");
+  const connectionStatus = String(result.connection_status ?? "unknown");
+  const hookStatus = String(result.hook_status ?? "unknown");
+  const dryRun = result.dry_run === true;
+  const projectId = String(result.project_id ?? "");
+  const projectDir = String(result.project_dir ?? "<project>");
+  const configFile = String(result.config_file ?? "");
+  const plannedChanges = Array.isArray(result.planned_changes)
+    ? result.planned_changes
+        .map((change) =>
+          change && typeof change === "object" ? (change as Record<string, unknown>) : null
+        )
+        .filter((change): change is Record<string, unknown> => change !== null)
+    : [];
+  const changedLines = plannedChanges.length
+    ? plannedChanges.map(
+        (change) => `  - ${String(change.action ?? "change")}: ${String(change.path ?? "")}`
+      )
+    : ["  - none"];
+  const globalConfig =
+    result.global_config && typeof result.global_config === "object"
+      ? (result.global_config as Record<string, unknown>)
+      : null;
+  const writesGlobalConfig = result.writes_global_config === true;
+  const clientConnection = objectValue(result.client_connection);
+  const nativeHooks = Array.isArray(clientConnection.native_hooks)
+    ? clientConnection.native_hooks
+        .map((entry) =>
+          entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null
+        )
+        .filter((entry): entry is Record<string, unknown> => entry !== null)
+    : [];
+  const nativeHookForClient = nativeHooks.find((entry) => String(entry.client) === client);
+  const globalLines = globalConfig
+    ? [
+        "",
+        `Global client config ${writesGlobalConfig ? "change" : "preview"}:`,
+        `  - target file: ${String(globalConfig.target_file ?? "not reported")}`,
+        `  - planned merge: ${String(
+          (globalConfig.planned_merge as Record<string, unknown> | undefined)?.operation ??
+            "not reported"
+        )}`,
+        `  - writer supported now: ${globalConfig.writer_supported === true ? "yes, with explicit confirmation" : "no, dry-run only"}`,
+        `  - backup path: ${String(globalConfig.backup_path ?? "created only before confirmed write")}`,
+        `  - writes global config now: ${writesGlobalConfig ? "yes" : "no"}`
+      ]
+    : [];
+  const hooksText =
+    hookStatus === "local_hook_kit_installed"
+      ? "installed"
+      : hookStatus === "local_hook_kit_planned"
+        ? "planned"
+        : hookStatus === "not_installed"
+          ? "skipped"
+          : hookStatus;
+  const proofCommand = String(
+    (result.mandatory_startup_layer as Record<string, unknown> | undefined)?.proof_command ??
+      `recallant doctor --project-dir ${projectDir} --require-capture`
+  );
+  const captureState = String(
+    String(objectValue(result.mandatory_startup_layer).status ?? "unknown") ===
+      "mcp_and_hooks_ready"
+      ? "configured_and_ready_for_capture"
+      : String(objectValue(result.client_connection).status ?? "unknown").includes("mcp")
+        ? "configured_without_local_hooks"
+        : connectionStatus === "hooks_without_mcp"
+          ? "hooks_without_client_config"
+          : "not_configured"
+  );
+  const installCommand = dryRun
+    ? `recallant connect ${client} --project-dir ${projectDir}${hookStatus === "local_hook_kit_planned" ? " --install-local-hooks" : ""}`
+    : proofCommand;
+  return (
+    [
+      "Recallant connect",
+      "",
+      `Status: ${dryRun ? "planned" : "agent client configured"}`,
+      `Agent client: ${client}`,
+      `Project id: ${projectId}`,
+      `Client config: ${configFile || "not reported"}`,
+      `Local hooks: ${hooksText}`,
+      `Native hooks: ${String(nativeHookForClient?.status ?? "not reported")}`,
+      "",
+      "Files:",
+      ...changedLines,
+      ...globalLines,
+      "",
+      `Capture configured/proven: ${captureState}`,
+      `Verification command: ${proofCommand}`,
+      `Next command: ${installCommand}`,
+      "",
+      `JSON output: recallant connect ${client} --project-dir <project> --format json`
+    ].join("\n") + "\n"
+  );
+}
+
 async function runConnect(argv: readonly string[]) {
   const dir = projectDir(argv);
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
   const dryRun = argv.includes("--dry-run");
+  const globalConfigRequested = argv.includes("--global");
+  const confirmGlobalWrite = argv.includes("--confirm-global-write");
+  const restoreGlobalBackup = parseFlag(argv, "--restore-global-backup");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if ((confirmGlobalWrite || restoreGlobalBackup) && !globalConfigRequested) {
+    throw new Error("VALIDATION_ERROR: global write/restore requires --global");
+  }
+  if (globalConfigRequested && !dryRun && !confirmGlobalWrite && !restoreGlobalBackup) {
+    throw new Error(
+      "POLICY_BLOCKED: connect --global writes require --confirm-global-write or --restore-global-backup. Run --global --dry-run first."
+    );
+  }
+  if (dryRun && (confirmGlobalWrite || restoreGlobalBackup)) {
+    throw new Error("VALIDATION_ERROR: dry-run cannot be combined with global write or restore");
+  }
   const installLocalHooks = argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
   const config = await readProjectConfig(dir);
   if (!config?.project_id) {
@@ -2967,6 +3644,15 @@ async function runConnect(argv: readonly string[]) {
     projectId: config.project_id
   });
   const targetConfig = connectClientTargetConfig(target, config.project_id, developerId);
+  if (
+    globalConfigRequested &&
+    (confirmGlobalWrite || restoreGlobalBackup) &&
+    targetConfig.target !== "cursor"
+  ) {
+    throw new Error(
+      "POLICY_BLOCKED: confirmed global config writes are currently enabled only for cursor"
+    );
+  }
   const targetPath = join(dir, targetConfig.config_file);
   const existing = await readOptional(targetPath);
   const desiredConfig = targetConfig.merge_mcp_servers
@@ -3006,6 +3692,99 @@ async function runConnect(argv: readonly string[]) {
           path: targetConfig.config_file
         }
       ];
+  const globalTargetPath = globalConfigRequested
+    ? String(
+        globalClientConfigDryRunPlan({
+          target: targetConfig.target,
+          targetConfig
+        }).target_file
+      )
+    : null;
+  const existingGlobal = globalTargetPath ? await readOptional(globalTargetPath) : null;
+  const globalConfigPlan = globalConfigRequested
+    ? {
+        ...globalClientConfigDryRunPlan({
+          target: targetConfig.target,
+          targetConfig,
+          existingText: existingGlobal
+        }),
+        backup_path:
+          existingGlobal && targetConfig.target === "cursor"
+            ? join(
+                recallantDir(dir),
+                "backups",
+                `connect-global-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+                "cursor__mcp.json"
+              )
+            : null,
+        restore_command:
+          existingGlobal && targetConfig.target === "cursor"
+            ? `recallant connect cursor --project-dir ${dir} --global --restore-global-backup <backup-path>`
+            : null,
+        confirmation_command:
+          targetConfig.target === "cursor"
+            ? `recallant connect cursor --project-dir ${dir} --global --confirm-global-write --previewed-global-target ${globalTargetPath}`
+            : null
+      }
+    : null;
+  const desiredGlobal =
+    globalConfigPlan?.desired_config && typeof globalConfigPlan.desired_config === "object"
+      ? `${JSON.stringify(globalConfigPlan.desired_config, null, 2)}\n`
+      : null;
+  const globalSame = Boolean(
+    globalTargetPath && desiredGlobal !== null && existingGlobal === desiredGlobal
+  );
+  const globalBackupPath =
+    typeof globalConfigPlan?.backup_path === "string" ? globalConfigPlan.backup_path : null;
+  const globalRestoreTarget = globalTargetPath;
+  const globalConfigRestored = Boolean(restoreGlobalBackup && globalRestoreTarget);
+  const globalConfigWritten = Boolean(
+    confirmGlobalWrite && globalTargetPath && desiredGlobal !== null && !globalSame
+  );
+  const previewedGlobalTarget = parseFlag(argv, "--previewed-global-target");
+  if (confirmGlobalWrite && previewedGlobalTarget !== globalTargetPath) {
+    throw new Error(
+      `POLICY_BLOCKED: confirmed global write requires --previewed-global-target ${globalTargetPath}. Run --global --dry-run first and confirm the exact target file.`
+    );
+  }
+  const globalChanges = globalConfigPlan
+    ? restoreGlobalBackup
+      ? [
+          {
+            action: "restore_global_backup",
+            path: globalTargetPath,
+            backup_path: restoreGlobalBackup,
+            scope: "global_client_config",
+            writes_file: true
+          }
+        ]
+      : [
+          ...(globalBackupPath && confirmGlobalWrite && !globalSame
+            ? [
+                {
+                  action: "backup_global_file",
+                  path: globalBackupPath,
+                  source_path: globalTargetPath,
+                  scope: "global_client_config",
+                  writes_file: true
+                }
+              ]
+            : []),
+          globalSame
+            ? {
+                action: "no_change",
+                path: globalTargetPath,
+                scope: "global_client_config",
+                writes_file: false
+              }
+            : {
+                action: confirmGlobalWrite ? "write_global_file" : "preview_global_merge",
+                path: globalTargetPath,
+                scope: "global_client_config",
+                writes_file: confirmGlobalWrite
+              }
+        ]
+    : [];
   const hookChanges = hookFilePlans.map((hookFile) =>
     hookFile.same
       ? { action: "no_change", path: hookFile.path }
@@ -3020,6 +3799,18 @@ async function runConnect(argv: readonly string[]) {
       recursive: true
     });
     await writeFile(targetPath, desired);
+  }
+  if (restoreGlobalBackup && globalRestoreTarget) {
+    const backupText = await readFile(restoreGlobalBackup, "utf8");
+    await mkdir(globalRestoreTarget.split("/").slice(0, -1).join("/"), { recursive: true });
+    await writeFile(globalRestoreTarget, backupText);
+  } else if (confirmGlobalWrite && globalTargetPath && desiredGlobal !== null && !globalSame) {
+    if (existingGlobal !== null && globalBackupPath) {
+      await mkdir(globalBackupPath.split("/").slice(0, -1).join("/"), { recursive: true });
+      await writeFile(globalBackupPath, existingGlobal);
+    }
+    await mkdir(globalTargetPath.split("/").slice(0, -1).join("/"), { recursive: true });
+    await writeFile(globalTargetPath, desiredGlobal);
   }
   if (!dryRun && installLocalHooks) {
     for (const hookFile of hookFilePlans) {
@@ -3050,51 +3841,329 @@ async function runConnect(argv: readonly string[]) {
           : hookKitWillExist
             ? "hooks_without_mcp"
             : "not_configured";
+  const result = {
+    ok: true,
+    action: "connect",
+    dry_run: dryRun,
+    client: targetConfig.target,
+    project_dir: dir,
+    project_id: config.project_id,
+    developer_id: developerId,
+    connection_status: mandatoryStartupLayerStatus,
+    hook_status: hookStatus,
+    capture_status: captureStatusFromState(state),
+    mandatory_startup_layer: {
+      status: mandatoryStartupLayerStatus,
+      mcp_configured_or_planned: mcpConfigWillExist,
+      hook_kit_status: hookStatus,
+      fail_soft: true,
+      writes_global_config: false,
+      capture_targets: captureTargetNames,
+      proof_command: `recallant doctor --project-dir ${dir} --require-capture`,
+      ready_definition:
+        "MCP config plus hook targets are installed/planned; capture-active still requires context read, memory write, and checkpoint evidence."
+    },
+    client_connection: clientConnection,
+    writes_files: !dryRun && (!same || hookFilePlans.some((hookFile) => !hookFile.same)),
+    writes_global_config: globalConfigWritten || globalConfigRestored,
+    config_scope: globalConfigRequested ? "project_local_and_global_dry_run" : "project_local",
+    project_local_config: {
+      scope: "project_local_config",
+      config_file: targetConfig.config_file,
+      planned_changes: plannedChanges,
+      writes_files: !dryRun && !same
+    },
+    global_config: globalConfigPlan,
+    planned_changes: [...plannedChanges, ...globalChanges, ...hookChanges],
+    config_file: targetConfig.config_file,
+    config_format: targetConfig.format,
+    client_specific: targetConfig.client_specific,
+    merge_mcp_servers: targetConfig.merge_mcp_servers,
+    setup_hint: targetConfig.setup_hint,
+    hook_integration: {
+      mode: installLocalHooks || localHookKitPresent ? "local_hook_kit" : "none",
+      fail_soft: true,
+      writes_global_config: false,
+      installed_files: hookFilePlans.map((hookFile) => hookFile.path),
+      native_hooks: clientConnection.native_hooks,
+      timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
+      project_dir_env: "RECALLANT_PROJECT_DIR"
+    },
+    mcp_config: desiredConfig
+  };
   process.stdout.write(
-    `${JSON.stringify(
-      {
-        ok: true,
-        action: "connect",
-        dry_run: dryRun,
-        client: targetConfig.target,
-        project_id: config.project_id,
-        developer_id: developerId,
-        connection_status: mandatoryStartupLayerStatus,
-        hook_status: hookStatus,
-        capture_status: captureStatusFromState(state),
-        mandatory_startup_layer: {
-          status: mandatoryStartupLayerStatus,
-          mcp_configured_or_planned: mcpConfigWillExist,
-          hook_kit_status: hookStatus,
-          fail_soft: true,
-          writes_global_config: false,
-          capture_targets: captureTargetNames,
-          proof_command: `recallant doctor --project-dir ${dir} --require-capture`,
-          ready_definition:
-            "MCP config plus hook targets are installed/planned; capture-active still requires context read, memory write, and checkpoint evidence."
-        },
-        client_connection: clientConnection,
-        writes_files: !dryRun && (!same || hookFilePlans.some((hookFile) => !hookFile.same)),
-        writes_global_config: false,
-        planned_changes: [...plannedChanges, ...hookChanges],
-        config_file: targetConfig.config_file,
-        config_format: targetConfig.format,
-        client_specific: targetConfig.client_specific,
-        merge_mcp_servers: targetConfig.merge_mcp_servers,
-        setup_hint: targetConfig.setup_hint,
-        hook_integration: {
-          mode: installLocalHooks || localHookKitPresent ? "local_hook_kit" : "none",
-          fail_soft: true,
-          writes_global_config: false,
-          installed_files: hookFilePlans.map((hookFile) => hookFile.path),
-          timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
-          project_dir_env: "RECALLANT_PROJECT_DIR"
-        },
-        mcp_config: desiredConfig
-      },
-      null,
-      2
-    )}\n`
+    format === "json" ? `${JSON.stringify(result, null, 2)}\n` : connectHumanReport(result)
+  );
+}
+
+function inferTargetClient(input: { client: string | null }) {
+  return input.client && input.client.trim() ? input.client : "codex";
+}
+
+async function runOnboard(argv: readonly string[]) {
+  const options = parseOnboardOptions(argv);
+  const targetClient = inferTargetClient({ client: options.client });
+  const steps: { attached: OnboardAttachedStep; connected: OnboardConnectedStep } = {
+    attached: {
+      command: formatCommandHint(["recallant", "attach", "--project-dir", options.projectDir]),
+      status: "skipped"
+    },
+    connected: {
+      command: formatCommandHint([
+        "recallant",
+        "connect",
+        targetClient,
+        "--project-dir",
+        options.projectDir
+      ]),
+      status: "skipped"
+    }
+  };
+  const existingConfig = await readProjectConfig(options.projectDir);
+  const needAttach = !existingConfig?.project_id;
+  if (options.verify && !options.client) {
+    throw new Error(
+      `onboard --verify requires --client. Run: recallant onboard ${options.projectDir} --client codex --verify`
+    );
+  }
+  const verifyResult: {
+    status: "passed" | "skipped" | "failed";
+    ask_answer: string | null;
+    proof: {
+      demo: "done" | "skipped" | "failed";
+      doctor: "done" | "skipped" | "failed";
+      ask: "done" | "skipped" | "failed";
+    };
+  } = {
+    status: "skipped",
+    ask_answer: null,
+    proof: { demo: "skipped", doctor: "skipped", ask: "skipped" }
+  };
+
+  if (needAttach) {
+    const attachCommand = [
+      "attach",
+      "--project-dir",
+      options.projectDir,
+      "--target",
+      targetClient,
+      "--format",
+      "json"
+    ];
+    if (options.dryRun) attachCommand.push("--dry-run");
+    const attachResult = runLocalCliSubcommand(attachCommand);
+    steps.attached.command = formatCommandHint(attachCommand);
+    if (attachResult.status !== 0) {
+      steps.attached.status = "failed";
+      throw new Error(
+        `onboard attach failed. Run again after fixing command: ${steps.attached.command}`
+      );
+    }
+    const attachPayload = attachResult.json;
+    const attachStatus = String(attachPayload?.status ?? "unknown");
+    if (options.dryRun && attachStatus === "plan_only") {
+      steps.attached.status = "skipped";
+      steps.attached.details = "dry-run only; remove --dry-run to apply attachment";
+      throw new Error(`onboard attach is in dry-run mode. Run: ${steps.attached.command}`);
+    }
+    if (attachStatus === "needs_confirmation") {
+      steps.attached.status = "failed";
+      const ownerReport = objectValue(attachPayload).owner_report;
+      const nextStep =
+        typeof ownerReport === "object" && ownerReport !== null
+          ? String(objectValue(ownerReport).next_step ?? steps.attached.command)
+          : `${steps.attached.command} --confirm`;
+      throw new Error(
+        `onboard attach needs confirmation before writing for this project. Run: ${nextStep}`
+      );
+    }
+    if (attachStatus !== "attached" && attachStatus !== "plan_only") {
+      steps.attached.status = "failed";
+      throw new Error(
+        `onboard attach failed with status '${attachStatus}'. Fix by running: ${steps.attached.command}`
+      );
+    }
+    steps.attached.status = attachStatus === "attached" ? "attached" : "failed";
+    steps.attached.details = `status=${attachStatus}`;
+  } else {
+    steps.attached.status = "skipped";
+    steps.attached.details = "recallant attach already has .recallant/config";
+  }
+
+  let alreadyConnected = false;
+  if (options.client) {
+    const clientConnection = await clientConnectionReadiness(options.projectDir);
+    const clientHasConfig = clientConnection.mcp_configs.some(
+      (entry) => entry.client === targetClient && entry.present
+    );
+    const hooksReady = clientConnection.hook_kit.ready;
+    alreadyConnected = clientHasConfig && (options.installLocalHooks ? hooksReady : true);
+    if (!alreadyConnected) {
+      const connectCommand = [
+        "connect",
+        targetClient,
+        "--project-dir",
+        options.projectDir,
+        "--format",
+        "json"
+      ];
+      if (options.installLocalHooks) connectCommand.push("--install-local-hooks");
+      if (options.dryRun) connectCommand.push("--dry-run");
+      const connectResult = runLocalCliSubcommand(connectCommand);
+      steps.connected.command = formatCommandHint(connectCommand);
+      if (connectResult.status !== 0) {
+        steps.connected.status = "failed";
+        throw new Error(
+          `onboard connect failed. Run again after fixing: ${steps.connected.command}`
+        );
+      }
+      const connectPayload = connectResult.json;
+      const connectionStatus = String(
+        connectPayload?.connection_status ??
+          objectValue(connectPayload?.mandatory_startup_layer).status ??
+          "not_configured"
+      );
+      steps.connected.status =
+        connectionStatus === "mcp_only" || connectionStatus === "mcp_and_hooks_ready"
+          ? "connected"
+          : "needed";
+      steps.connected.details = `connection_status=${connectionStatus}`;
+      if (steps.connected.status === "needed") {
+        throw new Error(
+          options.installLocalHooks
+            ? `onboard connect installed partial setup without hooks. Run: ${steps.connected.command}`
+            : `onboard connect is configured but not fully ready. Run: ${steps.connected.command}`
+        );
+      }
+    } else {
+      steps.connected.status = "connected";
+      steps.connected.details = `client=${targetClient} already connected`;
+    }
+  } else {
+    steps.connected.status = "skipped";
+    steps.connected.details = "no --client set, skipped connect";
+  }
+
+  if (options.verify) {
+    const marker = `onboard-${randomUUID()}`;
+    const demoCommand = [
+      "demo-capture",
+      "--project-dir",
+      options.projectDir,
+      "--format",
+      "json",
+      "--marker",
+      marker
+    ];
+    const demoResult = runLocalCliSubcommand(demoCommand);
+    if (demoResult.status !== 0) {
+      verifyResult.status = "failed";
+      verifyResult.proof.demo = "failed";
+      verifyResult.ask_answer = "not available";
+      throw new Error(
+        `onboard verify failed during demo-capture. Fix: run ${formatCommandHint(demoCommand)}`
+      );
+    }
+    verifyResult.proof.demo = "done";
+    const doctorCommand = [
+      "doctor",
+      "--project-dir",
+      options.projectDir,
+      "--require-capture",
+      "--format",
+      "json"
+    ];
+    const doctorResult = runLocalCliSubcommand(doctorCommand);
+    if (doctorResult.status !== 0) {
+      verifyResult.status = "failed";
+      verifyResult.proof.doctor = "failed";
+      throw new Error(
+        `onboard verify failed during doctor --require-capture. Fix: run ${formatCommandHint(doctorCommand)}`
+      );
+    }
+    const captureReady = Boolean(objectValue(doctorResult.json?.capture_readiness).ready);
+    if (!captureReady) {
+      verifyResult.status = "failed";
+      verifyResult.proof.doctor = "failed";
+      throw new Error(
+        `onboard verify: capture is not active. Fix: connect your client with hooks (recallant connect ${targetClient} --project-dir ${options.projectDir} --install-local-hooks)`
+      );
+    }
+    verifyResult.proof.doctor = "done";
+
+    const query = "what did you remember?";
+    const askCommand = [
+      "ask",
+      "--project-dir",
+      options.projectDir,
+      "--format",
+      "json",
+      "--query",
+      query
+    ];
+    const askResult = runLocalCliSubcommand(askCommand);
+    if (askResult.status !== 0) {
+      verifyResult.status = "failed";
+      verifyResult.proof.ask = "failed";
+      throw new Error(
+        `onboard verify failed during ask. Fix: run ${formatCommandHint(askCommand)}`
+      );
+    }
+    verifyResult.proof.ask = "done";
+    const memories = objectValue(askResult.json).memories;
+    const firstMemory =
+      Array.isArray(memories) && memories.length > 0
+        ? (memories[0] as Record<string, unknown>)
+        : null;
+    const answer = firstMemory && typeof firstMemory.body === "string" ? firstMemory.body : null;
+    verifyResult.ask_answer = answer;
+    verifyResult.status = answer ? "passed" : "failed";
+    if (verifyResult.status === "failed") {
+      throw new Error(
+        `onboard verify: recallant did not return memory for proof query. Fix: rerun ${formatCommandHint(
+          demoCommand
+        )} and then ${formatCommandHint(askCommand)}`
+      );
+    }
+  }
+
+  const nextCommand = options.verify
+    ? "Start normal work in your agent client."
+    : options.client
+      ? `recallant onboard ${options.projectDir} --client ${targetClient} --verify`
+      : `recallant onboard ${options.projectDir} --client codex --verify`;
+  const payload = {
+    action: "onboard",
+    project_dir: options.projectDir,
+    format: options.format,
+    project_already_attached: Boolean(existingConfig?.project_id),
+    client: options.client ? targetClient : null,
+    install_local_hooks: options.installLocalHooks,
+    verify_requested: options.verify,
+    attached: {
+      status: needAttach ? steps.attached.status : ("skipped" as const),
+      command: steps.attached.command,
+      details: steps.attached.details ?? null
+    },
+    connected: {
+      status:
+        options.client && !needAttach
+          ? steps.connected.status
+          : needAttach
+            ? steps.connected.status
+            : options.client
+              ? steps.connected.status
+              : "skipped",
+      command: steps.connected.command,
+      details: steps.connected.details ?? null
+    },
+    verify: options.verify ? verifyResult : null,
+    next_command: nextCommand
+  };
+  process.stdout.write(
+    options.format === "json"
+      ? `${JSON.stringify(payload, null, 2)}\n`
+      : onboardHumanReport(payload)
   );
 }
 
@@ -3169,6 +4238,63 @@ async function runMemorySpace(argv: readonly string[]) {
       );
       return;
     }
+    if (subcommand === "remember") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId)
+        throw new Error("VALIDATION_ERROR: memory-space remember requires --project-id");
+      const text =
+        parseFlag(argv, "--text") ??
+        positionalArgs(argv)
+          .filter((arg) => arg !== "remember")
+          .join(" ");
+      if (!text.trim()) throw new Error("VALIDATION_ERROR: memory-space remember requires --text");
+      const title = parseFlag(argv, "--title") ?? "Manual human memory";
+      const memory = await database.createAgentMemory({
+        project_id: projectId,
+        memory_type: "decision",
+        scope: "project",
+        scope_kind: "domain",
+        scope_id: projectId,
+        audience: [{ kind: "owner", id: process.env.RECALLANT_DEVELOPER_ID ?? null }],
+        title,
+        body: text,
+        confidence: 0.9,
+        created_by: "user",
+        source_refs: [
+          {
+            source_kind: "external",
+            source_id: `manual:${createHash("sha256").update(`${projectId}:${title}:${text}`).digest("hex").slice(0, 16)}`,
+            quote: summarizeText(text, 500),
+            metadata: {
+              source_policy: "manual_owner_supplied",
+              memory_space_project_id: projectId
+            }
+          }
+        ],
+        metadata: {
+          created_from: "recallant_memory_space_remember",
+          write_policy: "manual_owner_or_agent_mediated",
+          passive_capture: false,
+          reversible_via_review_archive: true
+        }
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_remember",
+            project_id: projectId,
+            memory,
+            writes_database: true,
+            passive_capture: false,
+            reversible: "review_or_archive"
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
     if (subcommand === "list") {
       const spaces = await database.listMemorySpaces();
       process.stdout.write(
@@ -3185,7 +4311,7 @@ async function runMemorySpace(argv: readonly string[]) {
       );
       return;
     }
-    throw new Error("VALIDATION_ERROR: memory-space supports create|list");
+    throw new Error("VALIDATION_ERROR: memory-space supports create|remember|list");
   } finally {
     await database.close();
   }
@@ -3285,6 +4411,7 @@ async function main(argv: readonly string[]) {
   if (command === "doctor") return runDoctor(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
+  if (command === "onboard") return runOnboard(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
   if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
   if (command === "source" || command === "project-source") return runSourceCommand(argv);
@@ -3305,12 +4432,15 @@ async function main(argv: readonly string[]) {
   if (command === "agent-event") return runAgentEvent(argv);
   if (command === "agent-checkpoint") return runAgentCheckpoint(argv);
   if (command === "agent-closeout") return runAgentCloseout(argv);
+  if (command === "demo-capture") return runDemoCapture(argv);
+  if (command === "ask") return runAsk(argv);
   if (command === "spool-append") return runSpoolAppend(argv);
+  if (command === "spool-status") return runSpoolStatus(argv);
   if (command === "sync-spool") return runSyncSpool(argv);
   if (command === "prune-spool") return runPruneSpool(argv);
 
   process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|connect|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|spool-append|sync-spool|prune-spool>\n"
+    "Usage: recallant <mcp-server|doctor|attach|connect|onboard|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n"
   );
   process.exitCode = 1;
 }

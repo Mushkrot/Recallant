@@ -1,79 +1,111 @@
 # Recallant
 
-**Governed external memory for the owner and AI agents.**
+**Self-hosted governed memory for Codex and MCP AI agents.**
 
-Recallant is a source-backed memory and context continuity platform for AI-assisted work. It
-preserves decisions, working context, evidence, checkpoints, and operating knowledge across
-sessions, tools, agent clients, projects, and broader memory spaces.
+Recallant gives AI coding agents a durable memory layer for real project work. It records decisions,
+checkpoints, evidence, reviewable rules, and source-backed context so a later session can resume
+without asking maintainers to rebuild the same background over and over.
 
-In Recallant, a project is a logical memory space. It may be backed by a folder, repository, server
-path, document set, connector, or no folder at all.
+Recallant is private by default, Apache-2.0 licensed, and designed for OSS maintainers who use
+Codex, Cursor, Claude Code, Windsurf, or any MCP-compatible client.
 
-## Quick Start
+## Why It Matters
 
-Preview the install:
+AI-assisted development often loses the thread between sessions. Project decisions live in chat
+history, local notes, PR comments, terminal output, and human memory. Generic logs or basic RAG can
+recover fragments, but they usually miss authority, provenance, review state, and scope.
+
+Recallant is built around governed memory:
+
+- **Evidence first:** raw workflow evidence, source references, and bounded excerpts stay attached to
+  remembered facts.
+- **Rules need authority:** durable guidance cannot silently become an instruction just because an
+  agent inferred it.
+- **Project context stays scoped:** current-project memory is the default; cross-project examples are
+  explicit and labeled.
+- **Maintainers keep control:** destructive actions, paid API use, public exposure, secrets, and
+  global rules stay behind policy gates.
+
+The result is a memory system that helps agents work faster without turning old context into an
+unreviewed pile of instructions.
+
+## What You Can Try Today
+
+Recallant is pre-release, but the first coding-agent memory slice is working: attach a project,
+start an agent-backed session, read a context pack, write decisions/actions/tests/checkpoints, close
+out, and recall that memory in a later session.
+
+Install:
 
 ```bash
-git clone https://github.com/Mushkrot/Recallant.git recallant
-cd recallant
-./scripts/install-recallant.sh --dry-run --profile single-user
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
 ```
 
-Install on a private server or workstation:
-
-```bash
-git clone https://github.com/Mushkrot/Recallant.git recallant
-cd recallant
-./scripts/install-recallant.sh --profile single-user
-```
-
-Attach a project:
+Onboard a project for Codex:
 
 ```bash
 cd /path/to/project
-recallant attach .
+recallant onboard --client codex --install-local-hooks --verify
 ```
 
-Connect an agent client and prove capture:
+Or run the step-by-step proof path:
 
 ```bash
+recallant attach .
 recallant connect codex --project-dir . --dry-run
 recallant connect codex --project-dir .
+recallant demo-capture --project-dir .
 recallant doctor --project-dir . --require-capture
+recallant ask "what did the agent remember?" --project-dir .
 ```
 
-The target state is not just "configured"; it is **capture active**.
+The important state is not "installed" or "configured". The important state is **capture active**:
+Recallant has observed real context reads, memory writes, and checkpoints for the project.
 
-See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the complete first-user path,
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for install profiles and rollback notes, and
-[docs/CLIENT_SETUP.md](docs/CLIENT_SETUP.md) for Codex, Cursor, Claude Code, Windsurf, and generic
-MCP clients.
+## Product Shape
+
+Recallant runs as a local or self-hosted memory service:
+
+- CLI for install, attach, connect, doctor, capture proof, and cleanup.
+- MCP server for agent clients.
+- Postgres/pgvector-backed storage.
+- Private Workbench UI for review, rules, source context, settings, and management chat.
+- Local-first model routing with explicit approval gates for paid APIs.
+
+See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
 
 ## Documentation
 
-The implementation-oriented specification lives in **[docs/](docs/README.md)**.
-
-Start with [docs/README.md](docs/README.md); it defines the canonical reading order.
+- [Quickstart](docs/QUICKSTART.md): install Recallant and prove one project can remember.
+- [Why Recallant](docs/WHY_RECALLANT.md): problem statement and community value.
+- [Comparison](docs/COMPARISON.md): inspirations, alternatives, and the gap Recallant fills.
+- [Self-hosting](docs/SELF_HOSTING.md): profiles, rollback, verification, and security defaults.
+- [Client setup](docs/CLIENT_SETUP.md): Codex and other MCP clients.
+- [Security](docs/SECURITY.md): public threat model and safe defaults.
+- [Roadmap](docs/ROADMAP.md): pre-release status and next milestones.
+- [Contributing](CONTRIBUTING.md): how to work on the project.
 
 ## Status
 
-Recallant has a first production-ready coding-agent memory slice and an owner-server production
-deployment for the private Workbench UI, Postgres/pgvector, local Ollama, automated local backups,
-autonomous project attach/detach, controlled cross-project recall, AI-backed management chat with
-deterministic safety gates, and first public-packaging/onboarding guardrails. Current product work
-is tracked in [docs/DEVELOPMENT_PLAN_2026-06-01.md](docs/DEVELOPMENT_PLAN_2026-06-01.md) and
-[docs/PUBLIC_READINESS.md](docs/PUBLIC_READINESS.md).
+Recallant is **pre-release**. It is suitable for local evaluation and development, not for
+unreviewed team-wide production rollout.
 
-Historical note: this project was originally drafted under the working name **Agent Memory Platform (AMP)**. Active specifications now use **Recallant** for the product, CLI, server, and repository-facing contracts.
+Current strengths:
+
+- first end-to-end coding-agent memory loop;
+- Codex-first MCP workflow with generic MCP client posture;
+- private-by-default Workbench and server defaults;
+- explicit security and cost governance design;
+- smoke coverage for the core capture/recall path.
+
+Known pre-release work:
+
+- final clean-host install validation;
+- more public screenshots and docs polish;
+- broader client pilot matrix;
+- security review and release hardening;
+- packaging and versioned release tags.
 
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
-
-## Security
-
-See [SECURITY.md](SECURITY.md) and [docs/SECURITY.md](docs/SECURITY.md).
-
-## Related Materials
-
-- `agent-bootstrap` is the owner's earlier personal sketch for the same problem. It is useful for repo-contract ideas such as `AGENTS.md` / `PROJECT_LOG.md`, but it is not a mature external upstream. The adjacent folder is not required for normal work: the relevant conclusions are captured in [docs/REPO_CONTRACT.md](docs/REPO_CONTRACT.md), [docs/UPSTREAM_INTEGRATION.md](docs/UPSTREAM_INTEGRATION.md), and [docs/UPSTREAM_RESEARCH_2026-05-19.md](docs/UPSTREAM_RESEARCH_2026-05-19.md).

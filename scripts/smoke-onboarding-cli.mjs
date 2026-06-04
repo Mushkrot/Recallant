@@ -57,7 +57,7 @@ const recallant = join(prefix, "recallant");
 const lint = runJson(recallant, ["lint-context"], { cwd: projectDir });
 assert(lint.ok === true, `installed wrapper did not run lint-context: ${JSON.stringify(lint)}`);
 
-const attach = runJson(recallant, ["attach", "."], { cwd: projectDir });
+const attach = runJson(recallant, ["attach", ".", "--format", "json"], { cwd: projectDir });
 assert(attach.status === "attached", `installed wrapper attach failed: ${JSON.stringify(attach)}`);
 assert(
   attach.requested_mode === "autopilot" && attach.effective_mode === "autopilot",

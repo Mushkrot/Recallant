@@ -324,6 +324,18 @@ function formatDisplayValue(value: unknown) {
   return String(value);
 }
 
+function parseOptionalJsonObject(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatUsd(value: unknown) {
   return `$${Number(value ?? 0).toFixed(4)}`;
 }
@@ -867,10 +879,17 @@ function conflictRole(row: Record<string, unknown>) {
 }
 
 function renderConflictRecord(label: string, row: Record<string, unknown>) {
+  const provenance = asRecord(row.provenance);
+  const provenanceSummary =
+    typeof provenance.summary === "string" && provenance.summary.length > 0
+      ? publicSafeProvenanceSummary(provenance.summary)
+      : "No source reference recorded";
   return `<article>
     <span>${escapeHtml(label)}</span>
     <strong>${escapeHtml(sourcePath(row))}</strong>
     <p>${escapeHtml(currentEffect(row))}</p>
+    <p class="source-note">Source: ${escapeHtml(provenanceSummary)}</p>
+    <p class="source-note">${escapeHtml(humanPolicy(row.use_policy))}; ${escapeHtml(humanStatus(row.status))}</p>
   </article>`;
 }
 
@@ -916,6 +935,8 @@ function renderConflictResolution(
   return `<details class="action-detail">
     <summary>Conflict resolution</summary>
     <p>Compare the older and newer records, then choose the active guidance. The losing memory is marked through the same review policy path.</p>
+    <h4>Source comparison</h4>
+    <p>Cross-source conflicts stay in review. Recallant does not silently turn overlapping evidence into an active rule.</p>
     <div class="conflict-compare">
       ${renderConflictRecord("Older record", oldRow)}
       ${renderConflictRecord("Newer record", newRow)}
@@ -947,6 +968,52 @@ function renderConflictResolution(
   </details>`;
 }
 
+function renderProvenanceDrilldown(payload: {
+  memory_space?: Record<string, unknown> | null;
+  source_refs?: Array<Record<string, unknown>>;
+  resolved_source_refs?: Array<Record<string, unknown>>;
+}) {
+  const memorySpace = payload.memory_space ?? {};
+  const sourceRefs = payload.resolved_source_refs ?? payload.source_refs ?? [];
+  const memorySpaceLabel =
+    projectDisplayName(memorySpace) || memorySpace.project_id || "Unknown memory space";
+  const sourceRows =
+    sourceRefs.length === 0
+      ? `<p class="empty">No source refs recorded for this memory.</p>`
+      : sourceRefs
+          .map((sourceRef) => {
+            const projectSource = asRecord(sourceRef.project_source);
+            const health = asRecord(projectSource.source_health);
+            const label =
+              sourceDisplayTitle(projectSource) ||
+              String(asRecord(sourceRef.metadata).source_path ?? sourceRef.source_id ?? "Source");
+            const kind =
+              String(projectSource.source_kind_label ?? "") ||
+              sourceKindLabel(projectSource.source_kind ?? sourceRef.source_kind);
+            const status = String(projectSource.status ?? "source ref");
+            const healthLabel = String(health.label ?? "Source reference recorded");
+            const quote = typeof sourceRef.quote === "string" ? sourceRef.quote : "";
+            return `<article class="provenance-source">
+              <strong>${escapeHtml(label)}</strong>
+              <span>${escapeHtml(kind)}</span>
+              <span>${escapeHtml(status === "active" ? "Active source" : status.replaceAll("_", " "))}</span>
+              <span>${escapeHtml(healthLabel)}</span>
+              ${quote ? `<p>${escapeHtml(quote)}</p>` : ""}
+            </article>`;
+          })
+          .join("");
+  return `<div class="provenance-drilldown">
+    <article>
+      <strong>${escapeHtml(memorySpaceLabel)}</strong>
+      <span>Memory space</span>
+      <p>${escapeHtml(
+        `Domain: ${String(memorySpace.memory_domain ?? "unknown").replaceAll("_", " ")}`
+      )}</p>
+    </article>
+    ${sourceRows}
+  </div>`;
+}
+
 function renderDetail(
   detail: unknown,
   availableActions: unknown,
@@ -959,7 +1026,9 @@ function renderDetail(
   }
   const payload = detail as {
     memory?: Record<string, unknown> | null;
+    memory_space?: Record<string, unknown> | null;
     source_refs?: Array<Record<string, unknown>>;
+    resolved_source_refs?: Array<Record<string, unknown>>;
     review_actions?: Array<Record<string, unknown>>;
   };
   const memory = payload.memory;
@@ -986,6 +1055,10 @@ function renderDetail(
     <h4>Separate sensitive cleanup</h4>
     <p class="action-note">Forget forever is separate from normal review. It is only for sensitive or wrong memory and still starts with a dry run.</p>
     <div class="actions risky-action-group">${renderMemoryForgetAction(memory, projectId, memoryForget)}</div>
+    <details open>
+      <summary>Where this came from</summary>
+      ${renderProvenanceDrilldown(payload)}
+    </details>
     <details>
       <summary>Evidence excerpts</summary>
       ${renderRows(payload.source_refs ?? [], "No source refs recorded.")}
@@ -1062,6 +1135,10 @@ function sourceLabel(row: Record<string, unknown>) {
   return "No attached source is recorded yet";
 }
 
+function isHumanMemorySpace(row: Record<string, unknown>) {
+  return row.project_kind === "personal_domain" || row.memory_domain === "personal_life";
+}
+
 function sourceKindLabel(value: unknown) {
   const labels: Record<string, string> = {
     workspace_path: "Workspace folder",
@@ -1095,7 +1172,31 @@ function attachedSourceSummary(row: Record<string, unknown>) {
   return parts.join(", ");
 }
 
+function memoryProfile(row: Record<string, unknown>) {
+  const profile = asRecord(row.memory_profile);
+  return {
+    label: String(profile.label ?? "Memory space"),
+    purpose: String(profile.purpose ?? "Recallant memory space."),
+    defaultIsolation: String(
+      profile.default_isolation ?? "Isolated by default; shared only through governed recall."
+    ),
+    allowedRecall: String(
+      profile.allowed_recall ?? "Recall uses this memory space according to governed policy."
+    ),
+    capturePolicy: String(
+      profile.capture_policy ?? "Recording state depends on explicit agent activity."
+    ),
+    connectorPolicy: String(
+      profile.connector_policy ??
+        "Connectors are not active until separate consent and setup are recorded."
+    ),
+    defaultSources: String(profile.default_sources ?? "zero sources by default")
+  };
+}
+
 function sharingPolicy(row: Record<string, unknown>) {
+  const profile = memoryProfile(row);
+  if (profile.defaultIsolation) return profile.defaultIsolation;
   if (row.memory_domain === "agent_work") {
     return "Isolated by default; agents may ask for source-linked examples from other spaces.";
   }
@@ -1172,6 +1273,52 @@ function sourceMapStatusLabel(status: string) {
     detached: "Detached"
   };
   return labels[status] ?? "Source";
+}
+
+function sourceAttachmentLabel(source: Record<string, unknown>) {
+  return source.status === "detached" ? "Detached source" : "Attached source";
+}
+
+function sourceUsabilityLabel(source: Record<string, unknown>) {
+  const status = sourceMapStatus(source);
+  if (status === "ready") return "Usable for citations";
+  if (status === "needs-setup") return "Planned; setup needed";
+  if (status === "needs-attention") return "Needs attention before use";
+  return "Detached; kept as provenance";
+}
+
+function sourceAccessContractSummary(source: Record<string, unknown>) {
+  const contract = asRecord(source.source_access_contract);
+  const capabilityStatus = String(contract.capability_binding_status ?? "not_required");
+  if (capabilityStatus === "needed") {
+    return "Governed access or capability binding is needed before live capture. Raw secrets stay outside Recallant.";
+  }
+  if (capabilityStatus === "ready") {
+    return "Governed access is recorded; raw secrets stay outside Recallant.";
+  }
+  return "No external access is needed for this source record.";
+}
+
+function sourceMapRole(source: Record<string, unknown>) {
+  const kind = String(source.source_kind ?? "other");
+  if (kind === "workspace_path") return "Primary workspace evidence";
+  if (kind === "repo") return "Repository evidence";
+  if (kind === "document_collection") return "Document evidence";
+  if (kind === "connector") return "Connector reference";
+  if (kind === "server_path") return "Server/environment reference";
+  if (kind === "manual") return "Owner-supplied note";
+  if (kind === "virtual") return "Virtual memory branch";
+  return "Supporting source";
+}
+
+function sourceCaptureReadiness(source: Record<string, unknown>) {
+  const contract = asRecord(source.source_access_contract);
+  const readiness = String(contract.capture_readiness ?? "");
+  if (source.status === "detached") return "Detached from new capture";
+  if (readiness === "ready_or_reference_only") return "Ready or reference-only";
+  if (readiness === "consent_or_capability_needed") return "Consent/setup needed";
+  if (readiness === "governed_setup_needed") return "Governed setup needed";
+  return "Ready for provenance";
 }
 
 function sourceProvenanceNote(source: Record<string, unknown>) {
@@ -1264,7 +1411,7 @@ function renderSourceResult(source?: SourceRenderState) {
     (source.action === "create_space"
       ? "The new space is available in Recallant. It can hold memory even before a folder is attached."
       : source.action === "detach_source"
-        ? "The memory space remains available; only this source binding was detached."
+        ? "The memory space remains available; only this source binding was detached. Detaching a source does not delete memories."
         : "The source is now linked to this memory space and can be shown as provenance.");
   return `<article class="source-result">
     <strong>${escapeHtml(title)}</strong>
@@ -1290,6 +1437,7 @@ function renderSourceTree(data: ReviewDashboardData) {
   const rootNote = sources.length
     ? "This memory space can cite attached sources without mixing them automatically."
     : "This memory space has no attached sources yet.";
+  const counts = sourceHealthCounts(sources);
   const groups = ["ready", "needs-setup", "needs-attention", "detached"].map((status) => ({
     status,
     label: sourceMapStatusLabel(status),
@@ -1297,9 +1445,10 @@ function renderSourceTree(data: ReviewDashboardData) {
   }));
   return `<div class="source-tree" aria-label="Memory Tree source map">
     <article class="source-tree-root">
-      <span>Memory space</span>
+      <span>Memory Tree root</span>
       <strong>${escapeHtml(title)}</strong>
       <p>${escapeHtml(rootNote)}</p>
+      <p>${escapeHtml(`${counts.ready} usable, ${counts.needsSetup} planned, ${counts.needsAttention} need attention, ${counts.detached} detached`)}</p>
     </article>
     <div class="source-tree-groups">
       ${groups
@@ -1316,8 +1465,13 @@ function renderSourceTree(data: ReviewDashboardData) {
                   });
                   return `<article class="source-tree-node">
                     <strong>${escapeHtml(sourceDisplayTitle(source))}</strong>
+                    <span>${escapeHtml(sourceMapRole(source))}</span>
+                    <span>${escapeHtml(sourceAttachmentLabel(source))}</span>
                     <span>${escapeHtml(sourceKindLabel(source.source_kind))}</span>
+                    <span>${escapeHtml(sourceUsabilityLabel(source))}</span>
+                    <span>${escapeHtml(sourceCaptureReadiness(source))}</span>
                     <p>${escapeHtml(sourceProvenanceNote(source))}</p>
+                    <p>${escapeHtml(sourceAccessContractSummary(source))}</p>
                     <a href="${escapeHtml(sourceMemoryPath)}#sources">View source memory</a>
                   </article>`;
                 })
@@ -1389,8 +1543,13 @@ function renderSelectedSources(data: ReviewDashboardData) {
           <div>
             <strong>${escapeHtml(sourceDisplayTitle(source))}</strong>
             <span class="source-health ${escapeHtml(health.status)}">${escapeHtml(health.label)}</span>
+            <span class="source-role">${escapeHtml(sourceMapRole(source))}</span>
+            <span class="source-attachment">${escapeHtml(sourceAttachmentLabel(source))}</span>
+            <span class="source-usability">${escapeHtml(sourceUsabilityLabel(source))}</span>
+            <span class="source-readiness">${escapeHtml(sourceCaptureReadiness(source))}</span>
             <span class="source-kind">${escapeHtml(sourceKindLabel(source.source_kind))}</span>
             <p>${escapeHtml(sourceProvenanceNote(source))}</p>
+            <p>${escapeHtml(sourceAccessContractSummary(source))}</p>
             <p>${escapeHtml(health.reason)}</p>
             <p class="source-action">${escapeHtml(health.action)}</p>
             <div class="source-card-actions">
@@ -1415,6 +1574,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
               ["status", source.status],
               ["location", source.uri],
               ["source_health", source.source_health],
+              ["source_access_contract", source.source_access_contract],
               ["is_primary", source.is_primary],
               ["metadata", source.metadata]
             ])}
@@ -1426,40 +1586,74 @@ function renderSelectedSources(data: ReviewDashboardData) {
 }
 
 function renderMemorySpaces(data: ReviewDashboardData) {
+  const renderSpaceCard = (row: Record<string, unknown>) => {
+    const active = row.project_id === data.current_project_id;
+    const state = captureState(row);
+    const profile = memoryProfile(row);
+    const human = isHumanMemorySpace(row);
+    const sources = Array.isArray(row.sources)
+      ? (row.sources as Array<Record<string, unknown>>)
+      : [];
+    const connectorCount = sources.filter(
+      (source) => source.source_kind === "connector" && source.status === "active"
+    ).length;
+    return `<article class="memory-space ${active ? "active" : ""} ${human ? "human-domain" : "code-domain"}">
+      <div class="memory-space-head">
+        <h3><a href="${escapeHtml(reviewPath(row.project_id))}">${escapeHtml(projectDisplayName(row))}</a></h3>
+        <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+      </div>
+      <p><strong>${escapeHtml(profile.label)}</strong></p>
+      <p>${escapeHtml(profile.purpose)}</p>
+      <p>${escapeHtml(sourceLabel(row))}</p>
+      <p>${escapeHtml(profile.defaultSources)}</p>
+      <p>${escapeHtml(attachedSourceSummary(row))}</p>
+      <p>${escapeHtml(sharingPolicy(row))}</p>
+      ${
+        human
+          ? `<p><strong>No passive capture.</strong> Manual or agent-mediated writes only.</p>
+             <p><strong>Connectors:</strong> ${connectorCount > 0 ? "planned source record present; setup still governed" : "not connected"}</p>`
+          : ""
+      }
+      <div class="metrics">
+        <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+        <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+        <span>${escapeHtml(row.event_count ?? 0)} events</span>
+      </div>
+      <details>
+        <summary>Technical details</summary>
+        ${renderMeta([
+          ["project_id", row.project_id],
+          ["project_kind", row.project_kind],
+          ["memory_domain", row.memory_domain],
+          ["memory_profile", row.memory_profile],
+          ["primary_path", row.primary_path],
+          ["sources", row.sources]
+        ])}
+      </details>
+    </article>`;
+  };
+  const humanSpaces = data.projects.filter(isHumanMemorySpace);
+  const codeSpaces = data.projects.filter((row) => !isHumanMemorySpace(row));
   const spaceList =
     data.projects.length === 0
       ? `<p class="empty">No memory spaces yet.</p>`
-      : `<div class="memory-spaces">
-        ${data.projects
-          .map((row) => {
-            const active = row.project_id === data.current_project_id;
-            const state = captureState(row);
-            return `<article class="memory-space ${active ? "active" : ""}">
-              <div class="memory-space-head">
-                <h3><a href="${escapeHtml(reviewPath(row.project_id))}">${escapeHtml(projectDisplayName(row))}</a></h3>
-                <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
-              </div>
-              <p>${escapeHtml(sourceLabel(row))}</p>
-              <p>${escapeHtml(attachedSourceSummary(row))}</p>
-              <p>${escapeHtml(sharingPolicy(row))}</p>
-              <div class="metrics">
-                <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
-                <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
-                <span>${escapeHtml(row.event_count ?? 0)} events</span>
-              </div>
-              <details>
-                <summary>Technical details</summary>
-                ${renderMeta([
-                  ["project_id", row.project_id],
-                  ["project_kind", row.project_kind],
-                  ["memory_domain", row.memory_domain],
-                  ["primary_path", row.primary_path],
-                  ["sources", row.sources]
-                ])}
-              </details>
-            </article>`;
-          })
-          .join("")}
+      : `<div class="memory-space-groups">
+        ${
+          humanSpaces.length
+            ? `<section class="memory-space-group human-memory-slice">
+                <span class="section-kicker">Human memory domains</span>
+                <h3>Virtual personal / work memory</h3>
+                <p>These spaces are manual-first and isolated from coding-agent context unless you explicitly ask Recallant to recall them.</p>
+                <div class="memory-spaces">${humanSpaces.map(renderSpaceCard).join("")}</div>
+              </section>`
+            : ""
+        }
+        <section class="memory-space-group">
+          <span class="section-kicker">Agent workspaces</span>
+          <h3>Code and project memory</h3>
+          <p>These spaces record agent work only when capture is configured and activity proves it.</p>
+          <div class="memory-spaces">${codeSpaces.length ? codeSpaces.map(renderSpaceCard).join("") : `<p class="empty">No code workspaces yet.</p>`}</div>
+        </section>
       </div>`;
   return `<div class="memory-spaces">
     ${spaceList}
@@ -1473,9 +1667,12 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
   const activeSources = sources.filter((source) => source.status === "active");
   const filterState = sourceFilterState(data);
   const title = projectDisplayName(project) || data.current_project_id;
+  const profile = memoryProfile(project);
   return `<aside class="memory-profile" aria-label="Current memory space profile">
     <span class="section-kicker">Current memory space</span>
     <h3>${escapeHtml(title)}</h3>
+    <p><strong>${escapeHtml(profile.label)}</strong></p>
+    <p>${escapeHtml(profile.purpose)}</p>
     <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
     <p>${escapeHtml(sourceLabel(project))}</p>
     ${
@@ -1484,6 +1681,9 @@ function renderCurrentMemoryProfile(data: ReviewDashboardData) {
         : ""
     }
     <p>${escapeHtml(sharingPolicy(project))}</p>
+    <p>${escapeHtml(profile.allowedRecall)}</p>
+    <p>${escapeHtml(profile.capturePolicy)}</p>
+    <p>${escapeHtml(profile.connectorPolicy)}</p>
     <div class="memory-profile-metrics">
       <span><strong>${escapeHtml(activeSources.length)}</strong> active sources</span>
       <span><strong>${escapeHtml(project.memory_count ?? 0)}</strong> memories</span>
@@ -1583,12 +1783,18 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
   return `<section class="panel source-workbench" id="sources">
     <div class="section-head">
       <div>
-        <span class="section-kicker">Memory space sources</span>
+        <span class="section-kicker">Memory Tree / Source Map · Memory space sources</span>
         <h2>Source Map</h2>
       </div>
       <p>These are the folders, repositories, documents, connectors, and virtual inputs Recallant may cite for this memory space. Detaching a source does not delete the memory.</p>
     </div>
     ${renderSourceResult(source)}
+    <div class="source-map-legend" aria-label="Source map legend">
+      <span><strong>Root</strong> current memory space</span>
+      <span><strong>Branches</strong> attached sources</span>
+      <span><strong>Provenance</strong> where facts came from</span>
+      <span><strong>Safety</strong> detach is not delete</span>
+    </div>
     <div class="source-overview">
       <span><strong>${escapeHtml(counts.active)}</strong> active sources</span>
       <span><strong>${escapeHtml(counts.ready)}</strong> ready to cite</span>
@@ -2316,6 +2522,11 @@ function renderManagementChat(
     <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
     <input type="hidden" name="view" value="${escapeHtml(view === "all" ? "ask" : view)}" />
     ${
+      chat?.response?.clarification_context
+        ? `<input type="hidden" name="clarification_context" value="${escapeHtml(JSON.stringify(chat.response.clarification_context))}" />`
+        : ""
+    }
+    ${
       selectedSourceId !== "all"
         ? `<input type="hidden" name="source_id" value="${escapeHtml(selectedSourceId)}" />`
         : ""
@@ -2366,7 +2577,7 @@ function renderChatActions(
     <h4>${escapeHtml(title)}</h4>
     ${actions
       .map(
-        (action) => `<article>
+        (action) => `<article class="chat-action chat-action--${escapeHtml(action.kind)}">
           <strong>${escapeHtml(action.label)}</strong>
           <span>${escapeHtml(actionKindLabel(action.kind, language))}</span>
           <p>${escapeHtml(action.reason)}</p>
@@ -2476,13 +2687,13 @@ function workbenchViewHref(data: ReviewDashboardData, view: WorkbenchView) {
 
 function renderWorkbenchNav(data: ReviewDashboardData, activeView: WorkbenchView) {
   const items: Array<{ view: WorkbenchView; label: string }> = [
-    { view: "all", label: "All" },
     { view: "ask", label: "Ask Recallant" },
+    { view: "all", label: "Workbench" },
     { view: "memory", label: "Memory Spaces" },
-    { view: "command", label: "Command Center" },
     { view: "sources", label: "Sources" },
     { view: "activity", label: "Activity / Replay" },
     { view: "review", label: "Review" },
+    { view: "command", label: "Command Center" },
     { view: "settings", label: "Settings" }
   ];
   return `<nav class="workbench-nav" aria-label="Workbench sections">
@@ -2570,10 +2781,17 @@ function renderDashboard(
     .workbench-nav a:hover { border-color: var(--line-strong); background: #f0f6f3; }
     .workbench-nav a.active { border-color: var(--accent); background: var(--accent); color: #fff; }
     .command-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(340px, 1.1fr); gap: 18px; align-items: start; }
-    .workbench-body { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 22px; align-items: start; }
+    .workbench-body { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 22px; align-items: start; }
     .workbench-body.focused { grid-template-columns: minmax(0, 1fr); }
     .workbench-body.focused .workbench-main { max-width: 1180px; width: 100%; justify-self: center; }
     .workbench-main { display: grid; gap: 16px; }
+    .workbench-main.production-first-screen { align-content: start; }
+    .overview-memory-map { order: 1; }
+    .overview-activity { order: 2; }
+    .overview-review { order: 3; }
+    .overview-command { order: 4; }
+    .overview-operations { order: 5; }
+    .workbench-main.production-first-screen > .secondary-workspace { order: 5; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
     .row-link, .project-link { display: block; border-radius: 6px; }
@@ -2595,11 +2813,16 @@ function renderDashboard(
     .left-rail { align-self: start; position: sticky; top: 12px; }
     .secondary-workspace { display: block; }
     .operations-workspace { background: transparent; border: 0; box-shadow: none; padding: 2px 0 0; }
+    .operations-workspace .section-head { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }
+    .operations-workspace .section-head h2 { color: #303845; font-size: 14px; }
+    .operations-workspace .section-head p { color: #647082; }
     .operation-panels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
-    .operation-panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px; margin: 0; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.03); }
+    .operation-panel { border: 1px solid var(--line); border-radius: var(--radius); background: #fbfcfe; padding: 12px; margin: 0; box-shadow: 0 1px 2px rgba(32, 36, 44, 0.03); }
     .operation-panel summary { border: 0; padding: 0; margin: 0; }
-    .operation-panel summary span { font-size: 14px; font-weight: 750; }
+    .operation-panel summary span { display: block; font-size: 13px; font-weight: 750; }
+    .operation-panel summary small { display: block; margin-top: 3px; color: #6a7280; font-size: 11px; font-weight: 500; line-height: 1.3; }
     .operation-panel[open] { grid-column: span 2; }
+    .operation-panel[open] summary { margin-bottom: 10px; }
     .workbench-body.focused .operation-panels { grid-template-columns: minmax(0, 1fr); }
     .workbench-body.focused .operation-panel[open] { grid-column: span 1; }
     .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 12px; }
@@ -2639,9 +2862,15 @@ function renderDashboard(
     .state.started { color: #715118; border-color: #e3d3a5; background: #fff9e8; }
     .state.registered { color: #526070; border-color: #d6dde7; background: #f8fafc; }
     .state.interrupted { color: #8a3c15; border-color: #e1b59b; background: #fff4ed; }
+    .memory-space-groups { display: grid; gap: 12px; }
+    .memory-space-group { border: 1px solid #dfe8e4; border-radius: var(--radius); padding: 10px; background: #fbfdfc; }
+    .memory-space-group h3 { margin: 0 0 5px; font-size: 14px; }
+    .memory-space-group > p { margin: 0 0 9px; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .human-memory-slice { border-color: #c7ded6; background: #f4fbf8; }
     .memory-spaces { display: grid; gap: 9px; }
     .memory-space-link { display: block; }
     .memory-space { border: 1px solid #dbe5e1; border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
+    .memory-space.human-domain { border-color: #c7ded6; background: #ffffff; }
     .memory-space.active { background: #eff7f4; border-color: #bdd8cf; box-shadow: inset 3px 0 0 var(--accent); }
     .memory-space-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .memory-space h3 { margin: 0; font-size: 14px; }
@@ -2655,6 +2884,9 @@ function renderDashboard(
     .source-form .checkbox-line { display: flex; align-items: center; gap: 7px; font-weight: 500; }
     .source-form .checkbox-line input { width: auto; }
     .source-workbench { border-color: #cdded9; background: var(--surface); }
+    .source-map-legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+    .source-map-legend span { border: 1px solid #d4e1dd; border-radius: 999px; padding: 7px 10px; background: #f8fbfa; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .source-map-legend strong { color: #166454; margin-right: 4px; }
     .source-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 0 0 14px; }
     .source-overview span { border: 1px solid #d4e1dd; border-radius: 7px; padding: 9px; background: #fff; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
     .source-overview strong { display: block; color: #166454; font-size: 15px; }
@@ -2673,7 +2905,7 @@ function renderDashboard(
     .source-tree-node { border-top: 1px solid #e5e9f0; padding-top: 8px; }
     .source-tree-node:first-child { border-top: 0; padding-top: 0; }
     .source-tree-node strong { display: block; font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
-    .source-tree-node span { display: inline-block; color: #6a7280; font-size: 11px; margin-top: 3px; }
+    .source-tree-node span { display: inline-block; border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 6px; color: #5f6875; background: #f8fafc; font-size: 11px; margin: 4px 4px 0 0; }
     .source-tree-node p { margin: 6px 0 7px; color: #4f5867; font-size: 12px; line-height: 1.35; }
     .source-tree-node a { display: inline-flex; border: 1px solid #cfd8e5; border-radius: 999px; padding: 3px 7px; background: #f8fafc; color: #303845; font-size: 11px; }
     .source-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr); gap: 12px; align-items: start; border: 1px solid #d4e1dd; border-radius: var(--radius); padding: 12px; margin: 0 0 14px; background: var(--surface-soft); }
@@ -2688,12 +2920,13 @@ function renderDashboard(
     .source-card, .source-result { border: 1px solid #dfe8e4; border-radius: 7px; padding: 9px; background: var(--surface-soft); }
     .source-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
     .source-card strong, .source-result strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
-    .source-card span { display: inline-block; font-size: 12px; margin-bottom: 3px; }
+    .source-card span { display: inline-block; font-size: 12px; margin: 0 4px 4px 0; }
     .source-kind { color: #6a7280; margin-left: 5px; }
     .source-health { border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; background: #f8fafc; color: #445064; }
     .source-health.ready { border-color: #bad8cf; background: #eef8f5; color: #166454; }
     .source-health.needs-setup, .source-health.needs-attention { border-color: #e3d3a5; background: #fff9e8; color: #715118; }
     .source-health.detached { border-color: #d6dde7; background: #f8fafc; color: #6a7280; }
+    .source-role, .source-readiness, .source-usability, .source-kind, .source-attachment { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; background: #fff; color: #4f5867; }
     .source-card p, .source-result p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
     .source-card .source-action { color: #6a7280; }
     .source-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -2701,6 +2934,11 @@ function renderDashboard(
     .detail h3 { font-size: 15px; margin: 0 0 7px; }
     .detail h4 { font-size: 12px; margin: 12px 0 6px; color: #4f5867; text-transform: uppercase; letter-spacing: .04em; }
     .detail p { margin: 0 0 10px; color: #303845; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+    .provenance-drilldown { display: grid; gap: 8px; margin-top: 8px; }
+    .provenance-drilldown article { border: 1px solid #dbe4ea; border-radius: 7px; padding: 8px; background: #fbfcfe; }
+    .provenance-drilldown strong { display: block; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
+    .provenance-drilldown span { display: inline-block; border: 1px solid #d4e1dd; border-radius: 999px; padding: 2px 6px; margin: 0 4px 4px 0; color: #4f5867; font-size: 11px; }
+    .provenance-drilldown p { margin: 3px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; }
     details { border-top: 1px solid #e5e9f0; padding-top: 9px; margin-top: 10px; }
     summary { cursor: pointer; color: #303845; font-weight: 650; font-size: 13px; }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2772,10 +3010,11 @@ function renderDashboard(
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
     pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f8fb; border: 1px solid #e1e7ef; border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.35; }
     .chat { min-height: 92px; border: 1px dashed #b8c2d0; border-radius: 8px; padding: 10px; color: #565d6b; font-size: 13px; }
-    .ask-panel { border-color: #accfc5; background: var(--surface); padding: 0; overflow: hidden; box-shadow: 0 12px 30px rgba(32, 36, 44, 0.07); }
-    .ask-layout { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(320px, 0.8fr); gap: 0; align-items: stretch; }
-    .ask-work { padding: 28px; }
-    .ask-work h2 { font-size: 28px; margin-bottom: 14px; }
+    .ask-panel { border-color: #9fc8bd; background: var(--surface); padding: 0; overflow: hidden; box-shadow: 0 18px 44px rgba(32, 36, 44, 0.08); }
+    .ask-layout { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(340px, 0.85fr); gap: 0; align-items: stretch; }
+    .ask-work { padding: 32px; }
+    .ask-work h2 { font-size: 34px; margin-bottom: 10px; }
+    .ask-work .workbench-promise { margin: 0 0 18px; color: #415363; font-size: 15px; line-height: 1.45; max-width: 860px; }
     .first-screen-snapshot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
     .first-screen-snapshot article { border: 1px solid #d5e1dd; border-radius: 8px; padding: 12px; background: #fff; min-height: 88px; }
     .first-screen-snapshot article.ready { border-color: #bdd8cf; background: #f4fbf8; }
@@ -2791,7 +3030,7 @@ function renderDashboard(
     .memory-profile-metrics span { border: 1px solid #dce3ec; border-radius: 6px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 11px; }
     .memory-profile-metrics strong { display: block; color: #20242c; font-size: 13px; }
     .chat-form { display: grid; gap: 10px; }
-    .chat-form textarea { resize: vertical; min-height: 260px; border: 1px solid #bfcbd6; border-radius: 7px; padding: 13px; font: inherit; font-size: 15px; color: #20242c; background: #fff; }
+    .chat-form textarea { resize: vertical; min-height: 300px; border: 1px solid #b6c9c4; border-radius: 7px; padding: 14px; font: inherit; font-size: 16px; color: #20242c; background: #fff; }
     .chat-submit-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
     .chat-submit-row span { color: #607080; font-size: 12px; }
     .chat-form button { justify-self: start; border-color: #8fb9ad; background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
@@ -2828,7 +3067,733 @@ function renderDashboard(
     .empty { color: var(--muted); font-size: 13px; line-height: 1.4; border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
     a:focus-visible, button:focus-visible, summary:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #7eb6a9; outline-offset: 2px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid, .source-tree { grid-template-columns: 1fr; } .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .chat-form textarea { min-height: 220px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary, .source-map-legend { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
+
+    /* Stage 1 Workbench design architecture corrective pass */
+    :root {
+      --bg: #f4f2ec;
+      --bg-subtle: #ebe8df;
+      --surface: #fbfaf6;
+      --surface-soft: #f7f5ee;
+      --surface-raised: #ffffff;
+      --surface-inset: #efede6;
+      --text: #171a1f;
+      --text-muted: #5e6673;
+      --text-faint: #858c98;
+      --line: #d8d5ca;
+      --line-strong: #b9b4a8;
+      --accent: #176b5d;
+      --accent-strong: #0f5147;
+      --accent-soft: #dcebe6;
+      --info: #285c7d;
+      --success: #16704f;
+      --warning: #9a6400;
+      --danger: #a33a2c;
+      --neutral: #6b7280;
+      --radius: 12px;
+      --radius-sm: 7px;
+      --shadow-soft: 0 1px 2px rgba(23, 26, 31, 0.05), 0 16px 40px rgba(23, 26, 31, 0.06);
+      --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.72) inset, 0 18px 48px rgba(23, 26, 31, 0.08);
+      --mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-family: "IBM Plex Sans", "Aptos", "Segoe UI", sans-serif;
+    }
+    html { background: var(--bg); }
+    body {
+      background:
+        radial-gradient(circle at 18% -18%, rgba(23, 107, 93, 0.12), transparent 32%),
+        linear-gradient(180deg, #faf8f1 0%, var(--bg) 42%, #ece8dc 100%);
+      color: var(--text);
+      letter-spacing: -0.006em;
+      font-size: 13px;
+      text-wrap: pretty;
+    }
+    a { color: var(--accent-strong); }
+    a:hover { color: #0a3d36; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      min-height: 50px;
+      padding: 10px 22px;
+      background: rgba(250, 248, 241, 0.88);
+      border-bottom: 1px solid rgba(185, 180, 168, 0.72);
+      backdrop-filter: blur(18px) saturate(1.08);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.62) inset;
+    }
+    header h1 {
+      font-size: 15px;
+      letter-spacing: -0.02em;
+      font-weight: 760;
+    }
+    header p { color: var(--text-muted); font-size: 12px; }
+    header .status span, header .status strong {
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.62);
+      color: var(--text-muted);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+    }
+    main {
+      max-width: 1840px;
+      padding: 18px 22px 34px;
+      gap: 16px;
+    }
+    .workbench-body {
+      grid-template-columns: minmax(276px, 320px) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .left-rail {
+      position: sticky;
+      top: 70px;
+      display: grid;
+      gap: 12px;
+      max-height: calc(100vh - 84px);
+      overflow: auto;
+      padding-right: 2px;
+      scrollbar-width: thin;
+    }
+    .workbench-main.production-first-screen {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(318px, 372px);
+      gap: 16px;
+      align-items: start;
+    }
+    .workbench-main.production-first-screen > .ask-panel,
+    .workbench-main.production-first-screen > .source-workbench,
+    .workbench-main.production-first-screen > .overview-activity,
+    .workbench-main.production-first-screen > .overview-review,
+    .workbench-main.production-first-screen > .overview-command {
+      grid-column: 1;
+    }
+    .workbench-main.production-first-screen > .secondary-workspace {
+      grid-column: 2;
+      grid-row: 1 / span 4;
+      order: initial;
+      position: sticky;
+      top: 70px;
+      max-height: calc(100vh - 84px);
+      overflow: auto;
+    }
+    .panel {
+      background: rgba(251, 250, 246, 0.94);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.74) inset, 0 10px 28px rgba(23, 26, 31, 0.045);
+    }
+    .section-head,
+    .activity-group-head {
+      border-bottom: 1px solid rgba(216, 213, 202, 0.74);
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .section-kicker {
+      font-family: var(--mono);
+      color: var(--accent-strong);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    h2 {
+      color: var(--text);
+      font-size: 17px;
+      line-height: 1.15;
+      letter-spacing: -0.035em;
+      font-weight: 760;
+    }
+    h3 { color: var(--text); letter-spacing: -0.018em; }
+    p, li, dd { color: var(--text-muted); line-height: 1.45; }
+    .workbench-nav {
+      gap: 6px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(239, 237, 230, 0.72);
+      width: fit-content;
+    }
+    .workbench-nav a {
+      border: 0;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .workbench-nav a:hover { background: rgba(255, 255, 255, 0.78); color: var(--text); }
+    .workbench-nav a.active {
+      background: var(--text);
+      color: #fffdf7;
+      box-shadow: 0 7px 18px rgba(23, 26, 31, 0.16);
+    }
+    .ask-panel {
+      position: relative;
+      overflow: hidden;
+      border-color: rgba(23, 107, 93, 0.38);
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 245, 238, 0.94)),
+        radial-gradient(circle at 88% 14%, rgba(23, 107, 93, 0.16), transparent 28%);
+      box-shadow: var(--shadow-panel);
+    }
+    .ask-panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(23, 26, 31, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 26, 31, 0.028) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(90deg, transparent, #000 14%, #000 64%, transparent);
+    }
+    .ask-layout {
+      position: relative;
+      grid-template-columns: minmax(0, 2.15fr) minmax(292px, 0.82fr);
+      isolation: isolate;
+    }
+    .ask-work { padding: 22px; }
+    .ask-work h2 {
+      max-width: 760px;
+      font-size: clamp(28px, 3vw, 40px);
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+    }
+    .ask-work .workbench-promise {
+      max-width: 780px;
+      color: #394550;
+      font-size: 14px;
+      line-height: 1.52;
+    }
+    .first-screen-snapshot {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .first-screen-snapshot span,
+    .signal-strip span,
+    .summary-grid span,
+    .activity-summary span,
+    .source-overview span,
+    .review-overview span {
+      border-color: rgba(216, 213, 202, 0.9);
+      background: rgba(255, 255, 255, 0.72);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.72) inset;
+    }
+    .first-screen-snapshot strong,
+    .signal-strip strong,
+    .summary-grid strong,
+    .activity-summary strong,
+    .source-overview strong,
+    .review-overview strong {
+      color: var(--text);
+      font-weight: 760;
+    }
+    .chat-form textarea,
+    input,
+    select {
+      border-color: var(--line-strong);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--text);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset;
+    }
+    .chat-form textarea {
+      min-height: 170px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .chat-form textarea:focus,
+    input:focus,
+    select:focus,
+    button:focus-visible,
+    a:focus-visible {
+      outline: 2px solid rgba(23, 107, 93, 0.45);
+      outline-offset: 2px;
+    }
+    button,
+    .actions a,
+    .source-card-actions a {
+      border-radius: 999px;
+      border-color: var(--line-strong);
+      background: #fffdf7;
+      color: var(--text);
+      font-weight: 700;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+    button:hover,
+    .actions a:hover,
+    .source-card-actions a:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+      box-shadow: 0 8px 20px rgba(23, 26, 31, 0.08);
+    }
+    .chat-form button[type="submit"] {
+      background: var(--accent);
+      border-color: var(--accent-strong);
+      color: #fffdf7;
+      box-shadow: 0 12px 26px rgba(23, 107, 93, 0.22);
+    }
+    .memory-profile {
+      border-left-color: rgba(23, 107, 93, 0.24);
+      background: rgba(239, 237, 230, 0.68);
+    }
+    .memory-profile-metrics span {
+      background: rgba(255, 255, 255, 0.7);
+      border-color: var(--line);
+    }
+    .memory-space-group {
+      border-color: var(--line);
+      background: rgba(251, 250, 246, 0.72);
+      padding: 12px;
+    }
+    .memory-spaces { gap: 8px; }
+    .memory-space {
+      position: relative;
+      border-color: rgba(216, 213, 202, 0.95);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.64);
+      padding: 11px 12px;
+      box-shadow: none;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+    .memory-space:hover {
+      transform: translateY(-1px);
+      border-color: var(--line-strong);
+      background: #fffdf7;
+      box-shadow: 0 10px 22px rgba(23, 26, 31, 0.055);
+    }
+    .memory-space.active {
+      border-color: rgba(23, 107, 93, 0.48);
+      background: linear-gradient(180deg, #ffffff, #edf6f2);
+      box-shadow: 0 0 0 1px rgba(23, 107, 93, 0.08), 0 12px 28px rgba(23, 107, 93, 0.08);
+    }
+    .memory-space.active::before {
+      content: "";
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      top: 15px;
+      left: -4px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(23, 107, 93, 0.14);
+    }
+    .memory-space h3 { font-size: 13px; }
+    .memory-space p { font-size: 11.5px; color: var(--text-muted); }
+    .memory-space .state,
+    .badges span,
+    .source-health,
+    .source-map-legend span {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text-muted);
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+    .state.active,
+    .source-health.ready,
+    .source-tree-group.ready h3::before { color: var(--success); }
+    .state.interrupted,
+    .source-health.needs-attention { color: var(--danger); }
+    .state.started,
+    .source-health.needs-setup { color: var(--warning); }
+    .source-workbench {
+      background: linear-gradient(180deg, rgba(251, 250, 246, 0.96), rgba(244, 242, 236, 0.92));
+    }
+    .source-map-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .source-map-legend span { padding: 6px 9px; }
+    .source-workspace-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+    }
+    .source-tree {
+      position: relative;
+      grid-template-columns: minmax(210px, 0.28fr) minmax(0, 1fr);
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid rgba(216, 213, 202, 0.86);
+      border-radius: 14px;
+      background:
+        linear-gradient(90deg, rgba(23, 107, 93, 0.08) 0 1px, transparent 1px) 0 0 / 28px 28px,
+        linear-gradient(rgba(23, 107, 93, 0.055) 0 1px, transparent 1px) 0 0 / 28px 28px,
+        rgba(255, 255, 255, 0.54);
+    }
+    .source-tree-root {
+      border-color: rgba(23, 107, 93, 0.34);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 10px 24px rgba(23, 107, 93, 0.065);
+    }
+    .source-tree-groups {
+      grid-template-columns: repeat(4, minmax(136px, 1fr));
+      gap: 8px;
+      position: relative;
+    }
+    .source-tree-group {
+      border-radius: 11px;
+      border-color: rgba(216, 213, 202, 0.92);
+      background: rgba(255, 255, 255, 0.72);
+      min-height: 210px;
+    }
+    .source-tree-group.ready { border-top: 3px solid var(--success); }
+    .source-tree-group.needs-setup { border-top: 3px solid var(--warning); }
+    .source-tree-group.needs-attention { border-top: 3px solid var(--danger); }
+    .source-tree-group.detached { border-top: 3px solid var(--neutral); opacity: 0.88; }
+    .source-tree-group h3 {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .source-card,
+    .source-result,
+    .provenance-source {
+      border-color: rgba(216, 213, 202, 0.92);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset;
+    }
+    .source-card strong,
+    .source-result strong { font-size: 12.5px; }
+    .source-card span,
+    .source-card p,
+    .source-result p { font-size: 11.5px; }
+    .activity-group {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+    .activity-list {
+      position: relative;
+      gap: 0;
+      padding-left: 6px;
+    }
+    .activity-list::before {
+      content: "";
+      position: absolute;
+      top: 4px;
+      bottom: 8px;
+      left: 47px;
+      width: 1px;
+      background: linear-gradient(var(--accent-soft), var(--line));
+    }
+    .activity-item {
+      position: relative;
+      grid-template-columns: 78px minmax(0, 1fr);
+      border-top: 0;
+      padding: 8px 0 10px;
+    }
+    .activity-item::before {
+      content: "";
+      position: absolute;
+      top: 15px;
+      left: 39px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--surface-raised);
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(23, 107, 93, 0.13);
+    }
+    .activity-time {
+      font-family: var(--mono);
+      color: var(--text-faint);
+      font-size: 10.5px;
+    }
+    .activity-item strong { font-size: 12.5px; }
+    .overview-review,
+    .overview-command { background: rgba(251, 250, 246, 0.82); }
+    .review-guide {
+      border-color: rgba(23, 107, 93, 0.24);
+      background: rgba(255, 255, 255, 0.68);
+      border-radius: 14px;
+    }
+    .review-lane,
+    .item,
+    .selected-project-card,
+    .setting-form {
+      border-color: var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.68);
+    }
+    .secondary-workspace.operations-workspace {
+      background: rgba(239, 237, 230, 0.7);
+      border-color: rgba(185, 180, 168, 0.82);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.68) inset;
+    }
+    .secondary-workspace .section-head {
+      display: block;
+    }
+    .secondary-workspace h2 { font-size: 15px; }
+    .operation-panels {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+    .operation-panel,
+    .operation-panel[open] {
+      grid-column: span 1;
+      border-color: rgba(216, 213, 202, 0.95);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.66);
+      box-shadow: none;
+    }
+    .operation-panel summary span { color: var(--text); font-size: 12.5px; }
+    .operation-panel summary small { color: var(--text-faint); }
+    details summary {
+      cursor: pointer;
+      color: var(--text);
+    }
+    .empty {
+      border: 1px dashed rgba(185, 180, 168, 0.9);
+      border-radius: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.48);
+      color: var(--text-muted);
+    }
+    dl, .badges, .source-note, code, pre {
+      font-family: var(--mono);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+    @media (max-width: 1320px) {
+      .workbench-main.production-first-screen {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .workbench-main.production-first-screen > .secondary-workspace {
+        grid-column: 1;
+        grid-row: auto;
+        position: static;
+        max-height: none;
+      }
+      .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1180px) {
+      .workbench-body { grid-template-columns: minmax(248px, 300px) minmax(0, 1fr); }
+      .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .source-tree { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      header { position: static; padding: 12px; }
+      main { padding: 10px; }
+      .workbench-body { grid-template-columns: 1fr; }
+      .workbench-main { order: 1; }
+      .left-rail {
+        order: 2;
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+      .workbench-nav {
+        width: 100%;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+      }
+      .workbench-nav a { white-space: nowrap; }
+      .ask-layout,
+      .first-screen-snapshot,
+      .source-tree-groups,
+      .operation-panels,
+      .activity-summary,
+      .summary-grid,
+      .review-overview,
+      .signal-strip { grid-template-columns: 1fr; }
+      .ask-work { padding: 16px; }
+      .ask-work h2 { font-size: 29px; }
+      .chat-form textarea { min-height: 210px; }
+      .activity-list { padding-left: 0; }
+      .activity-list::before { left: 9px; }
+      .activity-item { grid-template-columns: 1fr; padding-left: 28px; }
+      .activity-item::before { left: 4px; }
+    }
+
+
+    /* Stage 1 Workbench order correction: keep primary map surface before secondary panels */
+    .workbench-main.production-first-screen > .secondary-workspace {
+      grid-column: 1;
+      grid-row: auto;
+      order: 5;
+      position: static;
+      max-height: none;
+      overflow: visible;
+    }
+    .workbench-main.production-first-screen > .overview-activity { order: 3; }
+    .workbench-main.production-first-screen > .overview-review { order: 4; }
+    .workbench-main.production-first-screen > .overview-command { order: 6; }
+    .workbench-main.production-first-screen .operation-panels {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .workbench-main.production-first-screen .operation-panel[open] {
+      grid-column: span 2;
+    }
+    @media (max-width: 1320px) {
+      .workbench-main.production-first-screen .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .workbench-main.production-first-screen .operation-panels { grid-template-columns: 1fr; }
+      .workbench-main.production-first-screen .operation-panel[open] { grid-column: span 1; }
+    }
+
+
+    /* Stage 1 mobile overflow containment */
+    @media (max-width: 760px) {
+      html, body { max-width: 100%; overflow-x: hidden; }
+      header, main, section, aside,
+      .panel, .workbench-body, .workbench-main, .left-rail,
+      .ask-panel, .ask-layout, .ask-work, .memory-profile,
+      .source-workbench, .source-tree, .source-tree-root, .source-tree-groups,
+      .source-tree-group, .source-filter-panel, .source-filter-chips,
+      .source-workspace-grid, .source-management, .source-list,
+      .review-workspace, .review-guide, .review-lanes,
+      .activity-list, .activity-group, .operation-panels, .operation-panel,
+      .command-grid, .summary-grid, .signal-strip, .first-screen-snapshot {
+        max-width: 100%;
+        min-width: 0;
+      }
+      .workbench-nav {
+        width: 100%;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        overflow: visible;
+      }
+      .workbench-nav a {
+        min-width: 0;
+        white-space: normal;
+        text-align: center;
+        line-height: 1.2;
+      }
+      .source-filter-chips { justify-content: flex-start; }
+      .source-filter-chip, .filter-chip, .source-tree-node a, .source-card-actions a, button {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+      .source-tree-node span, .source-role, .source-readiness, .source-usability,
+      .source-kind, .source-attachment, .badges span, .activity-item > span {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+      pre, code, textarea { max-width: 100%; }
+    }
+
+
+    /* Stage 1 mobile Ask width correction */
+    @media (max-width: 760px) {
+      .ask-work { padding: 8px; }
+      .memory-profile { padding: 12px; }
+      .first-screen-snapshot { gap: 8px; }
+      .first-screen-snapshot article { padding: 10px; }
+    }
+
+
+    /* Stage 1 mobile snapshot width correction */
+    @media (max-width: 760px) {
+      #ask-recallant .first-screen-snapshot {
+        width: calc(100% + 20px);
+        max-width: calc(100vw - 20px);
+        margin-left: -10px;
+        margin-right: -10px;
+      }
+    }
+
+
+    /* Stage 1 Activity Replay timeline correction */
+    .activity-group {
+      overflow: hidden;
+    }
+    .activity-group-head h3 {
+      letter-spacing: -0.025em;
+    }
+    .activity-list {
+      padding-left: 0;
+    }
+    .activity-list::before {
+      left: 17px;
+      top: 8px;
+      bottom: 12px;
+      background: linear-gradient(180deg, rgba(23, 107, 93, 0.34), rgba(216, 213, 202, 0.72));
+    }
+    .activity-item {
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px 0 12px;
+      align-items: start;
+    }
+    .activity-item::before {
+      top: 18px;
+      left: 12px;
+      width: 9px;
+      height: 9px;
+      background: var(--accent);
+      border: 2px solid var(--surface-raised);
+      box-shadow: 0 0 0 3px rgba(23, 107, 93, 0.14);
+      z-index: 1;
+    }
+    .activity-item > span {
+      grid-column: 2;
+      justify-self: start;
+      max-width: 100%;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      margin: 0 0 3px;
+      background: transparent;
+      color: var(--accent-strong);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 760;
+      letter-spacing: 0.075em;
+      line-height: 1.2;
+      text-transform: uppercase;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .activity-item > div {
+      grid-column: 2;
+      min-width: 0;
+    }
+    .activity-item strong {
+      display: block;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 760;
+      letter-spacing: -0.012em;
+      line-height: 1.25;
+      margin-bottom: 4px;
+    }
+    .activity-item p {
+      color: var(--text-muted);
+      font-size: 12.5px;
+      line-height: 1.38;
+      margin-bottom: 3px;
+    }
+    .activity-item time {
+      color: var(--text-faint);
+      font-family: var(--mono);
+      font-size: 10.5px;
+    }
+    @media (max-width: 760px) {
+      .activity-list::before { left: 14px; }
+      .activity-item {
+        grid-template-columns: 34px minmax(0, 1fr);
+        padding-left: 0;
+      }
+      .activity-item::before { left: 9px; }
+      .activity-item > span,
+      .activity-item > div { grid-column: 2; }
+    }
+
   </style>
 </head>
 <body>
@@ -2850,6 +3815,7 @@ function renderDashboard(
         <div class="ask-work">
           <span class="section-kicker">AI control surface</span>
           <h2>Ask Recallant</h2>
+          <p class="workbench-promise">Ask what Recallant remembers, whether agents are recording, which sources support an answer, what needs review, or how to act safely.</p>
           ${renderFirstScreenSnapshot(data)}
           ${renderManagementChat(data, chat, activeView)}
         </div>
@@ -2868,17 +3834,32 @@ function renderDashboard(
           <h2>Memory Spaces</h2>
           ${renderMemorySpaces(data)}
         </section>
-        <section class="panel">
-          <h2>Project Actions</h2>
-          ${renderProjectActions(data)}
-        </section>
       </aside>`
           : ""
       }
-      <section class="workbench-main">
+      <section class="workbench-main ${focused ? "" : "production-first-screen"}">
+        <div class="${focused ? "" : "overview-memory-map"}">
+          ${showSources ? renderSourceWorkbench(data, source) : ""}
+        </div>
+        ${
+          showActivity
+            ? `<section class="panel ${focused ? "" : "overview-activity"}" id="activity-replay">
+          <h2>Activity / Replay</h2>
+          ${renderActivityReplay(data)}
+        </section>`
+            : ""
+        }
+        ${
+          showReview
+            ? `<section class="panel ${focused ? "" : "overview-review"}" id="review">
+          <h2>Review</h2>
+          ${renderReviewWorkspace(data)}
+        </section>`
+            : ""
+        }
         ${
           showCommand
-            ? `<section class="panel" id="command-center">
+            ? `<section class="panel ${focused ? "" : "overview-command"}" id="command-center">
           <h2>Command Center</h2>
           ${renderCurrentSignals(data)}
           <div class="command-grid">
@@ -2894,52 +3875,39 @@ function renderDashboard(
         </section>`
             : ""
         }
-        ${showSources ? renderSourceWorkbench(data, source) : ""}
-        ${
-          showActivity
-            ? `<section class="panel" id="activity-replay">
-          <h2>Activity / Replay</h2>
-          ${renderActivityReplay(data)}
-        </section>`
-            : ""
-        }
-        ${
-          showReview
-            ? `<section class="panel" id="review">
-          <h2>Review</h2>
-          ${renderReviewWorkspace(data)}
-        </section>`
-            : ""
-        }
         ${
           showSettings
             ? `<section class="secondary-workspace operations-workspace" aria-label="Secondary workbench panels">
           <div class="section-head">
             <div>
-              <span class="section-kicker">Governed operations</span>
-              <h2>Operations</h2>
+              <span class="section-kicker">Secondary workspace · Governed operations</span>
+              <h2>Operations drawer</h2>
             </div>
-            <p>Review detail, cost controls, cleanup, and settings stay available without crowding the main memory workspace.</p>
+            <p>Review detail, cost controls, cleanup, and settings stay available here without crowding Ask Recallant, Memory Spaces, or the Source Map.</p>
           </div>
           <div class="operation-panels">
             ${
               focused
                 ? ""
                 : `<details class="operation-panel">
-              <summary><span>Selected Detail</span></summary>
+              <summary><span>Project Actions</span><small>Isolation and advanced cleanup entry points</small></summary>
+              ${renderProjectActions(data)}
+            </details>
+            <details class="operation-panel">
+              <summary><span>Selected Detail</span><small>Open only when reviewing a specific memory</small></summary>
               ${renderDetail(data.selected_detail, data.available_review_actions, data.current_project_id, memoryForget, data.duplicate_conflicts)}
             </details>
             <details class="operation-panel">
-              <summary><span>Model costs and approvals</span></summary>
+              <summary><span>Model costs and approvals</span><small>Paid API remains confirmation-gated</small></summary>
               ${renderCosts(data)}
             </details>
             <details class="operation-panel">
-              <summary><span>Cleanup / Forget</span></summary>
+              <summary><span>Cleanup / Forget</span><small>Dry-run first; permanent erasure is separate</small></summary>
               ${renderCleanup(data, detach)}
             </details>`
             }
             <details class="operation-panel" id="settings"${focused ? " open" : ""}>
-              <summary><span>Settings</span></summary>
+              <summary><span>Settings</span><small>Project controls and technical values</small></summary>
               ${renderSettings(data, setting)}
             </details>
           </div>
@@ -3020,6 +3988,7 @@ export function createRecallantHttpServer() {
         selected_memory_id?: string | null;
         memory_id?: string | null;
         message?: string;
+        clarification_context?: unknown;
       };
       const chatDashboard = sanitizeDashboardForClient(
         await database.getReviewDashboard({
@@ -3034,7 +4003,8 @@ export function createRecallantHttpServer() {
       const result = await buildManagementChatResponse({
         message: String(body.message ?? ""),
         dashboard: chatDashboard,
-        database
+        database,
+        clarification_context: parseOptionalJsonObject(body.clarification_context)
       });
       write(response, 200, JSON.stringify(result), "application/json");
       return;
@@ -3052,7 +4022,8 @@ export function createRecallantHttpServer() {
       const result = await buildManagementChatResponse({
         message: question,
         dashboard: chatDashboard,
-        database
+        database,
+        clarification_context: parseOptionalJsonObject(body.clarification_context)
       });
       write(
         response,

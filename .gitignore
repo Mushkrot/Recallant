@@ -7,6 +7,23 @@
 # Recallant project-local pointers and spools
 .recallant/
 
+# Internal planning/docs belong in the private Recallant-internal repo
+PROJECT_LOG.md
+stage_goals/
+docs/archive/
+docs/ADR-*.md
+docs/*HANDOFF*.md
+docs/WORKING_CONTEXT.md
+docs/IMPLEMENTATION_STATUS.md
+docs/TEST_CONTRACT.md
+docs/TASK_GRAPH.md
+docs/PRODUCT_ACCEPTANCE_TEST.md
+docs/PRE_PILOT_READINESS.md
+docs/PUBLIC_READINESS.md
+docs/PUBLIC_SCREENSHOTS.md
+docs/PUBLIC_SECURITY_REVIEW.md
+docs/OWNER_SERVER.md
+
 # Secrets and environment overrides
 .env
 .env.*

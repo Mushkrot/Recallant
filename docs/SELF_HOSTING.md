@@ -1,8 +1,7 @@
-# Self-Hosting Recallant
+# Self-Hosting
 
-Recallant is private by default. A normal install should create a local database, a private
-Workbench, and a local CLI without exposing memory, raw artifacts, backups, or MCP over the public
-internet.
+Recallant is private by default. A normal install creates a local database, a private Workbench, and
+a local CLI without exposing memory, raw artifacts, backups, or MCP over the public internet.
 
 ## Profiles
 
@@ -26,7 +25,7 @@ systemd: disabled by default
 
 ### Managed Linux server
 
-Use this when Recallant is run as a managed service:
+Use this when Recallant should run as a managed service:
 
 ```bash
 sudo ./scripts/install-recallant.sh --dry-run --profile managed-server
@@ -45,41 +44,16 @@ Postgres container: recallant-postgres
 Docker Compose project: recallant
 ```
 
-For clean-host validation or side-by-side testing, use explicit Postgres isolation knobs:
+For side-by-side installs, choose a different Postgres port, container name, and Compose project:
 
 ```bash
 sudo ./scripts/install-recallant.sh --profile managed-server \
   --postgres-port 17432 \
-  --postgres-container-name recallant-clean-host-postgres \
-  --compose-project-name recallant-clean-host
+  --postgres-container-name recallant-eval-postgres \
+  --compose-project-name recallant-eval
 ```
 
-These values are written into the generated env file and passed through the production compose
-wrapper so the database URL, Docker container name, bind port, and Compose project stay consistent.
-
-Release-candidate managed install validation:
-
-```bash
-RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke
-```
-
-This smoke starts Docker, uses temporary env/data/prefix paths, a unique Postgres container, a
-unique Compose project, `--no-systemd`, and cleans up after itself. Run it only on a clean
-non-owner host or an approved isolated VM/container.
-
-### Owner-server compatibility profile
-
-The `owner-server` profile is kept for the current owner's `/ai` production host and existing
-operator workflow:
-
-```bash
-sudo ./scripts/install-recallant.sh --dry-run --profile owner-server
-```
-
-That profile uses owner-specific defaults documented in [OWNER_SERVER.md](OWNER_SERVER.md). It
-should not be treated as the generic public install path.
-
-## What The Installer Does
+## Installer Behavior
 
 Dry-run:
 
@@ -91,38 +65,14 @@ Dry-run:
 Confirmed install:
 
 - checks Node.js, npm, Docker, and Docker Compose;
-- creates the private env file if missing;
-- creates the data directories;
-- installs dependencies if needed;
-- builds the TypeScript workspaces;
-- installs the `recallant` CLI wrapper;
-- starts the local Postgres service;
-- applies the initial schema when needed;
-- starts `recallant.service` when the profile uses systemd.
-
-The selected profile paths are passed through the production compose wrapper and backup script.
-`managed-server` therefore uses `/var/lib/recallant/postgres` for Postgres data and
-`/var/lib/recallant/backups` for default backups unless overridden.
-
-## Rollback And Recovery
-
-The installer should be treated as reversible operational setup:
-
-- Keep the env file. It contains the database password and stable owner/project ids.
-- Back up the data directory before moving or reinstalling.
-- Stop the service before changing ports or env values.
-- Use `recallant backup-verify` on backup manifests before relying on them.
-- Remove the CLI wrapper only after confirming no agents still depend on it.
-
-Common managed-server rollback steps:
-
-```bash
-sudo systemctl stop recallant.service
-sudo systemctl disable recallant.service
-```
-
-Database and data removal is intentionally not part of ordinary rollback. Memory deletion must go
-through governed detach/forget workflows.
+- creates a private env file if missing;
+- creates data directories;
+- installs dependencies when needed;
+- builds TypeScript workspaces;
+- installs the CLI wrapper;
+- starts local Postgres;
+- applies schema migrations;
+- starts a service when the selected profile supports it.
 
 ## Verification
 
@@ -138,18 +88,33 @@ After attaching and connecting a project:
 recallant doctor --project-dir /path/to/project --require-capture
 ```
 
-The important distinction is:
+Recallant distinguishes:
 
-- configured: Recallant files or client settings exist;
-- capture active: Recallant has observed real session/context/memory/checkpoint evidence.
+- **configured:** project files or client settings exist;
+- **capture active:** Recallant has observed real session/context/memory/checkpoint evidence.
 
-Do not claim a project is ready until capture is active.
+## Rollback
+
+Rollback should avoid deleting memory by accident.
+
+- Stop services before changing ports or env values.
+- Keep the env file unless you intentionally want a fresh instance.
+- Back up the data directory before moving or reinstalling.
+- Remove source project bindings through Recallant detach/forget workflows, not by deleting random
+  database files.
+
+For a local disposable test install, minimal cleanup is usually:
+
+```bash
+rm -f ~/.local/bin/recallant
+rm -rf ~/.config/recallant ~/.local/share/recallant ~/.local/recallant
+```
 
 ## Security Defaults
 
-- The HTTP server defaults to private bind behavior.
-- Public bind requires an explicit opt-in environment variable.
-- MCP is local stdio by default, not a public HTTP endpoint.
-- Secrets and raw credentials must not be stored as memories.
-- Paid API, public exposure, connector/account binding, destructive actions, and production service
-  operations require policy gates and explicit confirmation.
+- HTTP defaults to private bind behavior.
+- MCP is local stdio by default.
+- Public exposure requires explicit deployment work and external auth.
+- Secrets stay in env files or secret stores, not memory records.
+- Paid API use, destructive actions, public exposure, connector binding, and global rule changes are
+  confirmation-gated.

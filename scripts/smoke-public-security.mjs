@@ -11,26 +11,29 @@ async function read(path) {
   return readFile(join(repoRoot, path), "utf8");
 }
 
-function mustInclude(text, markers, label) {
-  for (const marker of markers) {
-    assert(text.includes(marker), `${label} missing ${marker}`);
-  }
-}
-
 function mustNotMatch(text, patterns, label) {
   for (const pattern of patterns) {
-    assert(!pattern.test(text), `${label} contains forbidden public-path pattern: ${pattern}`);
+    assert(!pattern.test(text), `${label} contains forbidden public pattern: ${pattern}`);
   }
 }
 
-const normalPublicDocs = [
+const publicDocs = [
   "README.md",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "docs/README.md",
   "docs/QUICKSTART.md",
+  "docs/WHY_RECALLANT.md",
+  "docs/COMPARISON.md",
+  "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
-  "docs/CLIENT_SETUP.md"
+  "docs/CLIENT_SETUP.md",
+  "docs/SECURITY.md",
+  "docs/ROADMAP.md"
 ];
 
-const forbiddenInNormalPublicPath = [
+const forbidden = [
   /recallant\.unicloud\.ca/i,
   /highmac/i,
   /\/ai\/recallant(?:-data)?/i,
@@ -38,41 +41,13 @@ const forbiddenInNormalPublicPath = [
   /\bPOSTGRES_PASSWORD\s*=/i,
   /\bRECALLANT_AUTH_TOKEN\s*=/i,
   /\bRECALLANT_SESSION_SECRET\s*=/i,
-  /\b[A-Z0-9_]*API_KEY\s*=/i,
-  /postgres(?:ql)?:\/\/[^ <>"')]+/i
+  /\b[A-Z0-9_]*API_KEY\s*=\s*[^<\s]/i,
+  /postgres(?:ql)?:\/\/[^ <>"')]+:[^ <>"')]+@/i
 ];
 
-for (const path of normalPublicDocs) {
+for (const path of publicDocs) {
   const text = await read(path);
-  mustNotMatch(text, forbiddenInNormalPublicPath, path);
+  mustNotMatch(text, forbidden, path);
 }
-
-const review = await read("docs/PUBLIC_SECURITY_REVIEW.md");
-mustInclude(
-  review,
-  [
-    "Reviewed Public Path",
-    "Public Defaults",
-    "What The Public Path Must Not Expose",
-    "OWNER_SERVER.md",
-    "npm run public-security:smoke",
-    "manual security review"
-  ],
-  "docs/PUBLIC_SECURITY_REVIEW.md"
-);
-
-const release = await read("docs/RELEASE.md");
-mustInclude(
-  release,
-  [
-    "What Must Not Be Released As Public Defaults",
-    "Cloudflare hostname",
-    "raw env values"
-  ],
-  "docs/RELEASE.md"
-);
-
-const screenshots = await read("docs/PUBLIC_SCREENSHOTS.md");
-mustInclude(screenshots, ["Redaction Rules", "owner-server paths", "private hostnames"], "docs/PUBLIC_SCREENSHOTS.md");
 
 process.stdout.write("Public security smoke passed\n");

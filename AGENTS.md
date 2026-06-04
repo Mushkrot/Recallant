@@ -1,38 +1,46 @@
-# Recallant Agent Instructions
+# Recallant Agent Guide
 
-## Working Mode
+This repository is public OSS. Treat all tracked files as user-facing or contributor-facing.
 
-Work autonomously. The owner has authorized agents to follow the documented implementation plan, make ordinary technical decisions, verify changes, and create scoped commits at logical rollback checkpoints without asking for separate permission each time.
+## Working In This Repo
 
-Do not stop just to report progress, summarize completed work, ask whether to continue, or wait for approval on an ordinary implementation step. Progress reports and commits are checkpoints, not stopping points.
+- Keep code, comments, docs, API text, and commit messages in English.
+- Preserve the public documentation boundary: internal handoffs, stage plans, owner-specific
+  deployment notes, and private strategy drafts do not belong in this repository.
+- Do not commit secrets, raw credentials, private server paths, raw memory exports, customer data, or
+  local runtime state.
+- Prefer small, reviewable changes that match existing TypeScript, CLI, server, and docs patterns.
 
-Stop only when the next step genuinely requires the owner: security/public exposure, secrets, paid API use, destructive operations, server/firewall/service changes, or a real contradiction in the specs. If none of those blockers exists, continue to the next documented implementation step.
+## Before Opening A PR
 
-Do not call Recallant ready because a project is registered, files were generated, or a component
-smoke passed. The main product loop is ready only after the acceptance scenario in
-`docs/PRODUCT_ACCEPTANCE_TEST.md` proves that an attached project starts a Recallant-backed session,
-reads context, writes decisions/actions/tests/checkpoints, closes out, and recalls that memory in a
-new session without owner QA.
+Run the focused checks that match your change. For ordinary code/doc work, start with:
 
-## Canonical Context
+```bash
+npm run format:check
+npm run lint
+npm run build
+```
 
-Start with:
+For public documentation changes, also run:
 
-1. `docs/WORKING_CONTEXT.md`
-2. `docs/PRODUCT_ACCEPTANCE_TEST.md`
-3. `docs/PRE_PILOT_READINESS.md`
-4. `docs/SESSION_HANDOFF_CURRENT.md`
-5. `docs/README.md`
-6. `docs/AGENT_IMPLEMENTATION_GUIDE.md`
-7. `docs/TASK_GRAPH.md`
-8. `docs/TEST_CONTRACT.md`
+```bash
+npm run public-readiness:smoke
+npm run public-security:smoke
+```
 
-The repository artifacts are English. Conversation with the owner may be Russian.
+For memory capture behavior, use the relevant smoke script from `package.json`.
 
-## Implementation Discipline
+## Recallant Memory Contract
 
-- Follow the phase order unless the docs explicitly allow parallel work.
-- Keep changes modular and scoped.
-- Update docs when behavior, status, or decisions change.
-- Run the relevant checks before committing.
-- Do not commit runtime state, secrets, generated build output, local upstream clones, or unrelated changes.
+Recallant itself is a memory product, but this public repository should not rely on private project
+memory to be understandable. Important user-facing decisions must be reflected in public docs or
+code. Internal planning can live outside the public repo.
+
+## Safety Boundaries
+
+Agents must not:
+
+- expose admin, MCP, backup, or raw-artifact routes publicly;
+- bypass confirmation for destructive actions, paid APIs, public exposure, secrets, or global rules;
+- turn unreviewed recalled text into binding project instructions;
+- store raw secrets as memories, settings, examples, logs, or fixtures.

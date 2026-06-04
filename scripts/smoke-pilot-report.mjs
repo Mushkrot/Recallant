@@ -2,7 +2,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
@@ -69,6 +69,15 @@ async function hashTree(root) {
     }
   }
   await walk(root);
+  return entries;
+}
+
+async function hashSelectedFiles(root, relativePaths) {
+  const entries = {};
+  for (const relative of relativePaths) {
+    const content = await readFile(join(root, relative));
+    entries[relative] = createHash("sha256").update(content).digest("hex");
+  }
   return entries;
 }
 
@@ -158,8 +167,8 @@ function workbenchSnapshot(dashboard) {
   return {
     capture_ready: Boolean(
       readiness.last_context_read_at &&
-        readiness.last_memory_write_at &&
-        readiness.checkpoint_updated_at
+      readiness.last_memory_write_at &&
+      readiness.checkpoint_updated_at
     ),
     last_context_read_at: readiness.last_context_read_at ?? null,
     last_memory_write_at: readiness.last_memory_write_at ?? null,
@@ -180,14 +189,119 @@ function workbenchSnapshot(dashboard) {
   };
 }
 
+function statusMark(value) {
+  return value ? "PASS" : "FAIL";
+}
+
+function bulletList(values) {
+  const list = Array.isArray(values) ? values.filter(Boolean) : [];
+  if (list.length === 0) return "- none";
+  return list.map((value) => `- ${String(value)}`).join("\n");
+}
+
+function pilotMarkdownSummary(report) {
+  const clean = report.pilots.clean_empty_project;
+  const copied = report.pilots.copied_existing_sandbox;
+  const gutendocx = report.pilots.gutendocx_sandbox;
+  const production = report.pilots.production_sensitive_dry_run;
+  const gutendocxDryRun = report.pilots.gutendocx_production_dry_run;
+  const cross = report.pilots.cross_project_recall;
+  const qa = report.qa_summary;
+  return [
+    "# Recallant Pilot Report",
+    "",
+    `Generated: ${report.generated_at}`,
+    `Overall: ${statusMark(qa.all_required_scenarios_passed)}`,
+    "",
+    "## QA Summary",
+    "",
+    `- Clean attach/capture/recall/detach: ${statusMark(qa.clean_attach_capture_recall_detach)}`,
+    `- Copied sandbox original untouched: ${statusMark(qa.copied_sandbox_original_untouched)}`,
+    `- GutenDocx sampled sandbox original untouched: ${statusMark(qa.gutendocx_sandbox_original_untouched)}`,
+    `- Workbench capture visible: ${statusMark(qa.workbench_capture_visible)}`,
+    `- Production-sensitive preflight safe: ${statusMark(qa.production_sensitive_preflight_safe)}`,
+    `- GutenDocx production dry-run safe: ${statusMark(qa.gutendocx_production_dry_run_safe)}`,
+    `- Cross-project recall source-linked: ${statusMark(qa.cross_project_recall_source_linked)}`,
+    "",
+    "## Clean Empty Project",
+    "",
+    `- Attached: ${statusMark(clean.attached)}`,
+    `- Imported sources: ${clean.imported_sources}`,
+    `- Remembered marker: ${clean.capture.remembered_marker}`,
+    `- Public proof marker: ${clean.public_proof_flow.marker}`,
+    `- Public proof doctor status: ${clean.public_proof_flow.doctor_status}`,
+    `- Public proof ask recalled: ${statusMark(clean.public_proof_flow.ask_recalled)}`,
+    `- Recalled later: ${statusMark(clean.capture.recalled_in_later_session)}`,
+    `- Hook decision recalled: ${statusMark(clean.connect.recalled_hook_decision)}`,
+    `- Doctor status: ${clean.capture.doctor_status}`,
+    `- Detached: ${clean.cleanup.confirmed_status}`,
+    `- Left untouched: ${clean.untouched_original}`,
+    "",
+    "## Copied Existing Sandbox",
+    "",
+    `- Sandbox attached: ${statusMark(copied.attached)}`,
+    `- Original project untouched: ${statusMark(copied.untouched_original)}`,
+    `- Local backup created: ${statusMark(copied.local_backup_created)}`,
+    `- Imported sources: ${copied.imported_sources}`,
+    bulletList(copied.imported_paths),
+    `- Remembered marker: ${copied.capture.remembered_marker}`,
+    `- Recalled later: ${statusMark(copied.capture.recalled_in_later_session)}`,
+    `- Hook decision recalled: ${statusMark(copied.connect.recalled_hook_decision)}`,
+    `- Detached: ${copied.cleanup.confirmed_status}`,
+    "",
+    "## GutenDocx Sampled Sandbox",
+    "",
+    `- Sandbox attached: ${statusMark(gutendocx.attached)}`,
+    `- Original key files untouched: ${statusMark(gutendocx.untouched_original_key_files)}`,
+    `- Imported sources: ${gutendocx.imported_sources}`,
+    "- Copied source files:",
+    bulletList(gutendocx.copied_files),
+    `- Remembered marker: ${gutendocx.capture.remembered_marker}`,
+    `- Recalled later: ${statusMark(gutendocx.capture.recalled_in_later_session)}`,
+    `- Hook decision recalled: ${statusMark(gutendocx.connect.recalled_hook_decision)}`,
+    `- Detached: ${gutendocx.cleanup.confirmed_status}`,
+    "",
+    "## Production-Sensitive Dry Run",
+    "",
+    `- Status: ${production.status}`,
+    `- Effective mode: ${production.effective_mode}`,
+    `- Wrote project files: ${production.writes_files}`,
+    `- Wrote database: ${production.writes_database}`,
+    `- Project files untouched: ${statusMark(production.untouched_project_files)}`,
+    "- Detected signals:",
+    bulletList(production.detected_signals),
+    "",
+    "## GutenDocx Production Dry Run",
+    "",
+    `- Status: ${gutendocxDryRun.status}`,
+    `- Effective mode: ${gutendocxDryRun.effective_mode}`,
+    `- Wrote project files: ${gutendocxDryRun.writes_files}`,
+    `- Wrote database: ${gutendocxDryRun.writes_database}`,
+    `- Service restarts: ${gutendocxDryRun.service_restarts}`,
+    `- Owner confirmation required: ${statusMark(gutendocxDryRun.owner_confirmation_required)}`,
+    `- Key files untouched: ${statusMark(gutendocxDryRun.untouched_key_files)}`,
+    "- Detected signals:",
+    bulletList(gutendocxDryRun.detected_signals),
+    "",
+    "## Cross-Project Recall",
+    "",
+    `- Active recall hides detached sandbox: ${statusMark(cross.active_search_hides_detached_project)}`,
+    `- Include detached finds source-linked example: ${statusMark(cross.include_detached_finds_source_linked_example)}`,
+    `- Cross-project examples are binding rules: ${cross.cross_project_results_are_binding_rules}`,
+    `- Applicability: ${cross.applicability}`,
+    "",
+    "## Artifact Paths",
+    "",
+    `- JSON: ${report.report_path}`,
+    `- Markdown: ${report.markdown_report_path}`
+  ].join("\n");
+}
+
 async function installHookCliWrapper(projectDir) {
   const hookBin = join(projectDir, ".recallant", "hook-bin");
   await mkdir(hookBin, { recursive: true });
   const wrapperPath = join(hookBin, "recallant");
-  await writeFile(
-    wrapperPath,
-    `#!/usr/bin/env sh\nexec node ${JSON.stringify(cliPath)} "$@"\n`
-  );
+  await writeFile(wrapperPath, `#!/usr/bin/env sh\nexec node ${JSON.stringify(cliPath)} "$@"\n`);
   await chmod(wrapperPath, 0o755);
   return {
     ...commandEnv(),
@@ -216,7 +330,9 @@ async function runConnectHookEvidence(projectDir, marker, label) {
     "--project-dir",
     projectDir,
     "--install-local-hooks",
-    "--dry-run"
+    "--dry-run",
+    "--format",
+    "json"
   ]);
   assert(
     dryRun.dry_run === true &&
@@ -230,7 +346,9 @@ async function runConnectHookEvidence(projectDir, marker, label) {
     "codex",
     "--project-dir",
     projectDir,
-    "--install-local-hooks"
+    "--install-local-hooks",
+    "--format",
+    "json"
   ]);
   assert(
     connected.hook_status === "local_hook_kit_installed" &&
@@ -277,7 +395,7 @@ async function runConnectHookEvidence(projectDir, marker, label) {
     `${label}: hook-captured decision was not recalled in a later context pack`
   );
 
-  const doctor = await cli(projectDir, ["doctor", "--require-capture"]);
+  const doctor = await cli(projectDir, ["doctor", "--require-capture", "--format", "json"]);
   assert(
     doctor.capture_readiness?.ready === true &&
       doctor.client_connection?.status === "mcp_and_hooks_ready",
@@ -306,6 +424,63 @@ async function runConnectHookEvidence(projectDir, marker, label) {
     recalled_hook_decision: true,
     doctor_status: doctor.capture_readiness.status,
     client_connection: doctor.client_connection.status
+  };
+}
+
+async function runPublicProofFlow(projectDir, marker, label) {
+  const demo = await cli(projectDir, [
+    "demo-capture",
+    "--marker",
+    marker,
+    "--format",
+    "json"
+  ]);
+  assert(
+    demo.proof?.session_started === true &&
+      demo.proof?.memory_written === true &&
+      demo.proof?.checkpoint_exists === true &&
+      demo.proof?.later_recall_works === true,
+    `${label}: demo-capture did not prove the public capture flow: ${JSON.stringify(demo)}`
+  );
+  const doctor = await cli(projectDir, [
+    "doctor",
+    "--project-dir",
+    projectDir,
+    "--require-capture",
+    "--format",
+    "json"
+  ]);
+  assert(
+    doctor.capture_readiness?.ready === true &&
+      doctor.capture_readiness?.status === "capture_active",
+    `${label}: doctor --require-capture did not pass after demo-capture: ${JSON.stringify(doctor)}`
+  );
+  const ask = await cli(projectDir, [
+    "ask",
+    "what did the agent remember?",
+    "--project-dir",
+    projectDir,
+    "--format",
+    "json"
+  ]);
+  assert(
+    ask.recalled === true &&
+      ask.memories?.some((memory) => String(memory.body ?? "").includes(marker)),
+    `${label}: ask did not recall the demo marker: ${JSON.stringify(ask)}`
+  );
+  return {
+    command_sequence: [
+      "recallant demo-capture --project-dir .",
+      "recallant doctor --project-dir . --require-capture",
+      'recallant ask "what did the agent remember?" --project-dir .'
+    ],
+    marker,
+    session_started: demo.proof.session_started,
+    memory_written: demo.proof.memory_written,
+    checkpoint_exists: demo.proof.checkpoint_exists,
+    later_recall_works: demo.proof.later_recall_works,
+    doctor_status: doctor.capture_readiness.status,
+    ask_recalled: ask.recalled
   };
 }
 
@@ -397,7 +572,7 @@ async function runCapturedSession(projectDir, projectId, marker, label) {
     `Verified recall ${marker}`
   ]);
 
-  const doctor = await cli(projectDir, ["doctor", "--require-capture"]);
+  const doctor = await cli(projectDir, ["doctor", "--require-capture", "--format", "json"]);
   assert(doctor.capture_readiness?.ready === true, `${label}: doctor did not prove capture active`);
 
   const dashboard = await dashboardFor(projectId, projectDir);
@@ -422,17 +597,22 @@ async function runCapturedSession(projectDir, projectId, marker, label) {
 async function runCleanEmptyPilot() {
   const projectDir = await makeTempDir("recallant-pilot-clean-");
   const marker = `PILOT-CLEAN-${randomUUID()}`;
-  const attach = await cli(projectDir, ["attach", "."]);
+  const publicProofMarker = `DEMO-SMOKE-${randomUUID()}`;
+  const attach = await cli(projectDir, ["attach", ".", "--sandbox", "--format", "json"]);
   assert(attach.status === "attached", `clean pilot attach failed: ${JSON.stringify(attach)}`);
   assert(
     attach.discovery_summary?.selected_for_import === 0,
     "clean pilot should not import files"
   );
 
-  const capture = await runCapturedSession(projectDir, attach.project_id, marker, "clean pilot");
+  const publicProof = await runPublicProofFlow(projectDir, publicProofMarker, "clean pilot");
   const connect = await runConnectHookEvidence(projectDir, marker, "clean pilot");
+  const capture = await runCapturedSession(projectDir, attach.project_id, marker, "clean pilot");
   const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, projectDir));
-  assert(workbench.capture_ready === true, "clean pilot Workbench snapshot did not show capture ready");
+  assert(
+    workbench.capture_ready === true,
+    "clean pilot Workbench snapshot did not show capture ready"
+  );
   const detachDryRun = await cli(projectDir, [
     "detach",
     "--project-id",
@@ -453,6 +633,7 @@ async function runCleanEmptyPilot() {
     sources_detected: attach.discovery_summary?.candidates ?? 0,
     imported_sources: attach.imported?.length ?? 0,
     connect,
+    public_proof_flow: publicProof,
     capture,
     workbench,
     cleanup: {
@@ -473,7 +654,7 @@ async function runCopiedExistingPilot() {
   const sandboxDir = await makeTempDir("recallant-pilot-existing-copy-");
   await cp(originalDir, sandboxDir, { recursive: true });
   const marker = `PILOT-COPY-${randomUUID()}`;
-  const attach = await cli(sandboxDir, ["attach", sandboxDir, "--sandbox"]);
+  const attach = await cli(sandboxDir, ["attach", sandboxDir, "--sandbox", "--format", "json"]);
   assert(attach.status === "attached", `copied pilot attach failed: ${JSON.stringify(attach)}`);
   assert(attach.imported?.length >= 4, "copied pilot should import existing source files");
   assert(attach.backup?.manifest_path, "copied pilot should create local backup before file edits");
@@ -481,7 +662,10 @@ async function runCopiedExistingPilot() {
   const capture = await runCapturedSession(sandboxDir, attach.project_id, marker, "copied pilot");
   const connect = await runConnectHookEvidence(sandboxDir, marker, "copied pilot");
   const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, sandboxDir));
-  assert(workbench.capture_ready === true, "copied pilot Workbench snapshot did not show capture ready");
+  assert(
+    workbench.capture_ready === true,
+    "copied pilot Workbench snapshot did not show capture ready"
+  );
   const detachDryRun = await cli(sandboxDir, [
     "detach",
     "--project-id",
@@ -528,6 +712,86 @@ async function runCopiedExistingPilot() {
   };
 }
 
+async function runGutendocxSandboxPilot() {
+  const originalDir = "/ai/gutendocx";
+  const selectedFiles = [
+    "README.md",
+    "AGENTS.md",
+    "PROJECT_LOG.md",
+    "Docs/PRD.md",
+    "Docs/Deploy_Runbook.md",
+    "Docs/Commands for testing.md",
+    ".cursor/SESSION_HANDOFF.md"
+  ];
+  const before = await hashSelectedFiles(originalDir, selectedFiles);
+  const sandboxDir = await makeTempDir("recallant-pilot-gutendocx-copy-");
+  for (const relative of selectedFiles) {
+    await mkdir(dirname(join(sandboxDir, relative)), { recursive: true });
+    await cp(join(originalDir, relative), join(sandboxDir, relative));
+  }
+  const marker = `PILOT-GUTENDOCX-${randomUUID()}`;
+  const attach = await cli(sandboxDir, ["attach", sandboxDir, "--sandbox", "--format", "json"]);
+  assert(
+    attach.status === "attached",
+    `gutendocx sandbox attach failed: ${JSON.stringify(attach)}`
+  );
+  assert(
+    attach.imported?.length >= 4,
+    `gutendocx sandbox should import selected source files: ${JSON.stringify(attach.imported)}`
+  );
+  const capture = await runCapturedSession(
+    sandboxDir,
+    attach.project_id,
+    marker,
+    "gutendocx sandbox pilot"
+  );
+  const connect = await runConnectHookEvidence(sandboxDir, marker, "gutendocx sandbox pilot");
+  const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, sandboxDir));
+  assert(
+    workbench.capture_ready === true,
+    "gutendocx sandbox Workbench snapshot did not show capture ready"
+  );
+  const detachDryRun = await cli(sandboxDir, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--mode",
+    "sandbox",
+    "--dry-run"
+  ]);
+  const detach = await cli(sandboxDir, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--mode",
+    "sandbox",
+    "--confirm"
+  ]);
+  assert(detach.status === "detached", "gutendocx sandbox detach failed");
+  const after = await hashSelectedFiles(originalDir, selectedFiles);
+  assert(sameHashTree(before, after), "gutendocx sandbox pilot changed original key files");
+  return {
+    original_project_name: "gutendocx",
+    original_project_path_redacted: true,
+    sandbox_copy_name: basename(sandboxDir),
+    copied_files: selectedFiles,
+    project_id: attach.project_id,
+    attached: true,
+    imported_sources: attach.imported?.length ?? 0,
+    imported_paths: attach.imported?.map((item) => item.path) ?? [],
+    connect,
+    capture,
+    workbench,
+    cleanup: {
+      dry_run_first: detachDryRun.status,
+      confirmed_status: detach.status,
+      files_changed: detach.changes?.files_changed ?? null,
+      physically_deleted_records: detach.changes?.physically_deleted_records ?? null
+    },
+    untouched_original_key_files: true
+  };
+}
+
 async function runProductionSensitivePreflight() {
   const projectDir = await makeTempDir("recallant-pilot-production-preflight-");
   await writeFile(
@@ -545,7 +809,9 @@ async function runProductionSensitivePreflight() {
     "--target",
     "codex",
     "--mode",
-    "autopilot"
+    "autopilot",
+    "--format",
+    "json"
   ]);
   assert(
     preflight.status === "needs_confirmation" &&
@@ -571,6 +837,56 @@ async function runProductionSensitivePreflight() {
     production_sensitive: preflight.production_sensitive?.production_sensitive === true,
     detected_signals: preflight.production_sensitive?.signals ?? [],
     untouched_project_files: true
+  };
+}
+
+async function runGutendocxProductionDryRun() {
+  const projectDir = "/ai/gutendocx";
+  const selectedFiles = [
+    "README.md",
+    "AGENTS.md",
+    "PROJECT_LOG.md",
+    "Docs/Deploy_Runbook.md",
+    "config.yaml"
+  ];
+  const before = await hashSelectedFiles(projectDir, selectedFiles);
+  const preflight = await cli(projectDir, [
+    "attach",
+    projectDir,
+    "--target",
+    "codex",
+    "--mode",
+    "autopilot",
+    "--dry-run",
+    "--format",
+    "json"
+  ]);
+  assert(
+    preflight.status === "needs_confirmation" &&
+      preflight.effective_mode === "guided" &&
+      preflight.writes_files === false &&
+      preflight.writes_database === false,
+    `gutendocx production dry-run did not stop safely: ${JSON.stringify(preflight)}`
+  );
+  assert(
+    preflight.production_sensitive?.production_sensitive === true,
+    "gutendocx production dry-run did not detect production signals"
+  );
+  const after = await hashSelectedFiles(projectDir, selectedFiles);
+  assert(sameHashTree(before, after), "gutendocx production dry-run changed key files");
+  return {
+    project_name: "gutendocx",
+    project_path_redacted: true,
+    requested_mode: preflight.requested_mode,
+    effective_mode: preflight.effective_mode,
+    status: preflight.status,
+    writes_files: preflight.writes_files,
+    writes_database: preflight.writes_database,
+    service_restarts: 0,
+    production_sensitive: preflight.production_sensitive?.production_sensitive === true,
+    detected_signals: preflight.production_sensitive?.signals ?? [],
+    owner_confirmation_required: true,
+    untouched_key_files: true
   };
 }
 
@@ -632,11 +948,13 @@ async function runCrossProjectRecallEvidence(cleanPilot, copiedPilot) {
 
 try {
   const generatedAt = new Date().toISOString();
-  const reportDir = process.env.RECALLANT_PILOT_REPORT_DIR ?? join(tmpdir(), "recallant-pilot-reports");
+  const reportDir =
+    process.env.RECALLANT_PILOT_REPORT_DIR ?? join(tmpdir(), "recallant-pilot-reports");
   const reportPath = join(
     reportDir,
     `pilot-report-${generatedAt.replace(/[:.]/g, "-")}-${randomUUID()}.json`
   );
+  const markdownReportPath = reportPath.replace(/\.json$/u, ".md");
   const report = {
     ok: true,
     action: "pilot_report_smoke",
@@ -646,15 +964,22 @@ try {
   };
   report.pilots.clean_empty_project = await runCleanEmptyPilot();
   report.pilots.copied_existing_sandbox = await runCopiedExistingPilot();
+  report.pilots.gutendocx_sandbox = await runGutendocxSandboxPilot();
   report.pilots.cross_project_recall = await runCrossProjectRecallEvidence(
     report.pilots.clean_empty_project,
     report.pilots.copied_existing_sandbox
   );
   report.pilots.production_sensitive_dry_run = await runProductionSensitivePreflight();
+  report.pilots.gutendocx_production_dry_run = await runGutendocxProductionDryRun();
   report.qa_summary = {
     scenario_count: Object.keys(report.pilots).length,
     clean_attach_capture_recall_detach:
       report.pilots.clean_empty_project.capture.recalled_in_later_session === true &&
+      report.pilots.clean_empty_project.public_proof_flow.session_started === true &&
+      report.pilots.clean_empty_project.public_proof_flow.memory_written === true &&
+      report.pilots.clean_empty_project.public_proof_flow.checkpoint_exists === true &&
+      report.pilots.clean_empty_project.public_proof_flow.later_recall_works === true &&
+      report.pilots.clean_empty_project.public_proof_flow.ask_recalled === true &&
       report.pilots.clean_empty_project.connect.recalled_hook_decision === true &&
       report.pilots.clean_empty_project.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.clean_empty_project.cleanup.dry_run_first === "pending_confirmation" &&
@@ -664,15 +989,30 @@ try {
       report.pilots.copied_existing_sandbox.connect.recalled_hook_decision === true &&
       report.pilots.copied_existing_sandbox.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.copied_existing_sandbox.local_backup_created === true,
+    gutendocx_sandbox_original_untouched:
+      report.pilots.gutendocx_sandbox.untouched_original_key_files === true &&
+      report.pilots.gutendocx_sandbox.imported_sources >= 4 &&
+      report.pilots.gutendocx_sandbox.capture.recalled_in_later_session === true &&
+      report.pilots.gutendocx_sandbox.connect.recalled_hook_decision === true &&
+      report.pilots.gutendocx_sandbox.cleanup.confirmed_status === "detached",
     workbench_capture_visible:
       report.pilots.clean_empty_project.workbench.capture_ready === true &&
       report.pilots.copied_existing_sandbox.workbench.capture_ready === true &&
+      report.pilots.gutendocx_sandbox.workbench.capture_ready === true &&
       report.pilots.clean_empty_project.workbench.source_health.total >= 1 &&
-      report.pilots.copied_existing_sandbox.workbench.source_health.total >= 1,
+      report.pilots.copied_existing_sandbox.workbench.source_health.total >= 1 &&
+      report.pilots.gutendocx_sandbox.workbench.source_health.total >= 1,
     production_sensitive_preflight_safe:
       report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&
       report.pilots.production_sensitive_dry_run.writes_files === false &&
       report.pilots.production_sensitive_dry_run.writes_database === false,
+    gutendocx_production_dry_run_safe:
+      report.pilots.gutendocx_production_dry_run.status === "needs_confirmation" &&
+      report.pilots.gutendocx_production_dry_run.effective_mode === "guided" &&
+      report.pilots.gutendocx_production_dry_run.writes_files === false &&
+      report.pilots.gutendocx_production_dry_run.writes_database === false &&
+      report.pilots.gutendocx_production_dry_run.service_restarts === 0 &&
+      report.pilots.gutendocx_production_dry_run.untouched_key_files === true,
     cross_project_recall_source_linked:
       report.pilots.cross_project_recall.active_search_hides_detached_project === true &&
       report.pilots.cross_project_recall.include_detached_finds_source_linked_example === true &&
@@ -682,18 +1022,45 @@ try {
   report.qa_summary.all_required_scenarios_passed =
     report.qa_summary.clean_attach_capture_recall_detach &&
     report.qa_summary.copied_sandbox_original_untouched &&
+    report.qa_summary.gutendocx_sandbox_original_untouched &&
     report.qa_summary.workbench_capture_visible &&
     report.qa_summary.production_sensitive_preflight_safe &&
+    report.qa_summary.gutendocx_production_dry_run_safe &&
     report.qa_summary.cross_project_recall_source_linked;
   assert(report.qa_summary.all_required_scenarios_passed, "pilot report QA summary was not green");
   report.report_path = reportPath;
+  report.markdown_report_path = markdownReportPath;
   await mkdir(reportDir, { recursive: true });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(markdownReportPath, `${pilotMarkdownSummary(report)}\n`);
   const persisted = JSON.parse(await readFile(reportPath, "utf8"));
   assert(
     persisted.qa_summary?.all_required_scenarios_passed === true,
     "persisted pilot report did not preserve QA summary"
   );
+  const markdown = await readFile(markdownReportPath, "utf8");
+  for (const required of [
+    "# Recallant Pilot Report",
+    "## Clean Empty Project",
+    "## Copied Existing Sandbox",
+    "## GutenDocx Sampled Sandbox",
+    "## Production-Sensitive Dry Run",
+    "## GutenDocx Production Dry Run",
+    "## Cross-Project Recall",
+    "Attached",
+    "Imported sources",
+    "Remembered marker",
+    "Public proof marker",
+    "Public proof ask recalled",
+    "Recalled later",
+    "Detached",
+    "Left untouched",
+    "Original project untouched",
+    "Original key files untouched",
+    "Key files untouched"
+  ]) {
+    assert(markdown.includes(required), `pilot Markdown report missing ${required}`);
+  }
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
   await Promise.all(tempRoots.map((dir) => rm(dir, { recursive: true, force: true })));
