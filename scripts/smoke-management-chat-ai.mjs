@@ -225,8 +225,32 @@ try {
   assert(
     ambiguousNamedCleanup.result_type === "needs_clarification" &&
       ambiguousNamedCleanup.facts.target_project_ambiguous === true &&
+      ambiguousNamedCleanup.clarification_context?.intent === "cleanup" &&
       ambiguousNamedCleanup.proposed_actions.every((action) => !action.command),
     `Ambiguous named cleanup should ask for clarification: ${JSON.stringify(ambiguousNamedCleanup)}`
+  );
+  const clarifiedNamedCleanup = await buildManagementChatResponse({
+    message: "/ai/docs_archive_backup",
+    dashboard: {
+      ...baseDashboard,
+      projects: [
+        ...baseDashboard.projects,
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/ai/docs_archive" },
+        {
+          project_id: secondNamedProjectId,
+          name: "docs archive",
+          primary_path: "/ai/docs_archive_backup"
+        }
+      ]
+    },
+    clarification_context: ambiguousNamedCleanup.clarification_context
+  });
+  assert(
+    clarifiedNamedCleanup.intent === "cleanup" &&
+      clarifiedNamedCleanup.result_type === "dry_run_required" &&
+      clarifiedNamedCleanup.facts.target_project_id === secondNamedProjectId &&
+      String(clarifiedNamedCleanup.proposed_actions[0]?.command).includes(secondNamedProjectId),
+    `Clarified named cleanup did not continue to dry-run plan: ${JSON.stringify(clarifiedNamedCleanup)}`
   );
 
   queuedResponses.push({
@@ -347,7 +371,7 @@ try {
     global_rule_request: false
   });
   const sourceManagement = await buildManagementChatResponse({
-    message: "Создай виртуальное пространство и подключи к нему папку с документами",
+    message: "Подключи папку с документами как источник",
     dashboard: baseDashboard
   });
   assert(
@@ -360,9 +384,29 @@ try {
     sourceManagement.facts.source_count === 2 &&
       sourceManagement.facts.source_ready_count === 2 &&
       sourceManagement.facts.source_needs_attention_count === 0 &&
+      sourceManagement.clarification_context?.intent === "source_management" &&
       String(sourceManagement.answer).includes("не хватает данных") &&
       !sourceManagement.proposed_actions.some((action) => action.command),
     `Incomplete source management request did not ask for clarification: ${JSON.stringify(sourceManagement)}`
+  );
+  const clarifiedSourceAttach = await buildManagementChatResponse({
+    message: "/tmp/recallant-clarified-docs",
+    dashboard: baseDashboard,
+    clarification_context: sourceManagement.clarification_context,
+    database: {
+      attachProjectSource: async (input) => ({
+        id: "clarified-source-id",
+        ...input,
+        display_label: input.label,
+        source_health: { status: "ready", label: "Source ready" }
+      })
+    }
+  });
+  assert(
+    clarifiedSourceAttach.intent === "source_management" &&
+      clarifiedSourceAttach.result_type === "safe_action" &&
+      clarifiedSourceAttach.source_action_result?.source_uri === "/tmp/recallant-clarified-docs",
+    `Clarified source attach did not continue to a safe plan: ${JSON.stringify(clarifiedSourceAttach)}`
   );
 
   let createdSpaceInput = null;
@@ -656,6 +700,7 @@ try {
       ) &&
       String(googleDriveLookup.answer).includes("В текущем memory space") &&
       String(googleDriveLookup.answer).includes("Примеры из других проектов") &&
+      String(googleDriveLookup.answer).includes("не становятся правилами автоматически") &&
       String(googleDriveLookup.answer).includes("AGENTS.md") &&
       String(googleDriveLookup.answer).includes("Docs/GOOGLE_DRIVE.md"),
     `Google Drive lookup answer did not include memories/provenance: ${JSON.stringify(
@@ -708,8 +753,19 @@ try {
           truncated: false,
           memories: [
             {
+              memory_id: "memory-rule-active-capture-status",
+              title: "Active capture status rule",
+              body: "Agents must verify capture status before claiming readiness.",
+              status: "accepted",
+              use_policy: "instruction_grade",
+              scope: "developer",
+              scope_kind: "developer",
+              provenance: { summary: "From source AGENTS.md", source_path: "AGENTS.md" },
+              source_refs: []
+            },
+            {
               memory_id: "memory-rule-capture-status",
-              title: "Agents must check capture status",
+              title: "Old capture status reminder",
               body: "Agents should verify capture status before claiming Recallant is ready.",
               status: "stale",
               use_policy: "evidence_only",
@@ -728,10 +784,15 @@ try {
       ruleDiagnostics.intent === "rule_diagnostics" &&
       ruleDiagnostics.result_type === "read_only_answer" &&
       ruleDiagnostics.memory_lookup_result?.status === "found" &&
+      ruleDiagnosticsRecallInput?.include_needs_review === true &&
+      ruleDiagnosticsRecallInput?.include_candidates === true &&
       ruleDiagnosticsRecallInput?.include_stale === true &&
       ruleDiagnosticsRecallInput?.source_id === "source-agents-md" &&
-      String(ruleDiagnostics.answer).includes("только Active rule") &&
-      String(ruleDiagnostics.answer).includes("Agents must check capture status") &&
+      String(ruleDiagnostics.answer).includes("применяется ли каждая запись") &&
+      String(ruleDiagnostics.answer).includes("Применяется: это Active rule") &&
+      String(ruleDiagnostics.answer).includes("Не применяется: запись помечена как stale") &&
+      String(ruleDiagnostics.answer).includes("Active capture status rule") &&
+      String(ruleDiagnostics.answer).includes("Old capture status reminder") &&
       String(ruleDiagnostics.answer).includes("AGENTS.md"),
     `Rule diagnostics did not use governed lookup/source filter: ${JSON.stringify(ruleDiagnostics)}`
   );
@@ -787,17 +848,44 @@ try {
   });
   const provenance = await buildManagementChatResponse({
     message: "Where did this fact come from and what source is selected?",
-    dashboard: baseDashboard
+    dashboard: baseDashboard,
+    database: {
+      recallAgentMemories: async (input) => ({
+        trace_id: "trace-provenance",
+        truncated: false,
+        memories: [
+          {
+            memory_id: "memory-provenance-current",
+            title: "Capture proof source",
+            body: "The agent wrote capture proof after context read and checkpoint.",
+            status: "accepted",
+            use_policy: "recall_allowed",
+            scope: "project",
+            scope_kind: "project",
+            provenance: {
+              summary: "From source AGENTS.md",
+              source_path: "AGENTS.md"
+            },
+            source_refs: []
+          }
+        ],
+        query: input.query
+      })
+    }
   });
   assert(
     provenance.understanding.source === "local_ai" &&
       provenance.intent === "provenance" &&
-      provenance.result_type === "read_only_answer",
+      provenance.result_type === "read_only_answer" &&
+      provenance.memory_lookup_result?.status === "found" &&
+      provenance.memory_lookup_result?.same_project_hits.length === 1,
     `Provenance intent failed: ${JSON.stringify(provenance)}`
   );
   assert(
     provenance.facts.selected_source_name === "AGENTS.md" &&
-      String(provenance.answer).includes("Evidence excerpts") &&
+      provenance.memory_lookup_result?.source_filter?.label === "AGENTS.md" &&
+      String(provenance.answer).includes("Capture proof source") &&
+      String(provenance.answer).includes("AGENTS.md") &&
       provenance.proposed_actions[0]?.label === "Open Evidence excerpts",
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );

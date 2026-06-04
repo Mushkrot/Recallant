@@ -38,6 +38,29 @@ function runJson(args) {
   return JSON.parse(result.stdout);
 }
 
+function runText(args) {
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: hostProjectId,
+      RECALLANT_PROJECT_PATH: repoRoot,
+      RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+      RECALLANT_EMBEDDING_DIMS: "8",
+      RECALLANT_SERVER_URL: "http://127.0.0.1:3005"
+    },
+    encoding: "utf8"
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.error ?? ""}\n${result.stderr}\n${result.stdout}`
+    );
+  }
+  return result.stdout;
+}
+
 async function exists(path) {
   try {
     await stat(path);
@@ -115,7 +138,9 @@ const manual = runJson([
   "codex",
   "--mode",
   "manual",
-  "--dry-run"
+  "--dry-run",
+  "--format",
+  "json"
 ]);
 if (
   manual.effective_mode !== "manual" ||
@@ -126,7 +151,7 @@ if (
   throw new Error(`Manual attach dry-run wrote data: ${JSON.stringify(manual)}`);
 }
 
-const guided = runJson(["attach", projectDir, "--target", "codex", "--mode", "guided"]);
+const guided = runJson(["attach", projectDir, "--target", "codex", "--mode", "guided", "--format", "json"]);
 if (
   guided.status !== "needs_confirmation" ||
   guided.effective_mode !== "guided" ||
@@ -159,7 +184,19 @@ try {
   await readOnlyClient.end();
 }
 
-const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox"]);
+const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const attachText = runText(["attach", projectDir, "--target", "codex", "--sandbox"]);
+if (
+  !attachText.includes("Recallant attach") ||
+  !attachText.includes("Memory space: created or updated") ||
+  !attachText.includes(`Project path: ${projectDir}`) ||
+  !attachText.includes("Files changed:") ||
+  !attachText.includes("Backups:") ||
+  !attachText.includes("Next command: Run recallant connect codex --project-dir") ||
+  !attachText.includes("JSON output: recallant attach")
+) {
+  throw new Error(`Attach human output failed: ${attachText}`);
+}
 if (
   attach.requested_mode !== "autopilot" ||
   attach.effective_mode !== "autopilot" ||
@@ -230,7 +267,7 @@ if (
 
 const genericProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase10-generic-"));
 await writeFile(join(genericProjectDir, "README.md"), "# Generic Attach Fixture\n");
-const genericAttach = runJson(["attach", genericProjectDir, "--target", "generic", "--sandbox"]);
+const genericAttach = runJson(["attach", genericProjectDir, "--target", "generic", "--sandbox", "--format", "json"]);
 const genericMcpConfig = JSON.parse(
   await readFile(join(genericProjectDir, ".recallant", "generic-mcp.json"), "utf8")
 );
@@ -244,7 +281,7 @@ if (
   throw new Error(`Generic attach failed: ${JSON.stringify({ genericAttach, genericMcpConfig })}`);
 }
 
-const rerun = runJson(["attach", projectDir, "--target", "codex", "--sandbox"]);
+const rerun = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
 if (rerun.project_id !== attach.project_id || rerun.project_id_source !== "existing_config") {
   throw new Error(`Attach rerun did not reuse project id: ${JSON.stringify(rerun)}`);
 }
@@ -255,7 +292,7 @@ await writeFile(
   join(staleConfigDir, ".recallant", "config"),
   `${JSON.stringify({ project_id: hostProjectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
 );
-const staleAttach = runJson(["attach", staleConfigDir, "--target", "codex", "--sandbox"]);
+const staleAttach = runJson(["attach", staleConfigDir, "--target", "codex", "--sandbox", "--format", "json"]);
 if (
   staleAttach.project_id === hostProjectId ||
   staleAttach.project_id_source !== "database" ||
@@ -271,7 +308,7 @@ await writeFile(
   join(prodDir, "AGENTS.md"),
   "# Live Agent Instructions\nProduction token example: OPENAI_API_KEY=sk-livefixture123456\n"
 );
-const prodPlan = runJson(["attach", prodDir, "--target", "codex", "--mode", "autopilot"]);
+const prodPlan = runJson(["attach", prodDir, "--target", "codex", "--mode", "autopilot", "--format", "json"]);
 const prodAgentsAfter = await readFile(join(prodDir, "AGENTS.md"), "utf8");
 if (
   prodPlan.effective_mode !== "guided" ||

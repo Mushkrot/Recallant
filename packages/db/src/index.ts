@@ -18,6 +18,125 @@ function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function rawSecretLikeFindings(value: unknown, path = "value"): string[] {
+  const findings: string[] = [];
+  if (typeof value === "string") {
+    const checks = [
+      /sk-[A-Za-z0-9_-]{12,}/,
+      /gh[pousr]_[A-Za-z0-9_]{20,}/,
+      /xox[baprs]-[A-Za-z0-9-]{10,}/,
+      /postgres:\/\/[^:\s]+:[^@\s]+@/i,
+      /\b(?:password|passwd|api[_-]?key|secret|token)\s*[:=]\s*['"]?[^'",\s]{6,}/i
+    ];
+    if (checks.some((pattern) => pattern.test(value))) findings.push(path);
+    return findings;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      findings.push(...rawSecretLikeFindings(item, `${path}[${index}]`))
+    );
+    return findings;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      findings.push(...rawSecretLikeFindings(item, `${path}.${key}`));
+    }
+  }
+  return findings;
+}
+
+function memorySpaceProfile(input: {
+  project_kind?: string | null;
+  memory_domain?: string | null;
+  primary_path?: string | null;
+}) {
+  const projectKind = String(input.project_kind ?? "");
+  const memoryDomain = String(input.memory_domain ?? "agent_work");
+  if (projectKind === "personal_domain" || memoryDomain === "personal_life") {
+    return {
+      profile_key: "personal_work_operations",
+      label: "Personal / Work Operations",
+      purpose:
+        "A private virtual memory space for owner-mediated personal or work operations memory.",
+      default_isolation:
+        "Isolated from coding-agent context. Agents may use it only through explicit governed recall.",
+      allowed_sources: [
+        "manual notes",
+        "virtual owner-supplied records",
+        "document references after review",
+        "planned connectors only after separate consent and capability binding"
+      ],
+      allowed_recall:
+        "Explicit read-only recall for the selected memory space; no silent injection into code projects.",
+      capture_policy:
+        "Manual or agent-mediated writes only. Passive personal capture and connector ingestion are not active.",
+      connector_policy:
+        "Connectors are shown as not connected until consent and capability readiness are recorded.",
+      default_sources: input.primary_path ? "primary source from path" : "zero sources by default",
+      technical_basis: {
+        project_kind: projectKind || "other",
+        memory_domain: memoryDomain
+      }
+    };
+  }
+  return {
+    profile_key: "coding_agent_workspace",
+    label: "Coding Agent Workspace",
+    purpose: "A project memory space for agent work, decisions, context, checkpoints, and rules.",
+    default_isolation:
+      "Isolated by default; agents may ask for source-linked examples from other spaces.",
+    allowed_sources: [
+      "workspace folders",
+      "repositories",
+      "document references",
+      "manual records",
+      "planned connectors after governed setup"
+    ],
+    allowed_recall:
+      "Current-project memory is available to project context; cross-space examples require explicit recall.",
+    capture_policy:
+      "Agent capture is active only when session, context read, memory write, and checkpoint evidence exist.",
+    connector_policy:
+      "Connectors are planned references until separate consent and capability readiness are recorded.",
+    default_sources: input.primary_path ? "primary workspace source" : "zero sources by default",
+    technical_basis: {
+      project_kind: projectKind || "repo",
+      memory_domain: memoryDomain
+    }
+  };
+}
+
+function connectorConsentPolicy(metadata: Record<string, unknown>) {
+  const state = String(metadata.consent_state ?? "not_requested");
+  const capability = String(metadata.capability_binding_status ?? "");
+  const consentState = ["not_requested", "proposed", "granted", "revoked"].includes(state)
+    ? state
+    : "not_requested";
+  return {
+    consent_state: consentState,
+    capture_allowed:
+      consentState === "granted" && ["ready", "active", "configured"].includes(capability),
+    review_required_before_activation: true,
+    allowed_before_active: [
+      "connector label",
+      "connector reference",
+      "consent state",
+      "capability binding reference/status",
+      "source health metadata"
+    ],
+    prohibited_before_active: [
+      "raw connector content",
+      "raw OAuth tokens",
+      "API keys",
+      "passwords",
+      "unreviewed personal data"
+    ],
+    no_secret_policy: "Raw secrets and credentials stay outside Recallant memory.",
+    activation_rule:
+      "Connector capture is inactive until owner consent is granted, capability binding is ready, and review policy allows the source."
+  };
+}
+
 export type StartSessionInput = {
   client_kind: string;
   client_version?: string | null;
@@ -88,6 +207,7 @@ export type AgentMemorySourceRefInput = {
 
 export type CreateAgentMemoryInput = {
   project_path?: string | null;
+  project_id?: string | null;
   memory_type: string;
   scope: "project" | "developer";
   scope_kind?: string | null;
@@ -695,6 +815,19 @@ export class RecallantDb {
     input: ProjectSourceInput,
     options: { failSoftIfMissing?: boolean } = {}
   ) {
+    const secretFindings = rawSecretLikeFindings(
+      {
+        label: input.label,
+        uri: input.uri,
+        metadata: input.metadata ?? {}
+      },
+      "project_source"
+    );
+    if (secretFindings.length > 0) {
+      throw new Error(
+        `VALIDATION_ERROR: project source records must not store raw secrets (${secretFindings.join(", ")})`
+      );
+    }
     try {
       if (input.is_primary) {
         await client.query(
@@ -985,7 +1118,12 @@ export class RecallantDb {
       name: input.name,
       project_kind: projectKind,
       memory_domain: memoryDomain,
-      primary_path: input.primaryPath ?? null
+      primary_path: input.primaryPath ?? null,
+      memory_profile: memorySpaceProfile({
+        project_kind: projectKind,
+        memory_domain: memoryDomain,
+        primary_path: input.primaryPath ?? null
+      })
     };
   }
 
@@ -1049,6 +1187,13 @@ export class RecallantDb {
         String(metadata.capability_binding_status ?? "").toLowerCase()
       )
     );
+    const consentPolicy = sourceKind === "connector" ? connectorConsentPolicy(metadata) : null;
+    const capabilityBindingStatus = hasCapabilityBinding
+      ? "ready"
+      : ["connector", "server_path"].includes(sourceKind) ||
+          (sourceKind === "repo" && /^(?:[a-z][a-z0-9+.-]*:|https?:\/\/)/i.test(uri))
+        ? "needed"
+        : "not_required";
     const isRemoteReference =
       /^(?:[a-z][a-z0-9+.-]*:|[A-Za-z0-9_.-]+:\/|[A-Za-z0-9_.-]+:~?\/)/.test(uri) ||
       /^https?:\/\//i.test(uri);
@@ -1077,10 +1222,18 @@ export class RecallantDb {
       actionNeeded = "Review the source state before relying on it.";
     } else if (sourceKind === "connector") {
       if (hasCapabilityBinding) {
-        healthLabel = "Connector reference ready";
-        healthReason =
-          "A governed capability binding is recorded for this connector. Raw secrets stay outside Recallant memory.";
-        actionNeeded = "Use governed recall/import flows when connector data is needed.";
+        if (consentPolicy?.capture_allowed === true) {
+          healthLabel = "Connector reference ready";
+          healthReason =
+            "Owner consent and governed capability metadata are recorded for this connector. Raw secrets stay outside Recallant memory.";
+          actionNeeded = "Use governed recall/import flows when connector data is needed.";
+        } else {
+          healthStatus = "needs_setup";
+          healthLabel = "Connector consent needed";
+          healthReason =
+            "A governed capability reference is recorded, but connector capture is inactive until owner consent and review policy allow it.";
+          actionNeeded = "Record explicit consent before treating this connector as capture-ready.";
+        }
       } else {
         healthStatus = "needs_setup";
         healthLabel = "Connector source needs setup";
@@ -1156,6 +1309,31 @@ export class RecallantDb {
       ...source,
       display_label: label || uri || "Unnamed source",
       source_kind_label: this.projectSourceKindLabel(sourceKind),
+      source_access_contract: {
+        access_kind:
+          sourceKind === "connector"
+            ? "connector"
+            : isRemoteReference
+              ? "remote_reference"
+              : ["manual", "virtual", "other"].includes(sourceKind)
+                ? "owner_supplied_reference"
+                : "local_or_static_reference",
+        capability_binding_status: capabilityBindingStatus,
+        capture_readiness:
+          sourceKind === "connector" && consentPolicy?.capture_allowed !== true
+            ? "consent_or_capability_needed"
+            : healthStatus === "ready" && capabilityBindingStatus !== "needed"
+              ? "ready_or_reference_only"
+              : "governed_setup_needed",
+        health_check_policy:
+          sourceKind === "connector"
+            ? "Connector endpoints are not contacted by source health checks."
+            : isRemoteReference
+              ? "Remote paths and repositories are not probed without governed access."
+              : "Local/static references may be checked when they are safe to inspect.",
+        secrets_policy: "Raw secrets stay outside Recallant memory.",
+        connector_consent_policy: consentPolicy
+      },
       source_health: {
         status: healthStatus,
         label: healthLabel,
@@ -1339,6 +1517,7 @@ export class RecallantDb {
     );
     return result.rows.map((row) => ({
       ...row,
+      memory_profile: memorySpaceProfile(row),
       sources: Array.isArray(row.sources)
         ? row.sources.map((source: unknown) =>
             this.enrichProjectSource(source as Record<string, unknown>)
@@ -2333,7 +2512,9 @@ export class RecallantDb {
     if (input.created_by === "agent" && (input.source_refs?.length ?? 0) === 0) {
       throw new Error("VALIDATION_ERROR: agent-created memories require source_refs");
     }
-    const context = await this.ensureProject(input.project_path);
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
     return withTransaction(this.pool, async (client) => {
       const policy = this.classifyAgentMemory(input);
       const result = await client.query<{ id: string; status: string; use_policy: string }>(
@@ -2592,6 +2773,11 @@ export class RecallantDb {
             s.id AS memory_id, s.memory_type, s.title, s.body, s.status, s.use_policy,
             s.scope, s.scope_kind, s.scope_id, s.audience, s.confidence, s.created_by,
             s.updated_at, true AS possible_conflict, g.peer_ids AS conflict_peer_ids,
+            (
+              SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC), '[]'::jsonb)
+              FROM agent_memory_source_refs r
+              WHERE r.memory_id = s.id
+            ) AS source_refs,
             CASE WHEN g.high_risk OR g.distinct_authorities = 1 THEN 'needs_review' ELSE 'suggest_supersede' END AS review_status,
             jsonb_build_object(
               'adr', 'ADR-0041',
@@ -2612,7 +2798,7 @@ export class RecallantDb {
         `,
         values
       );
-      return { memories: result.rows };
+      return { memories: result.rows.map((row) => this.withSourceProvenance(row)) };
     }
 
     const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
@@ -2707,9 +2893,90 @@ export class RecallantDb {
       "SELECT * FROM agent_memory_review_actions WHERE memory_id = $1 ORDER BY created_at DESC",
       [memoryId]
     );
+    const memoryRow = memory.rows[0] ?? null;
+    const memorySpace = memoryRow
+      ? await this.pool.query(
+          `
+            SELECT id AS project_id, name, project_kind, memory_domain, primary_path
+            FROM projects
+            WHERE id = $1
+          `,
+          [memoryRow.project_id]
+        )
+      : null;
+    const redactedSourceRefs = sourceRefs.rows.map((sourceRef) => this.redactSourceRef(sourceRef));
+    const isUuid = (value: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const projectSourceIds = [
+      ...new Set(
+        redactedSourceRefs
+          .flatMap((sourceRef) => {
+            const record = sourceRef as Record<string, unknown>;
+            const metadata =
+              record.metadata && typeof record.metadata === "object"
+                ? (record.metadata as Record<string, unknown>)
+                : {};
+            return [
+              typeof record.source_id === "string" ? record.source_id : null,
+              typeof metadata.project_source_id === "string" ? metadata.project_source_id : null,
+              typeof metadata.source_id === "string" ? metadata.source_id : null
+            ];
+          })
+          .filter((value): value is string => typeof value === "string" && isUuid(value))
+      )
+    ];
+    const projectSourceRows =
+      projectSourceIds.length > 0
+        ? await this.pool.query(
+            `
+              SELECT id, project_id, source_kind, label, uri, is_primary, status, metadata,
+                     created_at, updated_at
+              FROM project_sources
+              WHERE id = ANY($1::uuid[])
+            `,
+            [projectSourceIds]
+          )
+        : { rows: [] as Record<string, unknown>[] };
+    const projectSourcesById = new Map(
+      projectSourceRows.rows.map((source) => {
+        const enriched = this.enrichProjectSource(source);
+        return [String(enriched.id), enriched];
+      })
+    );
+    const resolvedSourceRefs = redactedSourceRefs.map((sourceRef) => {
+      const record = sourceRef as Record<string, unknown>;
+      const metadata =
+        record.metadata && typeof record.metadata === "object"
+          ? (record.metadata as Record<string, unknown>)
+          : {};
+      const projectSourceId =
+        (typeof metadata.project_source_id === "string" ? metadata.project_source_id : null) ??
+        (typeof metadata.source_id === "string" ? metadata.source_id : null) ??
+        (typeof record.source_id === "string" ? record.source_id : null);
+      const projectSource = projectSourceId ? projectSourcesById.get(projectSourceId) : null;
+      return {
+        ...record,
+        project_source: projectSource
+          ? {
+              source_id: projectSource.id,
+              label: projectSource.display_label,
+              source_kind: projectSource.source_kind,
+              source_kind_label: projectSource.source_kind_label,
+              status: projectSource.status,
+              source_health: projectSource.source_health,
+              is_primary: projectSource.is_primary
+            }
+          : null
+      };
+    });
+    const memoryWithProvenance = memoryRow
+      ? this.withSourceProvenance({ ...memoryRow, source_refs: redactedSourceRefs })
+      : null;
     return {
-      memory: memory.rows[0] ?? null,
-      source_refs: sourceRefs.rows,
+      memory: memoryWithProvenance,
+      memory_space: memorySpace?.rows[0] ?? null,
+      source_refs: redactedSourceRefs,
+      resolved_source_refs: resolvedSourceRefs,
       review_actions: reviewActions.rows,
       related_memories: []
     };
@@ -3322,6 +3589,7 @@ export class RecallantDb {
     }
     projects.rows = projects.rows.map((project) => ({
       ...project,
+      memory_profile: memorySpaceProfile(project),
       sources: sourcesByProject.get(String(project.project_id)) ?? []
     }));
     const currentProject =
@@ -3399,18 +3667,38 @@ export class RecallantDb {
     );
     const duplicateConflicts = await this.pool.query(
       `
-        SELECT id AS memory_id, memory_type, title, body, status, use_policy, scope, scope_kind,
-               scope_id, audience, confidence, created_by, metadata, updated_at
-        FROM agent_memories
-        WHERE developer_id = $1
-          AND (project_id = $2 OR scope = 'developer')
+        SELECT
+          m.id AS memory_id,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.scope,
+          m.scope_kind,
+          m.scope_id,
+          m.audience,
+          m.confidence,
+          m.created_by,
+          m.metadata,
+          m.updated_at,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE m.developer_id = $1
+          AND (m.project_id = $2 OR m.scope = 'developer')
           AND (
-            metadata::text ILIKE '%possible_duplicate%'
-            OR metadata::text ILIKE '%possible_conflict%'
-            OR metadata::text ILIKE '%duplicate%'
-            OR metadata::text ILIKE '%conflict%'
+            m.metadata::text ILIKE '%possible_duplicate%'
+            OR m.metadata::text ILIKE '%possible_conflict%'
+            OR m.metadata::text ILIKE '%duplicate%'
+            OR m.metadata::text ILIKE '%conflict%'
           )
-        ORDER BY updated_at DESC
+        GROUP BY m.id
+        ORDER BY m.updated_at DESC
         LIMIT 25
       `,
       [context.developerId, dashboardProjectId]
@@ -3684,7 +3972,7 @@ export class RecallantDb {
       critical: critical.rows[0],
       inbox: inbox.memories,
       import_candidates: importCandidates.rows.map((row) => this.withSourceProvenance(row)),
-      duplicate_conflicts: duplicateConflicts.rows,
+      duplicate_conflicts: duplicateConflicts.rows.map((row) => this.withSourceProvenance(row)),
       selected_detail: selectedDetail,
       available_review_actions: [
         "accept",

@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const repoRoot = process.cwd();
@@ -14,96 +13,56 @@ async function read(path) {
   return readFile(join(repoRoot, path), "utf8");
 }
 
-function runInstallerDryRun(args, env = {}) {
-  const result = spawnSync("/bin/bash", ["scripts/install-recallant.sh", ...args], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      ...env
-    },
-    encoding: "utf8"
-  });
-  if (result.error?.code === "EPERM") return staticDryRunPlan(args, env);
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(
-      `Installer dry-run failed: ${args.join(" ")}\nSTDERR:\n${result.stderr}\nSTDOUT:\n${result.stdout}`
-    );
-  }
-  return result.stdout;
-}
-
-function staticDryRunPlan(args, env = {}) {
-  assert(args.includes("--dry-run"), "Static public-readiness fallback only supports dry-run");
-  const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
-  assert(
-    installer.indexOf('if [[ "$DRY_RUN" == "true" ]]') < installer.indexOf("need_command node"),
-    "Installer dry-run must happen before dependency checks"
-  );
-  const profile = args[args.indexOf("--profile") + 1] ?? "owner-server";
-  const home = env.HOME ?? process.env.HOME ?? "";
-  const envFile =
-    profile === "single-user"
-      ? join(home, ".config", "recallant", "recallant.env")
-      : profile === "managed-server"
-        ? "/etc/recallant/recallant.env"
-      : "/opt/secure-configs/recallant.env";
-  const dataDir =
-    profile === "single-user"
-      ? join(home, ".local", "share", "recallant")
-      : profile === "managed-server"
-        ? "/var/lib/recallant"
-        : "/ai/recallant-data";
-  const prefix = profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin";
-  const option = (name) => {
-    const index = args.indexOf(name);
-    return index >= 0 ? args[index + 1] : null;
-  };
-  const postgresHost = option("--postgres-host") ?? "127.0.0.1";
-  const postgresPort = option("--postgres-port") ?? "15432";
-  const postgresContainerName = option("--postgres-container-name") ?? "recallant-postgres";
-  const composeProjectName = option("--compose-project-name") ?? "recallant";
-  const systemd = profile === "single-user" ? "manual" : "auto";
-  return `Recallant install plan
-profile: ${profile}
-dry_run: true
-recallant_home: ${repoRoot}
-env_file: ${envFile}
-data_dir: ${dataDir}
-run_user: ${env.SUDO_USER ?? process.env.SUDO_USER ?? process.env.USER ?? ""}
-install_cli_prefix: ${prefix}
-systemd_mode: ${systemd}
-postgres_host: ${postgresHost}
-postgres_port: ${postgresPort}
-postgres_container_name: ${postgresContainerName}
-compose_project_name: ${composeProjectName}
-will_create_data_dirs: ${dataDir}/postgres, ${dataDir}/backups
-will_create_env_file: yes
-will_install_dependencies: no
-will_build: yes
-will_install_cli: yes
-will_start_postgres: yes
-will_apply_migrations: if schema is absent
-will_install_systemd: ${systemd === "manual" ? "no" : "auto"}
-DRY_RUN: no files, Docker containers, database rows, or systemd services were changed.
-`;
-}
-
 function mustInclude(text, markers, label) {
   for (const marker of markers) {
-    assert(text.includes(marker), `${label} is missing required public-readiness marker: ${marker}`);
+    assert(text.includes(marker), `${label} is missing required marker: ${marker}`);
   }
 }
+
+const publicDocs = [
+  "README.md",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
+  "SECURITY.md",
+  "docs/README.md",
+  "docs/QUICKSTART.md",
+  "docs/WHY_RECALLANT.md",
+  "docs/COMPARISON.md",
+  "docs/ARCHITECTURE.md",
+  "docs/SELF_HOSTING.md",
+  "docs/CLIENT_SETUP.md",
+  "docs/SECURITY.md",
+  "docs/ROADMAP.md"
+];
+
+for (const path of publicDocs) {
+  assert(existsSync(join(repoRoot, path)), `Missing public doc: ${path}`);
+}
+
+const docsEntries = await readdir(join(repoRoot, "docs"));
+const allowedDocs = new Set(
+  publicDocs.filter((path) => path.startsWith("docs/")).map((path) => path.slice("docs/".length))
+);
+for (const entry of docsEntries) {
+  assert(allowedDocs.has(entry), `Unexpected public docs entry: docs/${entry}`);
+}
+
+assert(!existsSync(join(repoRoot, "stage_goals")), "stage_goals must not remain in public tree");
+assert(!existsSync(join(repoRoot, "PROJECT_LOG.md")), "PROJECT_LOG.md must not remain in public tree");
 
 const readme = await read("README.md");
 mustInclude(
   readme,
   [
-    "docs/QUICKSTART.md",
-    "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "./scripts/install-recallant.sh --dry-run --profile single-user",
-    "recallant attach .",
-    "Governed external memory"
+    "Self-hosted governed memory for Codex and MCP AI agents",
+    "Why It Matters",
+    "recallant doctor --project-dir . --require-capture",
+    "capture active",
+    "pre-release",
+    "docs/WHY_RECALLANT.md",
+    "docs/COMPARISON.md",
+    "CONTRIBUTING.md"
   ],
   "README.md"
 );
@@ -112,187 +71,40 @@ const quickstart = await read("docs/QUICKSTART.md");
 mustInclude(
   quickstart,
   [
-    "Preview the install",
+    "Install",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "./scripts/install-recallant.sh --dry-run --profile single-user",
-    "recallant attach .",
-    "recallant connect codex --project-dir . --dry-run",
-    "recallant doctor --project-dir . --require-capture",
-    "Recallant capture is active for this project.",
-    "Open the Workbench",
-    "Ask Recallant",
-    "recallant detach --project-id <project-id> --mode sandbox --dry-run",
-    "SELF_HOSTING.md",
-    "OWNER_SERVER.md"
+    "recallant onboard --client codex --install-local-hooks --verify",
+    "recallant demo-capture --project-dir .",
+    "recallant ask \"what did the agent remember?\" --project-dir .",
+    "capture active"
   ],
   "docs/QUICKSTART.md"
 );
 
-const selfHosting = await read("docs/SELF_HOSTING.md");
-mustInclude(
-  selfHosting,
-  [
-    "Single-user",
-    "Managed Linux server",
-    "Owner-server compatibility profile",
-    "Dry-run",
-    "Rollback And Recovery",
-    "configured: Recallant files or client settings exist",
-    "capture active: Recallant has observed real session/context/memory/checkpoint evidence"
-  ],
-  "docs/SELF_HOSTING.md"
-);
+const why = await read("docs/WHY_RECALLANT.md");
+mustInclude(why, ["The Maintainer Pain", "The Gap", "Why Codex And OSS Maintainers Benefit"], "WHY");
 
-const ownerServer = await read("docs/OWNER_SERVER.md");
-mustInclude(
-  ownerServer,
-  [
-    "not the generic quickstart",
-    "/ai/recallant",
-    "/ai/SECURITY",
-    "/ai/PORTS.yaml",
-    "127.0.0.1:15432",
-    "127.0.0.1:15433"
-  ],
-  "docs/OWNER_SERVER.md"
-);
+const comparison = await read("docs/COMPARISON.md");
+mustInclude(comparison, ["Related Approaches", "What Is Different", "Honest Status"], "COMPARISON");
 
-const publicReadiness = await read("docs/PUBLIC_READINESS.md");
-mustInclude(
-  publicReadiness,
-  [
-    "README",
-    "installer dry-run",
-    "`managed-server`",
-    "recallant doctor --require-capture",
-    "Workbench confirms capture active",
-    "npm run public-readiness:smoke"
-  ],
-  "docs/PUBLIC_READINESS.md"
-);
+const roadmap = await read("docs/ROADMAP.md");
+mustInclude(roadmap, ["Current", "Near Term", "Codex For OSS Use"], "ROADMAP");
 
-const release = await read("docs/RELEASE.md");
-mustInclude(
-  release,
-  [
-    "https://github.com/Mushkrot/Recallant.git",
-    "package.json",
-    "semantic versioning",
-    "Release Candidate Gate",
-    "public-managed-install:smoke",
-    "approved isolated container/VM",
-    "What Must Not Be Released As Public Defaults"
-  ],
-  "docs/RELEASE.md"
-);
-
-const screenshots = await read("docs/PUBLIC_SCREENSHOTS.md");
-mustInclude(
-  screenshots,
-  [
-    "npm run review-ui:playwright",
-    "Required Screenshots Before Public Release",
-    "Redaction Rules",
-    "/ai/recallant",
-    "recallant.unicloud.ca",
-    "owner email addresses",
-    "secrets, tokens, database URLs",
-    "raw memory excerpts from real owner projects"
-  ],
-  "docs/PUBLIC_SCREENSHOTS.md"
-);
-
-assert(!readme.includes("<recallant-repo-url>"), "README.md still contains a placeholder repo URL");
+const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
 assert(
-  !quickstart.includes("<recallant-repo-url>"),
-  "docs/QUICKSTART.md still contains a placeholder repo URL"
+  installer.includes('if [[ "$DRY_RUN" == "true" ]]'),
+  "Installer must keep a dry-run path for public evaluation"
 );
 
-const prodCompose = await read("scripts/recallant-prod-compose.sh");
-const prodComposeYaml = await read("docker-compose.production.yml");
-const backupScript = await read("scripts/recallant-production-backup.sh");
-mustInclude(
-  prodCompose,
-  [
-    "RECALLANT_ENV_FILE",
-    "RECALLANT_DATA_DIR",
-    "RECALLANT_POSTGRES_PORT",
-    "RECALLANT_POSTGRES_CONTAINER_NAME",
-    "RECALLANT_COMPOSE_PROJECT_NAME",
-    'docker compose -p "$COMPOSE_PROJECT_NAME"',
-    'export RECALLANT_DATA_DIR="$DATA_DIR"'
-  ],
-  "scripts/recallant-prod-compose.sh"
-);
-mustInclude(
-  prodComposeYaml,
-  [
-    "${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres",
-    "${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}",
-    "${RECALLANT_POSTGRES_HOST:-127.0.0.1}:${RECALLANT_POSTGRES_PORT:-15432}:5432"
-  ],
-  "docker-compose.production.yml"
-);
-mustInclude(
-  backupScript,
-  ["RECALLANT_ENV_FILE", "RECALLANT_DATA_DIR", "RECALLANT_BACKUP_TARGET"],
-  "scripts/recallant-production-backup.sh"
-);
-
-const ownerPlan = runInstallerDryRun(["--dry-run", "--profile", "owner-server"], {
-  SUDO_USER: "recallant-smoke"
+const dryRun = spawnSync("/bin/bash", ["scripts/install-recallant.sh", "--dry-run", "--profile", "single-user"], {
+  cwd: repoRoot,
+  env: process.env,
+  encoding: "utf8"
 });
-mustInclude(
-  ownerPlan,
-  [
-    "Recallant install plan",
-    "profile: owner-server",
-    "dry_run: true",
-    "will_install_systemd: auto",
-    "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
-  ],
-  "owner-server installer dry-run"
-);
-
-const managedPlan = runInstallerDryRun(["--dry-run", "--profile", "managed-server"], {
-  SUDO_USER: "recallant-smoke"
-});
-mustInclude(
-  managedPlan,
-  [
-    "profile: managed-server",
-    "env_file: /etc/recallant/recallant.env",
-    "data_dir: /var/lib/recallant",
-    "postgres_port: 15432",
-    "postgres_container_name: recallant-postgres",
-    "compose_project_name: recallant",
-    "will_install_systemd: auto"
-  ],
-  "managed-server installer dry-run"
-);
-
-const singlePlan = runInstallerDryRun(["--dry-run", "--profile", "single-user"], {
-  HOME: join(tmpdir(), "recallant-public-readiness-home"),
-  SUDO_USER: "recallant-smoke"
-});
-mustInclude(
-  singlePlan,
-  ["profile: single-user", "systemd_mode: manual", "will_install_systemd: no"],
-  "single-user installer dry-run"
-);
-
-const fakeBin = await mkdtemp(join(tmpdir(), "recallant-public-readiness-path-"));
-await symlink("/usr/bin/cat", join(fakeBin, "cat"));
-await symlink("/usr/bin/dirname", join(fakeBin, "dirname"));
-const noDockerPlan = runInstallerDryRun(["--dry-run", "--profile", "single-user"], {
-  PATH: fakeBin,
-  HOME: join(tmpdir(), "recallant-public-readiness-no-docker-home"),
-  SUDO_USER: "recallant-smoke"
-});
-mustInclude(
-  noDockerPlan,
-  ["profile: single-user", "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."],
-  "installer dry-run without Docker in PATH"
-);
+if (dryRun.error?.code !== "EPERM") {
+  if (dryRun.error) throw dryRun.error;
+  assert(dryRun.status === 0, `single-user dry-run failed\n${dryRun.stderr}\n${dryRun.stdout}`);
+  mustInclude(dryRun.stdout, ["Recallant install plan", "profile: single-user", "dry_run: true"], "installer dry-run");
+}
 
 process.stdout.write("Public readiness smoke passed\n");

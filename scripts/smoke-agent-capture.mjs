@@ -45,7 +45,7 @@ const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-off
 const marker = `CAPTURE-SMOKE-${randomUUID()}`;
 
 try {
-  const attach = await cli(onlineProject, ["attach", "."]);
+  const attach = await cli(onlineProject, ["attach", ".", "--format", "json"]);
   assert(attach.status === "attached", `attach failed: ${JSON.stringify(attach)}`);
   assert(
     attach.requested_mode === "autopilot" && attach.effective_mode === "autopilot",

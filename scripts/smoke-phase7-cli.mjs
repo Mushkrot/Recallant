@@ -78,7 +78,16 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-const dryRun = run(["init", "--target", "codex", "--dry-run", "--project-dir", projectDir]);
+const dryRun = run([
+  "init",
+  "--target",
+  "codex",
+  "--dry-run",
+  "--project-dir",
+  projectDir,
+  "--format",
+  "json"
+]);
 await assertMissing(join(projectDir, ".recallant", "config"), "Dry run created .recallant/config");
 await assertMissing(join(projectDir, ".gitignore"), "Dry run created .gitignore");
 await assertMissing(join(projectDir, "AGENTS.md"), "Dry run created AGENTS.md");
@@ -351,11 +360,29 @@ const portsFile = join(ownerOpsDir, "PORTS.yaml");
 const securityPath = join(ownerOpsDir, "SECURITY");
 await writeFile(portsFile, "recallant:\n  port: 3005\n  bind: 127.0.0.1\n");
 await mkdir(securityPath);
-const doctor = run(["doctor", "--project-dir", projectDir], {
+const doctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
   RECALLANT_PORTS_FILE: portsFile,
   RECALLANT_SECURITY_PATH: securityPath,
   RECALLANT_PORT: "3005"
 });
+const doctorText = runRaw(["doctor", "--project-dir", projectDir], {
+  RECALLANT_PORTS_FILE: portsFile,
+  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_PORT: "3005"
+});
+if (
+  doctorText.status !== 0 ||
+  !doctorText.stdout.includes("Recallant doctor") ||
+  !doctorText.stdout.includes("- Recallant CLI: installed") ||
+  !doctorText.stdout.includes("- Database: available") ||
+  !doctorText.stdout.includes("- Local model:") ||
+  !doctorText.stdout.includes("- Current project: attached") ||
+  !doctorText.stdout.includes("- Agent capture configured:") ||
+  !doctorText.stdout.includes("Next command:") ||
+  !doctorText.stdout.includes("recallant doctor --format json")
+) {
+  throw new Error(`doctor human output failed: ${doctorText.stdout} ${doctorText.stderr}`);
+}
 if (
   doctor.postgres?.reachable !== true ||
   doctor.project_config?.present !== true ||
@@ -398,7 +425,7 @@ if (
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
 }
 
-const unreachableDoctor = run(["doctor", "--project-dir", projectDir], {
+const unreachableDoctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
   RECALLANT_PORTS_FILE: portsFile,
   RECALLANT_SECURITY_PATH: securityPath,
   RECALLANT_PORT: "3005",
@@ -414,7 +441,7 @@ if (
   throw new Error(`doctor unavailable Ollama state failed: ${JSON.stringify(unreachableDoctor)}`);
 }
 
-const productionDoctor = run(["doctor", "--project-dir", projectDir], {
+const productionDoctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
   RECALLANT_PORTS_FILE: portsFile,
   RECALLANT_SECURITY_PATH: securityPath,
   RECALLANT_PORT: "3005",

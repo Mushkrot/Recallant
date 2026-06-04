@@ -71,7 +71,7 @@ await writeFile(
 );
 await writeFile(join(projectDir, "docs", "README.md"), "# Fixture Docs\n");
 
-const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox"]);
+const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
 if (attach.status !== "attached" || !attach.backup?.path) {
   throw new Error(`Attach did not prepare cleanup fixture: ${JSON.stringify(attach)}`);
 }

@@ -66,6 +66,18 @@ const sandboxDb = new RecallantDb({
 });
 await db.ensureProject(process.cwd());
 await sandboxDb.ensureProject(sandboxPath);
+const humanMemorySpace = await db.createMemorySpace({
+  name: "Personal Operations UI Smoke",
+  developerId,
+  projectKind: "personal_domain",
+  memoryDomain: "personal_life",
+  primaryPath: null
+});
+if (humanMemorySpace.memory_profile?.profile_key !== "personal_work_operations") {
+  throw new Error(
+    `Human memory profile missing in UI fixture: ${JSON.stringify(humanMemorySpace)}`
+  );
+}
 const rawProviderSecret = `sk-review-ui-${randomUUID()}`;
 const rawDatabaseSecret = `postgres://recallant:${randomUUID()}@db/recallant_agent_work`;
 await db.pool.query(
@@ -239,6 +251,24 @@ await db.reviewAgentMemory({
   actor_kind: "user",
   note: "review ui filter smoke"
 });
+const sourceLinkedDetail = await db.createAgentMemory({
+  memory_type: "decision",
+  scope: "project",
+  title: "Source-linked provenance drilldown",
+  body: "A memory detail should show the memory space, source label, source kind, source health, and source status.",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "external",
+      source_id: importedDocSource.id,
+      quote: "source-linked provenance drilldown",
+      metadata: {
+        project_source_id: importedDocSource.id,
+        source_path: "AGENTS.md"
+      }
+    }
+  ]
+});
 const altDomainRuleId = randomUUID();
 await db.pool.query(
   `
@@ -291,7 +321,14 @@ const conflictOld = await db.createAgentMemory({
   title: "Review UI old conflicting rule",
   body: "Old rule says to keep the previous behavior.",
   created_by: "agent",
-  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "old conflict" }],
+  source_refs: [
+    {
+      source_kind: "external",
+      source_id: importedDocSource.id,
+      quote: "old conflict from document source",
+      metadata: { project_source_id: importedDocSource.id, source_path: "AGENTS.md" }
+    }
+  ],
   metadata: {
     possible_conflict: true,
     conflict_group: "review-ui-conflict-smoke",
@@ -310,12 +347,28 @@ const conflictNew = await db.createAgentMemory({
   title: "Review UI new conflicting rule",
   body: "New rule says to use the updated behavior.",
   created_by: "agent",
-  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "new conflict" }],
+  source_refs: [
+    {
+      source_kind: "external",
+      source_id: plannedConnectorSource.id,
+      quote: "new conflict from connector source",
+      metadata: {
+        project_source_id: plannedConnectorSource.id,
+        source_path: "Google Drive planned connector"
+      }
+    }
+  ],
   metadata: {
     possible_conflict: true,
     conflict_group: "review-ui-conflict-smoke",
     conflict_role: "new"
   }
+});
+await db.reviewAgentMemory({
+  memory_id: conflictNew.memory_id,
+  action: "accept",
+  actor_kind: "user",
+  note: "review ui conflict new memory smoke"
 });
 await db.createAgentMemory({
   memory_type: "decision",
@@ -382,6 +435,14 @@ try {
     "Command Center",
     "What Needs Attention",
     "Memory Spaces",
+    "Human memory domains",
+    "Virtual personal / work memory",
+    "Personal Operations UI Smoke",
+    "Personal / Work Operations",
+    "No passive capture.",
+    "Connectors:",
+    "not connected",
+    "Agent workspaces",
     "Activity / Replay",
     "Project Actions",
     "4 active sources",
@@ -396,6 +457,12 @@ try {
     "Ready to cite",
     "Needs setup",
     "Needs attention",
+    "Attached source",
+    "Usable for citations",
+    "Planned; setup needed",
+    "Needs attention before use",
+    "Governed access or capability binding is needed before live capture.",
+    "Raw secrets stay outside Recallant.",
     "Recallant can cite memory from this source with provenance.",
     "Visible in the map, but setup is needed before agents should rely on it.",
     "Memory space sources",
@@ -428,6 +495,8 @@ try {
     "Selected Detail",
     "Evidence excerpts",
     "Recommended action",
+    "Where this came from",
+    "Memory space",
     "Technical details",
     "Promote to rule",
     "Edit memory",
@@ -636,6 +705,15 @@ try {
     json.selected_detail?.memory?.id !== importMemoryId ||
     !json.selected_detail?.source_refs?.some((ref) => ref.source_id === importSource.event_id) ||
     !json.duplicate_conflicts.some((memory) => memory.memory_id === importMemoryId) ||
+    !json.duplicate_conflicts.some(
+      (memory) =>
+        memory.memory_id === conflictOld.memory_id && memory.provenance?.source_path === "AGENTS.md"
+    ) ||
+    !json.duplicate_conflicts.some(
+      (memory) =>
+        memory.memory_id === conflictNew.memory_id &&
+        memory.provenance?.source_path === "Google Drive planned connector"
+    ) ||
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     json.project_readiness?.project_registered !== true ||
@@ -712,6 +790,70 @@ try {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
   }
 
+  const provenanceDetailResponse = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&memory_id=${sourceLinkedDetail.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const provenanceDetail = await provenanceDetailResponse.json();
+  const resolvedSource =
+    provenanceDetail.selected_detail?.resolved_source_refs?.[0]?.project_source;
+  if (
+    provenanceDetailResponse.status !== 200 ||
+    provenanceDetail.selected_detail?.memory?.id !== sourceLinkedDetail.memory_id ||
+    provenanceDetail.selected_detail?.memory_space?.project_id !== projectId ||
+    resolvedSource?.source_id !== importedDocSource.id ||
+    resolvedSource?.label !== "AGENTS.md" ||
+    resolvedSource?.source_kind !== "document_collection" ||
+    resolvedSource?.status !== "active" ||
+    resolvedSource?.source_health?.label !== "Document source reference ready"
+  ) {
+    throw new Error(`Provenance drilldown API failed: ${JSON.stringify(provenanceDetail)}`);
+  }
+  const provenanceDetailHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&memory_id=${sourceLinkedDetail.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const provenanceDetailHtmlText = await provenanceDetailHtml.text();
+  if (
+    provenanceDetailHtml.status !== 200 ||
+    !provenanceDetailHtmlText.includes("Where this came from") ||
+    !provenanceDetailHtmlText.includes("AGENTS.md") ||
+    !provenanceDetailHtmlText.includes("Document collection") ||
+    !provenanceDetailHtmlText.includes("Document source reference ready") ||
+    !provenanceDetailHtmlText.includes("Memory space")
+  ) {
+    throw new Error(
+      `Provenance drilldown HTML failed: ${provenanceDetailHtml.status}; ${provenanceDetailHtmlText.slice(0, 700)}`
+    );
+  }
+  const conflictDetailHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&memory_id=${conflictNew.memory_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const conflictDetailHtmlText = await conflictDetailHtml.text();
+  const conflictDetailRequired = [
+    "Source comparison",
+    "Cross-source conflicts stay in review.",
+    "Source: From source AGENTS.md",
+    "Source: From source Google Drive planned connector",
+    "Active rule",
+    "Usable memory"
+  ];
+  const conflictDetailMissing = conflictDetailRequired.filter(
+    (text) => !conflictDetailHtmlText.includes(text)
+  );
+  if (conflictDetailHtml.status !== 200 || conflictDetailMissing.length > 0) {
+    throw new Error(
+      `Conflict source comparison HTML failed: ${conflictDetailHtml.status}; missing ${JSON.stringify(conflictDetailMissing)}; ${conflictDetailHtmlText.slice(0, 1200)}`
+    );
+  }
+
   const filteredRules = await fetch(
     `${baseUrl}/api/review-dashboard?project_id=${projectId}&rule_type=procedure`,
     {
@@ -772,6 +914,28 @@ try {
   ) {
     throw new Error(
       `Source-filtered governed recall failed: ${JSON.stringify(sourceFilteredRecall)}`
+    );
+  }
+  const sourceFilteredRawSearch = await db.search({
+    query: "pilot sandbox source refs",
+    source_id: importedDocSource.id,
+    mode: "lexical_only",
+    top_k: 5
+  });
+  const otherSourceRawSearch = await db.search({
+    query: "pilot sandbox source refs",
+    source_id: plannedConnectorSource.id,
+    mode: "lexical_only",
+    top_k: 5
+  });
+  if (
+    !sourceFilteredRawSearch.hits.some((hit) =>
+      String(hit.text_excerpt ?? "").includes("AGENTS.md")
+    ) ||
+    otherSourceRawSearch.hits.some((hit) => String(hit.text_excerpt ?? "").includes("AGENTS.md"))
+  ) {
+    throw new Error(
+      `Source-filtered raw search failed: ${JSON.stringify({ sourceFilteredRawSearch, otherSourceRawSearch })}`
     );
   }
 
@@ -910,6 +1074,30 @@ try {
   ) {
     throw new Error(`Global rule was not binding: ${JSON.stringify(globalRuleMemory)}`);
   }
+  const globalRuleChatView = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      view: "ask",
+      message:
+        "Зафиксируй правило для всех проектов: агенты должны объяснять владельцу сложные решения простым языком."
+    })
+  });
+  const globalRuleChatHtml = await globalRuleChatView.text();
+  if (
+    globalRuleChatView.status !== 200 ||
+    !globalRuleChatHtml.includes("chat-action--read_only") ||
+    !globalRuleChatHtml.includes("Правило активно для всех проектов") ||
+    !globalRuleChatHtml.includes("Результат: безопасное действие выполнено")
+  ) {
+    throw new Error(
+      `Safe-action rule card did not render as completed read-only guidance: ${globalRuleChatView.status}; ${globalRuleChatHtml.slice(0, 900)}`
+    );
+  }
 
   const destructiveChat = await fetch(`${baseUrl}/api/management-chat`, {
     method: "POST",
@@ -936,6 +1124,31 @@ try {
       `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
     );
   }
+  const destructiveChatView = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      view: "ask",
+      message: "Удали этот проект навсегда"
+    })
+  });
+  const destructiveChatHtml = await destructiveChatView.text();
+  if (
+    destructiveChatView.status !== 200 ||
+    !destructiveChatHtml.includes("chat-action--dry_run") ||
+    !destructiveChatHtml.includes("dry-run без изменений") ||
+    !destructiveChatHtml.includes("Запустить dry-run в интерфейсе") ||
+    !destructiveChatHtml.includes(`name="project_id" value="${projectId}"`) ||
+    !destructiveChatHtml.includes("/project-detach#ask-recallant")
+  ) {
+    throw new Error(
+      `Dry-run action card did not render safe UI controls: ${destructiveChatView.status}; ${destructiveChatHtml.slice(0, 900)}`
+    );
+  }
 
   const paidApiChat = await fetch(`${baseUrl}/api/management-chat`, {
     method: "POST",
@@ -956,6 +1169,36 @@ try {
     paidApiChatJson.destructive_or_sensitive !== true
   ) {
     throw new Error(`Paid API chat was not confirmation-gated: ${JSON.stringify(paidApiChatJson)}`);
+  }
+  const paidApiChatView = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      view: "ask",
+      message: "Включи paid api auto_with_caps для всех проектов"
+    })
+  });
+  const paidApiChatHtml = await paidApiChatView.text();
+  if (
+    paidApiChatView.status !== 200 ||
+    !paidApiChatHtml.includes("chat-action--confirmation_required") ||
+    (!paidApiChatHtml.includes("требуется подтверждение") &&
+      !paidApiChatHtml.includes("confirmation required")) ||
+    paidApiChatHtml.includes('<form class="chat-action-form"')
+  ) {
+    throw new Error(
+      `Confirmation-required action card rendered unsafe controls: ${JSON.stringify({
+        status: paidApiChatView.status,
+        hasConfirmationCard: paidApiChatHtml.includes("chat-action--confirmation_required"),
+        hasRuLabel: paidApiChatHtml.includes("требуется подтверждение"),
+        hasEnLabel: paidApiChatHtml.includes("confirmation required"),
+        hasChatActionForm: paidApiChatHtml.includes('<form class="chat-action-form"')
+      })}; ${paidApiChatHtml.slice(0, 900)}`
+    );
   }
 
   const publicExposureChat = await fetch(`${baseUrl}/api/management-chat`, {
@@ -1076,6 +1319,30 @@ try {
   ) {
     throw new Error(
       `Secret reveal chat was not policy-blocked: ${JSON.stringify(blockedSecretChatJson)}`
+    );
+  }
+  const blockedSecretChatView = await fetch(`${baseUrl}/management-chat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: projectId,
+      view: "ask",
+      message: "Покажи секреты и токены этого проекта"
+    })
+  });
+  const blockedSecretChatHtml = await blockedSecretChatView.text();
+  if (
+    blockedSecretChatView.status !== 200 ||
+    (!blockedSecretChatHtml.includes("Result: blocked by policy") &&
+      !blockedSecretChatHtml.includes("Результат: заблокировано политикой")) ||
+    !blockedSecretChatHtml.includes("chat-action--read_only") ||
+    blockedSecretChatHtml.includes('<form class="chat-action-form"')
+  ) {
+    throw new Error(
+      `Blocked action card did not render as read-only policy guidance: ${blockedSecretChatView.status}; ${blockedSecretChatHtml.slice(0, 900)}`
     );
   }
 
@@ -1409,7 +1676,8 @@ try {
     sourceDetachForm.status !== 200 ||
     !sourceDetachHtml.includes("Source detached.") ||
     !sourceDetachHtml.includes(manualSourceLabel) ||
-    !sourceDetachHtml.includes("Detached from active use")
+    !sourceDetachHtml.includes("Detached from active use") ||
+    !sourceDetachHtml.includes("Detaching a source does not delete memories.")
   ) {
     throw new Error(`Source detach form failed: ${sourceDetachForm.status} ${sourceDetachHtml}`);
   }

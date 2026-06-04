@@ -31,6 +31,7 @@ function forbidMarkers(text, markers, label) {
 
 async function run() {
   const stagePlan = await readText("stage_goals/stage_1/Stage 1 sub stages.md");
+  const productionTarget = await readText("stage_goals/stage_1/Stage 1 Production UI Target.md");
   const serverUi = await readText("apps/server/src/index.ts");
   const htmlSmoke = await readText("scripts/smoke-review-ui.mjs");
   const playwrightSmoke = await readText("scripts/smoke-review-ui-playwright.mjs");
@@ -38,14 +39,38 @@ async function run() {
   const acceptanceReportDir = process.env.RECALLANT_STAGE1_ACCEPTANCE_REPORT_DIR ?? "/tmp";
   const publicReportDir = join(reportDir, "public-safe-candidates");
 
-  for (let goal = 1; goal <= 9; goal += 1) {
+  for (let goal = 1; goal <= 12; goal += 1) {
     const marker = `## Goal 1.${goal}:`;
-    const section = stagePlan.slice(stagePlan.indexOf(marker), stagePlan.indexOf(`## Goal 1.${goal + 1}:`) > -1 ? stagePlan.indexOf(`## Goal 1.${goal + 1}:`) : stagePlan.length);
+    const section = stagePlan.slice(
+      stagePlan.indexOf(marker),
+      stagePlan.indexOf(`## Goal 1.${goal + 1}:`) > -1
+        ? stagePlan.indexOf(`## Goal 1.${goal + 1}:`)
+        : stagePlan.length
+    );
     assert(
       stagePlan.includes(marker) && section.includes("Status: completed."),
       `Stage 1 Goal 1.${goal} is not marked completed`
     );
   }
+  const gateMarker = "## Goal 1.13:";
+  const gateSection = stagePlan.slice(stagePlan.indexOf(gateMarker));
+  assert(
+    stagePlan.includes(gateMarker) &&
+      (gateSection.includes("Status: pending.") || gateSection.includes("Status: completed.")),
+    "Stage 1 Goal 1.13 is missing or has an invalid status"
+  );
+
+  requireMarkers(
+    productionTarget,
+    [
+      "Ask-first Workbench",
+      "Memory Tree / Source Map",
+      "Secondary areas should be available through focused views",
+      "Stage 1 acceptance must fail if",
+      "Stage 1 is production-complete"
+    ],
+    "Stage 1 production UI target"
+  );
 
   requireMarkers(
     serverUi,
@@ -62,6 +87,14 @@ async function run() {
       "Technical filter values",
       "Technical cost breakdown",
       "Advanced cleanup details",
+      "workbench-promise",
+      "Operations drawer",
+      "Secondary workspace",
+      "Source map legend",
+      "Memory Tree / Source Map · Memory space sources",
+      "Memory Tree root",
+      "sourceMapRole",
+      "sourceCaptureReadiness",
       "Semantic search is configured locally.",
       "Understood by local AI."
     ],
@@ -102,6 +135,11 @@ async function run() {
     [
       "assertHumanDefaultLanguage",
       "default_visible_language_is_human_first",
+      "desktop Workbench order is not Ask-first",
+      "central_ask_recallant_panel",
+      "memory_tree_source_map",
+      "desktop_focused_sources_view",
+      "desktop_focused_settings_view",
       "dense_state_desktop_responsive",
       "dense_review_scannable",
       "public_safe_screenshot_candidates",
@@ -141,10 +179,19 @@ async function run() {
   const report = {
     status: "ok",
     stage: "Stage 1: Human Workbench UI",
+    production_gate: gateSection.includes("Status: completed.") ? "complete" : "passed_pending_1.13",
+    production_target: "stage_goals/stage_1/Stage 1 Production UI Target.md",
     verified: [
-      "all Stage 1 sub-goals are marked completed",
+      "Stage 1 sub-goals 1.1 through 1.12 are marked completed",
+      gateSection.includes("Status: completed.")
+        ? "Stage 1 production visual acceptance gate 1.13 is completed"
+        : "Stage 1 production visual acceptance gate 1.13 has passed and is ready to mark completed",
+      "Stage 1 production target is present and referenced",
       "default Workbench language is human-first",
       "technical values remain behind details or technical smokes",
+      "Ask Recallant is first and primary in the Workbench order",
+      "Memory Tree / Source Map product surface is present",
+      "secondary operations are collapsed into the Operations drawer",
       "Ask Recallant, Memory Spaces, Source Map, Activity, Review, Settings, and Operations are covered",
       "desktop and mobile Playwright evidence screenshots exist",
       "public-safe screenshot candidates exist"

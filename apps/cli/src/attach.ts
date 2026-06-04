@@ -96,7 +96,7 @@ function parseCaptureProfile(raw: string | undefined): AttachOptions["capturePro
 
 function parseAttachOptions(argv: readonly string[]): AttachOptions {
   const modeFlag = parseFlag(argv, "--mode");
-  const format = parseFlag(argv, "--format") ?? "json";
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "json" && format !== "text") throw new Error(`Invalid --format: ${format}`);
   return {
     requestedMode: parseAttachMode(modeFlag),
@@ -669,13 +669,48 @@ async function runReviewVisibility(input: { database: RecallantDb; projectId: st
 
 function textReport(result: Record<string, unknown>) {
   const ownerReport = result.owner_report as Record<string, unknown>;
+  const status = String(result.status ?? "planned");
+  const projectDir = String(result.project_dir ?? "");
+  const projectId = String(result.project_id ?? "");
+  const changedFiles = Array.isArray(result.changed_files) ? result.changed_files.map(String) : [];
+  const backup = (result.backup ?? null) as Record<string, unknown> | null;
+  const plannedChanges = Array.isArray(result.planned_changes)
+    ? result.planned_changes
+        .map((change) =>
+          change && typeof change === "object"
+            ? String((change as Record<string, unknown>).path ?? "")
+            : ""
+        )
+        .filter(Boolean)
+    : [];
+  const fileLines = changedFiles.length
+    ? changedFiles.map((file) => `  - ${file}`)
+    : plannedChanges.length
+      ? plannedChanges.map((file) => `  - ${file} (planned)`)
+      : ["  - none"];
+  const backupLine = backup?.manifest_path
+    ? String(backup.manifest_path)
+    : backup?.path
+      ? String(backup.path)
+      : "none";
   return (
     [
-      `Recallant attach: ${ownerReport.ready_status}`,
-      `Done: ${ownerReport.what_was_done}`,
+      "Recallant attach",
+      "",
+      `Status: ${ownerReport.ready_status}`,
+      `Memory space: ${status === "attached" ? "created or updated" : "planned"}`,
+      `Project path: ${projectDir}`,
+      `Project id: ${projectId}`,
+      "",
+      "Files changed:",
+      ...fileLines,
+      "",
+      `Backups: ${backupLine}`,
+      "",
       `Needs attention: ${ownerReport.what_needs_attention}`,
-      `Check: ${ownerReport.how_to_check}`,
-      `Next: ${ownerReport.next_step}`
+      `Next command: ${ownerReport.next_step}`,
+      "",
+      `JSON output: recallant attach ${projectDir} --format json`
     ].join("\n") + "\n"
   );
 }
@@ -805,7 +840,7 @@ export async function runAttach(argv: readonly string[]) {
       next_step:
         effectiveMode === "manual"
           ? "Use lower-level init/discover/import commands for explicit manual work."
-          : "Rerun with --confirm or use --mode autopilot for an ordinary project."
+          : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`
     };
     process.stdout.write(
       options.format === "text" ? textReport(result) : `${JSON.stringify(result, null, 2)}\n`
@@ -945,7 +980,7 @@ export async function runAttach(argv: readonly string[]) {
             : "Nothing urgent.",
         how_to_check:
           "Open the Review UI or inspect .recallant/config, AGENTS.md, and PROJECT_LOG.md.",
-        next_step: 'Start an agent session with recallant agent-start --task-hint "<current task>".'
+        next_step: `Run recallant connect ${options.target} --project-dir ${options.projectDir} --dry-run.`
       }
     });
   } finally {

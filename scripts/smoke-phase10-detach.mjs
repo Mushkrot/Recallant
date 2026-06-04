@@ -128,9 +128,9 @@ await writeFixture(sandboxDir, "sandboxmarker");
 await writeFixture(liveDir, "livemarker");
 await writeFixture(activeDir, "activemarker");
 
-const sandboxAttach = runJson(["attach", sandboxDir, "--target", "codex", "--sandbox"]);
-const liveAttach = runJson(["attach", liveDir, "--target", "codex", "--sandbox"]);
-const activeAttach = runJson(["attach", activeDir, "--target", "codex", "--sandbox"]);
+const sandboxAttach = runJson(["attach", sandboxDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const liveAttach = runJson(["attach", liveDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const activeAttach = runJson(["attach", activeDir, "--target", "codex", "--sandbox", "--format", "json"]);
 
 const sandboxSearchBefore = await searchProject(
   sandboxAttach.project_id,

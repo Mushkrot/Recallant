@@ -91,6 +91,46 @@ if (dryRun.writes_database !== false || dryRun.unsynced_count !== 2) {
   throw new Error(`sync-spool dry-run failed: ${JSON.stringify(dryRun)}`);
 }
 
+const spoolStatus = run([
+  "spool-status",
+  "--project-dir",
+  projectPath,
+  "--spool-dir",
+  spoolDir,
+  "--format",
+  "json"
+]);
+if (
+  spoolStatus.status !== "unsynced" ||
+  spoolStatus.unsynced_count !== 2 ||
+  !spoolStatus.last_write_at ||
+  !spoolStatus.replay_command?.includes("--dry-run") ||
+  !spoolStatus.sync_command?.includes("sync-spool")
+) {
+  throw new Error(
+    `spool-status did not expose pending replay diagnostics: ${JSON.stringify(spoolStatus)}`
+  );
+}
+
+const doctorSpool = run([
+  "doctor",
+  "--project-dir",
+  projectPath,
+  "--spool-dir",
+  spoolDir,
+  "--format",
+  "json"
+]);
+if (
+  doctorSpool.local_spool_status?.status !== "unsynced" ||
+  doctorSpool.local_spool_status?.unsynced_count !== 2 ||
+  !doctorSpool.local_spool_status?.replay_command?.includes("--dry-run")
+) {
+  throw new Error(
+    `doctor did not expose pending spool diagnostics: ${JSON.stringify(doctorSpool)}`
+  );
+}
+
 const contextPack = run([
   "context",
   "--project-dir",

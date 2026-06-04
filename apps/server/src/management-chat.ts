@@ -99,6 +99,7 @@ export type ManagementChatResponse = {
     reason: string;
   };
   memory_lookup_result?: MemoryLookupResult;
+  clarification_context?: ClarificationContext;
   facts: {
     project_id: string;
     project_name: string;
@@ -192,17 +193,129 @@ type WorkflowRequestAnalysis = {
   commands: string[];
 };
 
+type ClarificationContext = {
+  intent: ManagementChatIntent;
+  original_message: string;
+  missing: string[];
+};
+
+function projectFromClarificationMessage(message: string, dashboard: DashboardLike) {
+  const matches = asRows(dashboard.projects)
+    .filter((project) => messageMentionsProject(message, project))
+    .map((project) => ({
+      project,
+      score: Math.max(
+        ...projectReferenceCandidates(project).map(
+          (candidate) => normalizeProjectReference(candidate).length
+        )
+      )
+    }))
+    .sort((left, right) => right.score - left.score);
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0]?.project ?? null;
+  return matches[0]?.score === matches[1]?.score ? null : (matches[0]?.project ?? null);
+}
+
+function continuationInterpretation(
+  message: string,
+  intent: ManagementChatIntent,
+  summary: string
+): ChatInterpretation {
+  return {
+    source: "rules",
+    language: detectLanguage(message),
+    intent,
+    confidence: 0.8,
+    summary,
+    target_hint: messageWantsSandbox(message) ? "sandbox" : "current",
+    destructive_or_sensitive: isDestructiveOrSensitive(message, intent),
+    global_rule_request: intent === "global_rule",
+    rule_text: intent === "global_rule" ? extractRuleText(message) : undefined
+  };
+}
+
+function resolveClarificationContinuation(
+  reply: string,
+  dashboard: DashboardLike,
+  rawContext?: Partial<ClarificationContext> | null
+): {
+  message: string;
+  interpretation?: ChatInterpretation;
+  targetProject?: ChatTargetProject;
+} {
+  const context =
+    rawContext &&
+    typeof rawContext.intent === "string" &&
+    typeof rawContext.original_message === "string"
+      ? {
+          intent: rawContext.intent,
+          original_message: rawContext.original_message,
+          missing: Array.isArray(rawContext.missing) ? rawContext.missing.map(String) : []
+        }
+      : null;
+  if (!context || !reply) return { message: reply };
+  if (context.intent === "cleanup") {
+    const project = projectFromClarificationMessage(reply, dashboard);
+    if (!project) return { message: `${context.original_message} ${reply}`.trim() };
+    const currentProject = asRecord(dashboard.current_project);
+    const currentProjectId = projectId(currentProject, dashboard.current_project_id);
+    const currentProjectName = projectName(currentProject, dashboard.current_project_id);
+    const targetProjectId = projectId(project, currentProjectId);
+    return {
+      message: context.original_message,
+      interpretation: continuationInterpretation(
+        context.original_message,
+        "cleanup",
+        detectLanguage(reply) === "ru"
+          ? "Продолжение уточнения: выбран целевой проект для cleanup."
+          : "Clarification continuation: target project selected for cleanup."
+      ),
+      targetProject: {
+        project_id: targetProjectId,
+        project_name: projectName(project, targetProjectId),
+        current_project_id: currentProjectId,
+        current_project_name: currentProjectName,
+        reason: "clarified_project",
+        switched: targetProjectId !== currentProjectId,
+        ambiguous: false
+      }
+    };
+  }
+  if (context.intent === "source_management") {
+    return {
+      message: `${context.original_message} ${reply}`.trim(),
+      interpretation: continuationInterpretation(
+        `${context.original_message} ${reply}`.trim(),
+        "source_management",
+        detectLanguage(reply) === "ru"
+          ? "Продолжение уточнения: добавлена недостающая ссылка на источник."
+          : "Clarification continuation: missing source reference provided."
+      )
+    };
+  }
+  return { message: `${context.original_message} ${reply}`.trim() };
+}
+
 export async function buildManagementChatResponse(input: {
   message: string;
   dashboard: DashboardLike;
   database?: RecallantDb;
+  clarification_context?: Partial<ClarificationContext> | null;
 }): Promise<ManagementChatResponse> {
-  const message = input.message.trim();
   const dashboard = input.dashboard;
-  const interpretation = await interpretMessage(message, dashboard);
+  const rawMessage = input.message.trim();
+  const continuation = resolveClarificationContinuation(
+    rawMessage,
+    dashboard,
+    input.clarification_context
+  );
+  const message = continuation.message;
+  const interpretation =
+    continuation.interpretation ?? (await interpretMessage(message, dashboard));
   const language = interpretation.language;
   const intent = interpretation.intent;
-  const targetProject = resolveTargetProject(message, dashboard, interpretation);
+  const targetProject =
+    continuation.targetProject ?? resolveTargetProject(message, dashboard, interpretation);
   const facts = dashboardFacts(dashboard, targetProject);
   const sourceRequest =
     intent === "source_management" ? analyzeSourceRequest(message, facts) : undefined;
@@ -279,6 +392,14 @@ export async function buildManagementChatResponse(input: {
     memoryLookupResult,
     workflowRequest
   );
+  const clarificationContext = clarificationContextForResult({
+    resultType,
+    intent,
+    message,
+    targetProject,
+    sourceRequest,
+    workflowRequest
+  });
   return {
     language,
     intent,
@@ -298,7 +419,8 @@ export async function buildManagementChatResponse(input: {
     source_action_result: sourceActionResult,
     memory_lookup_result: memoryLookupResult,
     facts,
-    proposed_actions: proposedActions
+    proposed_actions: proposedActions,
+    clarification_context: clarificationContext
   };
 }
 
@@ -357,8 +479,34 @@ function detectIntent(message: string): ManagementChatIntent {
     return "rule_diagnostics";
   }
   if (
-    includesAny(message, ["что", "show", "покажи", "какие"]) &&
-    includesAny(message, ["запомн", "remembered", "memorized", "memory"])
+    includesAny(message, [
+      "источник",
+      "sources",
+      "source",
+      "memory space",
+      "memory spaces",
+      "пространств",
+      "подключи папку",
+      "подключить папку",
+      "attach source",
+      "attach folder",
+      "создай вирту",
+      "virtual space"
+    ]) &&
+    !includesAny(message, [
+      "source of",
+      "where did",
+      "where is this from",
+      "provenance",
+      "откуда",
+      "происхожд"
+    ])
+  ) {
+    return "source_management";
+  }
+  if (
+    includesAny(message, ["что", "show", "what", "покажи", "какие"]) &&
+    includesAny(message, ["запомн", "remember", "remembered", "memorized", "memory"])
   ) {
     return "memory_summary";
   }
@@ -371,8 +519,11 @@ function detectIntent(message: string): ManagementChatIntent {
   if (
     includesAny(message, [
       "удал",
+      "снес",
+      "убер",
       "отцеп",
       "очист",
+      "remove",
       "forget",
       "delete",
       "erase",
@@ -687,6 +838,64 @@ async function interpretMessage(
 
 function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent) {
   if (intent === "cleanup") return true;
+  const readOnlyIntents: ManagementChatIntent[] = [
+    "status",
+    "next_steps",
+    "context_pack",
+    "cross_project",
+    "provenance",
+    "review",
+    "connection_check",
+    "memory_summary",
+    "rule_diagnostics",
+    "general"
+  ];
+  const actionChanging = includesAny(message, [
+    "enable",
+    "turn on",
+    "activate",
+    "authorize",
+    "attach",
+    "add",
+    "setup",
+    "configure",
+    "delete",
+    "remove",
+    "detach",
+    "erase",
+    "включ",
+    "актив",
+    "авториз",
+    "подключ",
+    "добав",
+    "настрой",
+    "удал",
+    "отцеп",
+    "снес"
+  ]);
+  if (readOnlyIntents.includes(intent) && !actionChanging) {
+    return includesAny(message, [
+      "навсегда",
+      "permanent",
+      "forever",
+      "секрет",
+      "secret",
+      "security",
+      "deploy",
+      "deployment",
+      "public",
+      "cloudflare",
+      "firewall",
+      "paid api",
+      "auto_with_caps",
+      "global setting",
+      "developer setting",
+      "безопас",
+      "деплой",
+      "публич",
+      "глобаль"
+    ]);
+  }
   return includesAny(message, [
     "навсегда",
     "permanent",
@@ -806,6 +1015,42 @@ function resultTypeForIntent(input: {
   if (input.destructiveOrSensitive && input.intent === "cleanup") return "dry_run_required";
   if (input.confirmationRequired) return "confirmation_required";
   return "read_only_answer";
+}
+
+function clarificationContextForResult(input: {
+  resultType: ManagementChatResultType;
+  intent: ManagementChatIntent;
+  message: string;
+  targetProject: ChatTargetProject;
+  sourceRequest?: SourceRequestAnalysis;
+  workflowRequest?: WorkflowRequestAnalysis;
+}): ClarificationContext | undefined {
+  if (input.resultType !== "needs_clarification") return undefined;
+  if (input.targetProject.ambiguous) {
+    return {
+      intent: input.intent,
+      original_message: input.message,
+      missing: ["target project"]
+    };
+  }
+  if (input.intent === "source_management" && input.sourceRequest?.missing.length) {
+    return {
+      intent: input.intent,
+      original_message: input.message,
+      missing: input.sourceRequest.missing
+    };
+  }
+  if (
+    (input.intent === "project_onboarding" || input.intent === "pilot_qa") &&
+    input.workflowRequest?.missing.length
+  ) {
+    return {
+      intent: input.intent,
+      original_message: input.message,
+      missing: input.workflowRequest.missing
+    };
+  }
+  return undefined;
 }
 
 function asNumber(value: unknown) {
@@ -1209,6 +1454,21 @@ function analyzeSourceRequest(
     "новое простран",
     "виртуальн"
   ]);
+  const wantsInspect = includesAny(message, [
+    "show",
+    "list",
+    "inspect",
+    "status",
+    "health",
+    "current source",
+    "current sources",
+    "покажи",
+    "список",
+    "статус",
+    "здоров",
+    "текущие источники",
+    "текущий источник"
+  ]);
   const wantsAttach = includesAny(message, [
     "attach",
     "connect",
@@ -1228,7 +1488,7 @@ function analyzeSourceRequest(
     ? "detach_source"
     : wantsCreate
       ? "create_space"
-      : wantsAttach
+      : wantsAttach && !wantsInspect
         ? "attach_source"
         : "inspect_sources";
   const missing: string[] = [];
@@ -1504,8 +1764,11 @@ async function maybeLookupMemories(input: {
     const sameProject = await input.database.recallAgentMemories({
       query,
       source_id: sourceFilter?.source_id,
-      include_needs_review: input.intent === "review" || input.intent === "provenance",
-      include_candidates: input.intent === "review",
+      include_needs_review:
+        input.intent === "review" ||
+        input.intent === "provenance" ||
+        input.intent === "rule_diagnostics",
+      include_candidates: input.intent === "review" || input.intent === "rule_diagnostics",
       include_stale: input.intent === "rule_diagnostics",
       top_k: 3,
       max_chars_total: 1_800
@@ -1675,6 +1938,94 @@ function formatMemoryLookupEn(result: MemoryLookupResult) {
   return sections.join("\n\n") || `Nothing found. ${result.reason}`;
 }
 
+function ruleDiagnosticReasonRu(hit: MemoryLookupHit) {
+  const status = hit.status.toLowerCase();
+  const usePolicy = hit.use_policy.toLowerCase();
+  const scope = (hit.scope_kind || hit.scope).toLowerCase();
+  if (status === "accepted" && usePolicy === "instruction_grade") {
+    if (scope === "developer" || scope === "project") {
+      return "Применяется: это Active rule с подходящим scope.";
+    }
+    return `Может не применяться: scope “${hit.scope_kind || hit.scope}” должен совпадать с текущим проектом, developer-scope или поддерживаемой областью.`;
+  }
+  if (status === "needs_review" || status === "candidate") {
+    return "Не применяется: правило еще требует решения владельца в Review.";
+  }
+  if (status === "stale") {
+    return "Не применяется: запись помечена как stale и остается только evidence.";
+  }
+  if (status === "rejected" || usePolicy === "do_not_use") {
+    return "Не применяется: запись отклонена или запрещена к использованию.";
+  }
+  if (usePolicy !== "instruction_grade") {
+    return `Не применяется как правило: use policy “${hit.use_policy}” разрешает память как evidence/recall, но не как binding instruction.`;
+  }
+  return "Проверь свежий Context Pack: правило может быть видимо, но не входить в стартовый пакет агента.";
+}
+
+function ruleDiagnosticReasonEn(hit: MemoryLookupHit) {
+  const status = hit.status.toLowerCase();
+  const usePolicy = hit.use_policy.toLowerCase();
+  const scope = (hit.scope_kind || hit.scope).toLowerCase();
+  if (status === "accepted" && usePolicy === "instruction_grade") {
+    if (scope === "developer" || scope === "project") {
+      return "Applies: this is an Active rule with a matching scope.";
+    }
+    return `May not apply: scope “${hit.scope_kind || hit.scope}” must match the current project, developer scope, or a supported binding area.`;
+  }
+  if (status === "needs_review" || status === "candidate") {
+    return "Does not apply: the rule still needs an owner decision in Review.";
+  }
+  if (status === "stale") {
+    return "Does not apply: the record is marked stale and remains evidence only.";
+  }
+  if (status === "rejected" || usePolicy === "do_not_use") {
+    return "Does not apply: the record was rejected or disabled.";
+  }
+  if (usePolicy !== "instruction_grade") {
+    return `Does not apply as a rule: use policy “${hit.use_policy}” allows evidence/recall, not binding instruction.`;
+  }
+  return "Check a fresh Context Pack: the rule may be visible but not included in agent startup context.";
+}
+
+function formatRuleDiagnosticsRu(result: MemoryLookupResult) {
+  const allHits = [...result.same_project_hits, ...result.cross_project_examples];
+  if (allHits.length === 0) return `Ничего похожего не найдено. ${result.reason}`;
+  const sourceFilter = result.source_filter
+    ? `Текущий source filter: ${result.source_filter.label}. Если правило связано с другим источником, оно может не попасть в этот filtered view.\n\n`
+    : "";
+  return `${sourceFilter}${allHits
+    .map((hit) => {
+      const source = hit.source_path || hit.source_summary;
+      const sourceLine = source ? ` Источник: ${source}.` : "";
+      const project =
+        hit.project_name || hit.project_path
+          ? ` Проект: ${hit.project_name || hit.project_path}.`
+          : "";
+      return `- ${hit.title}: ${ruleDiagnosticReasonRu(hit)} Status: ${hit.status}. Use: ${hit.use_policy}. Scope: ${hit.scope_kind || hit.scope}.${sourceLine}${project}`;
+    })
+    .join("\n")}`;
+}
+
+function formatRuleDiagnosticsEn(result: MemoryLookupResult) {
+  const allHits = [...result.same_project_hits, ...result.cross_project_examples];
+  if (allHits.length === 0) return `No matching rule was found. ${result.reason}`;
+  const sourceFilter = result.source_filter
+    ? `Current source filter: ${result.source_filter.label}. If the rule belongs to another source, it may be outside this filtered view.\n\n`
+    : "";
+  return `${sourceFilter}${allHits
+    .map((hit) => {
+      const source = hit.source_path || hit.source_summary;
+      const sourceLine = source ? ` Source: ${source}.` : "";
+      const project =
+        hit.project_name || hit.project_path
+          ? ` Project: ${hit.project_name || hit.project_path}.`
+          : "";
+      return `- ${hit.title}: ${ruleDiagnosticReasonEn(hit)} Status: ${hit.status}. Use: ${hit.use_policy}. Scope: ${hit.scope_kind || hit.scope}.${sourceLine}${project}`;
+    })
+    .join("\n")}`;
+}
+
 function answerRu(
   intent: ManagementChatIntent,
   facts: ManagementChatResponse["facts"],
@@ -1702,6 +2053,9 @@ function answerRu(
   }
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nЯ не буду подставлять открытый проект в опасную команду, потому что запрос похож на sandbox cleanup, а целевой sandbox-проект не выбран однозначно. Сначала выбери нужный проект слева или уточни название.`;
+  }
+  if (destructiveOrSensitive && (intent === "cost" || intent === "settings")) {
+    return `${baseline}\n\nЭто похоже на запрос про внешний или платный AI/model route. Recallant может объяснить, зачем такая эскалация нужна, но не делает paid API вызовы и не включает внешний provider прямо из чата. Следующий безопасный шаг: открыть Cost / Paid API, увидеть причину, ожидаемый scope и approval/audit запись, затем подтвердить отдельно, если это действительно нужно.`;
   }
   if (destructiveOrSensitive && intent !== "source_management") {
     const switchNote = facts.target_project_switched
@@ -1785,7 +2139,7 @@ function answerRu(
       return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
-        return `${baseline}\n\nЯ нашел возможные связанные правила/память по запросу “${memoryLookupResult.query}”. Проверь status/use/scope: только Active rule с подходящим scope обязан применяться агентом.\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
+        return `${baseline}\n\nЯ нашел возможные связанные правила/память по запросу “${memoryLookupResult.query}”. Диагностика ниже показывает, применяется ли каждая запись как binding rule и почему.\n\n${formatRuleDiagnosticsRu(memoryLookupResult)}`;
       }
       return `${baseline}\n\nЕсли правило не применяется, проверь три вещи: оно должно быть Active rule, его scope должен подходить этому проекту или всем проектам, и новая агентская сессия должна получить свежий Context Pack. Если правило только evidence-only, candidate, stale или needs review, агент может видеть его как факт, но не обязан выполнять как правило.`;
     case "status":
@@ -1824,6 +2178,9 @@ function answerEn(
   }
   if (facts.target_project_ambiguous && destructiveOrSensitive) {
     return `${baseline}\n\nI will not substitute the open project into a risky command because the request looks sandbox-related and the target sandbox project is not unambiguous. Select the target project on the left or name it explicitly first.`;
+  }
+  if (destructiveOrSensitive && (intent === "cost" || intent === "settings")) {
+    return `${baseline}\n\nThis looks like a request for an external or paid AI/model route. Recallant can explain why escalation might be useful, but it does not make paid API calls or enable an external provider directly from chat. Safe next step: open Cost / Paid API, review the reason, scope, and approval/audit record, then confirm separately only if it is really needed.`;
   }
   if (destructiveOrSensitive && intent !== "source_management") {
     const switchNote = facts.target_project_switched
@@ -1907,7 +2264,7 @@ function answerEn(
       return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
-        return `${baseline}\n\nI found possibly related rules/memory for “${memoryLookupResult.query}”. Check status/use/scope: only an Active rule with matching scope is binding for the agent.\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
+        return `${baseline}\n\nI found possibly related rules/memory for “${memoryLookupResult.query}”. The diagnostics below show whether each record applies as a binding rule and why.\n\n${formatRuleDiagnosticsEn(memoryLookupResult)}`;
       }
       return `${baseline}\n\nIf a rule is not applying, check three things: it must be an Active rule, its scope must match this project or all projects, and the next agent session must receive a fresh Context Pack. Evidence-only, candidate, stale, or needs-review records can be visible as facts, but they are not binding behavior.`;
     case "status":
@@ -1964,7 +2321,7 @@ function actionsForIntent(
       }
     ];
   }
-  if ((destructiveOrSensitive && intent !== "source_management") || intent === "cleanup") {
+  if (intent === "cleanup") {
     if (targetProject.ambiguous) {
       return [
         {
@@ -2003,6 +2360,36 @@ function actionsForIntent(
           language === "ru"
             ? "Постоянное удаление чувствительной или ошибочной памяти требует отдельного подтверждения."
             : "Permanent erasure of sensitive or wrong memory requires a separate confirmation."
+      }
+    ];
+  }
+
+  if (destructiveOrSensitive && (intent === "cost" || intent === "settings")) {
+    return [
+      {
+        label:
+          language === "ru" ? "Открыть Cost / Paid API approval" : "Open Cost / Paid API approval",
+        kind: "confirmation_required",
+        reason:
+          language === "ru"
+            ? `Ожидающих paid approvals: ${facts.pending_paid_approvals}. Внешний или платный model route требует отдельного подтверждения и audit.`
+            : `Pending paid approvals: ${facts.pending_paid_approvals}. External or paid model routing requires separate confirmation and audit.`
+      }
+    ];
+  }
+
+  if (destructiveOrSensitive && intent !== "source_management") {
+    return [
+      {
+        label:
+          language === "ru"
+            ? "Подтверждение через governed workflow"
+            : "Confirm through governed workflow",
+        kind: "confirmation_required",
+        reason:
+          language === "ru"
+            ? "Этот запрос может затронуть безопасность, доступ, настройки или расходы. Recallant не запускает такие изменения напрямую из чата."
+            : "This request can affect security, access, settings, or cost. Recallant does not run that kind of change directly from chat."
       }
     ];
   }

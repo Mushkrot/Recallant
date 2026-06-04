@@ -50,6 +50,17 @@ assert(
   virtualSpace.memory_space.primary_path === null,
   `Virtual memory space should have no folder: ${JSON.stringify(virtualSpace)}`
 );
+assert(
+  virtualSpace.memory_space.memory_profile?.profile_key === "personal_work_operations" &&
+    virtualSpace.memory_space.memory_profile?.label === "Personal / Work Operations" &&
+    /explicit .*recall/i.test(String(virtualSpace.memory_space.memory_profile?.allowed_recall)) &&
+    /governed recall/i.test(String(virtualSpace.memory_space.memory_profile?.default_isolation)) &&
+    String(virtualSpace.memory_space.memory_profile?.capture_policy).includes(
+      "Passive personal capture"
+    ) &&
+    String(virtualSpace.memory_space.memory_profile?.default_sources).includes("zero sources"),
+  `Virtual personal/work memory space profile missing or unsafe: ${JSON.stringify(virtualSpace)}`
+);
 const virtualProjectId = virtualSpace.memory_space.project_id;
 
 const emptySources = runCli(["source", "list", "--project-id", virtualProjectId]);
@@ -107,8 +118,24 @@ const connectorSource = runCli([
 assert(
   connectorSource.source?.source_health?.status === "needs_setup" &&
     connectorSource.source?.source_health?.label === "Connector source needs setup" &&
-    String(connectorSource.source?.source_health?.reason).includes("Raw secrets must stay outside"),
-  `Connector source should require governed setup without storing secrets: ${JSON.stringify(connectorSource)}`
+    String(connectorSource.source?.source_health?.reason).includes(
+      "Raw secrets must stay outside"
+    ) &&
+    connectorSource.source?.source_access_contract?.access_kind === "connector" &&
+    connectorSource.source?.source_access_contract?.capability_binding_status === "needed" &&
+    String(connectorSource.source?.source_access_contract?.secrets_policy).includes(
+      "Raw secrets stay outside"
+    ) &&
+    connectorSource.source?.source_access_contract?.connector_consent_policy?.consent_state ===
+      "not_requested" &&
+    connectorSource.source?.source_access_contract?.connector_consent_policy?.capture_allowed ===
+      false &&
+    connectorSource.source?.source_access_contract?.connector_consent_policy
+      ?.review_required_before_activation === true &&
+    connectorSource.source?.source_access_contract?.connector_consent_policy?.prohibited_before_active?.includes(
+      "raw connector content"
+    ),
+  `Connector source should require governed consent/setup without storing secrets: ${JSON.stringify(connectorSource)}`
 );
 
 const remoteRepoSource = runCli([
@@ -125,7 +152,12 @@ const remoteRepoSource = runCli([
 ]);
 assert(
   remoteRepoSource.source?.source_health?.status === "needs_setup" &&
-    remoteRepoSource.source?.source_health?.label === "Repository source needs sync or import",
+    remoteRepoSource.source?.source_health?.label === "Repository source needs sync or import" &&
+    remoteRepoSource.source?.source_access_contract?.access_kind === "remote_reference" &&
+    remoteRepoSource.source?.source_access_contract?.capability_binding_status === "needed" &&
+    String(remoteRepoSource.source?.source_access_contract?.health_check_policy).includes(
+      "not probed"
+    ),
   `Remote repo source should require governed sync/import: ${JSON.stringify(remoteRepoSource)}`
 );
 
@@ -143,7 +175,12 @@ const remoteServerSource = runCli([
 ]);
 assert(
   remoteServerSource.source?.source_health?.status === "needs_setup" &&
-    remoteServerSource.source?.source_health?.label === "Server source needs access binding",
+    remoteServerSource.source?.source_health?.label === "Server source needs access binding" &&
+    remoteServerSource.source?.source_access_contract?.access_kind === "remote_reference" &&
+    remoteServerSource.source?.source_access_contract?.capability_binding_status === "needed" &&
+    String(remoteServerSource.source?.source_access_contract?.health_check_policy).includes(
+      "not probed"
+    ),
   `Remote server source should require governed access binding: ${JSON.stringify(remoteServerSource)}`
 );
 
@@ -261,6 +298,80 @@ try {
   assert(
     dashboardProject?.sources?.some((source) => source.source_kind === "workspace_path"),
     `Dashboard did not expose project sources: ${JSON.stringify(dashboardProject)}`
+  );
+  const configuredConnectorSource = await db.attachProjectSource({
+    project_id: ensured.projectId,
+    source_kind: "connector",
+    label: "Configured Drive capability",
+    metadata: {
+      capability_binding_status: "configured",
+      capability_binding_id: "capability://drive/read-only"
+    }
+  });
+  assert(
+    configuredConnectorSource?.source_health?.status === "needs_setup" &&
+      configuredConnectorSource?.source_health?.label === "Connector consent needed" &&
+      configuredConnectorSource?.source_access_contract?.capability_binding_status === "ready" &&
+      configuredConnectorSource?.source_access_contract?.capture_readiness ===
+        "consent_or_capability_needed" &&
+      configuredConnectorSource?.source_access_contract?.connector_consent_policy
+        ?.capture_allowed === false &&
+      !JSON.stringify(configuredConnectorSource).includes("sk-") &&
+      !JSON.stringify(configuredConnectorSource).includes("fixture-secret-value"),
+    `Configured connector capability placeholder should still need consent without secrets: ${JSON.stringify(configuredConnectorSource)}`
+  );
+  const consentReadyConnectorSource = await db.attachProjectSource({
+    project_id: ensured.projectId,
+    source_kind: "connector",
+    label: "Consent ready Drive capability",
+    metadata: {
+      consent_state: "granted",
+      capability_binding_status: "configured",
+      capability_binding_id: "capability://drive/read-only"
+    }
+  });
+  assert(
+    consentReadyConnectorSource?.source_health?.status === "ready" &&
+      consentReadyConnectorSource?.source_access_contract?.capability_binding_status === "ready" &&
+      consentReadyConnectorSource?.source_access_contract?.capture_readiness ===
+        "ready_or_reference_only" &&
+      consentReadyConnectorSource?.source_access_contract?.connector_consent_policy
+        ?.capture_allowed === true,
+    `Consent-ready connector capability should be distinguished from missing capability: ${JSON.stringify(consentReadyConnectorSource)}`
+  );
+
+  const forbiddenSecret = `sk-stage6-${randomUUID().replaceAll("-", "")}`;
+  try {
+    await db.attachProjectSource({
+      project_id: ensured.projectId,
+      source_kind: "connector",
+      label: "Forbidden secret connector",
+      uri: `gdrive:${forbiddenSecret}`,
+      metadata: {
+        capability_binding_status: "configured",
+        raw_token: forbiddenSecret
+      }
+    });
+    throw new Error("Raw connector secret was accepted");
+  } catch (error) {
+    if (!String(error).includes("project source records must not store raw secrets")) {
+      throw error;
+    }
+  }
+  const secretLeak = await db.pool.query(
+    `
+      SELECT
+        (SELECT count(*)::int FROM project_sources WHERE metadata::text LIKE $1 OR label LIKE $1 OR coalesce(uri, '') LIKE $1) AS source_leaks,
+        (SELECT count(*)::int FROM agent_memories WHERE title LIKE $1 OR body LIKE $1 OR metadata::text LIKE $1) AS memory_leaks,
+        (SELECT count(*)::int FROM chunks WHERE text LIKE $1) AS chunk_leaks
+    `,
+    [`%${forbiddenSecret}%`]
+  );
+  assert(
+    secretLeak.rows[0]?.source_leaks === 0 &&
+      secretLeak.rows[0]?.memory_leaks === 0 &&
+      secretLeak.rows[0]?.chunk_leaks === 0,
+    `Raw connector secret leaked into storage: ${JSON.stringify(secretLeak.rows[0])}`
   );
 } finally {
   await db.close();
