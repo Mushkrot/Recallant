@@ -55,6 +55,13 @@ recallant ask "what did the agent remember?" --project-dir .
 Expected result: `doctor --require-capture` reports the project as capture active, and `ask` can
 summarize the test memory that was written.
 
+Maintainers can run the public quickstart smoke to exercise this same path in temporary clean
+directories:
+
+```bash
+npm run public-quickstart:smoke
+```
+
 ## 4. Open The Workbench
 
 Run:

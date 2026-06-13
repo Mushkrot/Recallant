@@ -361,13 +361,13 @@ const securityPath = join(ownerOpsDir, "SECURITY");
 await writeFile(portsFile, "recallant:\n  port: 3005\n  bind: 127.0.0.1\n");
 await mkdir(securityPath);
 const doctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
-  RECALLANT_PORTS_FILE: portsFile,
-  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_SERVER_INVENTORY_FILE: portsFile,
+  RECALLANT_SECURITY_BASELINE_PATH: securityPath,
   RECALLANT_PORT: "3005"
 });
 const doctorText = runRaw(["doctor", "--project-dir", projectDir], {
-  RECALLANT_PORTS_FILE: portsFile,
-  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_SERVER_INVENTORY_FILE: portsFile,
+  RECALLANT_SECURITY_BASELINE_PATH: securityPath,
   RECALLANT_PORT: "3005"
 });
 if (
@@ -418,16 +418,16 @@ if (
   doctor.policy?.preview_models_require_opt_in !== true ||
   doctor.policy?.gemini_3_5_flash_requires_opt_in !== true ||
   doctor.policy?.claude_sonnet_opus_require_quality_profile !== true ||
-  doctor.owner_server_deployment?.ports_file?.registered !== true ||
-  doctor.owner_server_deployment?.security_baseline?.must_consult_before_exposure !== true ||
-  !doctor.owner_server_deployment?.warnings?.some((warning) => warning.includes("SECURITY"))
+  doctor.deployment_profile?.server_inventory?.registered !== true ||
+  doctor.deployment_profile?.security_baseline?.must_consult_before_exposure !== true ||
+  !doctor.deployment_profile?.warnings?.some((warning) => warning.includes("SECURITY"))
 ) {
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
 }
 
 const unreachableDoctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
-  RECALLANT_PORTS_FILE: portsFile,
-  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_SERVER_INVENTORY_FILE: portsFile,
+  RECALLANT_SECURITY_BASELINE_PATH: securityPath,
   RECALLANT_PORT: "3005",
   RECALLANT_OLLAMA_URL: "http://127.0.0.1:1",
   RECALLANT_EXPECTED_OLLAMA_MODELS: "nomic-embed-text,gpt-oss:20b"
@@ -442,8 +442,9 @@ if (
 }
 
 const productionDoctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
-  RECALLANT_PORTS_FILE: portsFile,
-  RECALLANT_SECURITY_PATH: securityPath,
+  RECALLANT_SERVER_INVENTORY_FILE: portsFile,
+  RECALLANT_SECURITY_BASELINE_PATH: securityPath,
+  RECALLANT_PRODUCTION_PROJECT_PATH: projectDir,
   RECALLANT_PORT: "3005",
   RECALLANT_HOST: "127.0.0.1",
   RECALLANT_CLOUDFLARE_MODE: "enabled",
@@ -460,7 +461,7 @@ if (
   productionDoctor.production_readiness?.localhost_only_origin?.ok !== true ||
   productionDoctor.production_readiness?.backup_timer?.enabled !== true ||
   productionDoctor.production_readiness?.latest_backup_verification?.ok !== true ||
-  productionDoctor.production_readiness?.no_duplicate_recallant_project_rows !== true ||
+  productionDoctor.production_readiness?.no_duplicate_deployment_project_rows !== true ||
   productionDoctor.production_readiness?.no_unintended_paid_api_use !== true ||
   productionDoctor.production_readiness?.ready !== true
 ) {

@@ -23,6 +23,8 @@ import { clientTargetConfig, connectClientTargetConfig } from "./client-targets.
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 
+const recallantCliVersion = "0.0.0";
+
 const memorySection = `## Memory (Recallant)
 
 - At session start: call \`memory_start_session\`; if it reports an unclosed previous session, recover from checkpoint/captured events before asking the owner to repeat context.
@@ -50,7 +52,8 @@ function parseEnvValue(raw: string) {
 }
 
 async function loadDefaultEnv() {
-  const envFile = process.env.RECALLANT_ENV_FILE ?? "/opt/secure-configs/recallant.env";
+  const envFile =
+    process.env.RECALLANT_ENV_FILE ?? join(homedir(), ".config", "recallant", "recallant.env");
   if (!process.env.RECALLANT_ENV_FILE && process.env.RECALLANT_DATABASE_URL) return;
   try {
     const content = await readFile(envFile, "utf8");
@@ -1538,39 +1541,53 @@ async function checkOllama() {
   }
 }
 
-async function checkOwnerServerDeployment() {
+async function checkDeploymentProfile() {
   const plannedPort = Number(process.env.RECALLANT_PORT ?? "3005");
-  const portsFile = process.env.RECALLANT_PORTS_FILE ?? "/ai/PORTS.yaml";
-  const securityPath = process.env.RECALLANT_SECURITY_PATH ?? "/ai/SECURITY";
-  const portsContent = await readOptional(portsFile);
-  const portsRegistered = Boolean(
-    portsContent &&
-    portsContent.toLowerCase().includes("recallant") &&
-    portsContent.includes(String(plannedPort))
+  const inventoryFile =
+    process.env.RECALLANT_SERVER_INVENTORY_FILE ?? process.env.RECALLANT_PORTS_FILE ?? null;
+  const securityPath =
+    process.env.RECALLANT_SECURITY_BASELINE_PATH ?? process.env.RECALLANT_SECURITY_PATH ?? null;
+  const inventoryContent = inventoryFile ? await readOptional(inventoryFile) : null;
+  const inventoryRegistered = Boolean(
+    inventoryContent &&
+    inventoryContent.toLowerCase().includes("recallant") &&
+    inventoryContent.includes(String(plannedPort))
   );
-  const securityPresent = await pathPresent(securityPath);
+  const securityPresent = securityPath ? await pathPresent(securityPath) : false;
   const warnings = [];
-  if (!portsRegistered) {
+  if (!inventoryFile) {
     warnings.push(
-      `Planned Recallant service port ${plannedPort} is not registered in ${portsFile}.`
+      "No server inventory file configured; set RECALLANT_SERVER_INVENTORY_FILE before service start."
+    );
+  } else if (!inventoryRegistered) {
+    warnings.push(
+      `Planned Recallant service port ${plannedPort} is not registered in ${inventoryFile}.`
     );
   }
-  warnings.push(
-    `${securityPath} must be consulted before exposure, firewall, Cloudflare, service, or secret changes.`
-  );
+  if (securityPath) {
+    warnings.push(
+      `${securityPath} must be consulted before exposure, firewall, private access, service, or secret changes.`
+    );
+  } else {
+    warnings.push(
+      "No security baseline path configured; set RECALLANT_SECURITY_BASELINE_PATH before public exposure."
+    );
+  }
   return {
     planned_service: {
       name: "recallant",
       port: plannedPort,
       bind_host: process.env.RECALLANT_HOST ?? "127.0.0.1"
     },
-    ports_file: {
-      path: portsFile,
-      present: portsContent !== null,
-      registered: portsRegistered
+    server_inventory: {
+      path: inventoryFile,
+      configured: Boolean(inventoryFile),
+      present: inventoryContent !== null,
+      registered: inventoryRegistered
     },
     security_baseline: {
       path: securityPath,
+      configured: Boolean(securityPath),
       present: securityPresent,
       must_consult_before_exposure: true
     },
@@ -1598,9 +1615,8 @@ async function latestBackupVerificationStatus() {
   const envStatus = process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS;
   if (envStatus) return { status: envStatus, ok: envStatus === "passed", source: "env" };
 
-  const verificationPath =
-    process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_FILE ??
-    "/ai/recallant-data/backups/latest-verification.json";
+  const verificationPath = process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_FILE;
+  if (!verificationPath) return { status: "unknown", ok: false, source: "not_configured" };
   try {
     const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
     const status = String(parsed.restore_verification ?? parsed.status ?? "unknown");
@@ -1613,9 +1629,8 @@ async function latestBackupVerificationStatus() {
       manifest_path: parsed.manifest_path ?? null
     };
   } catch {
-    const manifestPath =
-      process.env.RECALLANT_LATEST_BACKUP_MANIFEST ??
-      "/ai/recallant-data/backups/latest-manifest.json";
+    const manifestPath = process.env.RECALLANT_LATEST_BACKUP_MANIFEST;
+    if (!manifestPath) return { status: "unknown", ok: false, source: "missing" };
     try {
       const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as {
         restore_verification?: { status?: string };
@@ -1628,7 +1643,7 @@ async function latestBackupVerificationStatus() {
   }
 }
 
-async function checkProductionReadiness(postgresReachable: boolean) {
+async function checkProductionReadiness(postgresReachable: boolean, projectDir: string) {
   const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
   const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
   const edgeAuth = process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH ?? "disabled";
@@ -1645,8 +1660,9 @@ async function checkProductionReadiness(postgresReachable: boolean) {
       ? { enabled: true, status: "enabled", source: "env" }
       : systemdBackupTimerStatus();
   const latestBackupVerification = await latestBackupVerificationStatus();
-  let duplicateRecallantProjectRows: number | null = null;
+  let deploymentProjectRows: number | null = null;
   let unintendedPaidApiSuccessCalls30d: number | null = null;
+  const readinessProjectPath = process.env.RECALLANT_PRODUCTION_PROJECT_PATH ?? projectDir;
   if (process.env.RECALLANT_DATABASE_URL) {
     const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
     const developerId = process.env.RECALLANT_DEVELOPER_ID ?? null;
@@ -1658,26 +1674,26 @@ async function checkProductionReadiness(postgresReachable: boolean) {
             (
               SELECT count(*)::int
               FROM projects
-              WHERE primary_path = '/ai/recallant'
+              WHERE primary_path = $2
                 AND ($1::uuid IS NULL OR developer_id = $1::uuid)
             ) AS recallant_project_rows,
             (
               SELECT count(*)::int
               FROM model_calls c
               JOIN projects p ON p.id = c.project_id
-              WHERE p.primary_path = '/ai/recallant'
+              WHERE p.primary_path = $2
                 AND ($1::uuid IS NULL OR p.developer_id = $1::uuid)
                 AND c.route_class = 'paid_api_provider'
                 AND c.status = 'success'
                 AND c.created_at >= now() - interval '30 days'
             ) AS paid_api_success_calls
         `,
-        [developerId]
+        [developerId, readinessProjectPath]
       );
-      duplicateRecallantProjectRows = Number(checks.rows[0]?.recallant_project_rows ?? 0);
+      deploymentProjectRows = Number(checks.rows[0]?.recallant_project_rows ?? 0);
       unintendedPaidApiSuccessCalls30d = Number(checks.rows[0]?.paid_api_success_calls ?? 0);
     } catch {
-      duplicateRecallantProjectRows = null;
+      deploymentProjectRows = null;
       unintendedPaidApiSuccessCalls30d = null;
     } finally {
       await client.end();
@@ -1714,9 +1730,10 @@ async function checkProductionReadiness(postgresReachable: boolean) {
       source: backupTimer.source
     },
     latest_backup_verification: latestBackupVerification,
-    recallant_project_rows: duplicateRecallantProjectRows,
-    no_duplicate_recallant_project_rows:
-      duplicateRecallantProjectRows === null ? null : duplicateRecallantProjectRows <= 1,
+    deployment_project_path: readinessProjectPath,
+    deployment_project_rows: deploymentProjectRows,
+    no_duplicate_deployment_project_rows:
+      deploymentProjectRows === null ? null : deploymentProjectRows <= 1,
     unintended_paid_api_success_calls_30d: unintendedPaidApiSuccessCalls30d,
     no_unintended_paid_api_use:
       unintendedPaidApiSuccessCalls30d === null ? null : unintendedPaidApiSuccessCalls30d === 0,
@@ -1727,8 +1744,8 @@ async function checkProductionReadiness(postgresReachable: boolean) {
       edgeAuth === "required" &&
       backupTimer.enabled &&
       latestBackupVerification.ok &&
-      duplicateRecallantProjectRows !== null &&
-      duplicateRecallantProjectRows <= 1 &&
+      deploymentProjectRows !== null &&
+      deploymentProjectRows <= 1 &&
       unintendedPaidApiSuccessCalls30d !== null &&
       unintendedPaidApiSuccessCalls30d === 0
   };
@@ -1835,11 +1852,11 @@ async function runDoctor(argv: readonly string[]) {
         claude_sonnet_opus_require_quality_profile: true,
         starts_local_services: false
       },
-      owner_server_deployment: await checkOwnerServerDeployment(),
-      production_readiness: await checkProductionReadiness(postgres.reachable),
-      owner_server_notes: [
-        "/ai/PORTS.yaml must be checked before service start",
-        "/ai/SECURITY must be consulted before public exposure"
+      deployment_profile: await checkDeploymentProfile(),
+      production_readiness: await checkProductionReadiness(postgres.reachable, projectDir),
+      deployment_notes: [
+        "Set RECALLANT_SERVER_INVENTORY_FILE before service start.",
+        "Set RECALLANT_SECURITY_BASELINE_PATH before public exposure."
       ]
     };
     process.stdout.write(
@@ -4404,6 +4421,10 @@ async function runSourceCommand(argv: readonly string[]) {
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
+  if (command === "--version" || command === "-v" || command === "version") {
+    process.stdout.write(`recallant ${recallantCliVersion}\n`);
+    return;
+  }
   if (command === "mcp-server") {
     await runRecallantStdioServer();
     return;

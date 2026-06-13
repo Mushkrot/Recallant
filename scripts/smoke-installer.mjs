@@ -50,14 +50,14 @@ function staticDryRunPlan(args, env = {}) {
       ? join(home, ".config", "recallant", "recallant.env")
       : profile === "managed-server"
         ? "/etc/recallant/recallant.env"
-        : "/opt/secure-configs/recallant.env");
+        : "/etc/recallant/recallant.env");
   const dataDir =
     option("--data-dir") ??
     (profile === "single-user"
       ? join(home, ".local", "share", "recallant")
       : profile === "managed-server"
         ? "/var/lib/recallant"
-        : "/ai/recallant-data");
+        : "/var/lib/recallant");
   const prefix =
     option("--install-cli-prefix") ??
     (profile === "single-user" ? join(home, ".local", "bin") : "/usr/local/bin");
@@ -196,8 +196,8 @@ assert(
   "Installer must write selected Postgres/Compose settings"
 );
 assert(
-  prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}') &&
-    prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
+  prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}') &&
+    prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}') &&
     prodComposeSource.includes('POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}') &&
     prodComposeSource.includes('POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}') &&
     prodComposeSource.includes('COMPOSE_PROJECT_NAME=${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}') &&
@@ -206,14 +206,15 @@ assert(
   "Production compose wrapper must honor selected env/data/Postgres/Compose settings"
 );
 assert(
-  prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/ai/recallant-data}/postgres") &&
+  prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/var/lib/recallant}/postgres") &&
     prodComposeYaml.includes("${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}") &&
     prodComposeYaml.includes("${RECALLANT_POSTGRES_HOST:-127.0.0.1}:${RECALLANT_POSTGRES_PORT:-15432}:5432"),
   "Production compose must use profile-driven Postgres data, container, and port settings"
 );
 assert(
-  backupSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}') &&
-    backupSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
+  backupSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}') &&
+    backupSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}') &&
+    backupSource.includes('RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}') &&
     backupSource.includes('BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}'),
   "Production backup script must honor profile env/data paths"
 );

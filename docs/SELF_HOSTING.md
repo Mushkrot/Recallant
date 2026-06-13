@@ -97,10 +97,13 @@ Maintainers can also run the public clean-host smoke before release work:
 
 ```bash
 npm run public-clean-host:smoke
+npm run public-quickstart:smoke
 ```
 
-That smoke validates install-plan dry-runs, profile defaults, override handling, and the installed
-CLI wrapper in isolated temporary directories. The rollback smoke validates dry-run behavior,
+Those smokes validate install-plan dry-runs, profile defaults, override handling, the installed CLI
+wrapper, and a fresh quickstart path in isolated temporary directories. The quickstart smoke installs
+the wrapper, runs `recallant onboard --client codex --install-local-hooks --verify`, proves
+`doctor --require-capture`, and checks `ask` recall. The rollback smoke validates dry-run behavior,
 confirmed cleanup of marked disposable artifacts, and refusal to remove unmarked data directories:
 
 ```bash

@@ -106,8 +106,8 @@ case "$INSTALL_PROFILE" in
     INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-/usr/local/bin}"
     ;;
   owner-server)
-    ENV_FILE="${ENV_FILE:-/opt/secure-configs/recallant.env}"
-    DATA_DIR="${DATA_DIR:-/ai/recallant-data}"
+    ENV_FILE="${ENV_FILE:-/etc/recallant/recallant.env}"
+    DATA_DIR="${DATA_DIR:-/var/lib/recallant}"
     INSTALL_CLI_PREFIX="${INSTALL_CLI_PREFIX:-/usr/local/bin}"
     ;;
   single-user)

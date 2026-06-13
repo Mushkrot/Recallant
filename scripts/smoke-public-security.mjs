@@ -61,6 +61,32 @@ for (const path of publicDocs) {
   mustNotMatch(text, forbidden, path);
 }
 
+const publicCode = [
+  "apps/cli/src/index.ts",
+  "apps/server/src/index.ts",
+  "scripts/install-recallant.sh",
+  "scripts/install-recallant-cli.sh",
+  "scripts/install-recallant-bootstrap.sh",
+  "scripts/recallant-prod-compose.sh",
+  "scripts/recallant-production-backup.sh",
+  "scripts/rollback-recallant-install.sh",
+  "scripts/smoke-public-quickstart.mjs",
+  "docker-compose.production.yml",
+  "package.json"
+];
+
+const forbiddenOwnerCodeMarkers = [
+  /\/ai\/SECURITY/i,
+  /\/ai\/PORTS\.yaml/i,
+  /\/ai\/recallant-data/i,
+  /\/opt\/secure-configs/i,
+  /unicloud\.ca/i
+];
+for (const path of publicCode) {
+  const text = await read(path);
+  mustNotMatch(text, forbiddenOwnerCodeMarkers, path);
+}
+
 const packageJson = JSON.parse(await read("package.json"));
 assert(
   packageJson.scripts?.["security-review:smoke"] === "node scripts/smoke-security-review.mjs",

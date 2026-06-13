@@ -108,7 +108,8 @@ Current strengths:
 - first agent-ready project onboarding path;
 - existing-project migration reports with local backups, import counts, review-needed counts, and
   raw-secret signals;
-- clean-host dry-run, CLI-wrapper validation, and opt-in Docker-backed managed install smoke;
+- clean-host dry-run, fresh public quickstart validation, CLI-wrapper validation, and opt-in
+  Docker-backed managed install smoke;
 - neutral non-owner migration smoke with original-project safety checks;
 - Workbench migration review queue for imported evidence, conflicts, secret references, and stale
   handoffs;
@@ -119,11 +120,11 @@ Current strengths:
 
 Known pre-release work:
 
-- final clean-host install validation;
+- external-host release rehearsal beyond the disposable clean-host smokes;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
 - broader real-world existing-project migration pilots;
-- security review and release hardening;
+- independent release hardening;
 - packaging and versioned release tags.
 
 ## License

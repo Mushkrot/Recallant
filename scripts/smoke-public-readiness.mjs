@@ -133,6 +133,7 @@ mustInclude(
     "Cross-project examples",
     "Safety gates",
     "npm run public-clean-host:smoke",
+    "npm run public-quickstart:smoke",
     "npm run public-install-rollback:smoke",
     "npm run security-review:smoke",
     "npm run non-owner-migration:smoke",
@@ -190,6 +191,7 @@ mustInclude(
     "Neutral non-owner migration smoke",
     "Opt-in real-project pilot smoke",
     "Workbench migration review queue",
+    "Public quickstart smoke",
     "autonomous browser QA",
     "Security review smoke",
     "Autonomous attach polish",
@@ -210,6 +212,15 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run non-owner-migration:smoke"),
   "smoke:core must include non-owner-migration:smoke"
+);
+assert(
+  packageJson.scripts?.["public-quickstart:smoke"] ===
+    "node scripts/smoke-public-quickstart.mjs",
+  "package.json must expose public-quickstart:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run public-quickstart:smoke"),
+  "smoke:core must include public-quickstart:smoke"
 );
 assert(
   packageJson.scripts?.["security-review:smoke"] === "node scripts/smoke-security-review.mjs",

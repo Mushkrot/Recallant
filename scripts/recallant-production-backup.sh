@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-ENV_FILE=${RECALLANT_ENV_FILE:-/opt/secure-configs/recallant.env}
-DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}
+RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
+ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}
+DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}
 BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -14,7 +15,7 @@ set -a
 . "$ENV_FILE"
 set +a
 
-cd /ai/recallant
+cd "$RECALLANT_HOME"
 mkdir -p "$BACKUP_TARGET"
 
 backup_output=$(node apps/cli/dist/index.js backup --target "$BACKUP_TARGET")
