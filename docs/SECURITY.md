@@ -62,7 +62,9 @@ The public security review is executable, not only narrative. Run:
 Together these cover install/auth/Workbench/backups/secrets: private-by-default HTTP binding,
 Cloudflare/private access preconditions, Workbench auth, browser-facing secret redaction, generated
 secret file permissions, rollback confirmation, redacted local backups, and static checks that the
-runtime Workbench smoke keeps exercising secret and route exposure cases.
+runtime Workbench smoke keeps exercising secret and route exposure cases. The public security smoke
+also scans public docs and public runtime/install code for owner-only paths and deployment markers so
+private overlays stay out of the OSS surface.
 
 ## Reporting Issues
 

@@ -116,6 +116,7 @@ Current strengths:
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - explicit security and cost governance design;
+- public/private boundary guards across docs and runtime/install defaults;
 - smoke coverage for the core capture/recall path.
 
 Known pre-release work:

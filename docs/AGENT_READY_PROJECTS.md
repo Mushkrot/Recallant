@@ -134,4 +134,5 @@ and safety gates.
 Concrete deployment overlays belong outside the public product docs: actual server inventories,
 domain names, private access-provider configuration, secret-store paths, customer data, internal
 handoffs, and owner-specific resource maps. Public docs should explain the model; private profiles
-should provide the local values.
+should provide the local values through environment variables, source/capability records, and
+deployment-profile notes.

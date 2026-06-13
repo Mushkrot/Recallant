@@ -131,6 +131,18 @@ connector accounts, and service-specific runtime settings. Recallant should repr
 deployment profiles, source records, capability references, and secret references. Public project
 docs should describe the pattern; private environments provide the actual values.
 
+Public defaults are intentionally generic. Private deployments can provide local values through
+environment variables such as:
+
+- `RECALLANT_SERVER_INVENTORY_FILE`
+- `RECALLANT_SECURITY_BASELINE_PATH`
+- `RECALLANT_PRODUCTION_PROJECT_PATH`
+- `RECALLANT_LATEST_BACKUP_VERIFICATION_FILE`
+- `RECALLANT_LATEST_BACKUP_MANIFEST`
+
+Those variables let `recallant doctor` and production-readiness checks reference a private
+deployment profile without baking owner-specific paths into public code or docs.
+
 Do not put raw credentials, private endpoint tokens, or customer data in a repository just so an
 agent can find them. Store secret values in the environment or a secret store and let Recallant hold
 only the safe reference.
