@@ -28,6 +28,7 @@ const publicDocs = [
   "docs/README.md",
   "docs/QUICKSTART.md",
   "docs/AGENT_READY_PROJECTS.md",
+  "docs/CONTRACT_STATUS.md",
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
   "docs/REFERENCE_PROJECTS.md",
@@ -62,6 +63,7 @@ mustInclude(
     "recallant doctor --project-dir . --require-capture",
     "capture active",
     "docs/AGENT_READY_PROJECTS.md",
+    "docs/CONTRACT_STATUS.md",
     "pre-release",
     "docs/WHY_RECALLANT.md",
     "docs/COMPARISON.md",
@@ -116,6 +118,23 @@ mustInclude(
     "capture active"
   ],
   "AGENT_READY_PROJECTS"
+);
+
+const contractStatus = await read("docs/CONTRACT_STATUS.md");
+mustInclude(
+  contractStatus,
+  [
+    "Product Contract Status",
+    "Contract Coverage",
+    "Agent-ready project onboarding",
+    "Existing-project migration",
+    "Capture-active proof",
+    "Source, capability, and secret references",
+    "Cross-project examples",
+    "Safety gates",
+    "Release-Candidate Bar"
+  ],
+  "CONTRACT_STATUS"
 );
 
 const comparison = await read("docs/COMPARISON.md");

@@ -85,6 +85,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
 - [Quickstart](docs/QUICKSTART.md): install Recallant and prove one project can remember.
 - [Agent-ready projects](docs/AGENT_READY_PROJECTS.md): autonomous attach, thin bootstrap files,
   source references, and safety gates.
+- [Product contract status](docs/CONTRACT_STATUS.md): current coverage, evidence, and remaining
+  release work.
 - [Why Recallant](docs/WHY_RECALLANT.md): problem statement and community value.
 - [Comparison](docs/COMPARISON.md): inspirations, alternatives, and the gap Recallant fills.
 - [Reference projects](docs/REFERENCE_PROJECTS.md): external projects Recallant studies, what to

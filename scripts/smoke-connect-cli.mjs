@@ -100,7 +100,7 @@ assert(
     dryRunText.stdout.includes("Recallant connect") &&
     dryRunText.stdout.includes("Agent client: codex") &&
     dryRunText.stdout.includes("Local hooks: skipped") &&
-    dryRunText.stdout.includes("Capture configured but not yet proven: yes") &&
+    dryRunText.stdout.includes("Capture configured/proven: configured_without_local_hooks") &&
     dryRunText.stdout.includes("Verification command: recallant doctor --project-dir") &&
     dryRunText.stdout.includes("Next command: recallant connect codex --project-dir") &&
     dryRunText.stdout.includes("JSON output: recallant connect codex"),

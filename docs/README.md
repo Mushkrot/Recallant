@@ -8,6 +8,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
 - [Quickstart](QUICKSTART.md): install Recallant and prove one project can remember.
 - [Agent-ready projects](AGENT_READY_PROJECTS.md): autonomous attach, thin bootstrap files, source
   references, and safety gates.
+- [Product contract status](CONTRACT_STATUS.md): current coverage, evidence, and remaining release
+  work.
 - [Why Recallant](WHY_RECALLANT.md): why governed agent memory matters.
 - [Comparison](COMPARISON.md): related projects and the gap Recallant fills.
 - [Reference projects](REFERENCE_PROJECTS.md): external projects Recallant studies, what to borrow,
