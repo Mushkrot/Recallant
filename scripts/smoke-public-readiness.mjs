@@ -132,6 +132,8 @@ mustInclude(
     "Source, capability, and secret references",
     "Cross-project examples",
     "Safety gates",
+    "npm run public-clean-host:smoke",
+    "npm run non-owner-migration:smoke",
     "Release-Candidate Bar"
   ],
   "CONTRACT_STATUS"
@@ -180,11 +182,24 @@ mustInclude(
   [
     "Current",
     "Agent-ready project bootstrap",
+    "Neutral non-owner migration smoke",
     "Autonomous attach polish",
+    "opt-in Docker-backed managed install smoke",
     "Deployment-profile",
     "Codex For OSS Use"
   ],
   "ROADMAP"
+);
+
+const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+assert(
+  packageJson.scripts?.["non-owner-migration:smoke"] ===
+    "node scripts/smoke-non-owner-migration.mjs",
+  "package.json must expose non-owner-migration:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run non-owner-migration:smoke"),
+  "smoke:core must include non-owner-migration:smoke"
 );
 
 const forbiddenPrivateMarkers = [

@@ -62,6 +62,11 @@ Recallant should treat those files as migration inputs:
 Historical material is evidence by default. It should not become an instruction-grade rule unless a
 trusted import path, explicit owner action, or review policy allows it.
 
+For public release validation, Recallant keeps a neutral non-owner migration smoke that attaches a
+sandbox copy of an existing-project fixture, verifies the original project is untouched, requires a
+local redacted backup, checks the migration summary, and confirms imported material stays reviewed
+evidence rather than silent instructions.
+
 ## Agent Session Contract
 
 After onboarding, agents should follow the same session loop:

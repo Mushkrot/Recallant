@@ -93,6 +93,24 @@ Recallant distinguishes:
 - **configured:** project files or client settings exist;
 - **capture active:** Recallant has observed real session/context/memory/checkpoint evidence.
 
+Maintainers can also run the public clean-host smoke before release work:
+
+```bash
+npm run public-clean-host:smoke
+```
+
+That smoke validates install-plan dry-runs, profile defaults, override handling, and the installed
+CLI wrapper in isolated temporary directories. For an opt-in Docker-backed managed install smoke:
+
+```bash
+RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke
+```
+
+The managed install smoke intentionally starts local infrastructure in temporary directories, proves
+Postgres reachability, attaches a project, writes capture evidence, verifies `doctor
+--require-capture`, and removes the temporary container afterward. Independent-host validation is
+still recommended before a release-candidate tag.
+
 ## Private Deployment Profiles
 
 Self-hosted installs often need local server inventories, private access providers, secret stores,

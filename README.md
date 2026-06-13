@@ -108,6 +108,8 @@ Current strengths:
 - first agent-ready project onboarding path;
 - existing-project migration reports with local backups, import counts, review-needed counts, and
   raw-secret signals;
+- clean-host dry-run, CLI-wrapper validation, and opt-in Docker-backed managed install smoke;
+- neutral non-owner migration smoke with original-project safety checks;
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - explicit security and cost governance design;
