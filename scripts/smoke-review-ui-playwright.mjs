@@ -50,6 +50,8 @@ async function assertResponsiveBounds(page, label) {
       ".memory-space",
       ".source-card",
       ".source-tree-group",
+      ".migration-review",
+      ".migration-review-lanes article",
       ".review-lane",
       ".activity-group",
       ".activity-item",
@@ -206,7 +208,7 @@ async function run() {
     projectPath,
     missingSourcePath,
     "/ai/",
-    "recallant.unicloud.ca",
+    "owner-private-domain.example",
     "AGENTS.md",
     "sk-",
     "postgres://"
@@ -539,6 +541,94 @@ async function run() {
       ]
     );
   }
+  const migrationSecretRef = await db.pool.query(
+    `
+      INSERT INTO agent_memories (
+        developer_id, project_id, scope, scope_kind, scope_id, audience,
+        memory_type, title, body, status, use_policy, confidence, created_by, metadata
+      )
+      VALUES ($1, $2, 'project', 'project', $7, $3, 'environment_fact', $4, $5,
+              'candidate', 'evidence_only', 0.58, 'import', $6)
+      RETURNING id
+    `,
+    [
+      developerId,
+      projectId,
+      JSON.stringify([{ kind: "all_agents", id: null }]),
+      "Imported capability reference needs owner review",
+      "The migrated environment example named connector keys without storing values. Keep it as a capability reference only.",
+      JSON.stringify({
+        smoke: "playwright",
+        dense_fixture: true,
+        result_classes: [
+          "secret_reference_names_only",
+          "capability_binding",
+          "connector_account_binding"
+        ],
+        risk: "high",
+        policy_reason: "secret_reference_review_required"
+      }),
+      projectId
+    ]
+  );
+  const migrationSecretRefId = migrationSecretRef.rows[0]?.id;
+  assert(migrationSecretRefId, "migration secret-reference candidate was not created");
+  await db.pool.query(
+    `
+      INSERT INTO agent_memory_source_refs (memory_id, source_kind, source_id, quote, metadata)
+      VALUES ($1, 'external', $2, 'migrated environment example', $3)
+    `,
+    [
+      migrationSecretRefId,
+      importedDocSource.id,
+      JSON.stringify({
+        project_source_id: importedDocSource.id,
+        source_path: "Environment example"
+      })
+    ]
+  );
+  const migrationLowRisk = await db.pool.query(
+    `
+      INSERT INTO agent_memories (
+        developer_id, project_id, scope, scope_kind, scope_id, audience,
+        memory_type, title, body, status, use_policy, confidence, created_by, metadata
+      )
+      VALUES ($1, $2, 'project', 'project', $7, $3, 'environment_fact', $4, $5,
+              'candidate', 'recall_allowed', 0.8, 'import', $6)
+      RETURNING id
+    `,
+    [
+      developerId,
+      projectId,
+      JSON.stringify([{ kind: "all_agents", id: null }]),
+      "Imported low-risk project convention",
+      "This migrated note is safe evidence after review and does not contain stale history or capability bindings.",
+      JSON.stringify({
+        smoke: "playwright",
+        dense_fixture: true,
+        result_classes: ["project_convention"],
+        risk: "low",
+        policy_reason: "migration_candidate_review"
+      }),
+      projectId
+    ]
+  );
+  const migrationLowRiskId = migrationLowRisk.rows[0]?.id;
+  assert(migrationLowRiskId, "migration low-risk candidate was not created");
+  await db.pool.query(
+    `
+      INSERT INTO agent_memory_source_refs (memory_id, source_kind, source_id, quote, metadata)
+      VALUES ($1, 'external', $2, 'low-risk migrated convention', $3)
+    `,
+    [
+      migrationLowRiskId,
+      importedDocSource.id,
+      JSON.stringify({
+        project_source_id: importedDocSource.id,
+        source_path: "Project convention note"
+      })
+    ]
+  );
   const conflictSource = denseMemorySources.at(-1) ?? importedDocSource;
   const conflictMemory = await db.createAgentMemory({
     memory_type: "environment_fact",
@@ -829,6 +919,35 @@ async function run() {
     await visibleBox(desktop.locator("#review"), "desktop focused Review");
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
+    const migrationQueue = desktop.locator("#review .migration-review");
+    await visibleBox(migrationQueue, "desktop migration review queue");
+    await desktop.getByText("Migration review queue").waitFor();
+    await desktop.getByText("Review imported evidence before active rules.").waitFor();
+    const migrationLaneCount = await desktop
+      .locator("#review .migration-review-lanes article")
+      .count();
+    assert(
+      migrationLaneCount === 4,
+      `migration review queue should show four priority lanes, found ${migrationLaneCount}`
+    );
+    const expectedMigrationLanes = [
+      { label: "Conflicts and duplicates", min: 1 },
+      { label: "Secret and capability references", min: 1 },
+      { label: "Stale handoffs", min: 1 },
+      { label: "Low-risk imported evidence", min: 1 }
+    ];
+    for (const expectedLane of expectedMigrationLanes) {
+      const lane = desktop.locator("#review .migration-review-lanes article").filter({
+        hasText: expectedLane.label
+      });
+      await visibleBox(lane.first(), `desktop migration lane ${expectedLane.label}`);
+      const laneText = await lane.first().innerText();
+      const laneCount = Number(laneText.match(/\n(\d+)\n/)?.[1] ?? "NaN");
+      assert(
+        laneCount >= expectedLane.min,
+        `migration lane ${expectedLane.label} expected at least ${expectedLane.min}, found ${laneText}`
+      );
+    }
     const importedEvidenceLane = desktop.locator(".review-lane").filter({
       hasText: "Imported evidence"
     });
@@ -852,6 +971,10 @@ async function run() {
     );
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-dense-review.png"),
+      fullPage: true
+    });
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-migration-review-queue.png"),
       fullPage: true
     });
     await saveScreenshotPair(
@@ -969,6 +1092,7 @@ async function run() {
             join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
             join(reportDir, "recallant-workbench-desktop-focused-review.png"),
             join(reportDir, "recallant-workbench-dense-review.png"),
+            join(reportDir, "recallant-workbench-migration-review-queue.png"),
             join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
             join(reportDir, "recallant-workbench-dense-mobile.png"),
@@ -984,6 +1108,7 @@ async function run() {
             "desktop_focused_sources_view",
             "memory_tree_source_map",
             "review_decision_workflow",
+            "migration_review_queue_browser_qa",
             "public_safe_screenshot_candidates",
             "desktop_focused_source_filtered_activity_view",
             "activity_replay_readability",

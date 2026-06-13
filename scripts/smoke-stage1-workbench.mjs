@@ -30,8 +30,9 @@ function forbidMarkers(text, markers, label) {
 }
 
 async function run() {
-  const stagePlan = await readText("stage_goals/stage_1/Stage 1 sub stages.md");
-  const productionTarget = await readText("stage_goals/stage_1/Stage 1 Production UI Target.md");
+  const contractStatus = await readText("docs/CONTRACT_STATUS.md");
+  const roadmap = await readText("docs/ROADMAP.md");
+  const agentReadyProjects = await readText("docs/AGENT_READY_PROJECTS.md");
   const serverUi = await readText("apps/server/src/index.ts");
   const htmlSmoke = await readText("scripts/smoke-review-ui.mjs");
   const playwrightSmoke = await readText("scripts/smoke-review-ui-playwright.mjs");
@@ -39,37 +40,41 @@ async function run() {
   const acceptanceReportDir = process.env.RECALLANT_STAGE1_ACCEPTANCE_REPORT_DIR ?? "/tmp";
   const publicReportDir = join(reportDir, "public-safe-candidates");
 
-  for (let goal = 1; goal <= 12; goal += 1) {
-    const marker = `## Goal 1.${goal}:`;
-    const section = stagePlan.slice(
-      stagePlan.indexOf(marker),
-      stagePlan.indexOf(`## Goal 1.${goal + 1}:`) > -1
-        ? stagePlan.indexOf(`## Goal 1.${goal + 1}:`)
-        : stagePlan.length
-    );
-    assert(
-      stagePlan.includes(marker) && section.includes("Status: completed."),
-      `Stage 1 Goal 1.${goal} is not marked completed`
-    );
-  }
-  const gateMarker = "## Goal 1.13:";
-  const gateSection = stagePlan.slice(stagePlan.indexOf(gateMarker));
-  assert(
-    stagePlan.includes(gateMarker) &&
-      (gateSection.includes("Status: pending.") || gateSection.includes("Status: completed.")),
-    "Stage 1 Goal 1.13 is missing or has an invalid status"
+  requireMarkers(
+    contractStatus,
+    [
+      "Governed memory and review",
+      "Workbench migration review queue",
+      "browser-level Workbench QA",
+      "npm run review-ui:playwright",
+      "autonomous Workbench browser QA",
+      "public screenshots with synthetic data only"
+    ],
+    "Public Workbench contract status"
   );
 
   requireMarkers(
-    productionTarget,
+    roadmap,
     [
-      "Ask-first Workbench",
-      "Memory Tree / Source Map",
-      "Secondary areas should be available through focused views",
-      "Stage 1 acceptance must fail if",
-      "Stage 1 is production-complete"
+      "Workbench migration review queue",
+      "Public screenshot set with synthetic data only",
+      "autonomous browser QA",
+      "Reference-backed Workbench polish"
     ],
-    "Stage 1 production UI target"
+    "Public Workbench roadmap"
+  );
+
+  requireMarkers(
+    agentReadyProjects,
+    [
+      "In the Workbench, migrated projects should expose a migration review queue",
+      "conflicts and duplicates",
+      "secret or",
+      "capability references",
+      "stale handoffs",
+      "low-risk imported evidence"
+    ],
+    "Agent-ready project Workbench contract"
   );
 
   requireMarkers(
@@ -142,6 +147,7 @@ async function run() {
       "desktop_focused_settings_view",
       "dense_state_desktop_responsive",
       "dense_review_scannable",
+      "migration_review_queue_browser_qa",
       "public_safe_screenshot_candidates",
       "mobile_chat_answer_readable"
     ],
@@ -156,6 +162,7 @@ async function run() {
     join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
     join(reportDir, "recallant-workbench-desktop-focused-review.png"),
     join(reportDir, "recallant-workbench-dense-review.png"),
+    join(reportDir, "recallant-workbench-migration-review-queue.png"),
     join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
     join(reportDir, "recallant-workbench-desktop-chat.png"),
     join(reportDir, "recallant-workbench-dense-mobile.png"),
@@ -179,20 +186,18 @@ async function run() {
   const report = {
     status: "ok",
     stage: "Stage 1: Human Workbench UI",
-    production_gate: gateSection.includes("Status: completed.") ? "complete" : "passed_pending_1.13",
-    production_target: "stage_goals/stage_1/Stage 1 Production UI Target.md",
+    production_gate: "public_contract_checked",
+    production_target: "docs/CONTRACT_STATUS.md",
     verified: [
-      "Stage 1 sub-goals 1.1 through 1.12 are marked completed",
-      gateSection.includes("Status: completed.")
-        ? "Stage 1 production visual acceptance gate 1.13 is completed"
-        : "Stage 1 production visual acceptance gate 1.13 has passed and is ready to mark completed",
-      "Stage 1 production target is present and referenced",
+      "public Workbench contract status is self-contained",
+      "agent-ready project docs define the migration review queue",
       "default Workbench language is human-first",
       "technical values remain behind details or technical smokes",
       "Ask Recallant is first and primary in the Workbench order",
       "Memory Tree / Source Map product surface is present",
       "secondary operations are collapsed into the Operations drawer",
       "Ask Recallant, Memory Spaces, Source Map, Activity, Review, Settings, and Operations are covered",
+      "migration review queue browser QA is covered",
       "desktop and mobile Playwright evidence screenshots exist",
       "public-safe screenshot candidates exist"
     ],
