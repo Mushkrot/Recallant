@@ -134,6 +134,7 @@ mustInclude(
     "Safety gates",
     "npm run public-clean-host:smoke",
     "npm run non-owner-migration:smoke",
+    "Workbench migration review queue",
     "Release-Candidate Bar"
   ],
   "CONTRACT_STATUS"
@@ -183,6 +184,7 @@ mustInclude(
     "Current",
     "Agent-ready project bootstrap",
     "Neutral non-owner migration smoke",
+    "Workbench migration review queue",
     "Autonomous attach polish",
     "opt-in Docker-backed managed install smoke",
     "Deployment-profile",

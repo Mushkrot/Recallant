@@ -67,6 +67,11 @@ sandbox copy of an existing-project fixture, verifies the original project is un
 local redacted backup, checks the migration summary, and confirms imported material stays reviewed
 evidence rather than silent instructions.
 
+In the Workbench, migrated projects should expose a migration review queue instead of leaving
+maintainers to infer priority from a flat inbox. The queue groups conflicts and duplicates, secret or
+capability references, stale handoffs, and low-risk imported evidence so owners can decide what to
+keep as usable memory, reject as noise, or promote only after source-backed review.
+
 ## Agent Session Contract
 
 After onboarding, agents should follow the same session loop:

@@ -172,6 +172,56 @@ await db.pool.query(
     JSON.stringify([{ provider: "openai", model: "gpt-5.4" }])
   ]
 );
+const envImportText =
+  "Imported .env.example references OPENAI_API_KEY, GITHUB_TOKEN, and DATABASE_URL without storing values.";
+const envImport = await db.importSource({
+  client_kind: "recallant-review-smoke",
+  project_path: process.cwd(),
+  source_path: ".env.example",
+  source_type: "env_example",
+  source_sha256: createHash("sha256").update(envImportText).digest("hex"),
+  source_size_bytes: envImportText.length,
+  content_type: "text/plain",
+  import_text: envImportText,
+  bounded_excerpt: envImportText,
+  result_class: "secret_reference_names_only",
+  result_classes: [
+    "secret_reference_names_only",
+    "capability_binding",
+    "connector_account_binding"
+  ],
+  scope_kind: "environment",
+  scope_id: projectId,
+  audience: [{ kind: "review_ui", id: null }],
+  risk: "high",
+  risks: [{ code: "raw_secret_value_detected", severity: "high", message: "secret refs only" }]
+});
+const envImportMemoryId = envImport.memory_ids[0];
+if (!envImportMemoryId)
+  throw new Error(`Env import did not create memory: ${JSON.stringify(envImport)}`);
+const handoffImportText =
+  "Imported SESSION_HANDOFF.md is stale and duplicates older project log guidance.";
+const handoffImport = await db.importSource({
+  client_kind: "recallant-review-smoke",
+  project_path: process.cwd(),
+  source_path: ".cursor/SESSION_HANDOFF.md",
+  source_type: "handoff",
+  source_sha256: createHash("sha256").update(handoffImportText).digest("hex"),
+  source_size_bytes: handoffImportText.length,
+  content_type: "text/markdown",
+  import_text: handoffImportText,
+  bounded_excerpt: handoffImportText,
+  result_class: "handoff_checkpoint",
+  result_classes: ["handoff_checkpoint", "stale_history", "possible_duplicate"],
+  scope_kind: "project",
+  scope_id: projectId,
+  audience: [{ kind: "all_agents", id: null }],
+  risk: "medium",
+  risks: [{ code: "stale_history", severity: "warning", message: "old handoff" }]
+});
+const handoffImportMemoryId = handoffImport.memory_ids[0];
+if (!handoffImportMemoryId)
+  throw new Error(`Handoff import did not create memory: ${JSON.stringify(handoffImport)}`);
 const importText =
   "Imported AGENTS.md says the pilot sandbox should review source refs before promotion.";
 const importSource = await db.importSource({
@@ -662,8 +712,17 @@ try {
     "Cost by project/provider/model/purpose",
     "Understood by local AI:"
   ].filter((marker) => htmlText.includes(marker));
+  const missingMigrationReviewUi = [
+    "Migration review queue",
+    "Conflicts and duplicates",
+    "Secret and capability references",
+    "Stale handoffs",
+    "Low-risk imported evidence",
+    "Review imported evidence before active rules."
+  ].filter((marker) => !htmlText.includes(marker));
   if (
     missingLayoutContracts.length > 0 ||
+    missingMigrationReviewUi.length > 0 ||
     askRecallantIndex < 0 ||
     sourcesIndex < 0 ||
     secondaryWorkspaceIndex < 0 ||
@@ -674,6 +733,7 @@ try {
     throw new Error(
       `Workbench layout contract failed: ${JSON.stringify({
         missingLayoutContracts,
+        missingMigrationReviewUi,
         askRecallantIndex,
         sourcesIndex,
         secondaryWorkspaceIndex,
@@ -698,6 +758,8 @@ try {
         setting.value?.status === "configured"
     ) ||
     !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
+    !json.import_candidates.some((memory) => memory.memory_id === envImportMemoryId) ||
+    !json.import_candidates.some((memory) => memory.memory_id === handoffImportMemoryId) ||
     !json.import_candidates.some(
       (memory) =>
         memory.memory_id === importMemoryId && memory.provenance?.source_path === "AGENTS.md"
@@ -717,6 +779,15 @@ try {
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
     json.project_readiness?.project_registered !== true ||
+    Number(json.migration_review?.total_imported ?? 0) < 3 ||
+    Number(json.migration_review?.review_required ?? 0) < 3 ||
+    Number(json.migration_review?.conflicts_or_duplicates ?? 0) < 1 ||
+    Number(json.migration_review?.secret_or_capability_references ?? 0) < 1 ||
+    Number(json.migration_review?.stale_handoffs ?? 0) < 1 ||
+    !String(json.migration_review?.first_action ?? "").includes("Resolve conflicts") ||
+    !json.migration_review?.lane_order?.some(
+      (lane) => lane.key === "secret_refs" && lane.count >= 1
+    ) ||
     typeof json.project_readiness?.capture_event_count !== "number" ||
     !json.project_readiness?.last_context_read_at ||
     !Array.isArray(json.recent_activity) ||

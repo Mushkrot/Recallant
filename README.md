@@ -110,6 +110,8 @@ Current strengths:
   raw-secret signals;
 - clean-host dry-run, CLI-wrapper validation, and opt-in Docker-backed managed install smoke;
 - neutral non-owner migration smoke with original-project safety checks;
+- Workbench migration review queue for imported evidence, conflicts, secret references, and stale
+  handoffs;
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - explicit security and cost governance design;

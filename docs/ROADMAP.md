@@ -13,6 +13,8 @@ dependable before expanding the product surface.
   and raw-secret signals.
 - Clean-host dry-run, CLI-wrapper validation, and opt-in Docker-backed managed install smoke.
 - Neutral non-owner migration smoke for sandbox-copy safety and reviewed imports.
+- Workbench migration review queue for imported evidence, conflicts, secret references, and stale
+  handoffs.
 - Context pack startup.
 - Decision/action/test/checkpoint capture.
 - Later-session recall.
@@ -28,9 +30,9 @@ dependable before expanding the product surface.
 - Clean-host install and rollback validation on an independent non-owner environment.
 - Public screenshot set with synthetic data only.
 - Security review of install, auth, Workbench, backups, and secret handling.
-- Reference-backed Workbench redesign for review, sources, settings, capture health, and ask/recall
-  flows, using the tracked reference projects as comparison points instead of starting from a blank
-  custom UI.
+- Reference-backed Workbench polish for review, sources, settings, capture health, and ask/recall
+  flows, using the tracked reference projects as comparison points and real migration pilots instead
+  of starting from a blank custom UI.
 - Deployment-profile and connector/capability guidance that stays generic in public docs while
   supporting private environments.
 - Release-candidate tag once the public quickstart is verified end to end.

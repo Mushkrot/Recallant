@@ -17,7 +17,7 @@ hardening before it should be treated as stable infrastructure.
 | Existing-project migration | Working slice | Discovery/import classify old agent files, handoffs, `.env.example`, runbooks, secret references, risky content, backups, and migration summaries; `npm run prepilot:smoke:discovery`, `npm run prepilot:smoke:import`, `npm run phase10:smoke`, `npm run non-owner-migration:smoke` | More real-world pilots before release candidate. |
 | Capture-active proof | Working slice | `doctor --require-capture` distinguishes configured from capture active; `npm run product-acceptance:smoke`, `npm run demo-capture:smoke`, `npm run agent-capture:smoke` | Keep proof visible in Workbench and docs. |
 | Context-pack startup and closeout | Working slice | MCP/CLI startup, checkpoint, closeout, recovery, and local spool paths; `npm run phase3:smoke`, `npm run spool:smoke`, `npm run product-acceptance:smoke` | Improve closeout extraction and reporting quality. |
-| Governed memory and review | Working slice | Source refs, statuses, rule promotion gates, conflict views, and Review UI; `npm run phase6:smoke:governed`, `npm run review-ui:smoke` | More review ergonomics and clearer Workbench states. |
+| Governed memory and review | Working slice | Source refs, statuses, rule promotion gates, conflict views, Review UI, and Workbench migration review queue; `npm run phase6:smoke:governed`, `npm run review-ui:smoke` | More real-world review ergonomics after broader migration pilots. |
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
 | Private deployment profiles | Documented and partially implemented | Self-hosting profiles, doctor production-readiness checks, capability references, private-by-default server posture | Public docs stay generic; deployment-specific overlays stay private. |
@@ -38,12 +38,14 @@ with:
 - `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke`
 - `npm run phase10:smoke`
 - `npm run non-owner-migration:smoke`
+- `npm run review-ui:smoke`
 - `npm run pilot-report:smoke`
 - `git diff --check`
 
 Those checks cover the public docs boundary, attach migration summaries, capture-active proof,
 cross-project recall behavior, clean-host install planning, Docker-backed managed install smoke,
-neutral non-owner migration safety, pilot report scenarios, and production-sensitive dry-run safety.
+neutral non-owner migration safety, Workbench migration review ergonomics, pilot report scenarios,
+and production-sensitive dry-run safety.
 
 ## What Is Not Ready Yet
 

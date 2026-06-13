@@ -2217,6 +2217,38 @@ function renderReviewLane(
   </details>`;
 }
 
+function renderMigrationReviewQueue(data: ReviewDashboardData) {
+  const migrationReview = asRecord(data.migration_review);
+  const totalImported = Number(migrationReview.total_imported ?? 0);
+  if (totalImported <= 0) return "";
+  const lanes = asArray(migrationReview.lane_order).map(asRecord);
+  const firstAction = String(
+    migrationReview.first_action ?? "Review imported evidence before active rules."
+  );
+  const filterHint = String(
+    migrationReview.review_filter_hint ?? "Review imported evidence before active rules."
+  );
+  return `<section class="migration-review" aria-label="Migration review queue">
+    <div class="migration-review-head">
+      <span>Migration review queue</span>
+      <strong>${escapeHtml(totalImported)} imported source${totalImported === 1 ? "" : "s"}</strong>
+      <p>${escapeHtml(firstAction)}</p>
+      <p class="review-lane-note">${escapeHtml(filterHint)}</p>
+    </div>
+    <div class="migration-review-lanes">
+      ${lanes
+        .map(
+          (lane) => `<article>
+            <span>${escapeHtml(lane.label)}</span>
+            <strong>${escapeHtml(lane.count ?? 0)}</strong>
+            <p>${escapeHtml(lane.action)}</p>
+          </article>`
+        )
+        .join("")}
+    </div>
+  </section>`;
+}
+
 function renderReviewDecisionGuide(
   importCount: number,
   inboxCount: number,
@@ -2261,6 +2293,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   return `<div class="review-workspace">
     ${renderSourceFilterControl(data, "review")}
     ${renderReviewDecisionGuide(importCount, inboxCount, conflictCount, ruleCount)}
+    ${renderMigrationReviewQueue(data)}
     <div class="review-overview">
       ${renderReviewSummaryTile(
         "Imported evidence",
@@ -2993,6 +3026,15 @@ function renderDashboard(
     .review-guide strong { display: block; color: #20242c; font-size: 18px; line-height: 1.2; margin-bottom: 6px; }
     .review-guide p { margin: 0; color: #425064; font-size: 13px; line-height: 1.45; }
     .review-guide ol { margin: 0; padding-left: 20px; color: #303845; font-size: 13px; line-height: 1.5; }
+    .migration-review { display: grid; grid-template-columns: minmax(220px, 0.62fr) minmax(0, 1fr); gap: 10px; border: 1px solid #d8e1d8; border-radius: 7px; padding: 12px; background: #fbfdf9; }
+    .migration-review-head span { display: block; color: #166454; font-size: 12px; font-weight: 750; margin-bottom: 5px; text-transform: uppercase; }
+    .migration-review-head strong { display: block; color: #20242c; font-size: 16px; line-height: 1.2; margin-bottom: 6px; }
+    .migration-review-head p { margin: 0 0 6px; color: #425064; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .migration-review-lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .migration-review-lanes article { border: 1px solid #dce3ec; border-radius: 7px; padding: 9px; background: #fff; }
+    .migration-review-lanes span { display: block; color: #5f6875; font-size: 11px; font-weight: 750; margin-bottom: 4px; text-transform: uppercase; }
+    .migration-review-lanes strong { display: block; color: #20242c; font-size: 16px; margin-bottom: 5px; }
+    .migration-review-lanes p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
     .review-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .review-overview article { border: 1px solid #dce3ec; border-radius: 7px; padding: 10px; background: #fbfcfe; }
     .review-overview span { display: block; color: #6a7280; font-size: 12px; margin-bottom: 4px; }
@@ -3653,7 +3695,7 @@ function renderDashboard(
       .source-workbench, .source-tree, .source-tree-root, .source-tree-groups,
       .source-tree-group, .source-filter-panel, .source-filter-chips,
       .source-workspace-grid, .source-management, .source-list,
-      .review-workspace, .review-guide, .review-lanes,
+      .review-workspace, .review-guide, .migration-review, .migration-review-lanes, .review-lanes,
       .activity-list, .activity-group, .operation-panels, .operation-panel,
       .command-grid, .summary-grid, .signal-strip, .first-screen-snapshot {
         max-width: 100%;
@@ -3685,6 +3727,7 @@ function renderDashboard(
         white-space: normal;
       }
       pre, code, textarea { max-width: 100%; }
+      .migration-review, .migration-review-lanes { grid-template-columns: 1fr; }
     }
 
 

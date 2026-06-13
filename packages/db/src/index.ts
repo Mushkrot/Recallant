@@ -106,6 +106,99 @@ function memorySpaceProfile(input: {
   };
 }
 
+function metadataRecord(row: Record<string, unknown>) {
+  return row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? (row.metadata as Record<string, unknown>)
+    : {};
+}
+
+function resultClassesFor(row: Record<string, unknown>) {
+  const metadata = metadataRecord(row);
+  const classes = Array.isArray(metadata.result_classes) ? metadata.result_classes : [];
+  const resultClass = typeof metadata.result_class === "string" ? [metadata.result_class] : [];
+  return [...classes, ...resultClass].map(String);
+}
+
+function hasMigrationClass(row: Record<string, unknown>, patterns: RegExp[]) {
+  const serialized = JSON.stringify(metadataRecord(row));
+  return (
+    resultClassesFor(row).some((name) => patterns.some((pattern) => pattern.test(name))) ||
+    patterns.some((pattern) => pattern.test(serialized))
+  );
+}
+
+function summarizeMigrationReview(
+  importedRows: Array<Record<string, unknown>>,
+  conflictRows: Array<Record<string, unknown>>
+) {
+  const secretReferenceCount = importedRows.filter((row) =>
+    hasMigrationClass(row, [/secret/i, /capability/i, /connector/i])
+  ).length;
+  const staleHandoffCount = importedRows.filter((row) =>
+    hasMigrationClass(row, [/handoff/i, /stale/i, /duplicate/i, /oversized/i])
+  ).length;
+  const conflictCount = importedRows.filter((row) =>
+    hasMigrationClass(row, [/conflict/i, /duplicate/i])
+  ).length;
+  const lowRiskEvidenceCount = importedRows.filter(
+    (row) =>
+      String(row.status ?? "") === "candidate" &&
+      String(row.use_policy ?? "") === "recall_allowed" &&
+      !hasMigrationClass(row, [/secret/i, /capability/i, /connector/i, /conflict/i, /duplicate/i])
+  ).length;
+  const reviewRequiredCount = importedRows.filter((row) =>
+    ["candidate", "needs_review"].includes(String(row.status ?? ""))
+  ).length;
+  const firstAction =
+    conflictCount > 0
+      ? "Resolve conflicts and duplicates before promoting migrated guidance."
+      : secretReferenceCount > 0
+        ? "Review secret and capability references before ordinary imports."
+        : staleHandoffCount > 0
+          ? "Decide which stale handoffs remain useful evidence."
+          : reviewRequiredCount > 0
+            ? "Accept useful imported evidence or reject noise."
+            : "No migrated imports are waiting for review.";
+  return {
+    total_imported: importedRows.length,
+    review_required: reviewRequiredCount,
+    conflicts_or_duplicates: Math.max(conflictCount, conflictRows.length),
+    secret_or_capability_references: secretReferenceCount,
+    stale_handoffs: staleHandoffCount,
+    low_risk_imported_evidence: lowRiskEvidenceCount,
+    first_action: firstAction,
+    review_filter_hint: "Review imported evidence before active rules.",
+    lane_order: [
+      {
+        key: "conflicts",
+        label: "Conflicts and duplicates",
+        count: Math.max(conflictCount, conflictRows.length),
+        action:
+          "Compare overlapping records and choose the source-backed memory agents should trust."
+      },
+      {
+        key: "secret_refs",
+        label: "Secret and capability references",
+        count: secretReferenceCount,
+        action: "Keep names and capability references only; never promote raw secret material."
+      },
+      {
+        key: "stale_handoffs",
+        label: "Stale handoffs",
+        count: staleHandoffCount,
+        action:
+          "Keep useful history as evidence, reject noise, and avoid instruction-grade promotion."
+      },
+      {
+        key: "low_risk",
+        label: "Low-risk imported evidence",
+        count: lowRiskEvidenceCount,
+        action: "Accept useful facts as usable memory after review."
+      }
+    ]
+  };
+}
+
 function connectorConsentPolicy(metadata: Record<string, unknown>) {
   const state = String(metadata.consent_state ?? "not_requested");
   const capability = String(metadata.capability_binding_status ?? "");
@@ -3703,6 +3796,11 @@ export class RecallantDb {
       `,
       [context.developerId, dashboardProjectId]
     );
+    const importCandidateRows = importCandidates.rows.map((row) => this.withSourceProvenance(row));
+    const duplicateConflictRows = duplicateConflicts.rows.map((row) =>
+      this.withSourceProvenance(row)
+    );
+    const migrationReview = summarizeMigrationReview(importCandidateRows, duplicateConflictRows);
     const critical = await this.pool.query(
       `
         SELECT
@@ -3971,8 +4069,9 @@ export class RecallantDb {
       projects: projects.rows,
       critical: critical.rows[0],
       inbox: inbox.memories,
-      import_candidates: importCandidates.rows.map((row) => this.withSourceProvenance(row)),
-      duplicate_conflicts: duplicateConflicts.rows.map((row) => this.withSourceProvenance(row)),
+      import_candidates: importCandidateRows,
+      duplicate_conflicts: duplicateConflictRows,
+      migration_review: migrationReview,
       selected_detail: selectedDetail,
       available_review_actions: [
         "accept",
