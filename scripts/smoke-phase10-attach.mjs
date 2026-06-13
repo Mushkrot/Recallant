@@ -192,6 +192,12 @@ if (
   !attachText.includes(`Project path: ${projectDir}`) ||
   !attachText.includes("Files changed:") ||
   !attachText.includes("Backups:") ||
+  !attachText.includes("Migration summary:") ||
+  !attachText.includes("  - Discovered agent files:") ||
+  !attachText.includes("  - Selected imports:") ||
+  !attachText.includes("  - Imported sources:") ||
+  !attachText.includes("  - Review needed:") ||
+  !attachText.includes("  - Raw secret findings:") ||
   !attachText.includes("Next command: Run recallant connect codex --project-dir") ||
   !attachText.includes("JSON output: recallant attach")
 ) {
@@ -213,7 +219,12 @@ if (
   attach.backup?.redacted_file_count < 1 ||
   attach.secret_findings?.raw_secret_count < 1 ||
   attach.secret_findings?.masked_after_redacted_backup !== true ||
-  !attach.owner_report?.ready_status
+  !attach.owner_report?.ready_status ||
+  attach.owner_report?.migration_summary?.discovered_agent_files < 4 ||
+  attach.owner_report?.migration_summary?.selected_imports < 5 ||
+  attach.owner_report?.migration_summary?.imported_sources < 5 ||
+  attach.owner_report?.migration_summary?.raw_secret_findings < 1 ||
+  attach.owner_report?.migration_summary?.local_backup_created !== true
 ) {
   throw new Error(`Autopilot attach failed: ${JSON.stringify(attach)}`);
 }

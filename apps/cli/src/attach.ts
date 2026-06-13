@@ -669,6 +669,7 @@ async function runReviewVisibility(input: { database: RecallantDb; projectId: st
 
 function textReport(result: Record<string, unknown>) {
   const ownerReport = result.owner_report as Record<string, unknown>;
+  const migrationSummary = (ownerReport.migration_summary ?? {}) as Record<string, unknown>;
   const status = String(result.status ?? "planned");
   const projectDir = String(result.project_dir ?? "");
   const projectId = String(result.project_id ?? "");
@@ -706,6 +707,13 @@ function textReport(result: Record<string, unknown>) {
       ...fileLines,
       "",
       `Backups: ${backupLine}`,
+      "",
+      "Migration summary:",
+      `  - Discovered agent files: ${String(migrationSummary.discovered_agent_files ?? 0)}`,
+      `  - Selected imports: ${String(migrationSummary.selected_imports ?? 0)}`,
+      `  - Imported sources: ${String(migrationSummary.imported_sources ?? 0)}`,
+      `  - Review needed: ${String(migrationSummary.review_needed ?? 0)}`,
+      `  - Raw secret findings: ${String(migrationSummary.raw_secret_findings ?? 0)}`,
       "",
       `Needs attention: ${ownerReport.what_needs_attention}`,
       `Next command: ${ownerReport.next_step}`,
@@ -781,6 +789,7 @@ export async function runAttach(argv: readonly string[]) {
   ].filter((item): item is string => item !== null);
   const agentFiles = await discoverAgentFiles(options.projectDir, candidates);
   const secretFindings = rawSecretFindings(candidates);
+  const reviewNeededCount = importCandidates.filter(candidateNeedsReview).length;
   const plan = plannedChanges({
     effectiveMode,
     executionAllowed,
@@ -827,6 +836,14 @@ export async function runAttach(argv: readonly string[]) {
         "Sandbox/test attach may mask changed bootstrap files only after a redacted local backup exists."
     }
   };
+  const plannedMigrationSummary = {
+    discovered_agent_files: agentFiles.length,
+    selected_imports: importCandidates.length,
+    imported_sources: 0,
+    review_needed: reviewNeededCount,
+    raw_secret_findings: secretFindings.length,
+    local_backup_created: false
+  };
 
   if (!executionAllowed) {
     result.owner_report = {
@@ -840,7 +857,8 @@ export async function runAttach(argv: readonly string[]) {
       next_step:
         effectiveMode === "manual"
           ? "Use lower-level init/discover/import commands for explicit manual work."
-          : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`
+          : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`,
+      migration_summary: plannedMigrationSummary
     };
     process.stdout.write(
       options.format === "text" ? textReport(result) : `${JSON.stringify(result, null, 2)}\n`
@@ -975,12 +993,17 @@ export async function runAttach(argv: readonly string[]) {
         ready_status: "Project attached; agent capture is ready to start.",
         what_was_done: `Updated bootstrap files, prepared Recallant capture startup, and imported ${imported.length} source(s).`,
         what_needs_attention:
-          candidates.filter(candidateNeedsReview).length > 0
-            ? `${candidates.filter(candidateNeedsReview).length} imported item(s) need review.`
+          reviewNeededCount > 0
+            ? `${reviewNeededCount} imported item(s) need review.`
             : "Nothing urgent.",
         how_to_check:
           "Open the Review UI or inspect .recallant/config, AGENTS.md, and PROJECT_LOG.md.",
-        next_step: `Run recallant connect ${options.target} --project-dir ${options.projectDir} --dry-run.`
+        next_step: `Run recallant connect ${options.target} --project-dir ${options.projectDir} --dry-run.`,
+        migration_summary: {
+          ...plannedMigrationSummary,
+          imported_sources: imported.length,
+          local_backup_created: Boolean(backup?.manifest_path)
+        }
       }
     });
   } finally {
