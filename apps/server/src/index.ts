@@ -552,6 +552,16 @@ function memoryKindLabel(value: unknown) {
 function riskSummary(row: Record<string, unknown>) {
   const metadata = asRecord(row.metadata);
   const risks = asArray(metadata.risks);
+  const resultClasses = [
+    ...asArray(metadata.result_classes),
+    ...(typeof metadata.result_class === "string" ? [metadata.result_class] : [])
+  ].map(String);
+  if (
+    resultClasses.some((value) => /secret|capability|connector/i.test(value)) ||
+    String(row.memory_type ?? "") === "secret_reference"
+  ) {
+    return "Review as a secret or capability reference. Keep names only; do not promote raw secret material.";
+  }
   const severity = String(metadata.risk ?? row.risk ?? "").replaceAll("_", " ");
   const messages = risks
     .map((risk) => asRecord(risk).message)

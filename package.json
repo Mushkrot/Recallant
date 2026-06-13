@@ -59,6 +59,7 @@
     "product-acceptance:smoke": "node scripts/smoke-agent-capture.mjs",
     "pilot-report:smoke": "node scripts/smoke-pilot-report.mjs",
     "non-owner-migration:smoke": "node scripts/smoke-non-owner-migration.mjs",
+    "real-project-pilots:smoke": "node scripts/smoke-real-project-pilots.mjs",
     "stage5:cleanup-matrix": "node scripts/smoke-stage5-cleanup-matrix.mjs",
     "stage5:dogfood-loop": "node scripts/smoke-stage5-dogfood-loop.mjs",
     "stage5:client-pilot-matrix": "node scripts/smoke-stage5-client-pilot-matrix.mjs",

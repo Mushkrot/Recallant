@@ -134,6 +134,7 @@ mustInclude(
     "Safety gates",
     "npm run public-clean-host:smoke",
     "npm run non-owner-migration:smoke",
+    "npm run real-project-pilots:smoke",
     "npm run review-ui:playwright",
     "Workbench migration review queue",
     "Release-Candidate Bar"
@@ -185,6 +186,7 @@ mustInclude(
     "Current",
     "Agent-ready project bootstrap",
     "Neutral non-owner migration smoke",
+    "Opt-in real-project pilot smoke",
     "Workbench migration review queue",
     "autonomous browser QA",
     "Autonomous attach polish",
