@@ -9,6 +9,8 @@ dependable before expanding the product surface.
 - Codex-first MCP workflow.
 - Project attach/connect flow.
 - Agent-ready project bootstrap with thin local files.
+- Existing-project migration reports with local backups, source import counts, review-needed counts,
+  and raw-secret signals.
 - Context pack startup.
 - Decision/action/test/checkpoint capture.
 - Later-session recall.
@@ -18,8 +20,9 @@ dependable before expanding the product surface.
 
 ## Near Term
 
-- Autonomous attach polish for existing projects: safe discovery, import, local backups, and
-  reviewed migration of old handoffs.
+- Autonomous attach polish through broader existing-project migration pilots across non-owner
+  repositories, with attention to report clarity, review ergonomics, and safe handling of stale
+  agent files.
 - Clean-host install and rollback validation on a non-owner environment.
 - Public screenshot set with synthetic data only.
 - Security review of install, auth, Workbench, backups, and secret handling.

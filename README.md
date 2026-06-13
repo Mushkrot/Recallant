@@ -106,6 +106,8 @@ Current strengths:
 
 - first end-to-end coding-agent memory loop;
 - first agent-ready project onboarding path;
+- existing-project migration reports with local backups, import counts, review-needed counts, and
+  raw-secret signals;
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - explicit security and cost governance design;
@@ -116,7 +118,7 @@ Known pre-release work:
 - final clean-host install validation;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
-- richer autonomous attach and existing-project migration polish;
+- broader real-world existing-project migration pilots;
 - security review and release hardening;
 - packaging and versioned release tags.
 

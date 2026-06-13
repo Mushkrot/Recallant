@@ -55,6 +55,8 @@ Recallant should treat those files as migration inputs:
 - classify stale, conflicting, broad, or risky statements for review;
 - keep local startup files thin after migration;
 - create local backups before changing existing agent files;
+- report discovered agent files, selected imports, imported sources, review-needed items, raw-secret
+  findings, and local backup creation;
 - never silently delete important project-specific guidance.
 
 Historical material is evidence by default. It should not become an instruction-grade rule unless a

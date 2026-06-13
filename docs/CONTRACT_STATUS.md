@@ -24,6 +24,23 @@ hardening before it should be treated as stable infrastructure.
 | Safety gates | Working slice | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths; `npm run public-security:smoke`, `npm run phase10:smoke` | Security review and release hardening. |
 | Public OSS surface | Working slice | Public docs boundary, readiness smoke, forbidden private marker checks; `npm run public-readiness:smoke`, `npm run public-security:smoke` | Public screenshots and final release packaging. |
 
+## Recent Verification
+
+As of the current public documentation checkpoint, the attach/migration slice has been rechecked
+with:
+
+- `npm run build`
+- `npm run format:check`
+- `npm run lint`
+- `npm run public-readiness:smoke`
+- `npm run public-security:smoke`
+- `npm run phase10:smoke`
+- `npm run pilot-report:smoke`
+- `git diff --check`
+
+Those checks cover the public docs boundary, attach migration summaries, capture-active proof,
+cross-project recall behavior, pilot report scenarios, and production-sensitive dry-run safety.
+
 ## What Is Not Ready Yet
 
 - Recallant should not be treated as stable team-wide infrastructure.
