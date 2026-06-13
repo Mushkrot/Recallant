@@ -12,7 +12,7 @@ hardening before it should be treated as stable infrastructure.
 
 | Contract Area | Current Status | Evidence | Remaining Work |
 |---------------|----------------|----------|----------------|
-| Agent-ready project onboarding | Working slice | `recallant attach`, `recallant onboard --client codex --install-local-hooks --verify`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-managed-install:smoke` | Independent non-owner host validation before release candidate. |
+| Agent-ready project onboarding | Working slice | `recallant attach`, `recallant onboard --client codex --install-local-hooks --verify`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-install-rollback:smoke`, `npm run public-managed-install:smoke` | Independent non-owner host validation before release candidate. |
 | Thin bootstrap files | Working slice | Attach/init create `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`, client MCP config, and `.gitignore`; `npm run repo-contract:smoke`, `npm run connect:smoke` | Keep generated files compact as more clients are added. |
 | Existing-project migration | Working slice | Discovery/import classify old agent files, handoffs, `.env.example`, runbooks, secret references, risky content, backups, and migration summaries; `npm run prepilot:smoke:discovery`, `npm run prepilot:smoke:import`, `npm run phase10:smoke`, `npm run non-owner-migration:smoke`, opt-in `npm run real-project-pilots:smoke` | More real-world pilots before release candidate. |
 | Capture-active proof | Working slice | `doctor --require-capture` distinguishes configured from capture active; `npm run product-acceptance:smoke`, `npm run demo-capture:smoke`, `npm run agent-capture:smoke` | Keep proof visible in Workbench and docs. |
@@ -35,6 +35,7 @@ with:
 - `npm run public-readiness:smoke`
 - `npm run public-security:smoke`
 - `npm run public-clean-host:smoke`
+- `npm run public-install-rollback:smoke`
 - `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke`
 - `npm run phase10:smoke`
 - `npm run non-owner-migration:smoke`
@@ -45,10 +46,11 @@ with:
 - `git diff --check`
 
 Those checks cover the public docs boundary, attach migration summaries, capture-active proof,
-cross-project recall behavior, clean-host install planning, Docker-backed managed install smoke,
-neutral non-owner migration safety, opt-in real-project pilot safety on sandbox copies, Workbench
-migration review ergonomics, autonomous browser QA with synthetic screenshots, pilot report
-scenarios, and production-sensitive dry-run safety.
+cross-project recall behavior, clean-host install planning, rollback dry-run and marked-artifact
+cleanup, Docker-backed managed install smoke, neutral non-owner migration safety, opt-in
+real-project pilot safety on sandbox copies, Workbench migration review ergonomics, autonomous
+browser QA with synthetic screenshots, pilot report scenarios, and production-sensitive dry-run
+safety.
 
 ## What Is Not Ready Yet
 

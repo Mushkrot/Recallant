@@ -133,6 +133,7 @@ mustInclude(
     "Cross-project examples",
     "Safety gates",
     "npm run public-clean-host:smoke",
+    "npm run public-install-rollback:smoke",
     "npm run non-owner-migration:smoke",
     "npm run real-project-pilots:smoke",
     "npm run review-ui:playwright",
@@ -190,7 +191,8 @@ mustInclude(
     "Workbench migration review queue",
     "autonomous browser QA",
     "Autonomous attach polish",
-    "opt-in Docker-backed managed install smoke",
+    "rollback smoke",
+    "opt-in Docker-backed managed",
     "Deployment-profile",
     "Codex For OSS Use"
   ],

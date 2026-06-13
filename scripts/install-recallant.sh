@@ -184,6 +184,18 @@ fi
 cd "$RECALLANT_HOME"
 
 mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/backups" "$(dirname "$ENV_FILE")"
+install_marker="$DATA_DIR/.recallant-install-marker"
+if [[ ! -f "$install_marker" ]]; then
+  cat >"$install_marker" <<EOF
+profile=$INSTALL_PROFILE
+env_file=$ENV_FILE
+data_dir=$DATA_DIR
+postgres_container_name=$POSTGRES_CONTAINER_NAME
+compose_project_name=$COMPOSE_PROJECT_NAME
+created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+  chmod 600 "$install_marker"
+fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   db_password="$(random_hex 24)"

@@ -100,7 +100,17 @@ npm run public-clean-host:smoke
 ```
 
 That smoke validates install-plan dry-runs, profile defaults, override handling, and the installed
-CLI wrapper in isolated temporary directories. For an opt-in Docker-backed managed install smoke:
+CLI wrapper in isolated temporary directories. The rollback smoke validates dry-run behavior,
+confirmed cleanup of marked disposable artifacts, and refusal to remove unmarked data directories:
+
+```bash
+npm run public-install-rollback:smoke
+```
+
+Set `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1` on that smoke to exercise a full disposable
+managed-install rollback cycle.
+
+For an opt-in Docker-backed managed install smoke:
 
 ```bash
 RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke
@@ -138,6 +148,25 @@ For a local disposable test install, minimal cleanup is usually:
 rm -f ~/.local/bin/recallant
 rm -rf ~/.config/recallant ~/.local/share/recallant ~/.local/recallant
 ```
+
+For managed disposable installs, prefer the rollback helper. It prints a dry-run plan by default and
+requires an explicit confirmation token before removing selected artifacts:
+
+```bash
+./scripts/rollback-recallant-install.sh --dry-run \
+  --env-file /etc/recallant/recallant.env \
+  --data-dir /var/lib/recallant \
+  --install-cli-prefix /usr/local/bin \
+  --postgres-container-name recallant-postgres \
+  --remove-env-file \
+  --remove-data-dir \
+  --remove-cli \
+  --remove-container
+```
+
+Confirmed data-dir removal requires the install marker created by the installer. Without that marker,
+the helper refuses to remove the directory unless a maintainer intentionally uses the manual recovery
+override.
 
 ## Security Defaults
 

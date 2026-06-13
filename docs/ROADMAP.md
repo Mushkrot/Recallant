@@ -11,7 +11,8 @@ dependable before expanding the product surface.
 - Agent-ready project bootstrap with thin local files.
 - Existing-project migration reports with local backups, source import counts, review-needed counts,
   and raw-secret signals.
-- Clean-host dry-run, CLI-wrapper validation, and opt-in Docker-backed managed install smoke.
+- Clean-host dry-run, CLI-wrapper validation, rollback smoke, and opt-in Docker-backed managed
+  install smoke.
 - Neutral non-owner migration smoke for sandbox-copy safety and reviewed imports.
 - Opt-in real-project pilot smoke for sandbox-copy migration checks on maintainer-provided paths.
 - Workbench migration review queue for imported evidence, conflicts, secret references, and stale

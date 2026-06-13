@@ -10,6 +10,7 @@ const installerSource = readFileSync(join(repoRoot, "scripts", "install-recallan
 const prodComposeSource = readFileSync(join(repoRoot, "scripts", "recallant-prod-compose.sh"), "utf8");
 const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
 const backupSource = readFileSync(join(repoRoot, "scripts", "recallant-production-backup.sh"), "utf8");
+const rollbackSource = readFileSync(join(repoRoot, "scripts", "rollback-recallant-install.sh"), "utf8");
 
 function run(args, env = {}) {
   const result = spawnSync("/bin/bash", ["scripts/install-recallant.sh", ...args], {
@@ -215,6 +216,14 @@ assert(
     backupSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/ai/recallant-data}') &&
     backupSource.includes('BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}'),
   "Production backup script must honor profile env/data paths"
+);
+assert(
+  installerSource.includes(".recallant-install-marker") &&
+    rollbackSource.includes("--confirm-token rollback-recallant-install") &&
+    rollbackSource.includes(".recallant-install-marker") &&
+    rollbackSource.includes("Refusing to remove unmarked data dir") &&
+    rollbackSource.includes("DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."),
+  "Installer rollback must be dry-run first, confirmation-gated, and marker-based"
 );
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");
