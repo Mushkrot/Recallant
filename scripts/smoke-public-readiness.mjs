@@ -134,6 +134,7 @@ mustInclude(
     "Safety gates",
     "npm run public-clean-host:smoke",
     "npm run public-install-rollback:smoke",
+    "npm run security-review:smoke",
     "npm run non-owner-migration:smoke",
     "npm run real-project-pilots:smoke",
     "npm run review-ui:playwright",
@@ -190,6 +191,7 @@ mustInclude(
     "Opt-in real-project pilot smoke",
     "Workbench migration review queue",
     "autonomous browser QA",
+    "Security review smoke",
     "Autonomous attach polish",
     "rollback smoke",
     "opt-in Docker-backed managed",
@@ -208,6 +210,14 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run non-owner-migration:smoke"),
   "smoke:core must include non-owner-migration:smoke"
+);
+assert(
+  packageJson.scripts?.["security-review:smoke"] === "node scripts/smoke-security-review.mjs",
+  "package.json must expose security-review:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run security-review:smoke"),
+  "smoke:core must include security-review:smoke"
 );
 
 const forbiddenPrivateMarkers = [

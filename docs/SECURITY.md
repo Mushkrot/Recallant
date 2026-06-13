@@ -50,6 +50,20 @@ Agent-created memories can be useful immediately, but durable behavioral guidanc
 authority. This protects maintainers from old or low-confidence context becoming hidden standing
 instructions.
 
+## Automated Security Review
+
+The public security review is executable, not only narrative. Run:
+
+- `npm run public-security:smoke`
+- `npm run security-review:smoke`
+- `npm run review-ui:smoke`
+- `npm run public-install-rollback:smoke`
+
+Together these cover install/auth/Workbench/backups/secrets: private-by-default HTTP binding,
+Cloudflare/private access preconditions, Workbench auth, browser-facing secret redaction, generated
+secret file permissions, rollback confirmation, redacted local backups, and static checks that the
+runtime Workbench smoke keeps exercising secret and route exposure cases.
+
 ## Reporting Issues
 
 Do not paste secrets or private memory exports into public issues. Report sensitive issues privately

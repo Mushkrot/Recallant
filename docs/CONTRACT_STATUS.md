@@ -21,7 +21,7 @@ hardening before it should be treated as stable infrastructure.
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
 | Private deployment profiles | Documented and partially implemented | Self-hosting profiles, doctor production-readiness checks, capability references, private-by-default server posture | Public docs stay generic; deployment-specific overlays stay private. |
-| Safety gates | Working slice | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths; `npm run public-security:smoke`, `npm run phase10:smoke` | Security review and release hardening. |
+| Safety gates | Working slice | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths, install/auth/Workbench/backups/secrets security smoke; `npm run public-security:smoke`, `npm run security-review:smoke`, `npm run phase10:smoke` | Independent release hardening review. |
 | Public OSS surface | Working slice | Public docs boundary, readiness smoke, forbidden private marker checks; `npm run public-readiness:smoke`, `npm run public-security:smoke` | Public screenshots and final release packaging. |
 
 ## Recent Verification
@@ -34,6 +34,7 @@ with:
 - `npm run lint`
 - `npm run public-readiness:smoke`
 - `npm run public-security:smoke`
+- `npm run security-review:smoke`
 - `npm run public-clean-host:smoke`
 - `npm run public-install-rollback:smoke`
 - `RECALLANT_RUN_MANAGED_INSTALL_SMOKE=1 npm run public-managed-install:smoke`
@@ -50,7 +51,7 @@ cross-project recall behavior, clean-host install planning, rollback dry-run and
 cleanup, Docker-backed managed install smoke, neutral non-owner migration safety, opt-in
 real-project pilot safety on sandbox copies, Workbench migration review ergonomics, autonomous
 browser QA with synthetic screenshots, pilot report scenarios, and production-sensitive dry-run
-safety.
+safety, plus install/auth/Workbench/backups/secrets security review smoke.
 
 ## What Is Not Ready Yet
 
@@ -70,5 +71,5 @@ Before a release-candidate tag, the project should have:
 - end-to-end proof that a fresh project becomes capture active;
 - existing-project migration proof with backup and review behavior on broader real-world projects;
 - autonomous Workbench browser QA and public screenshots with synthetic data only;
-- security review of install, auth, Workbench, backups, and secret handling;
+- independent hardening after the install/auth/Workbench/backups/secrets security smoke;
 - passing public readiness and security smokes.

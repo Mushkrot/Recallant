@@ -221,9 +221,15 @@ function write(
   headers: Record<string, string | string[]> = {}
 ) {
   response.writeHead(statusCode, {
+    ...headers,
     "content-type": `${contentType}; charset=utf-8`,
     "cache-control": "no-store",
-    ...headers
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "content-security-policy":
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
   });
   response.end(body);
 }

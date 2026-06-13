@@ -17,6 +17,12 @@ function mustNotMatch(text, patterns, label) {
   }
 }
 
+function mustInclude(text, markers, label) {
+  for (const marker of markers) {
+    assert(text.includes(marker), `${label} is missing required marker: ${marker}`);
+  }
+}
+
 const publicDocs = [
   "README.md",
   "AGENTS.md",
@@ -24,8 +30,11 @@ const publicDocs = [
   "SECURITY.md",
   "docs/README.md",
   "docs/QUICKSTART.md",
+  "docs/AGENT_READY_PROJECTS.md",
+  "docs/CONTRACT_STATUS.md",
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
+  "docs/REFERENCE_PROJECTS.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
   "docs/CLIENT_SETUP.md",
@@ -36,8 +45,10 @@ const publicDocs = [
 const forbidden = [
   /recallant\.unicloud\.ca/i,
   /highmac/i,
+  /\/ai\/recallant-internal/i,
   /\/ai\/recallant(?:-data)?/i,
   /\/opt\/secure-configs/i,
+  /\bPUBLIC_SYNC\.md\b/i,
   /\bPOSTGRES_PASSWORD\s*=/i,
   /\bRECALLANT_AUTH_TOKEN\s*=/i,
   /\bRECALLANT_SESSION_SECRET\s*=/i,
@@ -49,5 +60,28 @@ for (const path of publicDocs) {
   const text = await read(path);
   mustNotMatch(text, forbidden, path);
 }
+
+const packageJson = JSON.parse(await read("package.json"));
+assert(
+  packageJson.scripts?.["security-review:smoke"] === "node scripts/smoke-security-review.mjs",
+  "package.json must expose security-review:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run security-review:smoke"),
+  "smoke:core must include security-review:smoke"
+);
+
+const securityDoc = await read("docs/SECURITY.md");
+mustInclude(
+  securityDoc,
+  [
+    "Automated Security Review",
+    "npm run security-review:smoke",
+    "install/auth/Workbench/backups/secrets",
+    "browser-facing secret redaction",
+    "redacted local backups"
+  ],
+  "docs/SECURITY.md"
+);
 
 process.stdout.write("Public security smoke passed\n");
