@@ -93,6 +93,17 @@ Recallant distinguishes:
 - **configured:** project files or client settings exist;
 - **capture active:** Recallant has observed real session/context/memory/checkpoint evidence.
 
+## Private Deployment Profiles
+
+Self-hosted installs often need local server inventories, private access providers, secret stores,
+connector accounts, and service-specific runtime settings. Recallant should represent those as
+deployment profiles, source records, capability references, and secret references. Public project
+docs should describe the pattern; private environments provide the actual values.
+
+Do not put raw credentials, private endpoint tokens, or customer data in a repository just so an
+agent can find them. Store secret values in the environment or a secret store and let Recallant hold
+only the safe reference.
+
 ## Rollback
 
 Rollback should avoid deleting memory by accident.

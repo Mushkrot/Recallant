@@ -27,8 +27,10 @@ const publicDocs = [
   "SECURITY.md",
   "docs/README.md",
   "docs/QUICKSTART.md",
+  "docs/AGENT_READY_PROJECTS.md",
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
+  "docs/REFERENCE_PROJECTS.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
   "docs/CLIENT_SETUP.md",
@@ -59,9 +61,11 @@ mustInclude(
     "Why It Matters",
     "recallant doctor --project-dir . --require-capture",
     "capture active",
+    "docs/AGENT_READY_PROJECTS.md",
     "pre-release",
     "docs/WHY_RECALLANT.md",
     "docs/COMPARISON.md",
+    "docs/REFERENCE_PROJECTS.md",
     "CONTRIBUTING.md"
   ],
   "README.md"
@@ -72,23 +76,111 @@ mustInclude(
   quickstart,
   [
     "Install",
+    "Make A Project Agent-Ready",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard --client codex --install-local-hooks --verify",
     "recallant demo-capture --project-dir .",
     "recallant ask \"what did the agent remember?\" --project-dir .",
-    "capture active"
+    "capture active",
+    "Agent-ready projects"
   ],
   "docs/QUICKSTART.md"
 );
 
 const why = await read("docs/WHY_RECALLANT.md");
-mustInclude(why, ["The Maintainer Pain", "The Gap", "Why Codex And OSS Maintainers Benefit"], "WHY");
+mustInclude(
+  why,
+  [
+    "The Maintainer Pain",
+    "The Gap",
+    "Manual project bootstrap",
+    "Why Codex And OSS Maintainers Benefit"
+  ],
+  "WHY"
+);
+
+const agentReadyProjects = await read("docs/AGENT_READY_PROJECTS.md");
+mustInclude(
+  agentReadyProjects,
+  [
+    "Agent-Ready Projects",
+    "Product Contract",
+    "recallant attach .",
+    "New Project Bootstrap",
+    "Existing Project Migration",
+    "Agent Session Contract",
+    "Sources, Capabilities, And Secret References",
+    "Cross-Project Examples",
+    "Safety Gates",
+    "Public And Private Boundary",
+    "capture active"
+  ],
+  "AGENT_READY_PROJECTS"
+);
 
 const comparison = await read("docs/COMPARISON.md");
-mustInclude(comparison, ["Related Approaches", "What Is Different", "Honest Status"], "COMPARISON");
+mustInclude(
+  comparison,
+  [
+    "Related Approaches",
+    "Reference Projects",
+    "Open Brain / OB1",
+    "MemPalace",
+    "AgentMemory",
+    "Journey / Journey Kits",
+    "OpenMemory variants",
+    "MF0.ai / MF0-1984",
+    "Odysseus",
+    "What Is Different",
+    "Honest Status"
+  ],
+  "COMPARISON"
+);
+
+const referenceProjects = await read("docs/REFERENCE_PROJECTS.md");
+mustInclude(
+  referenceProjects,
+  [
+    "Open Brain / OB1",
+    "MemPalace",
+    "AgentMemory",
+    "Journey / Journey Kits",
+    "OpenMemory Variants",
+    "Odysseus",
+    "MF0.ai / MF0-1984",
+    "Kortix / Suna",
+    "Kortex / Eden",
+    "Refresh Checklist"
+  ],
+  "REFERENCE_PROJECTS"
+);
 
 const roadmap = await read("docs/ROADMAP.md");
-mustInclude(roadmap, ["Current", "Near Term", "Codex For OSS Use"], "ROADMAP");
+mustInclude(
+  roadmap,
+  [
+    "Current",
+    "Agent-ready project bootstrap",
+    "Autonomous attach polish",
+    "Deployment-profile",
+    "Codex For OSS Use"
+  ],
+  "ROADMAP"
+);
+
+const forbiddenPrivateMarkers = [
+  "/ai/SECURITY",
+  "/ai/PORTS.yaml",
+  "/opt/secure-configs",
+  "unicloud.ca",
+  "recallant-internal"
+];
+for (const path of publicDocs) {
+  const content = await read(path);
+  for (const marker of forbiddenPrivateMarkers) {
+    assert(!content.includes(marker), `${path} must not contain private marker: ${marker}`);
+  }
+}
 
 const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
 assert(

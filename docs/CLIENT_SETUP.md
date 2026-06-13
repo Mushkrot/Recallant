@@ -16,6 +16,9 @@ recallant doctor --project-dir . --require-capture
 Attach creates the memory space and small project-local pointers. Connect writes or prints the client
 configuration. Doctor verifies whether the client has produced capture evidence.
 
+Project-local files stay thin. The client setup should point agents to Recallant, not copy long
+handoffs or private deployment details into prompt-visible files.
+
 ## Codex
 
 Default target:
@@ -95,6 +98,9 @@ The first agent session after connect should:
 4. work normally;
 5. write meaningful decisions, actions, tests, and checkpoints;
 6. close out with `memory_closeout`.
+
+That startup contract is what turns a registered project into an agent-ready project. If the loop is
+not visible in Recallant, the project is configured but not yet capture active.
 
 If MCP tools are unavailable, use CLI fallback commands:
 

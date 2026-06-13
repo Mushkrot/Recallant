@@ -1,6 +1,6 @@
 # Quickstart
 
-Install Recallant, attach one project, connect Codex, and prove memory capture.
+Install Recallant, attach one project, connect Codex, and prove the project is capture active.
 
 ## 1. Install
 
@@ -23,7 +23,7 @@ recallant --version
 recallant doctor
 ```
 
-## 2. Onboard A Project
+## 2. Make A Project Agent-Ready
 
 From a project directory:
 
@@ -31,8 +31,8 @@ From a project directory:
 recallant onboard --client codex --install-local-hooks --verify
 ```
 
-The one-command flow attaches the project, prepares the local agent configuration, and verifies
-whether capture is active.
+The one-command flow attaches the project, prepares thin local agent configuration, installs
+optional local hooks, and verifies whether capture is active.
 
 For step-by-step onboarding:
 
@@ -83,8 +83,13 @@ Project attach may create small local pointer/config files such as `.recallant/c
 client-specific MCP config, `AGENTS.md`, and `PROJECT_LOG.md`. Durable memory lives in Recallant,
 not in those bootstrap files.
 
+`AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is a compact
+fallback/checkpoint file. Old handoffs, long history, source notes, and runbook details should be
+imported as source-linked evidence or reviewed memories rather than copied into startup context.
+
 ## Next
 
+- [Agent-ready projects](AGENT_READY_PROJECTS.md)
 - [Self-hosting](SELF_HOSTING.md)
 - [Client setup](CLIENT_SETUP.md)
 - [Security](SECURITY.md)

@@ -2,9 +2,9 @@
 
 **Self-hosted governed memory for Codex and MCP AI agents.**
 
-Recallant gives AI coding agents a durable memory layer for real project work. It records decisions,
-checkpoints, evidence, reviewable rules, and source-backed context so a later session can resume
-without asking maintainers to rebuild the same background over and over.
+Recallant gives AI coding agents a durable memory layer and a project onboarding contract for real
+work. It records decisions, checkpoints, evidence, reviewable rules, and source-backed context so a
+later session can resume without asking maintainers to rebuild the same background over and over.
 
 Recallant is private by default, Apache-2.0 licensed, and designed for OSS maintainers who use
 Codex, Cursor, Claude Code, Windsurf, or any MCP-compatible client.
@@ -28,6 +28,10 @@ Recallant is built around governed memory:
 
 The result is a memory system that helps agents work faster without turning old context into an
 unreviewed pile of instructions.
+
+Recallant also aims to make projects **agent-ready**. A new or existing repository should be able to
+attach to Recallant, get thin startup files, migrate useful old handoffs as evidence, prove capture
+is active, and let future agents continue from governed context instead of a long manual prompt.
 
 ## What You Can Try Today
 
@@ -71,14 +75,20 @@ Recallant runs as a local or self-hosted memory service:
 - Postgres/pgvector-backed storage.
 - Private Workbench UI for review, rules, source context, settings, and management chat.
 - Local-first model routing with explicit approval gates for paid APIs.
+- Source, capability, and secret-reference model for agent-ready project setup without storing raw
+  secrets.
 
 See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
 
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md): install Recallant and prove one project can remember.
+- [Agent-ready projects](docs/AGENT_READY_PROJECTS.md): autonomous attach, thin bootstrap files,
+  source references, and safety gates.
 - [Why Recallant](docs/WHY_RECALLANT.md): problem statement and community value.
 - [Comparison](docs/COMPARISON.md): inspirations, alternatives, and the gap Recallant fills.
+- [Reference projects](docs/REFERENCE_PROJECTS.md): external projects Recallant studies, what to
+  borrow, and what not to copy.
 - [Self-hosting](docs/SELF_HOSTING.md): profiles, rollback, verification, and security defaults.
 - [Client setup](docs/CLIENT_SETUP.md): Codex and other MCP clients.
 - [Security](docs/SECURITY.md): public threat model and safe defaults.
@@ -93,6 +103,7 @@ unreviewed team-wide production rollout.
 Current strengths:
 
 - first end-to-end coding-agent memory loop;
+- first agent-ready project onboarding path;
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - explicit security and cost governance design;
@@ -103,6 +114,7 @@ Known pre-release work:
 - final clean-host install validation;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
+- richer autonomous attach and existing-project migration polish;
 - security review and release hardening;
 - packaging and versioned release tags.
 

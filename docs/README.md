@@ -6,8 +6,12 @@ readers should see the product, how to evaluate it, how it works, and how to con
 ## Start Here
 
 - [Quickstart](QUICKSTART.md): install Recallant and prove one project can remember.
+- [Agent-ready projects](AGENT_READY_PROJECTS.md): autonomous attach, thin bootstrap files, source
+  references, and safety gates.
 - [Why Recallant](WHY_RECALLANT.md): why governed agent memory matters.
 - [Comparison](COMPARISON.md): related projects and the gap Recallant fills.
+- [Reference projects](REFERENCE_PROJECTS.md): external projects Recallant studies, what to borrow,
+  and what not to copy.
 - [Architecture](ARCHITECTURE.md): public system overview.
 - [Self-hosting](SELF_HOSTING.md): install profiles, rollback, and verification.
 - [Client setup](CLIENT_SETUP.md): Codex, Cursor, Claude Code, Windsurf, and generic MCP clients.

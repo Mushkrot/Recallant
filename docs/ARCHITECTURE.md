@@ -22,6 +22,7 @@ flowchart TB
     Workbench["Private Workbench"]
     Policy["Governance and policy"]
     Context["Context Pack Builder"]
+    Sources["Sources and capabilities"]
     Store[(Postgres + pgvector)]
   end
 
@@ -30,6 +31,8 @@ flowchart TB
   Workbench --> Policy
   MCP --> Policy
   Policy --> Context
+  Policy --> Sources
+  Sources --> Store
   Policy --> Store
   Context --> Store
 ```
@@ -40,10 +43,24 @@ flowchart TB
   repository, document set, connector, or manual topic.
 - **Source:** the thing a memory refers to: project files, repo metadata, session events, imported
   documents, or future connector records.
+- **Capability reference:** a governed record that a project can use an external service, private
+  deployment profile, connector, or server inventory entry without storing raw credentials.
+- **Secret reference:** a variable name, secret-store label, or configuration handle. The secret
+  value stays outside Recallant memory.
 - **Raw evidence:** bounded records of what happened during work.
 - **Governed memory:** a durable, reviewable fact, decision, rule, lesson, or checkpoint derived
   from evidence.
 - **Context pack:** a bounded startup bundle built by the server for the current task.
+
+## Project Bootstrap
+
+`recallant attach` is the product-level path for making a project agent-ready. It creates or updates
+thin local pointers such as `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`, and client MCP
+configuration while keeping durable history in Recallant.
+
+For existing projects, attach treats old handoffs, runbooks, and agent files as migration inputs.
+Useful material is imported as source-linked evidence or reviewable memory candidates; long history
+does not belong in startup files.
 
 ## Write Path
 
@@ -74,6 +91,7 @@ labeled as examples/evidence unless explicitly adopted in the current project.
 Recallant keeps safety decisions server-side:
 
 - secrets are stored as references, not raw values;
+- capability and connector bindings require governed setup;
 - destructive actions require confirmation;
 - paid APIs are disabled or confirmation-gated by default;
 - public exposure is explicit deployment work, not a default mode;
@@ -89,6 +107,7 @@ private-by-default self-hosting:
 - private Workbench for humans;
 - Postgres/pgvector storage;
 - explicit install profiles;
+- private deployment profiles represented as configuration and capability references;
 - rollback and detach workflows that avoid deleting memory by accident.
 
 ## Why This Is Different From Plain Logs Or RAG

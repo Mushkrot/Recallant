@@ -14,6 +14,7 @@ Modern OSS maintenance has many context surfaces:
 - issues, PRs, reviews, and CI logs;
 - local terminal output;
 - private deployment notes;
+- old agent handoffs and project bootstrap files;
 - agent chat history;
 - human decisions that never become code.
 
@@ -30,6 +31,10 @@ project-scope policy.
 
 Manual handoff files help, but they grow stale and push context-budget work back onto humans.
 
+Manual project bootstrap has the same problem. Maintainers often have to recreate `AGENTS.md`,
+handoffs, local logs, client setup, service notes, and safety rules whenever a new project starts.
+That work should become a governed onboarding flow instead of another prompt to copy forward.
+
 Recallant is designed around the missing layer: governed external memory for agents.
 
 ## Why Codex And OSS Maintainers Benefit
@@ -38,6 +43,7 @@ Codex can already write code quickly. The hard part is making it continue respon
 sessions, branches, reviews, and releases. Recallant gives Codex a way to:
 
 - start from a server-built context pack instead of a long manual prompt;
+- attach a project without hand-building the same agent files and handoff structure;
 - remember decisions and checkpoints with source references;
 - avoid silently mixing unrelated project memory;
 - surface conflicts and candidate rules for maintainer review;
@@ -50,6 +56,7 @@ needing a large process around every session.
 
 - private self-hosting first;
 - evidence-backed memory instead of ungrounded summaries;
+- agent-ready onboarding with thin project files and durable memory behind them;
 - explicit review for durable rules;
 - local-first model routing and cost gates;
 - MCP-compatible agents beyond a single client;

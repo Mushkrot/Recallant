@@ -8,6 +8,7 @@ bounded by design, and conservative about secrets.
 | Threat | Default posture |
 |--------|-----------------|
 | Secret leakage into memory | Store secret references, never raw secret values. |
+| Unsafe capability reuse | Treat connector, deployment, and external service bindings as governed capabilities. |
 | Cross-project context contamination | Scope recall to the current memory space by default. |
 | Prompt injection through old memory | Treat recalled text as evidence, not automatic instruction. |
 | Silent rule promotion | Block instruction-grade memory unless authority is explicit. |
@@ -32,6 +33,16 @@ only references such as variable names or configuration labels.
 
 Browser clients must never receive provider API keys, database passwords, session secrets, auth
 tokens, or connector secrets.
+
+## External Services And Deployment Profiles
+
+Projects may need to remember that an external service, private access provider, server inventory,
+or connector account exists. Recallant should store those as references and policy records, not as
+raw authorization material.
+
+Using a capability can still require confirmation, local operator action, or a separate connector
+binding flow. A recalled note that a service exists is evidence, not permission to expose a public
+route, spend money, delete data, or bypass a private access boundary.
 
 ## Memory Governance
 
