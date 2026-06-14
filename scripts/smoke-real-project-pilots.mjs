@@ -1,16 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import {
-  cp,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile
-} from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -217,7 +208,7 @@ function onboardingSummary(payload) {
   const reviewQueue = objectValue(workbench.migration_review_queue);
   return {
     status: payload.status,
-    command: "recallant onboard <sandbox-copy> --client codex --install-local-hooks --verify --yes --format json",
+    command: "recallant onboard <sandbox-copy>",
     storage: {
       status: objectValue(payload.storage).status ?? null,
       configured: objectValue(payload.storage).configured === true,
@@ -393,7 +384,10 @@ async function browserCheckPilots(pilots) {
   let browser;
   try {
     const unauthenticated = await fetch(`${baseUrl}/review`);
-    assert(unauthenticated.status === 401, `Workbench did not require auth: ${unauthenticated.status}`);
+    assert(
+      unauthenticated.status === 401,
+      `Workbench did not require auth: ${unauthenticated.status}`
+    );
     browser = await chromium.launch({ headless: true });
     const screenshots = [];
     for (const pilot of pilots) {
@@ -454,9 +448,18 @@ async function databaseCheck(pilot) {
       [pilot.project_id]
     );
     const row = checks.rows[0];
-    assert(row.project_count === 1, `${pilot.name} project was not registered: ${JSON.stringify(row)}`);
-    assert(row.import_events >= 1, `${pilot.name} did not create import events: ${JSON.stringify(row)}`);
-    assert(row.starter_memories === 1, `${pilot.name} missing starter memory: ${JSON.stringify(row)}`);
+    assert(
+      row.project_count === 1,
+      `${pilot.name} project was not registered: ${JSON.stringify(row)}`
+    );
+    assert(
+      row.import_events >= 1,
+      `${pilot.name} did not create import events: ${JSON.stringify(row)}`
+    );
+    assert(
+      row.starter_memories === 1,
+      `${pilot.name} missing starter memory: ${JSON.stringify(row)}`
+    );
     assert(
       row.instruction_grade === 0,
       `${pilot.name} promoted imports to instruction-grade without review: ${JSON.stringify(row)}`
@@ -579,7 +582,9 @@ async function runPilot(originalPath) {
   const sourceRoot = resolve(originalPath);
   const sourceInfo = await stat(sourceRoot);
   assert(sourceInfo.isDirectory(), `${sourceRoot} is not a directory`);
-  const name = basename(sourceRoot).replaceAll(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+  const name = basename(sourceRoot)
+    .replaceAll(/[^a-zA-Z0-9_-]/g, "-")
+    .toLowerCase();
   const selectedFiles = await walkCopyPlan(sourceRoot);
   assert(selectedFiles.length > 0, `${sourceRoot} did not produce any safe pilot files`);
   const originalBefore = await snapshotSelectedFiles(sourceRoot, selectedFiles);
@@ -589,23 +594,22 @@ async function runPilot(originalPath) {
   const sandboxPath = join(pilotRoot, name);
   await copySandbox(sourceRoot, sandboxPath, selectedFiles);
 
-  const onboard = runJson([
-    "onboard",
-    sandboxPath,
-    "--client",
-    "codex",
-    "--install-local-hooks",
-    "--verify",
-    "--yes",
-    "--format",
-    "json"
-  ]);
+  const onboard = runJson(["onboard", sandboxPath, "--yes", "--format", "json"]);
   assert(onboard.status === "completed", `${name} onboard failed: ${JSON.stringify(onboard)}`);
+  assert(
+    onboard.client === "codex" &&
+      onboard.install_local_hooks === true &&
+      onboard.verify_requested === true,
+    `${name} onboard did not use beginner defaults: ${JSON.stringify(onboard)}`
+  );
   const summary = onboardingSummary(onboard);
   assert(summary.storage.reachable === true, `${name} onboard storage was not reachable`);
   assert(summary.attach.status === "attached", `${name} onboard did not attach`);
   assert(summary.attach.handled_by_onboard === true, `${name} attach was not handled by onboard`);
-  assert(summary.attach.writes_files === true, `${name} onboard attach did not write sandbox files`);
+  assert(
+    summary.attach.writes_files === true,
+    `${name} onboard attach did not write sandbox files`
+  );
   assert(summary.attach.writes_database === true, `${name} onboard attach did not write database`);
   assert(summary.connect.status === "connected", `${name} onboard did not connect codex`);
   assert(summary.capture_proof.status === "passed", `${name} capture proof did not pass`);
@@ -621,7 +625,10 @@ async function runPilot(originalPath) {
     summary.workbench.private_by_default === true,
     `${name} Workbench was not private by default`
   );
-  assert(summary.workbench.project_visible === true, `${name} Workbench did not show project visibility`);
+  assert(
+    summary.workbench.project_visible === true,
+    `${name} Workbench did not show project visibility`
+  );
   assertNoLikelyRawSecrets(onboard, `${name} onboard`);
   const config = await readProjectConfig(sandboxPath);
   assert(
@@ -716,10 +723,7 @@ try {
   }
   process.stdout.write(`${publicReportText}\n`);
 } finally {
-  if (
-    !sandboxRootsCleaned &&
-    process.env.RECALLANT_KEEP_REAL_PROJECT_PILOT_SANDBOXES !== "1"
-  ) {
+  if (!sandboxRootsCleaned && process.env.RECALLANT_KEEP_REAL_PROJECT_PILOT_SANDBOXES !== "1") {
     for (const sandboxRoot of sandboxRoots) await rm(sandboxRoot, { recursive: true, force: true });
   }
 }

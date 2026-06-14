@@ -220,11 +220,16 @@ function parseProjectArg(argv: readonly string[], start = 3) {
 type OnboardOptions = {
   projectDir: string;
   client: string | null;
+  clientExplicit: boolean;
   installLocalHooks: boolean;
+  installLocalHooksExplicit: boolean;
   verify: boolean;
+  verifyExplicit: boolean;
   dryRun: boolean;
   yes: boolean;
   cancel: boolean;
+  initGit: boolean;
+  skipVcsSafety: boolean;
   format: "text" | "json";
 };
 
@@ -293,6 +298,29 @@ type OnboardWorkbenchOutcome = {
   message: string;
 };
 
+type OnboardVersionControlStep = {
+  status:
+    | "ready"
+    | "initialized"
+    | "needs_choice"
+    | "skipped"
+    | "git_missing"
+    | "dry_run_planned"
+    | "failed";
+  git_available: boolean;
+  repository_ready: boolean;
+  initialized: boolean;
+  writes_files: boolean;
+  message: string;
+  refusal_available: true;
+  choices: Array<{
+    id: "initialize_git" | "continue_without_git" | "install_git";
+    label: string;
+    description: string;
+  }>;
+  warnings: string[];
+};
+
 type OnboardAttachedStep = {
   status: "attached" | "skipped" | "needs_confirmation" | "failed" | "unknown";
   command: string | null;
@@ -306,17 +334,46 @@ type OnboardConnectedStep = {
 };
 
 function parseOnboardOptions(argv: readonly string[]): OnboardOptions {
-  const client = parseFlag(argv, "--client");
+  const rawClient = parseFlag(argv, "--client");
+  const clientDisabled = argv.includes("--no-client");
+  const installHooksRequested =
+    argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
+  const installHooksDisabled =
+    argv.includes("--no-install-local-hooks") || argv.includes("--no-local-hooks");
+  const verifyRequested = argv.includes("--verify");
+  const verifyDisabled = argv.includes("--no-verify");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if (clientDisabled && rawClient) {
+    throw new Error("Use either --client <name> or --no-client, not both.");
+  }
+  if (installHooksRequested && installHooksDisabled) {
+    throw new Error("Use either --install-local-hooks or --no-local-hooks, not both.");
+  }
+  if (verifyRequested && verifyDisabled) {
+    throw new Error("Use either --verify or --no-verify, not both.");
+  }
+  if (clientDisabled && installHooksRequested) {
+    throw new Error("--install-local-hooks requires a client; remove --no-client first.");
+  }
+  if (clientDisabled && verifyRequested) {
+    throw new Error("--verify requires a client; remove --no-client first.");
+  }
+  const client = clientDisabled ? null : rawClient && rawClient.trim() ? rawClient.trim() : "codex";
+  const clientEnabled = client !== null;
   return {
     projectDir: resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()),
-    client: client && client.trim() ? client : null,
-    installLocalHooks: argv.includes("--install-local-hooks") || argv.includes("--hook-kit"),
-    verify: argv.includes("--verify"),
+    client,
+    clientExplicit: Boolean(rawClient || clientDisabled),
+    installLocalHooks: clientEnabled && !installHooksDisabled,
+    installLocalHooksExplicit: installHooksRequested || installHooksDisabled,
+    verify: clientEnabled && !verifyDisabled,
+    verifyExplicit: verifyRequested || verifyDisabled,
     dryRun: argv.includes("--dry-run"),
     yes: argv.includes("--yes") || argv.includes("-y"),
     cancel: argv.includes("--cancel"),
+    initGit: argv.includes("--init-git"),
+    skipVcsSafety: argv.includes("--skip-vcs-safety"),
     format
   };
 }
@@ -979,13 +1036,250 @@ function formatCommandHint(input: readonly string[]) {
 
 function formatOnboardRerunCommand(options: OnboardOptions, targetClient: string) {
   const args = ["recallant", "onboard", options.projectDir];
-  if (options.client) args.push("--client", targetClient);
-  if (options.installLocalHooks) args.push("--install-local-hooks");
-  if (options.verify) args.push("--verify");
+  if (!options.client) args.push("--no-client");
+  if (options.client && targetClient !== "codex") args.push("--client", targetClient);
+  if (options.client && !options.installLocalHooks) args.push("--no-local-hooks");
+  if (!options.verify) args.push("--no-verify");
   if (options.yes) args.push("--yes");
   if (options.dryRun) args.push("--dry-run");
   if (options.cancel) args.push("--cancel");
+  if (options.initGit) args.push("--init-git");
+  if (options.skipVcsSafety) args.push("--skip-vcs-safety");
   return formatCommandHint(args);
+}
+
+function gitSafetyChoices(): OnboardVersionControlStep["choices"] {
+  return [
+    {
+      id: "initialize_git",
+      label: "Initialize Git here",
+      description:
+        "Run git init before onboarding writes files. Recallant will not stage or commit project files."
+    },
+    {
+      id: "continue_without_git",
+      label: "Continue without Git",
+      description:
+        "Use Recallant local backups only. This is allowed, but rollback safety is weaker."
+    },
+    {
+      id: "install_git",
+      label: "Install Git first",
+      description: "Install Git with your operating system package manager, then rerun onboarding."
+    }
+  ];
+}
+
+function unavailableGitStep(): OnboardVersionControlStep {
+  return {
+    status: "git_missing",
+    git_available: false,
+    repository_ready: false,
+    initialized: false,
+    writes_files: false,
+    message:
+      "Git is not available in this environment. Install Git first or continue with Recallant local backups only.",
+    refusal_available: true,
+    choices: gitSafetyChoices(),
+    warnings: [
+      "Recallant does not install system packages automatically.",
+      "No project files were changed by the version-control preflight."
+    ]
+  };
+}
+
+function runGit(projectDir: string, args: readonly string[]) {
+  return spawnSync("git", ["-C", projectDir, ...args], {
+    cwd: projectDir,
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+}
+
+function canPromptForOnboarding(options: OnboardOptions) {
+  return options.format === "text" && process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+async function promptYesNo(question: string, defaultAnswer: boolean) {
+  const suffix = defaultAnswer ? " [Y/n] " : " [y/N] ";
+  process.stdout.write(`${question}${suffix}`);
+  return await new Promise<boolean>((resolvePrompt) => {
+    const wasRaw = process.stdin.isRaw;
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("data", (chunk) => {
+      if (wasRaw) process.stdin.setRawMode?.(true);
+      process.stdin.pause();
+      const answer = String(chunk).trim().toLowerCase();
+      if (!answer) {
+        resolvePrompt(defaultAnswer);
+        return;
+      }
+      resolvePrompt(answer === "y" || answer === "yes");
+    });
+  });
+}
+
+function initializedGitStep(projectDir: string, choices: OnboardVersionControlStep["choices"]) {
+  const initialized = runGit(projectDir, ["init"]);
+  if (initialized.status !== 0) {
+    return {
+      status: "failed" as const,
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message: "Recallant tried to initialize Git before onboarding, but git init failed.",
+      refusal_available: true as const,
+      choices,
+      warnings: [initialized.stderr.trim() || "git init failed without stderr output."]
+    };
+  }
+  return {
+    status: "initialized" as const,
+    git_available: true,
+    repository_ready: true,
+    initialized: true,
+    writes_files: true,
+    message:
+      "Recallant initialized Git before onboarding. No files were staged or committed automatically.",
+    refusal_available: true as const,
+    choices,
+    warnings: [
+      "Git was initialized for rollback visibility, but Recallant did not stage secrets, data, or project files."
+    ]
+  };
+}
+
+async function resolveOnboardVersionControl(
+  options: OnboardOptions
+): Promise<OnboardVersionControlStep> {
+  const choices = gitSafetyChoices();
+  const version = spawnSync("git", ["--version"], {
+    cwd: options.projectDir,
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+  if (version.error || version.status !== 0) {
+    if (options.skipVcsSafety) {
+      return {
+        ...unavailableGitStep(),
+        status: "skipped",
+        message:
+          "Git is not available; onboarding will continue with Recallant local backups only.",
+        warnings: ["Version-control safety was explicitly skipped."]
+      };
+    }
+    if (canPromptForOnboarding(options)) {
+      const continueWithoutGit = await promptYesNo(
+        "Git is not available. Continue with Recallant local backups only?",
+        false
+      );
+      if (continueWithoutGit) {
+        return {
+          ...unavailableGitStep(),
+          status: "skipped",
+          message:
+            "Git is not available; onboarding will continue with Recallant local backups only.",
+          warnings: ["Version-control safety was declined by the user."]
+        };
+      }
+    }
+    return unavailableGitStep();
+  }
+
+  const ready = runGit(options.projectDir, ["rev-parse", "--is-inside-work-tree"]);
+  if (ready.status === 0 && ready.stdout.trim() === "true") {
+    return {
+      status: "ready",
+      git_available: true,
+      repository_ready: true,
+      initialized: false,
+      writes_files: false,
+      message: "Project already has a usable Git work tree.",
+      refusal_available: true,
+      choices,
+      warnings: []
+    };
+  }
+
+  if (options.skipVcsSafety) {
+    return {
+      status: "skipped",
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message:
+        "No usable Git work tree was found; onboarding will continue with local backups only.",
+      refusal_available: true,
+      choices,
+      warnings: ["Version-control safety was explicitly skipped."]
+    };
+  }
+
+  if (options.dryRun) {
+    return {
+      status: "dry_run_planned",
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message: "No usable Git work tree was found. Dry-run would offer to initialize Git.",
+      refusal_available: true,
+      choices,
+      warnings: ["Dry-run did not run git init."]
+    };
+  }
+
+  if (options.yes || options.initGit) {
+    const initialized = initializedGitStep(options.projectDir, choices);
+    if (initialized.status === "failed") {
+      return {
+        ...initialized
+      };
+    }
+    return initialized;
+  }
+
+  if (canPromptForOnboarding(options)) {
+    const initialize = await promptYesNo(
+      "No usable Git work tree was found. Initialize Git before onboarding?",
+      true
+    );
+    if (initialize) return initializedGitStep(options.projectDir, choices);
+    const continueWithoutGit = await promptYesNo(
+      "Continue without Git using Recallant local backups only?",
+      false
+    );
+    if (continueWithoutGit) {
+      return {
+        status: "skipped",
+        git_available: true,
+        repository_ready: false,
+        initialized: false,
+        writes_files: false,
+        message:
+          "No usable Git work tree was found; onboarding will continue with local backups only.",
+        refusal_available: true,
+        choices,
+        warnings: ["Version-control safety was declined by the user."]
+      };
+    }
+  }
+
+  return {
+    status: "needs_choice",
+    git_available: true,
+    repository_ready: false,
+    initialized: false,
+    writes_files: false,
+    message:
+      "No usable Git work tree was found. Choose whether Recallant should initialize Git before changing project files.",
+    refusal_available: true,
+    choices,
+    warnings: ["No project files were changed by the version-control preflight."]
+  };
 }
 
 function offlineSpoolFallback() {
@@ -1018,6 +1312,28 @@ function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
   ];
 }
 
+function recallantHomeDir() {
+  return resolve(process.env.RECALLANT_HOME ?? process.cwd());
+}
+
+async function singleUserStorageInstallerPath() {
+  const candidate = join(recallantHomeDir(), "scripts", "install-recallant.sh");
+  try {
+    const file = await stat(candidate);
+    return file.isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function runSingleUserStorageInstaller(installerPath: string) {
+  return spawnSync("bash", [installerPath, "--profile", "single-user"], {
+    cwd: recallantHomeDir(),
+    env: { ...process.env },
+    stdio: "inherit"
+  });
+}
+
 function blockedStorageStep(input: {
   status: "missing" | "unreachable" | "storage_blocked";
   configured: boolean;
@@ -1038,20 +1354,8 @@ function blockedStorageStep(input: {
   };
 }
 
-async function resolveOnboardStorage(options: OnboardOptions): Promise<OnboardStorageStep> {
-  const configured = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
-  const setupMode = options.yes ? "non_interactive" : "guided";
-  if (!configured) {
-    return blockedStorageStep({
-      status: options.yes ? "storage_blocked" : "missing",
-      configured: false,
-      setupMode,
-      message: options.yes
-        ? "Recallant needs private storage before onboarding can finish. Automatic setup was requested, but no reachable storage profile is available in this runtime. No project files were changed."
-        : "Recallant needs private storage before onboarding can finish. Choose a setup path, then rerun onboarding; no project files were changed."
-    });
-  }
-
+async function readyStorageStep(): Promise<OnboardStorageStep | null> {
+  if (!envValueIsSet(process.env.RECALLANT_DATABASE_URL)) return null;
   const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
   try {
     await client.connect();
@@ -1071,16 +1375,69 @@ async function resolveOnboardStorage(options: OnboardOptions): Promise<OnboardSt
       setup_choices: []
     };
   } catch {
-    return blockedStorageStep({
-      status: "unreachable",
-      configured: true,
-      setupMode,
-      message:
-        "Recallant found a private storage profile, but the database is not reachable. No project files were changed."
-    });
+    return null;
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+async function maybeRunInteractiveStorageSetup(options: OnboardOptions) {
+  if (options.dryRun || options.yes || !canPromptForOnboarding(options)) return null;
+  if (envValueIsSet(process.env.RECALLANT_ENV_FILE)) return null;
+  const installerPath = await singleUserStorageInstallerPath();
+  if (!installerPath) return null;
+  const setupStorage = await promptYesNo(
+    "Recallant storage is not configured. Set up local single-user storage now?",
+    true
+  );
+  if (!setupStorage) return null;
+  const result = runSingleUserStorageInstaller(installerPath);
+  if (result.error || result.status !== 0) {
+    return blockedStorageStep({
+      status: "storage_blocked",
+      configured: false,
+      setupMode: "guided",
+      message:
+        "Recallant tried to set up local single-user storage, but the installer did not complete. No project files were changed."
+    });
+  }
+  await loadDefaultEnv();
+  const ready = await readyStorageStep();
+  if (ready) return ready;
+  return blockedStorageStep({
+    status: "storage_blocked",
+    configured: envValueIsSet(process.env.RECALLANT_DATABASE_URL),
+    setupMode: "guided",
+    message:
+      "Recallant set up local single-user storage, but the database is not reachable yet. No project files were changed."
+  });
+}
+
+async function resolveOnboardStorage(options: OnboardOptions): Promise<OnboardStorageStep> {
+  const configured = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+  const setupMode = options.yes ? "non_interactive" : "guided";
+  if (!configured) {
+    const interactiveSetup = await maybeRunInteractiveStorageSetup(options);
+    if (interactiveSetup) return interactiveSetup;
+    return blockedStorageStep({
+      status: options.yes ? "storage_blocked" : "missing",
+      configured: false,
+      setupMode,
+      message: options.yes
+        ? "Recallant needs private storage before onboarding can finish. Automatic setup was requested, but no reachable storage profile is available in this runtime. No project files were changed."
+        : "Recallant needs private storage before onboarding can finish. Choose a setup path, then rerun onboarding; no project files were changed."
+    });
+  }
+
+  const ready = await readyStorageStep();
+  if (ready) return ready;
+  return blockedStorageStep({
+    status: "unreachable",
+    configured: true,
+    setupMode,
+    message:
+      "Recallant found a private storage profile, but the database is not reachable. No project files were changed."
+  });
 }
 
 function safeAttachDetailsForOnboard(payload: Record<string, unknown> | null) {
@@ -1324,6 +1681,7 @@ function onboardHumanReport(result: {
   status?: string;
   project_dir: string;
   storage: OnboardStorageStep;
+  version_control?: OnboardVersionControlStep | null;
   project_already_attached: boolean;
   attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
   workbench?: OnboardWorkbenchOutcome | null;
@@ -1347,13 +1705,22 @@ function onboardHumanReport(result: {
     `Project: ${result.project_dir}`,
     `Storage: ${result.storage.status}`,
     `  - ${result.storage.message}`,
-    `  - Offline spool: fail-soft capture fallback, not completed onboarding`,
-    `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
-    `Attach: ${result.attached.status}`,
-    result.attached.details ? `  - ${result.attached.details}` : null,
-    `Connect: ${result.connected.status}`,
-    result.connected.details ? `  - ${result.connected.details}` : null
+    `  - Offline spool: fail-soft capture fallback, not completed onboarding`
   ].filter((line) => line !== null) as string[];
+  if (result.version_control) {
+    lines.push(
+      `Version control: ${result.version_control.status}`,
+      `  - ${result.version_control.message}`
+    );
+    for (const warning of result.version_control.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push(
+    `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
+    `Attach: ${result.attached.status}`
+  );
+  if (result.attached.details) lines.push(`  - ${result.attached.details}`);
+  lines.push(`Connect: ${result.connected.status}`);
+  if (result.connected.details) lines.push(`  - ${result.connected.details}`);
   if (result.attach_details && result.attached.status === "needs_confirmation") {
     const signals = attachRiskSignals(result.attach_details);
     const writePaths = plannedWritePaths(result.attach_details);
@@ -1375,7 +1742,7 @@ function onboardHumanReport(result: {
       `  - Review needed: ${String(migrationSummary.review_needed ?? 0)}`,
       `  - Raw secret findings: ${String(migrationSummary.raw_secret_findings ?? 0)}`,
       "Continue/cancel prompt:",
-      "  - Continue this onboarding with --yes, or cancel with --cancel. No attach command is required."
+      "  - In an interactive terminal, answer the next question. In automation, use --yes only after approving this plan."
     );
   }
   if (result.verify) {
@@ -1422,6 +1789,20 @@ function onboardHumanReport(result: {
       "",
       "Next action: Prepare private Recallant storage, then rerun this same onboarding command.",
       `Rerun command: ${result.next_command}`
+    );
+  } else if (
+    result.version_control &&
+    ["needs_choice", "git_missing", "failed"].includes(result.version_control.status)
+  ) {
+    lines.push("", "Version-control safety choices:");
+    for (const choice of result.version_control.choices) {
+      lines.push(`- ${choice.label}: ${choice.description}`);
+    }
+    lines.push(
+      "",
+      "Next action: initialize Git before onboarding, or explicitly continue with Recallant local backups only.",
+      `Initialize Git: ${result.next_command} --init-git`,
+      `Continue without Git: ${result.next_command} --skip-vcs-safety`
     );
   } else {
     lines.push("", `Next command: ${result.next_command}`);
@@ -4392,6 +4773,7 @@ async function runOnboard(argv: readonly string[]) {
       project_dir: options.projectDir,
       format: options.format,
       storage,
+      version_control: null,
       attach_details: null,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
@@ -4418,10 +4800,14 @@ async function runOnboard(argv: readonly string[]) {
     process.exitCode = 2;
     return;
   }
+  const versionControl = await resolveOnboardVersionControl(options);
+  const versionControlBlocks = ["needs_choice", "git_missing", "failed"].includes(
+    versionControl.status
+  );
   const needAttach = !existingConfig?.project_id;
   if (options.verify && !options.client) {
     throw new Error(
-      `onboard --verify requires --client. Run: recallant onboard ${options.projectDir} --client codex --verify`
+      `onboard --verify requires a client. Run the beginner flow with: recallant onboard ${options.projectDir}`
     );
   }
   const verifyResult: OnboardVerifyPayload = {
@@ -4446,35 +4832,75 @@ async function runOnboard(argv: readonly string[]) {
     "completed";
   let attachDetails: ReturnType<typeof safeAttachDetailsForOnboard> | null = null;
 
-  const emitAttachPlan = (status: typeof onboardStatus, exitCode: number) => {
-    onboardStatus = status;
+  if (versionControlBlocks) {
     const payload = {
       action: "onboard",
-      status: onboardStatus,
+      status: "vcs_blocked",
       project_dir: options.projectDir,
       format: options.format,
       storage,
-      attach_details: attachDetails,
+      version_control: versionControl,
+      attach_details: null,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
       install_local_hooks: options.installLocalHooks,
       verify_requested: options.verify,
       attached: {
-        status: steps.attached.status,
-        command: steps.attached.command,
-        details: steps.attached.details ?? null
+        status: "skipped" as const,
+        command: null,
+        details: "version-control safety needs a choice before project files are changed"
       },
       connected: {
         status: "skipped" as const,
-        command: steps.connected.command,
-        details: "waiting for onboard attach confirmation"
+        command: null,
+        details: "version-control safety needs a choice before project files are changed"
       },
       verify: null,
-      next_command:
-        status === "cancelled"
-          ? `recallant onboard ${options.projectDir}`
-          : `recallant onboard ${options.projectDir} --yes`
+      next_command: formatOnboardRerunCommand(options, targetClient)
     };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const buildAttachPlanPayload = (status: typeof onboardStatus, nextCommand: string) => ({
+    action: "onboard",
+    status,
+    project_dir: options.projectDir,
+    format: options.format,
+    storage,
+    version_control: versionControl,
+    attach_details: attachDetails,
+    project_already_attached: Boolean(existingConfig?.project_id),
+    client: options.client ? targetClient : null,
+    install_local_hooks: options.installLocalHooks,
+    verify_requested: options.verify,
+    attached: {
+      status: steps.attached.status,
+      command: steps.attached.command,
+      details: steps.attached.details ?? null
+    },
+    connected: {
+      status: "skipped" as const,
+      command: steps.connected.command,
+      details: "waiting for onboard attach confirmation"
+    },
+    verify: null,
+    next_command: nextCommand
+  });
+
+  const emitAttachPlan = (status: typeof onboardStatus, exitCode: number) => {
+    onboardStatus = status;
+    const payload = buildAttachPlanPayload(
+      onboardStatus,
+      status === "cancelled"
+        ? formatOnboardRerunCommand({ ...options, yes: false, cancel: false }, targetClient)
+        : formatOnboardRerunCommand({ ...options, yes: true, cancel: false }, targetClient)
+    );
     process.stdout.write(
       options.format === "json"
         ? `${JSON.stringify(payload, null, 2)}\n`
@@ -4497,6 +4923,7 @@ async function runOnboard(argv: readonly string[]) {
       project_dir: options.projectDir,
       format: options.format,
       storage,
+      version_control: versionControl,
       attach_details: attachDetails,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
@@ -4513,7 +4940,7 @@ async function runOnboard(argv: readonly string[]) {
         details: steps.connected.details ?? null
       },
       verify: verifyResult,
-      next_command: `recallant onboard ${options.projectDir} --client ${targetClient} --verify --yes`
+      next_command: formatOnboardRerunCommand(options, targetClient)
     };
     process.stdout.write(
       options.format === "json"
@@ -4562,7 +4989,30 @@ async function runOnboard(argv: readonly string[]) {
         emitAttachPlan("plan_only", 0);
         return;
       }
-      if (!options.yes) {
+      let attachApproved = options.yes;
+      if (!attachApproved) {
+        if (canPromptForOnboarding(options)) {
+          const reviewPayload = buildAttachPlanPayload(
+            "needs_confirmation",
+            "Answer the prompt below."
+          );
+          process.stdout.write(onboardHumanReport(reviewPayload));
+          const continueOnboarding = await promptYesNo(
+            "Continue onboarding and apply these planned changes?",
+            false
+          );
+          if (!continueOnboarding) {
+            steps.attached.details = "cancelled by user; no project files or database rows changed";
+            emitAttachPlan("cancelled", 3);
+            return;
+          }
+          attachApproved = true;
+        } else {
+          emitAttachPlan("needs_confirmation", 2);
+          return;
+        }
+      }
+      if (!attachApproved) {
         emitAttachPlan("needs_confirmation", 2);
         return;
       }
@@ -4738,17 +5188,25 @@ async function runOnboard(argv: readonly string[]) {
   }
 
   const workbench = await resolveOnboardWorkbenchOutcome(options.projectDir);
+  const verifyNextOptions: OnboardOptions = {
+    ...options,
+    client: options.client ?? "codex",
+    installLocalHooks: options.client ? options.installLocalHooks : true,
+    verify: true,
+    dryRun: false,
+    yes: false,
+    cancel: false
+  };
   const nextCommand = options.verify
     ? "Start normal work in your agent client."
-    : options.client
-      ? `recallant onboard ${options.projectDir} --client ${targetClient} --verify`
-      : `recallant onboard ${options.projectDir} --client codex --verify`;
+    : formatOnboardRerunCommand(verifyNextOptions, options.client ? targetClient : "codex");
   const payload = {
     action: "onboard",
     status: onboardStatus,
     project_dir: options.projectDir,
     format: options.format,
     storage,
+    version_control: versionControl,
     attach_details: attachDetails,
     workbench,
     project_already_attached: Boolean(existingConfig?.project_id),

@@ -52,7 +52,10 @@ for (const entry of docsEntries) {
 }
 
 assert(!existsSync(join(repoRoot, "stage_goals")), "stage_goals must not remain in public tree");
-assert(!existsSync(join(repoRoot, "PROJECT_LOG.md")), "PROJECT_LOG.md must not remain in public tree");
+assert(
+  !existsSync(join(repoRoot, "PROJECT_LOG.md")),
+  "PROJECT_LOG.md must not remain in public tree"
+);
 
 const readme = await read("README.md");
 mustInclude(
@@ -60,7 +63,7 @@ mustInclude(
   [
     "Self-hosted governed memory for Codex and MCP AI agents",
     "Why It Matters",
-    "recallant onboard /path/to/project --client codex --install-local-hooks --verify",
+    "recallant onboard /path/to/project",
     "storage_blocked",
     "Workbench link",
     "capture active",
@@ -82,7 +85,7 @@ mustInclude(
     "Install",
     "Make A Project Agent-Ready",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "recallant onboard /path/to/project --client codex --install-local-hooks --verify",
+    "recallant onboard /path/to/project",
     "Capture active: yes",
     "storage_blocked",
     "production-sensitive",
@@ -230,8 +233,7 @@ assert(
   "smoke:core must include non-owner-migration:smoke"
 );
 assert(
-  packageJson.scripts?.["public-quickstart:smoke"] ===
-    "node scripts/smoke-public-quickstart.mjs",
+  packageJson.scripts?.["public-quickstart:smoke"] === "node scripts/smoke-public-quickstart.mjs",
   "package.json must expose public-quickstart:smoke"
 );
 assert(
@@ -267,15 +269,23 @@ assert(
   "Installer must keep a dry-run path for public evaluation"
 );
 
-const dryRun = spawnSync("/bin/bash", ["scripts/install-recallant.sh", "--dry-run", "--profile", "single-user"], {
-  cwd: repoRoot,
-  env: process.env,
-  encoding: "utf8"
-});
+const dryRun = spawnSync(
+  "/bin/bash",
+  ["scripts/install-recallant.sh", "--dry-run", "--profile", "single-user"],
+  {
+    cwd: repoRoot,
+    env: process.env,
+    encoding: "utf8"
+  }
+);
 if (dryRun.error?.code !== "EPERM") {
   if (dryRun.error) throw dryRun.error;
   assert(dryRun.status === 0, `single-user dry-run failed\n${dryRun.stderr}\n${dryRun.stdout}`);
-  mustInclude(dryRun.stdout, ["Recallant install plan", "profile: single-user", "dry_run: true"], "installer dry-run");
+  mustInclude(
+    dryRun.stdout,
+    ["Recallant install plan", "profile: single-user", "dry_run: true"],
+    "installer dry-run"
+  );
 }
 
 process.stdout.write("Public readiness smoke passed\n");

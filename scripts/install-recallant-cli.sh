@@ -40,4 +40,4 @@ rm -f "$tmp_wrapper"
 
 echo "Recallant CLI installed: $PREFIX/recallant"
 echo "Try: recallant doctor"
-echo "Attach a project: cd /path/to/project && recallant attach ."
+echo "Onboard a project: recallant onboard /path/to/project"

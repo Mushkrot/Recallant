@@ -54,13 +54,15 @@ flowchart TB
 
 ## Project Bootstrap
 
-`recallant attach` is the product-level path for making a project agent-ready. It creates or updates
-thin local pointers such as `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`, and client MCP
-configuration while keeping durable history in Recallant.
+`recallant onboard <project>` is the product-level path for making a project agent-ready. It owns
+storage readiness, project attach, client connection, capture proof, recall proof, and Workbench
+visibility. Under the hood it creates or updates thin local pointers such as `.recallant/config`,
+`AGENTS.md`, `PROJECT_LOG.md`, and client MCP configuration while keeping durable history in
+Recallant.
 
-For existing projects, attach treats old handoffs, runbooks, and agent files as migration inputs.
-Useful material is imported as source-linked evidence or reviewable memory candidates; long history
-does not belong in startup files.
+For existing projects, onboarding treats old handoffs, runbooks, and agent files as migration
+inputs. Useful material is imported as source-linked evidence or reviewable memory candidates; long
+history does not belong in startup files.
 
 ## Write Path
 
@@ -94,6 +96,8 @@ Recallant keeps safety decisions server-side:
 - capability and connector bindings require governed setup;
 - destructive actions require confirmation;
 - paid APIs are disabled or confirmation-gated by default;
+- Ollama cloud tags and other external model routes are governed capabilities, not local fallback
+  models;
 - public exposure is explicit deployment work, not a default mode;
 - browser clients must not receive provider keys or raw secret values;
 - recalled text is treated as untrusted evidence until policy promotes it.

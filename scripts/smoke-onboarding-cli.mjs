@@ -94,11 +94,13 @@ const recallant = join(prefix, "recallant");
 const lint = runJson(recallant, ["lint-context"], { cwd: projectDir });
 assert(lint.ok === true, `installed wrapper did not run lint-context: ${JSON.stringify(lint)}`);
 
-const missingStorageProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-missing-storage-"));
+const missingStorageProject = await mkdtemp(
+  join(tmpdir(), "recallant-onboarding-missing-storage-")
+);
 await writeFile(join(missingStorageProject, "README.md"), "# Missing storage onboarding smoke\n");
 const missingStorage = runRaw(
   recallant,
-  ["onboard", missingStorageProject, "--client", "codex", "--verify", "--yes", "--format", "json"],
+  ["onboard", missingStorageProject, "--yes", "--format", "json"],
   {
     cwd: missingStorageProject,
     omitDatabaseUrl: true,
@@ -126,10 +128,12 @@ assert(
   `missing storage should not expose internal attach/connect command hints: ${JSON.stringify(missingPayload)}`
 );
 assert(
-  String(missingPayload.next_command).includes("--client codex") &&
-    String(missingPayload.next_command).includes("--verify") &&
-    String(missingPayload.next_command).includes("--yes"),
-  `missing storage next command should rerun the same onboard flow: ${JSON.stringify(missingPayload)}`
+  String(missingPayload.next_command).startsWith(`recallant onboard ${missingStorageProject}`) &&
+    String(missingPayload.next_command).includes("--yes") &&
+    !String(missingPayload.next_command).includes("--client") &&
+    !String(missingPayload.next_command).includes("--verify") &&
+    !String(missingPayload.next_command).includes("--install-local-hooks"),
+  `missing storage next command should keep beginner defaults implicit: ${JSON.stringify(missingPayload)}`
 );
 assert(
   missingPayload.storage?.offline_spool?.role === "fail_soft_capture_fallback" &&
@@ -141,17 +145,13 @@ assert(
     !JSON.stringify(missingPayload).includes(databaseUrl),
   "missing storage output leaked database credentials"
 );
-const missingStorageText = runRaw(
-  recallant,
-  ["onboard", missingStorageProject, "--client", "codex", "--verify", "--yes"],
-  {
-    cwd: missingStorageProject,
-    omitDatabaseUrl: true,
-    env: {
-      RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env")
-    }
+const missingStorageText = runRaw(recallant, ["onboard", missingStorageProject], {
+  cwd: missingStorageProject,
+  omitDatabaseUrl: true,
+  env: {
+    RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env")
   }
-);
+});
 assert(
   missingStorageText.status === 2,
   `missing storage text onboard should exit 2: ${missingStorageText.stderr}\n${missingStorageText.stdout}`
@@ -159,9 +159,10 @@ assert(
 assert(
   (missingStorageText.stdout.match(/^Next action:/gm) ?? []).length === 1 &&
     missingStorageText.stdout.includes("Rerun command: recallant onboard") &&
-    missingStorageText.stdout.includes("--client codex") &&
-    missingStorageText.stdout.includes("--verify") &&
-    missingStorageText.stdout.includes("--yes"),
+    !missingStorageText.stdout.includes("--client codex") &&
+    !missingStorageText.stdout.includes("--verify") &&
+    !missingStorageText.stdout.includes("--install-local-hooks") &&
+    !missingStorageText.stdout.includes("--yes"),
   `missing storage text output should have one clear next action: ${missingStorageText.stdout}`
 );
 for (const forbidden of [
@@ -190,7 +191,7 @@ await mkdir(defaultEnvProject, { recursive: true });
 await writeFile(join(defaultEnvProject, "README.md"), "# Default env onboarding smoke\n");
 const defaultEnvOnboard = runJson(
   recallant,
-  ["onboard", "--client", "codex", "--format", "json"],
+  ["onboard", "--client", "codex", "--skip-vcs-safety", "--format", "json"],
   {
     cwd: defaultEnvProject,
     omitDatabaseUrl: true,
@@ -216,7 +217,7 @@ const explicitEnvProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-ex
 await writeFile(join(explicitEnvProject, "README.md"), "# Explicit env onboarding smoke\n");
 const explicitEnvOnboard = runJson(
   recallant,
-  ["onboard", "--client", "codex", "--format", "json"],
+  ["onboard", "--client", "codex", "--skip-vcs-safety", "--format", "json"],
   { cwd: explicitEnvProject }
 );
 assert(
@@ -230,6 +231,37 @@ assert(
   "explicit env onboard output leaked database credentials"
 );
 
+const vcsChoiceProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-choice-"));
+await writeFile(join(vcsChoiceProject, "README.md"), "# Version-control safety smoke\n");
+const vcsChoice = runRaw(recallant, ["onboard", vcsChoiceProject], {
+  cwd: vcsChoiceProject
+});
+assert(
+  vcsChoice.status === 2,
+  `vcs choice should exit 2: ${vcsChoice.stderr}\n${vcsChoice.stdout}`
+);
+assert(
+  vcsChoice.stdout.includes("Version-control safety choices") &&
+    vcsChoice.stdout.includes("Initialize Git") &&
+    vcsChoice.stdout.includes("Continue without Git"),
+  `vcs choice output should offer initialize/refuse choices: ${vcsChoice.stdout}`
+);
+assert(!(await exists(join(vcsChoiceProject, ".recallant", "config"))), "vcs choice wrote config");
+assert((await projectRowCount(vcsChoiceProject)) === 0, "vcs choice wrote database row");
+
+const vcsInitProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-init-"));
+await writeFile(join(vcsInitProject, "README.md"), "# Version-control init smoke\n");
+const vcsInit = runJson(recallant, ["onboard", vcsInitProject, "--yes", "--format", "json"], {
+  cwd: vcsInitProject
+});
+assert(
+  vcsInit.version_control?.status === "initialized" &&
+    vcsInit.version_control?.initialized === true &&
+    vcsInit.version_control?.writes_files === true,
+  `--yes should initialize Git before onboarding writes: ${JSON.stringify(vcsInit.version_control)}`
+);
+assert(await exists(join(vcsInitProject, ".git")), "--yes vcs init did not create .git");
+
 const productionProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-production-"));
 await writeFile(
   join(productionProject, "README.md"),
@@ -240,8 +272,9 @@ await writeFile(
   "# Existing Agent Notes\n\nKeep deployment notes under review. API_SECRET=super-secret-value\n"
 );
 await writeFile(join(productionProject, ".env.example"), "API_SECRET=super-secret-value\n");
+run("git", ["-C", productionProject, "init"]);
 
-const wizard = runRaw(recallant, ["onboard", productionProject, "--client", "codex"], {
+const wizard = runRaw(recallant, ["onboard", productionProject], {
   cwd: productionProject
 });
 assert(wizard.status === 2, `production wizard should exit 2: ${wizard.stderr}\n${wizard.stdout}`);
@@ -253,7 +286,7 @@ for (const marker of [
   "Backup behavior:",
   "Import/review behavior:",
   "Continue/cancel prompt:",
-  "No attach command is required."
+  "In automation, use --yes only after approving this plan."
 ]) {
   assert(wizard.stdout.includes(marker), `wizard output missing ${marker}:\n${wizard.stdout}`);
 }
@@ -261,11 +294,9 @@ assert(!wizard.stdout.includes("recallant attach"), "wizard leaked attach handof
 assert(!(await exists(join(productionProject, ".recallant", "config"))), "wizard wrote config");
 assert((await projectRowCount(productionProject)) === 0, "wizard wrote database row");
 
-const cancel = runRaw(
-  recallant,
-  ["onboard", productionProject, "--client", "codex", "--cancel", "--format", "json"],
-  { cwd: productionProject }
-);
+const cancel = runRaw(recallant, ["onboard", productionProject, "--cancel", "--format", "json"], {
+  cwd: productionProject
+});
 assert(cancel.status === 3, `cancel should exit 3: ${cancel.stderr}\n${cancel.stdout}`);
 const cancelPayload = JSON.parse(cancel.stdout);
 assert(cancelPayload.status === "cancelled", `cancel did not report cancelled: ${cancel.stdout}`);
@@ -277,12 +308,13 @@ assert(
 assert(!(await exists(join(productionProject, ".recallant", "config"))), "cancel wrote config");
 assert((await projectRowCount(productionProject)) === 0, "cancel wrote database row");
 
-const dryRun = runJson(
-  recallant,
-  ["onboard", productionProject, "--client", "codex", "--dry-run", "--format", "json"],
-  { cwd: productionProject }
+const dryRun = runJson(recallant, ["onboard", productionProject, "--dry-run", "--format", "json"], {
+  cwd: productionProject
+});
+assert(
+  dryRun.status === "plan_only",
+  `dry-run did not return plan_only: ${JSON.stringify(dryRun)}`
 );
-assert(dryRun.status === "plan_only", `dry-run did not return plan_only: ${JSON.stringify(dryRun)}`);
 assert(
   dryRun.attach_details?.writes_files === false &&
     dryRun.attach_details?.writes_database === false &&
@@ -294,7 +326,7 @@ assert((await projectRowCount(productionProject)) === 0, "dry-run wrote database
 
 const productionYes = runJson(
   recallant,
-  ["onboard", productionProject, "--client", "codex", "--yes", "--format", "json"],
+  ["onboard", productionProject, "--yes", "--format", "json"],
   { cwd: productionProject }
 );
 assert(
@@ -318,20 +350,14 @@ assert((await projectRowCount(productionProject)) === 1, "--yes did not write da
 
 const oneCommandProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-one-command-"));
 await writeFile(join(oneCommandProject, "README.md"), "# One-command onboarding proof\n");
-const oneCommand = runJson(
-  recallant,
-  [
-    "onboard",
-    oneCommandProject,
-    "--client",
-    "codex",
-    "--install-local-hooks",
-    "--verify",
-    "--yes",
-    "--format",
-    "json"
-  ],
-  { cwd: oneCommandProject }
+const oneCommand = runJson(recallant, ["onboard", oneCommandProject, "--yes", "--format", "json"], {
+  cwd: oneCommandProject
+});
+assert(
+  oneCommand.client === "codex" &&
+    oneCommand.install_local_hooks === true &&
+    oneCommand.verify_requested === true,
+  `one-command defaults should select Codex hooks and verify: ${JSON.stringify(oneCommand)}`
 );
 assert(
   oneCommand.connected?.status === "connected" && oneCommand.verify?.status === "passed",
@@ -368,20 +394,11 @@ assert(
 
 const humanProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-human-success-"));
 await writeFile(join(humanProject, "README.md"), "# Human success onboarding proof\n");
-const humanSuccess = runRaw(
-  recallant,
-  [
-    "onboard",
-    humanProject,
-    "--client",
-    "codex",
-    "--install-local-hooks",
-    "--verify",
-    "--yes"
-  ],
-  { cwd: humanProject }
+const humanSuccess = runRaw(recallant, ["onboard", humanProject, "--yes"], { cwd: humanProject });
+assert(
+  humanSuccess.status === 0,
+  `human success failed: ${humanSuccess.stderr}\n${humanSuccess.stdout}`
 );
-assert(humanSuccess.status === 0, `human success failed: ${humanSuccess.stderr}\n${humanSuccess.stdout}`);
 assert(
   humanSuccess.stdout.includes("Capture active: yes") &&
     humanSuccess.stdout.includes("context read, memory write, checkpoint, and recall proof"),
@@ -416,7 +433,10 @@ assert(
 );
 
 const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
-assert(agents.includes("recallant agent-start"), "installed wrapper attach did not write capture runtime instructions");
+assert(
+  agents.includes("recallant agent-start"),
+  "installed wrapper attach did not write capture runtime instructions"
+);
 
 const start = runJson(recallant, ["agent-start", "--task-hint", "fresh onboarding smoke"], {
   cwd: projectDir
@@ -434,7 +454,10 @@ const event = runJson(
   ],
   { cwd: projectDir }
 );
-assert(event.memory?.status === "accepted", `installed wrapper decision was not captured: ${JSON.stringify(event)}`);
+assert(
+  event.memory?.status === "accepted",
+  `installed wrapper decision was not captured: ${JSON.stringify(event)}`
+);
 
 const closeout = runJson(
   recallant,

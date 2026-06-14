@@ -8,12 +8,12 @@ call `recallant mcp-server` locally.
 For ordinary project setup, use onboarding:
 
 ```bash
-recallant onboard <project> --client codex --install-local-hooks --verify
+recallant onboard <project>
 ```
 
-Onboarding owns attach, client connection, capture proof, readiness proof, and recall proof. The
-project is not capture active until context read, memory write, checkpoint, and recall evidence are
-present.
+Onboarding defaults to the Codex beginner flow: attach, client connection, local hooks when
+supported, capture proof, readiness proof, and recall proof. The project is not capture active until
+context read, memory write, checkpoint, and recall evidence are present.
 
 ## Advanced Client Setup
 

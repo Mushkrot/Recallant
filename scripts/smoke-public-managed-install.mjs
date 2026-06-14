@@ -118,26 +118,24 @@ try {
   );
 
   const onboard = parseJson(
-    run(
-      recallant,
-      [
-        "onboard",
-        projectDir,
-        "--client",
-        "codex",
-        "--install-local-hooks",
-        "--verify",
-        "--yes",
-        "--format",
-        "json"
-      ],
-      { env: baseEnv }
-    ),
+    run(recallant, ["onboard", projectDir, "--yes", "--format", "json"], { env: baseEnv }),
     "managed install onboard"
   );
   assert(onboard.status === "completed", `Onboard failed: ${JSON.stringify(onboard)}`);
-  assert(onboard.storage?.reachable === true, `Onboard storage was not ready: ${JSON.stringify(onboard.storage)}`);
-  assert(onboard.attached?.status === "attached", `Onboard attach failed: ${JSON.stringify(onboard)}`);
+  assert(
+    onboard.client === "codex" &&
+      onboard.install_local_hooks === true &&
+      onboard.verify_requested === true,
+    `Managed install onboard should keep beginner defaults implicit: ${JSON.stringify(onboard)}`
+  );
+  assert(
+    onboard.storage?.reachable === true,
+    `Onboard storage was not ready: ${JSON.stringify(onboard.storage)}`
+  );
+  assert(
+    onboard.attached?.status === "attached",
+    `Onboard attach failed: ${JSON.stringify(onboard)}`
+  );
   assert(
     onboard.connected?.status === "connected",
     `Onboard connect failed: ${JSON.stringify(onboard)}`
@@ -178,8 +176,7 @@ try {
     JSON.stringify(
       {
         status: "ok",
-        onboarding_command:
-          "recallant onboard <project> --client codex --install-local-hooks --verify --yes --format json",
+        onboarding_command: "recallant onboard <project>",
         project_id: config.project_id ?? null,
         clean_root: "[temporary-directory-removed]",
         postgres_port: port,

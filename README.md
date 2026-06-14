@@ -47,14 +47,16 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 Onboard a project for Codex:
 
 ```bash
-recallant onboard /path/to/project --client codex --install-local-hooks --verify
+recallant onboard /path/to/project
 ```
 
-Onboarding owns storage readiness, project attach, client connection, capture proof, recall proof,
-and the Workbench outcome. If storage is missing, it stops with `storage_blocked` and a plain setup
-choice; `Database not configured` is not a successful onboarding state. If the project looks
-production-sensitive, onboarding shows the planned writes, backup behavior, import/review behavior,
-and a continue/cancel prompt before changing files.
+Onboarding defaults to the beginner Codex path: project attach, local client connection, optional
+hooks, capture proof, recall proof, and the Workbench outcome. If storage is missing in an
+interactive terminal, it offers to run the local single-user storage setup first; in automation it
+stops with `storage_blocked` and a plain setup choice. `Database not configured` is not a successful
+onboarding state. If the project looks production-sensitive, onboarding shows the planned writes,
+backup behavior, import/review behavior, and an interactive continue/cancel prompt before changing
+files.
 
 The important state is not "installed" or "configured". The important state is **capture active**:
 Recallant has observed real context reads, memory writes, checkpoints, and recall proof for the

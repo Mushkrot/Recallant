@@ -13,7 +13,7 @@ bounded by design, and conservative about secrets.
 | Prompt injection through old memory | Treat recalled text as evidence, not automatic instruction. |
 | Silent rule promotion | Block instruction-grade memory unless authority is explicit. |
 | Public admin exposure | Keep Workbench/admin/MCP private by default. |
-| Paid API surprises | Require explicit approval unless a project changes policy. |
+| Paid or cloud model surprises | Require explicit approval unless a project changes policy. |
 | Destructive action overreach | Require dry-run and confirmation paths. |
 | Huge tool output or raw artifacts | Store bounded excerpts plus hashes/pointers. |
 | Backup exposure | Keep backups private and avoid raw secret material in manifests. |
@@ -43,6 +43,9 @@ raw authorization material.
 Using a capability can still require confirmation, local operator action, or a separate connector
 binding flow. A recalled note that a service exists is evidence, not permission to expose a public
 route, spend money, delete data, or bypass a private access boundary.
+
+Ollama-hosted cloud model tags, including `*:cloud` model names, are external model capabilities.
+They should not be treated as local Ollama readiness requirements or silent local-model fallbacks.
 
 ## Memory Governance
 

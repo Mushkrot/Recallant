@@ -80,9 +80,11 @@ Confirmed install:
 `RECALLANT_DATABASE_URL` is already reachable, onboarding reuses it. If that variable is not set,
 the CLI loads the default single-user env file when it exists.
 
-Missing or unreachable storage blocks beginner onboarding with `storage_blocked` and a short setup
-choice. Local offline spool remains a fail-soft capture fallback, but it is not treated as completed
-onboarding because Recallant cannot prove recall or Workbench review without storage.
+In an interactive terminal, missing storage offers to run the single-user install profile before
+project files are touched. Non-interactive runs, explicit private env-file runs, declined setup, or
+unreachable storage block beginner onboarding with `storage_blocked` and a short setup choice. Local
+offline spool remains a fail-soft capture fallback, but it is not treated as completed onboarding
+because Recallant cannot prove recall or Workbench review without storage.
 
 ## Verification
 
@@ -133,6 +135,22 @@ The managed install smoke intentionally starts local infrastructure in temporary
 Postgres reachability, attaches a project, writes capture evidence, verifies `doctor
 --require-capture`, and removes the temporary container afterward. Independent-host validation is
 still recommended before a release-candidate tag.
+
+## Model Routing
+
+Recallant is local-first. The local model route points at Ollama through
+`RECALLANT_OLLAMA_URL`, and `RECALLANT_EXPECTED_OLLAMA_MODELS` should list only models that are
+expected to be available from that local Ollama service.
+
+Do not add Ollama cloud tags such as `*:cloud` to the expected local model list. They are external
+model routes, even when they are launched through the Ollama CLI. Treat cloud or paid model use as a
+governed capability: it must be explicit, cost-aware, and approval-gated instead of becoming a
+silent fallback from local inference.
+
+Maintainers may still use one-off agent launches such as `ollama launch codex`,
+`ollama launch codex-app`, or `ollama launch cline` with a cloud model for complex development work.
+That is an operator decision outside automatic Recallant routing unless the project has an approved
+paid/external model policy.
 
 ## Private Deployment Profiles
 

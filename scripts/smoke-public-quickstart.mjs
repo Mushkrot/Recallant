@@ -62,9 +62,7 @@ function runJson(command, args, options = {}) {
   try {
     return JSON.parse(output);
   } catch (error) {
-    throw new Error(
-      `Expected JSON from ${command} ${args.join(" ")}: ${String(error)}\n${output}`
-    );
+    throw new Error(`Expected JSON from ${command} ${args.join(" ")}: ${String(error)}\n${output}`);
   }
 }
 
@@ -111,14 +109,26 @@ assert(
 );
 assertNoPrivatePathLeak(doctorBefore, "fresh doctor");
 
-const onboard = runJson(
-  recallant,
-  ["onboard", "--client", "codex", "--install-local-hooks", "--verify", "--format", "json"],
-  { cwd: projectDir, timeout: 180000 }
-);
+const onboard = runJson(recallant, ["onboard", "--yes", "--format", "json"], {
+  cwd: projectDir,
+  timeout: 180000
+});
 assert(onboard.action === "onboard", `Onboard action mismatch: ${JSON.stringify(onboard)}`);
 assert(onboard.project_already_attached === false, "Quickstart project should start unattached");
-assert(onboard.attached?.status === "attached", `Onboard attach failed: ${JSON.stringify(onboard)}`);
+assert(
+  onboard.client === "codex" &&
+    onboard.install_local_hooks === true &&
+    onboard.verify_requested === true,
+  `Quickstart onboard should keep beginner defaults implicit: ${JSON.stringify(onboard)}`
+);
+assert(
+  onboard.version_control?.status === "initialized" || onboard.version_control?.status === "ready",
+  `Onboard version-control safety failed: ${JSON.stringify(onboard.version_control)}`
+);
+assert(
+  onboard.attached?.status === "attached",
+  `Onboard attach failed: ${JSON.stringify(onboard)}`
+);
 assert(
   onboard.connected?.status === "connected",
   `Onboard connect failed: ${JSON.stringify(onboard)}`
@@ -153,7 +163,9 @@ assert(
   `Onboard Workbench outcome incomplete: ${JSON.stringify(onboard.workbench)}`
 );
 assert(
-  String(onboard.verify?.ask_answer ?? "").includes("The agent remembered this Recallant demo memory"),
+  String(onboard.verify?.ask_answer ?? "").includes(
+    "The agent remembered this Recallant demo memory"
+  ),
   `Onboard ask proof did not recall the demo memory: ${JSON.stringify(onboard.verify)}`
 );
 assertNoPrivatePathLeak(onboard, "onboard result");
@@ -192,14 +204,7 @@ assertNoPrivatePathLeak(doctorAfter, "capture-active doctor");
 
 const ask = runJson(
   recallant,
-  [
-    "ask",
-    "what did the agent remember?",
-    "--project-dir",
-    projectDir,
-    "--format",
-    "json"
-  ],
+  ["ask", "what did the agent remember?", "--project-dir", projectDir, "--format", "json"],
   { cwd: projectDir }
 );
 assert(ask.recalled === true, `Ask did not recall quickstart memory: ${JSON.stringify(ask)}`);

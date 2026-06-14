@@ -27,12 +27,18 @@ recallant --version
 From anywhere:
 
 ```bash
-recallant onboard /path/to/project --client codex --install-local-hooks --verify
+recallant onboard /path/to/project
 ```
 
-The one-command flow checks storage readiness, attaches the project, prepares thin local agent
-configuration, installs optional local hooks, proves capture and recall, and prints the private
-Workbench outcome.
+The one-command flow checks storage readiness, offers local single-user storage setup when needed,
+attaches the project, prepares thin local agent configuration for Codex, installs local hooks when
+supported, proves capture and recall, and prints the private Workbench outcome. Advanced flags can
+opt out of those defaults, but they are not part of the beginner path.
+
+Before changing project files, onboarding also checks version-control safety. If Git is available
+but the project is not a usable Git work tree, onboarding offers to initialize Git first or continue
+with Recallant local backups only. In approved automation, `--yes` may initialize Git, but Recallant
+does not stage or commit project files, secrets, or data automatically.
 
 Expected success:
 
@@ -49,12 +55,17 @@ npm run public-quickstart:smoke
 
 ## 3. If Onboarding Stops
 
-If storage is missing or unreachable, onboarding reports `storage_blocked` and explains the setup
-choice. Local offline spool is a fail-soft capture fallback, not completed onboarding.
+If storage is missing in an interactive terminal, onboarding asks whether to set up local single-user
+storage before it touches the project. If the user declines, the environment is non-interactive, or
+storage remains unreachable, onboarding reports `storage_blocked` and explains the setup choice.
+Local offline spool is a fail-soft capture fallback, not completed onboarding.
+
+If version-control safety needs a decision, onboarding stops before project writes and offers a
+plain choice: initialize Git first, install Git if it is missing, or explicitly continue without Git.
 
 If the project looks production-sensitive, onboarding shows the project path, risk reason, planned
 writes, backup behavior, import/review behavior, and a continue/cancel prompt before it changes
-files. Use `--yes` only after reviewing that plan or in automation that already approved it.
+files. Use `--yes` only in automation that already approved the plan.
 
 ## 4. Open The Workbench
 
