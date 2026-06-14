@@ -202,9 +202,9 @@ function bulletList(values) {
 function pilotMarkdownSummary(report) {
   const clean = report.pilots.clean_empty_project;
   const copied = report.pilots.copied_existing_sandbox;
-  const gutendocx = report.pilots.gutendocx_sandbox;
+  const sampleProduction = report.pilots.sample_production_sandbox;
   const production = report.pilots.production_sensitive_dry_run;
-  const gutendocxDryRun = report.pilots.gutendocx_production_dry_run;
+  const sampleProductionDryRun = report.pilots.sample_production_dry_run;
   const cross = report.pilots.cross_project_recall;
   const qa = report.qa_summary;
   return [
@@ -217,10 +217,10 @@ function pilotMarkdownSummary(report) {
     "",
     `- Clean attach/capture/recall/detach: ${statusMark(qa.clean_attach_capture_recall_detach)}`,
     `- Copied sandbox original untouched: ${statusMark(qa.copied_sandbox_original_untouched)}`,
-    `- GutenDocx sampled sandbox original untouched: ${statusMark(qa.gutendocx_sandbox_original_untouched)}`,
+    `- Sample production sandbox original untouched: ${statusMark(qa.sample_production_sandbox_original_untouched)}`,
     `- Workbench capture visible: ${statusMark(qa.workbench_capture_visible)}`,
     `- Production-sensitive preflight safe: ${statusMark(qa.production_sensitive_preflight_safe)}`,
-    `- GutenDocx production dry-run safe: ${statusMark(qa.gutendocx_production_dry_run_safe)}`,
+    `- Sample production dry-run safe: ${statusMark(qa.sample_production_dry_run_safe)}`,
     `- Cross-project recall source-linked: ${statusMark(qa.cross_project_recall_source_linked)}`,
     "",
     "## Clean Empty Project",
@@ -249,17 +249,17 @@ function pilotMarkdownSummary(report) {
     `- Hook decision recalled: ${statusMark(copied.connect.recalled_hook_decision)}`,
     `- Detached: ${copied.cleanup.confirmed_status}`,
     "",
-    "## GutenDocx Sampled Sandbox",
+    "## Sample Production Sandbox",
     "",
-    `- Sandbox attached: ${statusMark(gutendocx.attached)}`,
-    `- Original key files untouched: ${statusMark(gutendocx.untouched_original_key_files)}`,
-    `- Imported sources: ${gutendocx.imported_sources}`,
+    `- Sandbox attached: ${statusMark(sampleProduction.attached)}`,
+    `- Original key files untouched: ${statusMark(sampleProduction.untouched_original_key_files)}`,
+    `- Imported sources: ${sampleProduction.imported_sources}`,
     "- Copied source files:",
-    bulletList(gutendocx.copied_files),
-    `- Remembered marker: ${gutendocx.capture.remembered_marker}`,
-    `- Recalled later: ${statusMark(gutendocx.capture.recalled_in_later_session)}`,
-    `- Hook decision recalled: ${statusMark(gutendocx.connect.recalled_hook_decision)}`,
-    `- Detached: ${gutendocx.cleanup.confirmed_status}`,
+    bulletList(sampleProduction.copied_files),
+    `- Remembered marker: ${sampleProduction.capture.remembered_marker}`,
+    `- Recalled later: ${statusMark(sampleProduction.capture.recalled_in_later_session)}`,
+    `- Hook decision recalled: ${statusMark(sampleProduction.connect.recalled_hook_decision)}`,
+    `- Detached: ${sampleProduction.cleanup.confirmed_status}`,
     "",
     "## Production-Sensitive Dry Run",
     "",
@@ -271,17 +271,17 @@ function pilotMarkdownSummary(report) {
     "- Detected signals:",
     bulletList(production.detected_signals),
     "",
-    "## GutenDocx Production Dry Run",
+    "## Sample Production Dry Run",
     "",
-    `- Status: ${gutendocxDryRun.status}`,
-    `- Effective mode: ${gutendocxDryRun.effective_mode}`,
-    `- Wrote project files: ${gutendocxDryRun.writes_files}`,
-    `- Wrote database: ${gutendocxDryRun.writes_database}`,
-    `- Service restarts: ${gutendocxDryRun.service_restarts}`,
-    `- Owner confirmation required: ${statusMark(gutendocxDryRun.owner_confirmation_required)}`,
-    `- Key files untouched: ${statusMark(gutendocxDryRun.untouched_key_files)}`,
+    `- Status: ${sampleProductionDryRun.status}`,
+    `- Effective mode: ${sampleProductionDryRun.effective_mode}`,
+    `- Wrote project files: ${sampleProductionDryRun.writes_files}`,
+    `- Wrote database: ${sampleProductionDryRun.writes_database}`,
+    `- Service restarts: ${sampleProductionDryRun.service_restarts}`,
+    `- Owner confirmation required: ${statusMark(sampleProductionDryRun.owner_confirmation_required)}`,
+    `- Key files untouched: ${statusMark(sampleProductionDryRun.untouched_key_files)}`,
     "- Detected signals:",
-    bulletList(gutendocxDryRun.detected_signals),
+    bulletList(sampleProductionDryRun.detected_signals),
     "",
     "## Cross-Project Recall",
     "",
@@ -712,8 +712,76 @@ async function runCopiedExistingPilot() {
   };
 }
 
-async function runGutendocxSandboxPilot() {
-  const originalDir = "/ai/gutendocx";
+async function writeProductionLikeProjectFixture(projectDir) {
+  await mkdir(join(projectDir, "Docs"), { recursive: true });
+  await mkdir(join(projectDir, ".cursor"), { recursive: true });
+  await writeFile(
+    join(projectDir, "README.md"),
+    [
+      "# Sample Production Project",
+      "",
+      "This fixture represents a deployed service with production runbooks and agent handoffs.",
+      "It is synthetic and contains no owner infrastructure."
+    ].join("\n")
+  );
+  await writeFile(
+    join(projectDir, "AGENTS.md"),
+    [
+      "# Agent Instructions",
+      "",
+      "## Project Rules",
+      "",
+      "Use the deployment runbook before changing public-service behavior.",
+      "Never write raw secrets into memory or project documentation."
+    ].join("\n")
+  );
+  await writeFile(
+    join(projectDir, "PROJECT_LOG.md"),
+    [
+      "# Project Log",
+      "",
+      "## Current Session",
+      "",
+      "Status: production-like fixture.",
+      "Current focus: safe Recallant migration.",
+      "Next step: run sandbox-only onboarding.",
+      "",
+      "## Historical Log",
+      "",
+      "2025-03-10: sample deployment review.",
+      "2025-04-10: sample agent handoff."
+    ].join("\n")
+  );
+  await writeFile(
+    join(projectDir, "Docs", "PRD.md"),
+    "# Product Notes\nThis sample service has user-facing production behavior.\n"
+  );
+  await writeFile(
+    join(projectDir, "Docs", "Deploy_Runbook.md"),
+    [
+      "# Deploy Runbook",
+      "",
+      "Production deploys require owner approval, rollback notes, and private access checks.",
+      "Use placeholder domains and generic providers only in public fixtures."
+    ].join("\n")
+  );
+  await writeFile(
+    join(projectDir, "Docs", "Commands for testing.md"),
+    "# Commands For Testing\nRun deterministic smoke checks before deploy.\n"
+  );
+  await writeFile(
+    join(projectDir, ".cursor", "SESSION_HANDOFF.md"),
+    "# Session Handoff\nPrevious agent paused before production-sensitive deploy review.\n"
+  );
+  await writeFile(
+    join(projectDir, "config.yaml"),
+    "service:\n  mode: production-like-fixture\n  public_exposure: private-by-default\n"
+  );
+}
+
+async function runSampleProductionSandboxPilot() {
+  const originalDir = await makeTempDir("recallant-pilot-sample-production-original-");
+  await writeProductionLikeProjectFixture(originalDir);
   const selectedFiles = [
     "README.md",
     "AGENTS.md",
@@ -724,32 +792,36 @@ async function runGutendocxSandboxPilot() {
     ".cursor/SESSION_HANDOFF.md"
   ];
   const before = await hashSelectedFiles(originalDir, selectedFiles);
-  const sandboxDir = await makeTempDir("recallant-pilot-gutendocx-copy-");
+  const sandboxDir = await makeTempDir("recallant-pilot-sample-production-copy-");
   for (const relative of selectedFiles) {
     await mkdir(dirname(join(sandboxDir, relative)), { recursive: true });
     await cp(join(originalDir, relative), join(sandboxDir, relative));
   }
-  const marker = `PILOT-GUTENDOCX-${randomUUID()}`;
+  const marker = `PILOT-SAMPLE-PRODUCTION-${randomUUID()}`;
   const attach = await cli(sandboxDir, ["attach", sandboxDir, "--sandbox", "--format", "json"]);
   assert(
     attach.status === "attached",
-    `gutendocx sandbox attach failed: ${JSON.stringify(attach)}`
+    `sample production sandbox attach failed: ${JSON.stringify(attach)}`
   );
   assert(
     attach.imported?.length >= 4,
-    `gutendocx sandbox should import selected source files: ${JSON.stringify(attach.imported)}`
+    `sample production sandbox should import selected source files: ${JSON.stringify(attach.imported)}`
   );
   const capture = await runCapturedSession(
     sandboxDir,
     attach.project_id,
     marker,
-    "gutendocx sandbox pilot"
+    "sample production sandbox pilot"
   );
-  const connect = await runConnectHookEvidence(sandboxDir, marker, "gutendocx sandbox pilot");
+  const connect = await runConnectHookEvidence(
+    sandboxDir,
+    marker,
+    "sample production sandbox pilot"
+  );
   const workbench = workbenchSnapshot(await dashboardFor(attach.project_id, sandboxDir));
   assert(
     workbench.capture_ready === true,
-    "gutendocx sandbox Workbench snapshot did not show capture ready"
+    "sample production sandbox Workbench snapshot did not show capture ready"
   );
   const detachDryRun = await cli(sandboxDir, [
     "detach",
@@ -767,11 +839,11 @@ async function runGutendocxSandboxPilot() {
     "sandbox",
     "--confirm"
   ]);
-  assert(detach.status === "detached", "gutendocx sandbox detach failed");
+  assert(detach.status === "detached", "sample production sandbox detach failed");
   const after = await hashSelectedFiles(originalDir, selectedFiles);
-  assert(sameHashTree(before, after), "gutendocx sandbox pilot changed original key files");
+  assert(sameHashTree(before, after), "sample production sandbox pilot changed original key files");
   return {
-    original_project_name: "gutendocx",
+    original_project_name: "sample-production",
     original_project_path_redacted: true,
     sandbox_copy_name: basename(sandboxDir),
     copied_files: selectedFiles,
@@ -840,8 +912,9 @@ async function runProductionSensitivePreflight() {
   };
 }
 
-async function runGutendocxProductionDryRun() {
-  const projectDir = "/ai/gutendocx";
+async function runSampleProductionDryRun() {
+  const projectDir = await makeTempDir("recallant-pilot-sample-production-dryrun-");
+  await writeProductionLikeProjectFixture(projectDir);
   const selectedFiles = [
     "README.md",
     "AGENTS.md",
@@ -866,16 +939,16 @@ async function runGutendocxProductionDryRun() {
       preflight.effective_mode === "guided" &&
       preflight.writes_files === false &&
       preflight.writes_database === false,
-    `gutendocx production dry-run did not stop safely: ${JSON.stringify(preflight)}`
+    `sample production dry-run did not stop safely: ${JSON.stringify(preflight)}`
   );
   assert(
     preflight.production_sensitive?.production_sensitive === true,
-    "gutendocx production dry-run did not detect production signals"
+    "sample production dry-run did not detect production signals"
   );
   const after = await hashSelectedFiles(projectDir, selectedFiles);
-  assert(sameHashTree(before, after), "gutendocx production dry-run changed key files");
+  assert(sameHashTree(before, after), "sample production dry-run changed key files");
   return {
-    project_name: "gutendocx",
+    project_name: "sample-production",
     project_path_redacted: true,
     requested_mode: preflight.requested_mode,
     effective_mode: preflight.effective_mode,
@@ -964,13 +1037,13 @@ try {
   };
   report.pilots.clean_empty_project = await runCleanEmptyPilot();
   report.pilots.copied_existing_sandbox = await runCopiedExistingPilot();
-  report.pilots.gutendocx_sandbox = await runGutendocxSandboxPilot();
+  report.pilots.sample_production_sandbox = await runSampleProductionSandboxPilot();
   report.pilots.cross_project_recall = await runCrossProjectRecallEvidence(
     report.pilots.clean_empty_project,
     report.pilots.copied_existing_sandbox
   );
   report.pilots.production_sensitive_dry_run = await runProductionSensitivePreflight();
-  report.pilots.gutendocx_production_dry_run = await runGutendocxProductionDryRun();
+  report.pilots.sample_production_dry_run = await runSampleProductionDryRun();
   report.qa_summary = {
     scenario_count: Object.keys(report.pilots).length,
     clean_attach_capture_recall_detach:
@@ -989,30 +1062,30 @@ try {
       report.pilots.copied_existing_sandbox.connect.recalled_hook_decision === true &&
       report.pilots.copied_existing_sandbox.connect.client_connection === "mcp_and_hooks_ready" &&
       report.pilots.copied_existing_sandbox.local_backup_created === true,
-    gutendocx_sandbox_original_untouched:
-      report.pilots.gutendocx_sandbox.untouched_original_key_files === true &&
-      report.pilots.gutendocx_sandbox.imported_sources >= 4 &&
-      report.pilots.gutendocx_sandbox.capture.recalled_in_later_session === true &&
-      report.pilots.gutendocx_sandbox.connect.recalled_hook_decision === true &&
-      report.pilots.gutendocx_sandbox.cleanup.confirmed_status === "detached",
+    sample_production_sandbox_original_untouched:
+      report.pilots.sample_production_sandbox.untouched_original_key_files === true &&
+      report.pilots.sample_production_sandbox.imported_sources >= 4 &&
+      report.pilots.sample_production_sandbox.capture.recalled_in_later_session === true &&
+      report.pilots.sample_production_sandbox.connect.recalled_hook_decision === true &&
+      report.pilots.sample_production_sandbox.cleanup.confirmed_status === "detached",
     workbench_capture_visible:
       report.pilots.clean_empty_project.workbench.capture_ready === true &&
       report.pilots.copied_existing_sandbox.workbench.capture_ready === true &&
-      report.pilots.gutendocx_sandbox.workbench.capture_ready === true &&
+      report.pilots.sample_production_sandbox.workbench.capture_ready === true &&
       report.pilots.clean_empty_project.workbench.source_health.total >= 1 &&
       report.pilots.copied_existing_sandbox.workbench.source_health.total >= 1 &&
-      report.pilots.gutendocx_sandbox.workbench.source_health.total >= 1,
+      report.pilots.sample_production_sandbox.workbench.source_health.total >= 1,
     production_sensitive_preflight_safe:
       report.pilots.production_sensitive_dry_run.status === "needs_confirmation" &&
       report.pilots.production_sensitive_dry_run.writes_files === false &&
       report.pilots.production_sensitive_dry_run.writes_database === false,
-    gutendocx_production_dry_run_safe:
-      report.pilots.gutendocx_production_dry_run.status === "needs_confirmation" &&
-      report.pilots.gutendocx_production_dry_run.effective_mode === "guided" &&
-      report.pilots.gutendocx_production_dry_run.writes_files === false &&
-      report.pilots.gutendocx_production_dry_run.writes_database === false &&
-      report.pilots.gutendocx_production_dry_run.service_restarts === 0 &&
-      report.pilots.gutendocx_production_dry_run.untouched_key_files === true,
+    sample_production_dry_run_safe:
+      report.pilots.sample_production_dry_run.status === "needs_confirmation" &&
+      report.pilots.sample_production_dry_run.effective_mode === "guided" &&
+      report.pilots.sample_production_dry_run.writes_files === false &&
+      report.pilots.sample_production_dry_run.writes_database === false &&
+      report.pilots.sample_production_dry_run.service_restarts === 0 &&
+      report.pilots.sample_production_dry_run.untouched_key_files === true,
     cross_project_recall_source_linked:
       report.pilots.cross_project_recall.active_search_hides_detached_project === true &&
       report.pilots.cross_project_recall.include_detached_finds_source_linked_example === true &&
@@ -1022,10 +1095,10 @@ try {
   report.qa_summary.all_required_scenarios_passed =
     report.qa_summary.clean_attach_capture_recall_detach &&
     report.qa_summary.copied_sandbox_original_untouched &&
-    report.qa_summary.gutendocx_sandbox_original_untouched &&
+    report.qa_summary.sample_production_sandbox_original_untouched &&
     report.qa_summary.workbench_capture_visible &&
     report.qa_summary.production_sensitive_preflight_safe &&
-    report.qa_summary.gutendocx_production_dry_run_safe &&
+    report.qa_summary.sample_production_dry_run_safe &&
     report.qa_summary.cross_project_recall_source_linked;
   assert(report.qa_summary.all_required_scenarios_passed, "pilot report QA summary was not green");
   report.report_path = reportPath;
@@ -1043,9 +1116,9 @@ try {
     "# Recallant Pilot Report",
     "## Clean Empty Project",
     "## Copied Existing Sandbox",
-    "## GutenDocx Sampled Sandbox",
+    "## Sample Production Sandbox",
     "## Production-Sensitive Dry Run",
-    "## GutenDocx Production Dry Run",
+    "## Sample Production Dry Run",
     "## Cross-Project Recall",
     "Attached",
     "Imported sources",

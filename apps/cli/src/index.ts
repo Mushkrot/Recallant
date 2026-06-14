@@ -51,22 +51,74 @@ function parseEnvValue(raw: string) {
   return trimmed;
 }
 
+function envValueIsSet(value: string | undefined) {
+  return value !== undefined && value.trim() !== "";
+}
+
+type EnvLoadState = {
+  status:
+    | "not_checked"
+    | "explicit_database_url"
+    | "loaded_env_file"
+    | "env_file_missing"
+    | "env_file_unreadable";
+  source: "none" | "explicit_env" | "default_env_file" | "explicit_env_file";
+  env_file_loaded: boolean;
+  database_url_present_before: boolean;
+  database_url_present_after: boolean;
+};
+
+let envLoadState: EnvLoadState = {
+  status: "not_checked",
+  source: "none",
+  env_file_loaded: false,
+  database_url_present_before: false,
+  database_url_present_after: false
+};
+
 async function loadDefaultEnv() {
   const envFile =
     process.env.RECALLANT_ENV_FILE ?? join(homedir(), ".config", "recallant", "recallant.env");
-  if (!process.env.RECALLANT_ENV_FILE && process.env.RECALLANT_DATABASE_URL) return;
+  const explicitEnvFile = envValueIsSet(process.env.RECALLANT_ENV_FILE);
+  const databaseUrlBefore = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+  if (!explicitEnvFile && databaseUrlBefore) {
+    envLoadState = {
+      status: "explicit_database_url",
+      source: "explicit_env",
+      env_file_loaded: false,
+      database_url_present_before: true,
+      database_url_present_after: true
+    };
+    return;
+  }
   try {
     const content = await readFile(envFile, "utf8");
+    const loadedKeys: string[] = [];
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
       const [rawKey, ...rawValueParts] = trimmed.split("=");
       const key = rawKey?.trim();
-      if (!key || process.env[key] !== undefined) continue;
+      if (!key || envValueIsSet(process.env[key])) continue;
       process.env[key] = parseEnvValue(rawValueParts.join("="));
+      loadedKeys.push(key);
     }
+    const databaseUrlAfter = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+    envLoadState = {
+      status: databaseUrlAfter && !databaseUrlBefore ? "loaded_env_file" : "explicit_database_url",
+      source: explicitEnvFile ? "explicit_env_file" : "default_env_file",
+      env_file_loaded: loadedKeys.length > 0,
+      database_url_present_before: databaseUrlBefore,
+      database_url_present_after: databaseUrlAfter
+    };
   } catch {
-    // Fresh checkouts may not have a server env file yet.
+    envLoadState = {
+      status: "env_file_missing",
+      source: explicitEnvFile ? "explicit_env_file" : "default_env_file",
+      env_file_loaded: false,
+      database_url_present_before: databaseUrlBefore,
+      database_url_present_after: envValueIsSet(process.env.RECALLANT_DATABASE_URL)
+    };
   }
 }
 
@@ -171,18 +223,85 @@ type OnboardOptions = {
   installLocalHooks: boolean;
   verify: boolean;
   dryRun: boolean;
+  yes: boolean;
+  cancel: boolean;
   format: "text" | "json";
+};
+
+type OnboardStorageStep = {
+  status: "ready" | "missing" | "unreachable" | "storage_blocked";
+  configured: boolean;
+  reachable: boolean;
+  env_file_loaded: boolean;
+  env_source: EnvLoadState["source"];
+  setup_mode: "not_needed" | "guided" | "non_interactive";
+  message: string;
+  error_code: "storage_blocked" | null;
+  offline_spool: {
+    available: true;
+    role: "fail_soft_capture_fallback";
+    complete_onboarding: false;
+  };
+  setup_choices: Array<{
+    id: "single_user_storage" | "existing_private_profile" | "stop_without_changes";
+    label: string;
+    description: string;
+  }>;
+};
+
+type OnboardVerifyEvidence = {
+  context_read: boolean;
+  memory_write: boolean;
+  checkpoint: boolean;
+  recall: boolean;
+};
+
+type OnboardVerifyPayload = {
+  status: "passed" | "skipped" | "failed";
+  ask_answer: string | null;
+  failed_stage: "capture" | "readiness" | "recall" | null;
+  message: string | null;
+  capture_active: boolean;
+  evidence: OnboardVerifyEvidence;
+  proof: {
+    demo: "done" | "skipped" | "failed";
+    doctor: "done" | "skipped" | "failed";
+    ask: "done" | "skipped" | "failed";
+  };
+  stages: {
+    capture: { status: "done" | "skipped" | "failed"; detail: string | null };
+    readiness: {
+      status: "done" | "skipped" | "failed";
+      detail: string | null;
+      evidence: OnboardVerifyEvidence;
+    };
+    recall: { status: "done" | "skipped" | "failed"; detail: string | null };
+  };
+};
+
+type OnboardWorkbenchOutcome = {
+  available: boolean;
+  url: string | null;
+  auth_required: boolean;
+  private_by_default: boolean;
+  project_visible: boolean | null;
+  migration_review_queue: {
+    import_candidate_count: number | null;
+    pending_review: number | null;
+    review_needed: boolean | null;
+  };
+  message: string;
 };
 
 type OnboardAttachedStep = {
   status: "attached" | "skipped" | "needs_confirmation" | "failed" | "unknown";
-  command: string;
+  command: string | null;
   details?: string;
 };
 
 type OnboardConnectedStep = {
   status: "connected" | "skipped" | "failed" | "needed";
-  command: string;
+  command: string | null;
   details?: string;
 };
 
@@ -196,6 +315,8 @@ function parseOnboardOptions(argv: readonly string[]): OnboardOptions {
     installLocalHooks: argv.includes("--install-local-hooks") || argv.includes("--hook-kit"),
     verify: argv.includes("--verify"),
     dryRun: argv.includes("--dry-run"),
+    yes: argv.includes("--yes") || argv.includes("-y"),
+    cancel: argv.includes("--cancel"),
     format
   };
 }
@@ -856,6 +977,160 @@ function formatCommandHint(input: readonly string[]) {
   return input.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
 }
 
+function formatOnboardRerunCommand(options: OnboardOptions, targetClient: string) {
+  const args = ["recallant", "onboard", options.projectDir];
+  if (options.client) args.push("--client", targetClient);
+  if (options.installLocalHooks) args.push("--install-local-hooks");
+  if (options.verify) args.push("--verify");
+  if (options.yes) args.push("--yes");
+  if (options.dryRun) args.push("--dry-run");
+  if (options.cancel) args.push("--cancel");
+  return formatCommandHint(args);
+}
+
+function offlineSpoolFallback() {
+  return {
+    available: true as const,
+    role: "fail_soft_capture_fallback" as const,
+    complete_onboarding: false as const
+  };
+}
+
+function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
+  return [
+    {
+      id: "single_user_storage",
+      label: "Set up local single-user storage",
+      description:
+        "Create a private local Recallant storage profile for this user, then continue onboarding."
+    },
+    {
+      id: "existing_private_profile",
+      label: "Use an existing private profile",
+      description:
+        "Load a private environment profile that points Recallant at an existing database."
+    },
+    {
+      id: "stop_without_changes",
+      label: "Stop without changing the project",
+      description: "Leave project files untouched until storage is ready."
+    }
+  ];
+}
+
+function blockedStorageStep(input: {
+  status: "missing" | "unreachable" | "storage_blocked";
+  configured: boolean;
+  setupMode: "guided" | "non_interactive";
+  message: string;
+}): OnboardStorageStep {
+  return {
+    status: input.status,
+    configured: input.configured,
+    reachable: false,
+    env_file_loaded: envLoadState.env_file_loaded,
+    env_source: envLoadState.source,
+    setup_mode: input.setupMode,
+    message: input.message,
+    error_code: "storage_blocked",
+    offline_spool: offlineSpoolFallback(),
+    setup_choices: storageSetupChoices()
+  };
+}
+
+async function resolveOnboardStorage(options: OnboardOptions): Promise<OnboardStorageStep> {
+  const configured = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+  const setupMode = options.yes ? "non_interactive" : "guided";
+  if (!configured) {
+    return blockedStorageStep({
+      status: options.yes ? "storage_blocked" : "missing",
+      configured: false,
+      setupMode,
+      message: options.yes
+        ? "Recallant needs private storage before onboarding can finish. Automatic setup was requested, but no reachable storage profile is available in this runtime. No project files were changed."
+        : "Recallant needs private storage before onboarding can finish. Choose a setup path, then rerun onboarding; no project files were changed."
+    });
+  }
+
+  const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+  try {
+    await client.connect();
+    await client.query("SELECT 1");
+    return {
+      status: "ready",
+      configured: true,
+      reachable: true,
+      env_file_loaded: envLoadState.env_file_loaded,
+      env_source: envLoadState.source,
+      setup_mode: "not_needed",
+      message: envLoadState.env_file_loaded
+        ? "Recallant storage is ready from the loaded private environment profile."
+        : "Recallant storage is ready from the current environment.",
+      error_code: null,
+      offline_spool: offlineSpoolFallback(),
+      setup_choices: []
+    };
+  } catch {
+    return blockedStorageStep({
+      status: "unreachable",
+      configured: true,
+      setupMode,
+      message:
+        "Recallant found a private storage profile, but the database is not reachable. No project files were changed."
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+function safeAttachDetailsForOnboard(payload: Record<string, unknown> | null) {
+  if (!payload) return null;
+  const ownerReport = objectValue(payload.owner_report);
+  return {
+    status: payload.status ?? null,
+    requested_mode: payload.requested_mode ?? null,
+    effective_mode: payload.effective_mode ?? null,
+    dry_run: Boolean(payload.dry_run),
+    writes_files: payload.writes_files === true,
+    writes_database: payload.writes_database === true,
+    production_sensitive: payload.production_sensitive ?? null,
+    planned_changes: Array.isArray(payload.planned_changes) ? payload.planned_changes : [],
+    discovery_summary: payload.discovery_summary ?? null,
+    migration_summary: ownerReport.migration_summary ?? null,
+    secret_findings: payload.secret_findings ?? null,
+    backup: payload.backup ?? null,
+    owner_report: {
+      ready_status: ownerReport.ready_status ?? null,
+      what_was_done: ownerReport.what_was_done ?? null,
+      what_needs_attention: ownerReport.what_needs_attention ?? null,
+      how_to_check: ownerReport.how_to_check ?? null
+    }
+  };
+}
+
+function attachDetailObject(value: unknown) {
+  return objectValue(value);
+}
+
+function attachRiskSignals(attachDetails: unknown) {
+  const production = attachDetailObject(attachDetailObject(attachDetails).production_sensitive);
+  const signals = production.signals;
+  return Array.isArray(signals) ? signals.map(String) : [];
+}
+
+function plannedWritePaths(attachDetails: unknown) {
+  const changes = attachDetailObject(attachDetails).planned_changes;
+  if (!Array.isArray(changes)) return [];
+  return changes
+    .filter((change) => String(objectValue(change).action ?? "").includes("write_file"))
+    .map((change) => objectValue(change).path)
+    .filter((path): path is string => typeof path === "string" && path.trim() !== "");
+}
+
+function migrationSummaryObject(attachDetails: unknown) {
+  return attachDetailObject(attachDetailObject(attachDetails).migration_summary);
+}
+
 async function checkCaptureReadiness(input: {
   projectDir: string;
   database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>> | null;
@@ -1046,52 +1321,112 @@ function doctorHumanReport(result: {
 }
 
 function onboardHumanReport(result: {
+  status?: string;
   project_dir: string;
+  storage: OnboardStorageStep;
   project_already_attached: boolean;
+  attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
+  workbench?: OnboardWorkbenchOutcome | null;
   attached: {
     status: OnboardAttachedStep["status"];
-    command: string;
-    details?: string;
+    command: string | null;
+    details?: string | null;
   };
   connected: {
     status: OnboardConnectedStep["status"];
-    command: string;
-    details?: string;
+    command: string | null;
+    details?: string | null;
   };
-  verify: {
-    status: "passed" | "skipped" | "failed";
-    ask_answer: string | null;
-    proof: {
-      demo: "done" | "skipped" | "failed";
-      doctor: "done" | "skipped" | "failed";
-      ask: "done" | "skipped" | "failed";
-    };
-  } | null;
+  verify: OnboardVerifyPayload | null;
   next_command: string;
 }) {
   const lines = [
     "Recallant onboard",
     "",
+    result.status ? `Status: ${result.status}` : null,
     `Project: ${result.project_dir}`,
+    `Storage: ${result.storage.status}`,
+    `  - ${result.storage.message}`,
+    `  - Offline spool: fail-soft capture fallback, not completed onboarding`,
     `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
     `Attach: ${result.attached.status}`,
     result.attached.details ? `  - ${result.attached.details}` : null,
     `Connect: ${result.connected.status}`,
     result.connected.details ? `  - ${result.connected.details}` : null
   ].filter((line) => line !== null) as string[];
+  if (result.attach_details && result.attached.status === "needs_confirmation") {
+    const signals = attachRiskSignals(result.attach_details);
+    const writePaths = plannedWritePaths(result.attach_details);
+    const migrationSummary = migrationSummaryObject(result.attach_details);
+    lines.push(
+      "",
+      "Production-sensitive onboarding review",
+      `Project path: ${result.project_dir}`,
+      "Risk reason:",
+      ...(signals.length
+        ? signals.map((signal) => `  - ${signal}`)
+        : ["  - project requested review"]),
+      "Planned writes:",
+      ...(writePaths.length ? writePaths.map((path) => `  - ${path}`) : ["  - none"]),
+      "Backup behavior:",
+      "  - Existing agent files are backed up locally before overwrite; backup copies are redacted when needed.",
+      "Import/review behavior:",
+      `  - Selected imports: ${String(migrationSummary.selected_imports ?? 0)}`,
+      `  - Review needed: ${String(migrationSummary.review_needed ?? 0)}`,
+      `  - Raw secret findings: ${String(migrationSummary.raw_secret_findings ?? 0)}`,
+      "Continue/cancel prompt:",
+      "  - Continue this onboarding with --yes, or cancel with --cancel. No attach command is required."
+    );
+  }
   if (result.verify) {
     lines.push(`Verify: ${result.verify.status}`);
+    if (result.verify.status === "passed") {
+      lines.push(
+        "Capture active: yes — context read, memory write, checkpoint, and recall proof are present."
+      );
+    }
+    if (result.verify.status === "failed") {
+      lines.push(
+        `Onboarding incomplete: proof failed at ${result.verify.failed_stage ?? "unknown"} stage.`
+      );
+      if (result.verify.message) lines.push(`Proof issue: ${result.verify.message}`);
+    }
     if (result.verify.ask_answer) {
       lines.push(`Proof memory: ${result.verify.ask_answer}`);
     }
     lines.push(
-      `Proof status: demo=${result.verify.proof.demo}, doctor=${result.verify.proof.doctor}, ask=${result.verify.proof.ask}`
+      `Proof stages: capture=${result.verify.stages.capture.status}, readiness=${result.verify.stages.readiness.status}, recall=${result.verify.stages.recall.status}`
     );
   } else {
     lines.push("Verify: skipped");
   }
-  lines.push("", `Next command: ${result.next_command}`);
-  lines.push("", `JSON output: recallant onboard ${result.project_dir} --format json`);
+  if (result.workbench) {
+    lines.push(
+      result.workbench.available && result.workbench.url
+        ? `Workbench: ${result.workbench.url} (${result.workbench.auth_required ? "auth required" : "private access depends on deployment profile"})`
+        : `Workbench: ${result.workbench.message}`
+    );
+    if (result.workbench.available) {
+      lines.push(
+        `Workbench project visible: ${result.workbench.project_visible ? "yes" : "no"}`,
+        `Workbench review queue: ${String(result.workbench.migration_review_queue.pending_review ?? 0)} pending review item(s)`
+      );
+    }
+  }
+  if (result.storage.error_code === "storage_blocked") {
+    lines.push("", "Setup choices:");
+    for (const choice of result.storage.setup_choices) {
+      lines.push(`- ${choice.label}: ${choice.description}`);
+    }
+    lines.push(
+      "",
+      "Next action: Prepare private Recallant storage, then rerun this same onboarding command.",
+      `Rerun command: ${result.next_command}`
+    );
+  } else {
+    lines.push("", `Next command: ${result.next_command}`);
+    lines.push("", `JSON output: recallant onboard ${result.project_dir} --format json`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -3917,6 +4252,118 @@ function inferTargetClient(input: { client: string | null }) {
   return input.client && input.client.trim() ? input.client : "codex";
 }
 
+function emptyOnboardVerifyEvidence(): OnboardVerifyEvidence {
+  return {
+    context_read: false,
+    memory_write: false,
+    checkpoint: false,
+    recall: false
+  };
+}
+
+function onboardVerifyEvidenceFromDoctor(doctorJson: Record<string, unknown> | null) {
+  const readiness = objectValue(doctorJson?.capture_readiness);
+  const databaseReadiness = objectValue(readiness.database_readiness);
+  const localState = objectValue(readiness.local_state);
+  return {
+    context_read: Boolean(
+      databaseReadiness.last_context_read_at ?? localState.last_context_read_at
+    ),
+    memory_write: Boolean(
+      databaseReadiness.last_memory_write_at ?? localState.last_memory_write_at
+    ),
+    checkpoint: Boolean(databaseReadiness.checkpoint_updated_at ?? localState.last_checkpoint_at),
+    recall: false
+  };
+}
+
+function unavailableWorkbenchOutcome(message: string): OnboardWorkbenchOutcome {
+  return {
+    available: false,
+    url: null,
+    auth_required: true,
+    private_by_default: true,
+    project_visible: null,
+    migration_review_queue: {
+      import_candidate_count: null,
+      pending_review: null,
+      review_needed: null
+    },
+    message
+  };
+}
+
+function buildWorkbenchUrl(projectId: string) {
+  const baseUrl =
+    process.env.RECALLANT_WORKBENCH_URL ??
+    process.env.RECALLANT_SERVER_URL ??
+    `http://${process.env.RECALLANT_HOST ?? "127.0.0.1"}:${process.env.RECALLANT_PORT ?? "3005"}`;
+  try {
+    const url = new URL("/review", baseUrl);
+    url.searchParams.set("project_id", projectId);
+    url.searchParams.set("view", "review");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function resolveOnboardWorkbenchOutcome(
+  projectDir: string
+): Promise<OnboardWorkbenchOutcome> {
+  const config = await readProjectConfig(projectDir);
+  if (!config?.project_id) {
+    return unavailableWorkbenchOutcome(
+      "Workbench needs an attached project before it can show review state."
+    );
+  }
+  const url = buildWorkbenchUrl(config.project_id);
+  if (!url) {
+    return unavailableWorkbenchOutcome("Workbench URL is not valid in the current environment.");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    return unavailableWorkbenchOutcome(
+      "Workbench needs Recallant storage before it can show review state."
+    );
+  }
+  try {
+    const dashboard = await database.getReviewDashboard({ project_id: config.project_id });
+    const projectVisible = dashboard.projects.some(
+      (project) => project.project_id === config.project_id
+    );
+    const importCandidateCount = Array.isArray(dashboard.import_candidates)
+      ? dashboard.import_candidates.length
+      : null;
+    const pendingReview =
+      typeof dashboard.critical?.pending_review === "number"
+        ? dashboard.critical.pending_review
+        : null;
+    return {
+      available: true,
+      url,
+      auth_required: true,
+      private_by_default: true,
+      project_visible: projectVisible,
+      migration_review_queue: {
+        import_candidate_count: importCandidateCount,
+        pending_review: pendingReview,
+        review_needed:
+          importCandidateCount === null && pendingReview === null
+            ? null
+            : (importCandidateCount ?? 0) > 0 || (pendingReview ?? 0) > 0
+      },
+      message: projectVisible
+        ? "Workbench can show this project with capture and review state."
+        : "Workbench is reachable, but this project was not visible in the review dashboard."
+    };
+  } catch {
+    return unavailableWorkbenchOutcome("Workbench review state could not be checked.");
+  } finally {
+    await database.close();
+  }
+}
+
 async function runOnboard(argv: readonly string[]) {
   const options = parseOnboardOptions(argv);
   const targetClient = inferTargetClient({ client: options.client });
@@ -3937,24 +4384,143 @@ async function runOnboard(argv: readonly string[]) {
     }
   };
   const existingConfig = await readProjectConfig(options.projectDir);
+  const storage = await resolveOnboardStorage(options);
+  if (!storage.reachable) {
+    const payload = {
+      action: "onboard",
+      status: "storage_blocked",
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      attach_details: null,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: "skipped" as const,
+        command: null,
+        details: "storage is not ready"
+      },
+      connected: {
+        status: "skipped" as const,
+        command: null,
+        details: "storage is not ready"
+      },
+      verify: null,
+      next_command: formatOnboardRerunCommand(options, targetClient)
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
+    return;
+  }
   const needAttach = !existingConfig?.project_id;
   if (options.verify && !options.client) {
     throw new Error(
       `onboard --verify requires --client. Run: recallant onboard ${options.projectDir} --client codex --verify`
     );
   }
-  const verifyResult: {
-    status: "passed" | "skipped" | "failed";
-    ask_answer: string | null;
-    proof: {
-      demo: "done" | "skipped" | "failed";
-      doctor: "done" | "skipped" | "failed";
-      ask: "done" | "skipped" | "failed";
-    };
-  } = {
+  const verifyResult: OnboardVerifyPayload = {
     status: "skipped",
     ask_answer: null,
-    proof: { demo: "skipped", doctor: "skipped", ask: "skipped" }
+    failed_stage: null,
+    message: null,
+    capture_active: false,
+    evidence: emptyOnboardVerifyEvidence(),
+    proof: { demo: "skipped", doctor: "skipped", ask: "skipped" },
+    stages: {
+      capture: { status: "skipped", detail: null },
+      readiness: {
+        status: "skipped",
+        detail: null,
+        evidence: emptyOnboardVerifyEvidence()
+      },
+      recall: { status: "skipped", detail: null }
+    }
+  };
+  let onboardStatus: "completed" | "needs_confirmation" | "plan_only" | "cancelled" | "incomplete" =
+    "completed";
+  let attachDetails: ReturnType<typeof safeAttachDetailsForOnboard> | null = null;
+
+  const emitAttachPlan = (status: typeof onboardStatus, exitCode: number) => {
+    onboardStatus = status;
+    const payload = {
+      action: "onboard",
+      status: onboardStatus,
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      attach_details: attachDetails,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: steps.attached.status,
+        command: steps.attached.command,
+        details: steps.attached.details ?? null
+      },
+      connected: {
+        status: "skipped" as const,
+        command: steps.connected.command,
+        details: "waiting for onboard attach confirmation"
+      },
+      verify: null,
+      next_command:
+        status === "cancelled"
+          ? `recallant onboard ${options.projectDir}`
+          : `recallant onboard ${options.projectDir} --yes`
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = exitCode;
+  };
+
+  const emitVerifyFailure = (
+    failedStage: NonNullable<OnboardVerifyPayload["failed_stage"]>,
+    message: string
+  ) => {
+    onboardStatus = "incomplete";
+    verifyResult.status = "failed";
+    verifyResult.failed_stage = failedStage;
+    verifyResult.message = message;
+    const payload = {
+      action: "onboard",
+      status: onboardStatus,
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      attach_details: attachDetails,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: needAttach ? steps.attached.status : ("skipped" as const),
+        command: steps.attached.command,
+        details: steps.attached.details ?? null
+      },
+      connected: {
+        status: steps.connected.status,
+        command: steps.connected.command,
+        details: steps.connected.details ?? null
+      },
+      verify: verifyResult,
+      next_command: `recallant onboard ${options.projectDir} --client ${targetClient} --verify --yes`
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
   };
 
   if (needAttach) {
@@ -3972,33 +4538,49 @@ async function runOnboard(argv: readonly string[]) {
     steps.attached.command = formatCommandHint(attachCommand);
     if (attachResult.status !== 0) {
       steps.attached.status = "failed";
-      throw new Error(
-        `onboard attach failed. Run again after fixing command: ${steps.attached.command}`
-      );
+      throw new Error("onboard attach failed. Fix the reported issue and rerun onboard.");
     }
-    const attachPayload = attachResult.json;
-    const attachStatus = String(attachPayload?.status ?? "unknown");
+    let attachPayload = attachResult.json;
+    let attachStatus = String(attachPayload?.status ?? "unknown");
+    attachDetails = safeAttachDetailsForOnboard(attachPayload);
     if (options.dryRun && attachStatus === "plan_only") {
       steps.attached.status = "skipped";
-      steps.attached.details = "dry-run only; remove --dry-run to apply attachment";
-      throw new Error(`onboard attach is in dry-run mode. Run: ${steps.attached.command}`);
+      steps.attached.details = "dry-run plan; no project files or database rows changed";
+      emitAttachPlan("plan_only", 0);
+      return;
     }
     if (attachStatus === "needs_confirmation") {
-      steps.attached.status = "failed";
-      const ownerReport = objectValue(attachPayload).owner_report;
-      const nextStep =
-        typeof ownerReport === "object" && ownerReport !== null
-          ? String(objectValue(ownerReport).next_step ?? steps.attached.command)
-          : `${steps.attached.command} --confirm`;
-      throw new Error(
-        `onboard attach needs confirmation before writing for this project. Run: ${nextStep}`
-      );
+      steps.attached.status = "needs_confirmation";
+      steps.attached.details = "production-sensitive plan needs onboard confirmation";
+      if (options.cancel) {
+        steps.attached.details = "cancelled by user; no project files or database rows changed";
+        emitAttachPlan("cancelled", 3);
+        return;
+      }
+      if (options.dryRun) {
+        steps.attached.details = "dry-run plan; no project files or database rows changed";
+        emitAttachPlan("plan_only", 0);
+        return;
+      }
+      if (!options.yes) {
+        emitAttachPlan("needs_confirmation", 2);
+        return;
+      }
+      const confirmedCommand = [...attachCommand, "--confirm"];
+      const confirmedResult = runLocalCliSubcommand(confirmedCommand);
+      if (confirmedResult.status !== 0) {
+        steps.attached.status = "failed";
+        throw new Error(
+          "onboard attach confirmation failed. Fix the reported issue and rerun onboard."
+        );
+      }
+      attachPayload = confirmedResult.json;
+      attachStatus = String(attachPayload?.status ?? "unknown");
+      attachDetails = safeAttachDetailsForOnboard(attachPayload);
     }
     if (attachStatus !== "attached" && attachStatus !== "plan_only") {
       steps.attached.status = "failed";
-      throw new Error(
-        `onboard attach failed with status '${attachStatus}'. Fix by running: ${steps.attached.command}`
-      );
+      throw new Error(`onboard attach failed with status '${attachStatus}'. Rerun onboard.`);
     }
     steps.attached.status = attachStatus === "attached" ? "attached" : "failed";
     steps.attached.details = `status=${attachStatus}`;
@@ -4074,14 +4656,16 @@ async function runOnboard(argv: readonly string[]) {
     ];
     const demoResult = runLocalCliSubcommand(demoCommand);
     if (demoResult.status !== 0) {
-      verifyResult.status = "failed";
       verifyResult.proof.demo = "failed";
+      verifyResult.stages.capture.status = "failed";
+      verifyResult.stages.capture.detail = "capture proof did not complete";
       verifyResult.ask_answer = "not available";
-      throw new Error(
-        `onboard verify failed during demo-capture. Fix: run ${formatCommandHint(demoCommand)}`
-      );
+      emitVerifyFailure("capture", "capture proof did not complete");
+      return;
     }
     verifyResult.proof.demo = "done";
+    verifyResult.stages.capture.status = "done";
+    verifyResult.stages.capture.detail = "context read, memory write, and checkpoint were written";
     const doctorCommand = [
       "doctor",
       "--project-dir",
@@ -4091,22 +4675,27 @@ async function runOnboard(argv: readonly string[]) {
       "json"
     ];
     const doctorResult = runLocalCliSubcommand(doctorCommand);
+    verifyResult.evidence = onboardVerifyEvidenceFromDoctor(doctorResult.json);
+    verifyResult.stages.readiness.evidence = verifyResult.evidence;
     if (doctorResult.status !== 0) {
-      verifyResult.status = "failed";
       verifyResult.proof.doctor = "failed";
-      throw new Error(
-        `onboard verify failed during doctor --require-capture. Fix: run ${formatCommandHint(doctorCommand)}`
-      );
+      verifyResult.stages.readiness.status = "failed";
+      verifyResult.stages.readiness.detail = "capture readiness proof did not complete";
+      emitVerifyFailure("readiness", "capture readiness proof did not complete");
+      return;
     }
     const captureReady = Boolean(objectValue(doctorResult.json?.capture_readiness).ready);
     if (!captureReady) {
-      verifyResult.status = "failed";
       verifyResult.proof.doctor = "failed";
-      throw new Error(
-        `onboard verify: capture is not active. Fix: connect your client with hooks (recallant connect ${targetClient} --project-dir ${options.projectDir} --install-local-hooks)`
-      );
+      verifyResult.stages.readiness.status = "failed";
+      verifyResult.stages.readiness.detail = "capture is not active yet; onboarding is incomplete";
+      emitVerifyFailure("readiness", "capture is not active yet; onboarding is incomplete");
+      return;
     }
     verifyResult.proof.doctor = "done";
+    verifyResult.stages.readiness.status = "done";
+    verifyResult.stages.readiness.detail = "capture readiness is active";
+    verifyResult.capture_active = true;
 
     const query = "what did you remember?";
     const askCommand = [
@@ -4120,11 +4709,11 @@ async function runOnboard(argv: readonly string[]) {
     ];
     const askResult = runLocalCliSubcommand(askCommand);
     if (askResult.status !== 0) {
-      verifyResult.status = "failed";
       verifyResult.proof.ask = "failed";
-      throw new Error(
-        `onboard verify failed during ask. Fix: run ${formatCommandHint(askCommand)}`
-      );
+      verifyResult.stages.recall.status = "failed";
+      verifyResult.stages.recall.detail = "recall proof did not complete";
+      emitVerifyFailure("recall", "recall proof did not complete");
+      return;
     }
     verifyResult.proof.ask = "done";
     const memories = objectValue(askResult.json).memories;
@@ -4136,14 +4725,19 @@ async function runOnboard(argv: readonly string[]) {
     verifyResult.ask_answer = answer;
     verifyResult.status = answer ? "passed" : "failed";
     if (verifyResult.status === "failed") {
-      throw new Error(
-        `onboard verify: recallant did not return memory for proof query. Fix: rerun ${formatCommandHint(
-          demoCommand
-        )} and then ${formatCommandHint(askCommand)}`
-      );
+      verifyResult.proof.ask = "failed";
+      verifyResult.stages.recall.status = "failed";
+      verifyResult.stages.recall.detail = "recall proof did not return the captured memory";
+      emitVerifyFailure("recall", "recall proof did not return the captured memory");
+      return;
     }
+    verifyResult.evidence = { ...verifyResult.evidence, recall: true };
+    verifyResult.stages.readiness.evidence = verifyResult.evidence;
+    verifyResult.stages.recall.status = "done";
+    verifyResult.stages.recall.detail = "captured memory was recalled";
   }
 
+  const workbench = await resolveOnboardWorkbenchOutcome(options.projectDir);
   const nextCommand = options.verify
     ? "Start normal work in your agent client."
     : options.client
@@ -4151,8 +4745,12 @@ async function runOnboard(argv: readonly string[]) {
       : `recallant onboard ${options.projectDir} --client codex --verify`;
   const payload = {
     action: "onboard",
+    status: onboardStatus,
     project_dir: options.projectDir,
     format: options.format,
+    storage,
+    attach_details: attachDetails,
+    workbench,
     project_already_attached: Boolean(existingConfig?.project_id),
     client: options.client ? targetClient : null,
     install_local_hooks: options.installLocalHooks,

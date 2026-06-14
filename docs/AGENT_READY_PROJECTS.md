@@ -17,20 +17,41 @@ An agent-ready project has three layers:
   provider settings, server inventory, and external connector bindings stay outside the public repo
   and are represented as references or capability records.
 
-The target onboarding path is one command:
+## Beginner Onboarding Contract
+
+The beginner onboarding path is one command:
+
+```bash
+recallant onboard <project>
+```
+
+That command should behave like a guided setup program, not a list of commands to memorize. It must:
+
+- check whether Recallant storage is configured and reachable;
+- create or select a local/private storage profile when the user chooses automatic setup;
+- explain production-sensitive project signals in plain language before writing files;
+- create a local backup before changing existing agent files;
+- attach the project, connect the selected client, and keep generated files thin;
+- import old handoffs and project notes as review-only evidence;
+- prove capture with a context read, memory write, checkpoint, and recall check;
+- show the Workbench outcome or a single clear blocker.
+
+`Database not configured` is not a successful onboarding state. Offline spool can be a fail-soft
+capture fallback, but a beginner setup is not complete until Recallant can either use storage or
+clearly stop with one next action.
+
+The lower-level commands remain advanced/debug APIs for automation and contributors:
 
 ```bash
 recallant attach .
+recallant connect codex --project-dir .
+recallant doctor --project-dir . --require-capture
+recallant agent-start --task-hint "<task>"
 ```
 
-For Codex-first setup, a project may also use:
-
-```bash
-recallant onboard --client codex --install-local-hooks --verify
-```
-
-The important result is **capture active**: Recallant has observed a context read, meaningful memory
-write, and checkpoint for the project.
+They should not be the normal beginner quickstart. The important user-facing result is
+`capture active`: Recallant has observed a context read, meaningful memory write, checkpoint, and
+recall proof for the project.
 
 ## New Project Bootstrap
 

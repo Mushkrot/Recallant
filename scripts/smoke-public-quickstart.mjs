@@ -131,6 +131,28 @@ assert(
   `Onboard proof steps incomplete: ${JSON.stringify(onboard.verify)}`
 );
 assert(
+  onboard.verify?.stages?.capture?.status === "done" &&
+    onboard.verify?.stages?.readiness?.status === "done" &&
+    onboard.verify?.stages?.recall?.status === "done" &&
+    onboard.verify?.capture_active === true,
+  `Onboard structured proof stages incomplete: ${JSON.stringify(onboard.verify)}`
+);
+assert(
+  onboard.verify?.evidence?.context_read === true &&
+    onboard.verify?.evidence?.memory_write === true &&
+    onboard.verify?.evidence?.checkpoint === true &&
+    onboard.verify?.evidence?.recall === true,
+  `Onboard proof evidence incomplete: ${JSON.stringify(onboard.verify?.evidence)}`
+);
+assert(
+  onboard.workbench?.available === true &&
+    typeof onboard.workbench?.url === "string" &&
+    onboard.workbench.url.includes("/review") &&
+    onboard.workbench?.auth_required === true &&
+    onboard.workbench?.project_visible === true,
+  `Onboard Workbench outcome incomplete: ${JSON.stringify(onboard.workbench)}`
+);
+assert(
   String(onboard.verify?.ask_answer ?? "").includes("The agent remembered this Recallant demo memory"),
   `Onboard ask proof did not recall the demo memory: ${JSON.stringify(onboard.verify)}`
 );
@@ -198,6 +220,8 @@ process.stdout.write(
       installed_cli: recallant,
       project_id: doctorAfter.capture_readiness?.project_config?.project_id ?? null,
       proof: onboard.verify?.proof,
+      structured_proof: onboard.verify?.stages,
+      workbench: onboard.workbench,
       capture_ready: doctorAfter.capture_readiness?.ready === true,
       recalled: ask.recalled === true
     },

@@ -16,7 +16,8 @@ dependable before expanding the product surface.
 - Public quickstart smoke for installed-wrapper onboarding, capture-active proof, and ask recall in
   temporary clean directories.
 - Neutral non-owner migration smoke for sandbox-copy safety and reviewed imports.
-- Opt-in real-project pilot smoke for sandbox-copy migration checks on maintainer-provided paths.
+- Opt-in real-project pilot smoke for one-command onboarding on sandbox copies of
+  maintainer-provided paths, with original-file integrity checks and lifecycle cleanup.
 - Workbench migration review queue for imported evidence, conflicts, secret references, and stale
   handoffs.
 - Security review smoke for install/auth/Workbench/backups/secrets.
@@ -31,6 +32,10 @@ dependable before expanding the product surface.
 
 ## Near Term
 
+- One-command beginner onboarding hardening: keep rehearsing `recallant onboard <project>` across
+  clean hosts, real-project sandbox copies, and more client profiles, with storage readiness,
+  production-sensitive confirmation, attach/connect orchestration, capture proof, recall proof,
+  Workbench outcome, and cleanup in one public beginner flow.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

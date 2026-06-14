@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { rm, mkdir, mkdtemp } from "node:fs/promises";
+import { readFile, rm, mkdir, mkdtemp } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,94 +117,45 @@ try {
     `Postgres was not reachable: ${JSON.stringify(doctor)}`
   );
 
-  const attach = parseJson(
-    run(recallant, ["attach", ".", "--sandbox", "--format", "json"], {
-      cwd: projectDir,
-      env: baseEnv
-    }),
-    "managed install attach"
-  );
-  assert(attach.status === "attached", `Attach failed: ${JSON.stringify(attach)}`);
-
-  const connectDryRun = parseJson(
-    run(recallant, ["connect", "codex", "--project-dir", projectDir, "--dry-run", "--format", "json"], {
-      env: baseEnv
-    }),
-    "managed install connect dry-run"
-  );
-  assert(
-    connectDryRun.dry_run === true || connectDryRun.writes_files === false,
-    `Connect dry-run was not safe: ${JSON.stringify(connectDryRun)}`
-  );
-
-  const start = parseJson(
-    run(
-      recallant,
-      ["agent-start", "--project-dir", projectDir, "--task-hint", "public managed install smoke"],
-      {
-        env: baseEnv
-      }
-    ),
-    "managed install agent-start"
-  );
-  assert(start.session_id, `agent-start failed: ${JSON.stringify(start)}`);
-
-  const event = parseJson(
+  const onboard = parseJson(
     run(
       recallant,
       [
-        "agent-event",
-        "--project-dir",
+        "onboard",
         projectDir,
-        "--kind",
-        "decision",
-        "--text",
-        "Public managed install smoke captured a decision."
+        "--client",
+        "codex",
+        "--install-local-hooks",
+        "--verify",
+        "--yes",
+        "--format",
+        "json"
       ],
       { env: baseEnv }
     ),
-    "managed install agent-event"
+    "managed install onboard"
   );
-  assert(event.memory?.memory_id, `agent-event did not write memory: ${JSON.stringify(event)}`);
-
-  const checkpoint = parseJson(
-    run(
-      recallant,
-      [
-        "agent-checkpoint",
-        "--project-dir",
-        projectDir,
-        "--summary",
-        "Public managed install smoke checkpoint."
-      ],
-      {
-        env: baseEnv
-      }
-    ),
-    "managed install checkpoint"
+  assert(onboard.status === "completed", `Onboard failed: ${JSON.stringify(onboard)}`);
+  assert(onboard.storage?.reachable === true, `Onboard storage was not ready: ${JSON.stringify(onboard.storage)}`);
+  assert(onboard.attached?.status === "attached", `Onboard attach failed: ${JSON.stringify(onboard)}`);
+  assert(
+    onboard.connected?.status === "connected",
+    `Onboard connect failed: ${JSON.stringify(onboard)}`
   );
   assert(
-    checkpoint.ok === true &&
-      checkpoint.event_id &&
-      checkpoint.project_log_update?.status === "updated",
-    `checkpoint failed: ${JSON.stringify(checkpoint)}`
+    onboard.verify?.status === "passed" &&
+      onboard.verify?.capture_active === true &&
+      onboard.verify?.evidence?.context_read === true &&
+      onboard.verify?.evidence?.memory_write === true &&
+      onboard.verify?.evidence?.checkpoint === true &&
+      onboard.verify?.evidence?.recall === true,
+    `Onboard verify did not prove capture and recall: ${JSON.stringify(onboard.verify)}`
   );
-
-  parseJson(
-    run(
-      recallant,
-      [
-        "agent-closeout",
-        "--project-dir",
-        projectDir,
-        "--summary",
-        "Public managed install smoke closeout."
-      ],
-      {
-        env: baseEnv
-      }
-    ),
-    "managed install closeout"
+  assert(
+    onboard.workbench?.available === true &&
+      onboard.workbench?.auth_required === true &&
+      onboard.workbench?.private_by_default === true,
+    `Onboard Workbench outcome was not private and available: ${JSON.stringify(onboard.workbench)}`
   );
 
   const ready = parseJson(
@@ -221,16 +172,21 @@ try {
     ready.owner_summary?.actually_recording === true,
     `Require-capture doctor did not prove recording: ${JSON.stringify(ready.owner_summary)}`
   );
+  const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
 
   process.stdout.write(
     JSON.stringify(
       {
         status: "ok",
-        clean_root: cleanRoot,
+        onboarding_command:
+          "recallant onboard <project> --client codex --install-local-hooks --verify --yes --format json",
+        project_id: config.project_id ?? null,
+        clean_root: "[temporary-directory-removed]",
         postgres_port: port,
         container_name: containerName,
         compose_project: composeProject,
-        project_dir: projectDir
+        capture_active: ready.owner_summary?.actually_recording === true,
+        workbench_private: onboard.workbench?.private_by_default === true
       },
       null,
       2

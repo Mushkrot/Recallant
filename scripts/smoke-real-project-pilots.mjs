@@ -1,4 +1,3 @@
-/* global console */
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
@@ -15,6 +14,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { URL } from "node:url";
 import pg from "pg";
 import { createRecallantHttpServer } from "../apps/server/dist/index.js";
 
@@ -111,6 +111,10 @@ function loadPlaywright() {
   }
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function cliEnv() {
   return {
     ...process.env,
@@ -143,6 +147,127 @@ function runJson(args) {
   } catch (error) {
     throw new Error(`Command did not return JSON: ${error}\n${result.stdout}`);
   }
+}
+
+async function pathExists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readProjectConfig(projectDir) {
+  const configPath = join(projectDir, ".recallant", "config");
+  const content = await readFile(configPath, "utf8");
+  return JSON.parse(content);
+}
+
+function snapshotDigest(snapshot) {
+  const hash = createHash("sha256");
+  for (const [path, digest] of Object.entries(snapshot).sort(([left], [right]) =>
+    left.localeCompare(right)
+  )) {
+    hash.update(path);
+    hash.update("\0");
+    hash.update(digest);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function boundedPath(path) {
+  const tempRelative = relative(tmpdir(), path);
+  if (tempRelative && !tempRelative.startsWith("..") && tempRelative !== path) {
+    return join("$TMPDIR", tempRelative);
+  }
+  return join("[redacted-report-dir]", basename(path));
+}
+
+function workbenchUrlSummary(url) {
+  if (!url) return { available_url: false, origin: null, path: null, project_id_present: false };
+  try {
+    const parsed = new URL(url);
+    return {
+      available_url: true,
+      origin: parsed.origin,
+      path: parsed.pathname,
+      view: parsed.searchParams.get("view"),
+      project_id_present: Boolean(parsed.searchParams.get("project_id"))
+    };
+  } catch {
+    return {
+      available_url: true,
+      origin: "[invalid-url-redacted]",
+      path: null,
+      project_id_present: false
+    };
+  }
+}
+
+function onboardingSummary(payload) {
+  const attach = objectValue(payload.attach_details);
+  const production = objectValue(attach.production_sensitive);
+  const migration = objectValue(attach.migration_summary);
+  const verify = objectValue(payload.verify);
+  const evidence = objectValue(verify.evidence);
+  const stages = objectValue(verify.stages);
+  const workbench = objectValue(payload.workbench);
+  const reviewQueue = objectValue(workbench.migration_review_queue);
+  return {
+    status: payload.status,
+    command: "recallant onboard <sandbox-copy> --client codex --install-local-hooks --verify --yes --format json",
+    storage: {
+      status: objectValue(payload.storage).status ?? null,
+      configured: objectValue(payload.storage).configured === true,
+      reachable: objectValue(payload.storage).reachable === true
+    },
+    attach: {
+      status: objectValue(payload.attached).status ?? null,
+      handled_by_onboard: true,
+      requested_mode: attach.requested_mode ?? null,
+      effective_mode: attach.effective_mode ?? null,
+      writes_files: attach.writes_files === true,
+      writes_database: attach.writes_database === true,
+      production_sensitive: production.production_sensitive === true,
+      production_confirmation:
+        production.production_sensitive === true ? "handled by onboard --yes" : "not required",
+      selected_imports: Number(migration.selected_imports ?? 0),
+      review_required: Number(migration.needs_review ?? 0),
+      backup_created: Boolean(objectValue(attach.backup).manifest_path)
+    },
+    connect: {
+      status: objectValue(payload.connected).status ?? null,
+      install_local_hooks: payload.install_local_hooks === true
+    },
+    capture_proof: {
+      status: verify.status ?? null,
+      capture_active: verify.capture_active === true,
+      evidence: {
+        context_read: evidence.context_read === true,
+        memory_write: evidence.memory_write === true,
+        checkpoint: evidence.checkpoint === true
+      },
+      stage_status: objectValue(stages.capture).status ?? null
+    },
+    recall_proof: {
+      status: objectValue(stages.recall).status ?? null,
+      answer_present: typeof verify.ask_answer === "string" && verify.ask_answer.length > 0
+    },
+    workbench: {
+      available: workbench.available === true,
+      auth_required: workbench.auth_required === true,
+      private_by_default: workbench.private_by_default === true,
+      project_visible: workbench.project_visible === true,
+      url: workbenchUrlSummary(typeof workbench.url === "string" ? workbench.url : null),
+      migration_review_queue: {
+        import_candidate_count: reviewQueue.import_candidate_count ?? null,
+        pending_review: reviewQueue.pending_review ?? null,
+        review_needed: reviewQueue.review_needed ?? null
+      }
+    }
+  };
 }
 
 function extensionFor(path) {
@@ -342,6 +467,114 @@ async function databaseCheck(pilot) {
   }
 }
 
+async function lifecycleCheck(projectId) {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const lifecycle = await client.query(
+      `
+        SELECT value
+        FROM project_settings
+        WHERE project_id = $1
+          AND key = 'project_lifecycle'
+      `,
+      [projectId]
+    );
+    const value = lifecycle.rows[0]?.value ?? {};
+    const active = await client.query(
+      `
+        SELECT count(*)::int AS visible_count
+        FROM projects p
+        LEFT JOIN project_settings lifecycle
+          ON lifecycle.project_id = p.id
+         AND lifecycle.key = 'project_lifecycle'
+        WHERE p.developer_id = $1
+          AND p.id = $2
+          AND coalesce(lifecycle.value->>'visibility', 'active') <> 'hidden'
+          AND coalesce(lifecycle.value->>'status', 'active') NOT IN ('detached', 'sandbox_cleaned')
+      `,
+      [developerId, projectId]
+    );
+    return {
+      status: value.status ?? null,
+      visibility: value.visibility ?? null,
+      searchable: value.searchable ?? null,
+      detach_mode: value.detach_mode ?? null,
+      visible_in_active_project_list: active.rows[0]?.visible_count === 1
+    };
+  } finally {
+    await client.end();
+  }
+}
+
+async function cleanupPilot(pilot) {
+  const dryRun = runJson([
+    "detach",
+    "--project-id",
+    pilot.project_id,
+    "--mode",
+    "sandbox",
+    "--dry-run",
+    "--format",
+    "json"
+  ]);
+  assert(dryRun.status === "pending_confirmation", `${pilot.name} detach dry-run failed`);
+  assert(dryRun.writes_database === false, `${pilot.name} detach dry-run changed database`);
+  const detached = runJson([
+    "detach",
+    "--project-id",
+    pilot.project_id,
+    "--mode",
+    "sandbox",
+    "--confirm",
+    "--format",
+    "json"
+  ]);
+  assert(
+    detached.status === "detached",
+    `${pilot.name} detach failed: ${JSON.stringify(detached)}`
+  );
+  assert(
+    detached.changes?.physically_deleted_records === 0,
+    `${pilot.name} detach physically deleted records`
+  );
+  assert(detached.changes?.files_changed === 0, `${pilot.name} detach changed project files`);
+  const lifecycle = await lifecycleCheck(pilot.project_id);
+  assert(lifecycle.status === "sandbox_cleaned", `${pilot.name} lifecycle was not sandbox_cleaned`);
+  assert(lifecycle.visibility === "hidden", `${pilot.name} lifecycle was not hidden`);
+  assert(
+    lifecycle.visible_in_active_project_list === false,
+    `${pilot.name} was still visible after lifecycle cleanup`
+  );
+  return {
+    dry_run_status: dryRun.status,
+    confirmed_status: detached.status,
+    lifecycle,
+    physically_deleted_records: detached.changes?.physically_deleted_records ?? null,
+    files_changed: detached.changes?.files_changed ?? null
+  };
+}
+
+async function cleanupSandboxRoots() {
+  const keep = process.env.RECALLANT_KEEP_REAL_PROJECT_PILOT_SANDBOXES === "1";
+  const roots = [];
+  for (const sandboxRoot of sandboxRoots) {
+    if (!keep) await rm(sandboxRoot, { recursive: true, force: true });
+    roots.push({
+      sandbox_root_name: basename(sandboxRoot),
+      kept: keep,
+      removed: keep ? false : !(await pathExists(sandboxRoot))
+    });
+  }
+  sandboxRootsCleaned = !keep;
+  return {
+    status: keep ? "kept_by_env" : "removed",
+    root_count: roots.length,
+    all_removed: keep ? false : roots.every((root) => root.removed),
+    roots
+  };
+}
+
 async function runPilot(originalPath) {
   const sourceRoot = resolve(originalPath);
   const sourceInfo = await stat(sourceRoot);
@@ -350,92 +583,143 @@ async function runPilot(originalPath) {
   const selectedFiles = await walkCopyPlan(sourceRoot);
   assert(selectedFiles.length > 0, `${sourceRoot} did not produce any safe pilot files`);
   const originalBefore = await snapshotSelectedFiles(sourceRoot, selectedFiles);
+  const beforeFingerprint = snapshotDigest(originalBefore);
   const pilotRoot = await mkdtemp(join(tmpdir(), `recallant-real-pilot-${name}-`));
   sandboxRoots.push(pilotRoot);
   const sandboxPath = join(pilotRoot, name);
   await copySandbox(sourceRoot, sandboxPath, selectedFiles);
 
-  const guided = runJson([
-    "attach",
+  const onboard = runJson([
+    "onboard",
     sandboxPath,
-    "--target",
+    "--client",
     "codex",
-    "--mode",
-    "guided",
+    "--install-local-hooks",
+    "--verify",
+    "--yes",
     "--format",
     "json"
   ]);
-  assert(guided.status === "needs_confirmation", `${name} guided attach did not wait: ${JSON.stringify(guided)}`);
-  assert(guided.writes_files === false, `${name} guided attach would write files`);
-  assert(guided.writes_database === false, `${name} guided attach would write database`);
-  assertNoLikelyRawSecrets(guided, `${name} guided attach`);
-
-  const attached = runJson(["attach", sandboxPath, "--target", "codex", "--sandbox", "--format", "json"]);
-  assert(attached.status === "attached", `${name} sandbox attach failed: ${JSON.stringify(attached)}`);
-  assert(attached.project_id && attached.project_id !== hostProjectId, `${name} did not get a pilot project id`);
-  assert(attached.writes_files === true, `${name} sandbox attach did not write sandbox files`);
-  assert(attached.writes_database === true, `${name} sandbox attach did not write database`);
-  assert(attached.startup_smoke?.status === "ok", `${name} startup smoke failed: ${JSON.stringify(attached.startup_smoke)}`);
+  assert(onboard.status === "completed", `${name} onboard failed: ${JSON.stringify(onboard)}`);
+  const summary = onboardingSummary(onboard);
+  assert(summary.storage.reachable === true, `${name} onboard storage was not reachable`);
+  assert(summary.attach.status === "attached", `${name} onboard did not attach`);
+  assert(summary.attach.handled_by_onboard === true, `${name} attach was not handled by onboard`);
+  assert(summary.attach.writes_files === true, `${name} onboard attach did not write sandbox files`);
+  assert(summary.attach.writes_database === true, `${name} onboard attach did not write database`);
+  assert(summary.connect.status === "connected", `${name} onboard did not connect codex`);
+  assert(summary.capture_proof.status === "passed", `${name} capture proof did not pass`);
+  assert(summary.capture_proof.capture_active === true, `${name} capture did not become active`);
+  assert(summary.recall_proof.status === "done", `${name} recall proof did not complete`);
   assert(
-    attached.review_visibility?.status === "ok",
-    `${name} review visibility failed: ${JSON.stringify(attached.review_visibility)}`
+    summary.recall_proof.answer_present === true,
+    `${name} recall proof did not return an answer`
   );
-  assertNoLikelyRawSecrets(attached, `${name} sandbox attach`);
+  assert(summary.workbench.available === true, `${name} Workbench outcome was unavailable`);
+  assert(summary.workbench.auth_required === true, `${name} Workbench was not auth-required`);
+  assert(
+    summary.workbench.private_by_default === true,
+    `${name} Workbench was not private by default`
+  );
+  assert(summary.workbench.project_visible === true, `${name} Workbench did not show project visibility`);
+  assertNoLikelyRawSecrets(onboard, `${name} onboard`);
+  const config = await readProjectConfig(sandboxPath);
+  assert(
+    config.project_id && config.project_id !== hostProjectId,
+    `${name} did not get a pilot project id`
+  );
 
   const originalAfter = await snapshotSelectedFiles(sourceRoot, selectedFiles);
+  const afterFingerprint = snapshotDigest(originalAfter);
   assert(
     JSON.stringify(originalAfter) === JSON.stringify(originalBefore),
     `${name} pilot changed the original project`
   );
-  const dbChecks = await databaseCheck({ name, project_id: attached.project_id });
-  const summary = attached.owner_report?.migration_summary ?? {};
   assert(
-    Number(summary.selected_imports ?? 0) >= 1,
-    `${name} did not select any imports: ${JSON.stringify(summary)}`
+    beforeFingerprint === afterFingerprint,
+    `${name} pilot changed the original project fingerprint`
+  );
+  const dbChecks = await databaseCheck({ name, project_id: config.project_id });
+  assert(
+    summary.attach.selected_imports >= 1,
+    `${name} did not select any imports: ${JSON.stringify(summary.attach)}`
   );
   await stat(join(sandboxPath, ".recallant", "config"));
   await stat(join(sandboxPath, ".recallant", "codex-mcp.json"));
-  if (attached.backup?.manifest_path) await stat(join(sandboxPath, ".recallant", "backups"));
+  if (summary.attach.backup_created) await stat(join(sandboxPath, ".recallant", "backups"));
 
   return {
     name,
     original_path: sourceRoot,
     sandbox_path: sandboxPath,
+    sandbox_root: pilotRoot,
     copied_files: selectedFiles.length,
-    project_id: attached.project_id,
-    migration_summary: summary,
+    project_id: config.project_id,
+    onboarding: summary,
     database: dbChecks,
-    backup_manifest_path: attached.backup?.manifest_path ?? null
+    original_integrity: {
+      selected_file_count: selectedFiles.length,
+      before_fingerprint: beforeFingerprint,
+      after_fingerprint: afterFingerprint,
+      unchanged: true
+    }
   };
 }
 
 const projects = parseProjectList();
 const pilots = [];
 const sandboxRoots = [];
+let sandboxRootsCleaned = false;
 try {
   for (const project of projects) {
     pilots.push(await runPilot(project));
   }
   const browser = await browserCheckPilots(pilots);
+  const cleanup = [];
+  for (const pilot of pilots) {
+    cleanup.push(await cleanupPilot(pilot));
+  }
+  const tempFiles = await cleanupSandboxRoots();
   const report = {
     status: "ok",
-    projects: pilots.map((pilot) => ({
+    projects: pilots.map((pilot, index) => ({
       name: pilot.name,
       copied_files: pilot.copied_files,
       project_id: pilot.project_id,
-      migration_summary: pilot.migration_summary,
+      onboarding: pilot.onboarding,
       database: pilot.database,
-      backup_manifest_path: pilot.backup_manifest_path
-        ? relative(pilot.sandbox_path, pilot.backup_manifest_path)
-        : null
+      original_integrity: pilot.original_integrity,
+      cleanup: cleanup[index]
     })),
-    browser
+    browser: {
+      auth_required: true,
+      workbench_url: workbenchUrlSummary(browser.base_url),
+      screenshots: browser.screenshots.map((screenshot) => boundedPath(screenshot))
+    },
+    temp_files: tempFiles
   };
   const reportPath = join(reportDir, "recallant-real-project-pilots.json");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(JSON.stringify({ ...report, report_path: reportPath }, null, 2));
+  const publicReport = { ...report, report_path: boundedPath(reportPath) };
+  const publicReportText = JSON.stringify(publicReport, null, 2);
+  for (const project of projects) {
+    assert(
+      !publicReportText.includes(project),
+      `public pilot report leaked source path ${project}`
+    );
+  }
+  for (const pilot of pilots) {
+    assert(
+      !publicReportText.includes(pilot.sandbox_path),
+      `public pilot report leaked sandbox path ${pilot.sandbox_path}`
+    );
+  }
+  process.stdout.write(`${publicReportText}\n`);
 } finally {
-  if (process.env.RECALLANT_KEEP_REAL_PROJECT_PILOT_SANDBOXES !== "1") {
+  if (
+    !sandboxRootsCleaned &&
+    process.env.RECALLANT_KEEP_REAL_PROJECT_PILOT_SANDBOXES !== "1"
+  ) {
     for (const sandboxRoot of sandboxRoots) await rm(sandboxRoot, { recursive: true, force: true });
   }
 }

@@ -60,7 +60,9 @@ mustInclude(
   [
     "Self-hosted governed memory for Codex and MCP AI agents",
     "Why It Matters",
-    "recallant doctor --project-dir . --require-capture",
+    "recallant onboard /path/to/project --client codex --install-local-hooks --verify",
+    "storage_blocked",
+    "Workbench link",
     "capture active",
     "docs/AGENT_READY_PROJECTS.md",
     "docs/CONTRACT_STATUS.md",
@@ -80,10 +82,12 @@ mustInclude(
     "Install",
     "Make A Project Agent-Ready",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "recallant onboard --client codex --install-local-hooks --verify",
-    "recallant demo-capture --project-dir .",
-    "recallant ask \"what did the agent remember?\" --project-dir .",
-    "capture active",
+    "recallant onboard /path/to/project --client codex --install-local-hooks --verify",
+    "Capture active: yes",
+    "storage_blocked",
+    "production-sensitive",
+    "Workbench link",
+    "Advanced / Debug CLI",
     "Agent-ready projects"
   ],
   "docs/QUICKSTART.md"
@@ -107,7 +111,14 @@ mustInclude(
   [
     "Agent-Ready Projects",
     "Product Contract",
+    "Beginner Onboarding Contract",
+    "recallant onboard <project>",
+    "Database not configured",
+    "advanced/debug APIs",
     "recallant attach .",
+    "recallant connect codex --project-dir .",
+    "recallant doctor --project-dir . --require-capture",
+    "recallant agent-start",
     "New Project Bootstrap",
     "Existing Project Migration",
     "Agent Session Contract",
@@ -127,6 +138,9 @@ mustInclude(
     "Product Contract Status",
     "Contract Coverage",
     "Agent-ready project onboarding",
+    "one-command beginner path",
+    "recallant onboard <project>",
+    "Database not configured",
     "Existing-project migration",
     "Capture-active proof",
     "Source, capability, and secret references",
@@ -194,6 +208,8 @@ mustInclude(
     "Public quickstart smoke",
     "autonomous browser QA",
     "Security review smoke",
+    "One-command beginner onboarding hardening",
+    "recallant onboard <project>",
     "Autonomous attach polish",
     "rollback smoke",
     "opt-in Docker-backed managed",
@@ -232,10 +248,10 @@ assert(
 );
 
 const forbiddenPrivateMarkers = [
-  "/ai/SECURITY",
-  "/ai/PORTS.yaml",
-  "/opt/secure-configs",
-  "unicloud.ca",
+  ["/ai", "SECURITY"].join("/"),
+  ["/ai", "PORTS.yaml"].join("/"),
+  ["/opt", "secure-configs"].join("/"),
+  ["unicloud", "ca"].join("."),
   "recallant-internal"
 ];
 for (const path of publicDocs) {

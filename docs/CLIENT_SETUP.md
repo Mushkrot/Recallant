@@ -3,9 +3,22 @@
 Recallant connects to agents through local MCP stdio. The Workbench is for humans; agents normally
 call `recallant mcp-server` locally.
 
-## Normal Flow
+## Beginner Flow
 
-From a project directory:
+For ordinary project setup, use onboarding:
+
+```bash
+recallant onboard <project> --client codex --install-local-hooks --verify
+```
+
+Onboarding owns attach, client connection, capture proof, readiness proof, and recall proof. The
+project is not capture active until context read, memory write, checkpoint, and recall evidence are
+present.
+
+## Advanced Client Setup
+
+Maintainers and automation can still use the lower-level client setup path when they need explicit
+control over each step:
 
 ```bash
 recallant attach .

@@ -35,9 +35,8 @@ is active, and let future agents continue from governed context instead of a lon
 
 ## What You Can Try Today
 
-Recallant is pre-release, but the first coding-agent memory slice is working: attach a project,
-start an agent-backed session, read a context pack, write decisions/actions/tests/checkpoints, close
-out, and recall that memory in a later session.
+Recallant is pre-release, but the first coding-agent memory slice is working: onboard a project,
+prove capture, and get a private Workbench review link from one command.
 
 Install:
 
@@ -48,23 +47,22 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 Onboard a project for Codex:
 
 ```bash
-cd /path/to/project
-recallant onboard --client codex --install-local-hooks --verify
+recallant onboard /path/to/project --client codex --install-local-hooks --verify
 ```
 
-Or run the step-by-step proof path:
-
-```bash
-recallant attach .
-recallant connect codex --project-dir . --dry-run
-recallant connect codex --project-dir .
-recallant demo-capture --project-dir .
-recallant doctor --project-dir . --require-capture
-recallant ask "what did the agent remember?" --project-dir .
-```
+Onboarding owns storage readiness, project attach, client connection, capture proof, recall proof,
+and the Workbench outcome. If storage is missing, it stops with `storage_blocked` and a plain setup
+choice; `Database not configured` is not a successful onboarding state. If the project looks
+production-sensitive, onboarding shows the planned writes, backup behavior, import/review behavior,
+and a continue/cancel prompt before changing files.
 
 The important state is not "installed" or "configured". The important state is **capture active**:
-Recallant has observed real context reads, memory writes, and checkpoints for the project.
+Recallant has observed real context reads, memory writes, checkpoints, and recall proof for the
+project. The success output also includes a private Workbench link for review.
+
+Lower-level CLI commands such as attach, connect, doctor, agent capture, demo capture, and ask
+remain available for maintainers and automation. They are advanced/debug APIs, not the normal
+beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 ## Product Shape
 

@@ -439,6 +439,25 @@ function plannedChanges(input: {
           input.effectiveMode === "manual"
             ? "Manual mode preserves explicit lower-level commands."
             : "Guided/dry-run mode waits for confirmation."
+      },
+      ...input.changedFiles.map((path) => ({
+        action: "would_write_file",
+        path,
+        writes_files: false,
+        writes_database: false
+      })),
+      ...input.candidates.filter(candidateImportable).map((candidate) => ({
+        action: "would_import_source",
+        path: candidate.path,
+        writes_files: false,
+        writes_database: false,
+        review_required: candidateNeedsReview(candidate),
+        promotes_instruction_grade: false
+      })),
+      {
+        action: "would_register_project",
+        writes_files: false,
+        writes_database: false
       }
     ];
   }

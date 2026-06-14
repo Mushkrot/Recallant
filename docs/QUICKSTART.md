@@ -1,6 +1,6 @@
 # Quickstart
 
-Install Recallant, attach one project, connect Codex, and prove the project is capture active.
+Install Recallant and make one project agent-ready with one onboarding command.
 
 ## 1. Install
 
@@ -20,40 +20,25 @@ Verify the CLI:
 
 ```bash
 recallant --version
-recallant doctor
 ```
 
 ## 2. Make A Project Agent-Ready
 
-From a project directory:
+From anywhere:
 
 ```bash
-recallant onboard --client codex --install-local-hooks --verify
+recallant onboard /path/to/project --client codex --install-local-hooks --verify
 ```
 
-The one-command flow attaches the project, prepares thin local agent configuration, installs
-optional local hooks, and verifies whether capture is active.
+The one-command flow checks storage readiness, attaches the project, prepares thin local agent
+configuration, installs optional local hooks, proves capture and recall, and prints the private
+Workbench outcome.
 
-For step-by-step onboarding:
+Expected success:
 
-```bash
-recallant attach .
-recallant connect codex --project-dir . --dry-run
-recallant connect codex --project-dir .
-```
-
-## 3. Prove Capture
-
-Do not stop at "configured". Prove that Recallant has captured project memory:
-
-```bash
-recallant demo-capture --project-dir .
-recallant doctor --project-dir . --require-capture
-recallant ask "what did the agent remember?" --project-dir .
-```
-
-Expected result: `doctor --require-capture` reports the project as capture active, and `ask` can
-summarize the test memory that was written.
+- `Capture active: yes` after context read, memory write, checkpoint, and recall proof are present;
+- a Workbench link with private/auth-required posture;
+- project visibility and review queue status.
 
 Maintainers can run the public quickstart smoke to exercise this same path in temporary clean
 directories:
@@ -62,16 +47,20 @@ directories:
 npm run public-quickstart:smoke
 ```
 
+## 3. If Onboarding Stops
+
+If storage is missing or unreachable, onboarding reports `storage_blocked` and explains the setup
+choice. Local offline spool is a fail-soft capture fallback, not completed onboarding.
+
+If the project looks production-sensitive, onboarding shows the project path, risk reason, planned
+writes, backup behavior, import/review behavior, and a continue/cancel prompt before it changes
+files. Use `--yes` only after reviewing that plan or in automation that already approved it.
+
 ## 4. Open The Workbench
 
-Run:
-
-```bash
-recallant doctor
-```
-
-The doctor output shows the private Workbench URL for your install profile. The Workbench is used to
-review memories, rules, source context, capture status, and safety gates.
+The onboarding output includes the private Workbench URL when review state is available. The
+Workbench is used to review memories, rules, source context, capture status, migration imports, and
+safety gates.
 
 ## 5. Clean Up A Test Project
 
@@ -97,6 +86,12 @@ imported as source-linked evidence or reviewed memories rather than copied into 
 ## Next
 
 - [Agent-ready projects](AGENT_READY_PROJECTS.md)
-- [Self-hosting](SELF_HOSTING.md)
 - [Client setup](CLIENT_SETUP.md)
+- [Self-hosting](SELF_HOSTING.md)
 - [Security](SECURITY.md)
+
+## Advanced / Debug CLI
+
+Maintainers and automation can still use lower-level commands such as attach, connect, doctor,
+agent capture, demo capture, and ask when they need explicit control. See [Client setup](CLIENT_SETUP.md)
+for that advanced path. These commands are not required for the beginner quickstart above.

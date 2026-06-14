@@ -74,6 +74,16 @@ Confirmed install:
 - applies schema migrations;
 - starts a service when the selected profile supports it.
 
+## Onboarding Storage Readiness
+
+`recallant onboard <project>` checks storage before it changes project files. If
+`RECALLANT_DATABASE_URL` is already reachable, onboarding reuses it. If that variable is not set,
+the CLI loads the default single-user env file when it exists.
+
+Missing or unreachable storage blocks beginner onboarding with `storage_blocked` and a short setup
+choice. Local offline spool remains a fail-soft capture fallback, but it is not treated as completed
+onboarding because Recallant cannot prove recall or Workbench review without storage.
+
 ## Verification
 
 After install:
@@ -101,10 +111,10 @@ npm run public-quickstart:smoke
 ```
 
 Those smokes validate install-plan dry-runs, profile defaults, override handling, the installed CLI
-wrapper, and a fresh quickstart path in isolated temporary directories. The quickstart smoke installs
-the wrapper, runs `recallant onboard --client codex --install-local-hooks --verify`, proves
-`doctor --require-capture`, and checks `ask` recall. The rollback smoke validates dry-run behavior,
-confirmed cleanup of marked disposable artifacts, and refusal to remove unmarked data directories:
+wrapper, and a fresh quickstart path in isolated temporary directories. The quickstart smoke runs
+the unified onboarding proof, including capture, readiness, recall, and Workbench outcome checks.
+The rollback smoke validates dry-run behavior, confirmed cleanup of marked disposable artifacts, and
+refusal to remove unmarked data directories:
 
 ```bash
 npm run public-install-rollback:smoke
