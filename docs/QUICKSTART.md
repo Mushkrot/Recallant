@@ -87,8 +87,8 @@ it should not delete your source files.
 ## What Gets Written
 
 Project attach may create small local pointer/config files such as `.recallant/config`,
-client-specific MCP config, `AGENTS.md`, and `PROJECT_LOG.md`. Durable memory lives in Recallant,
-not in those bootstrap files.
+client-specific MCP config such as `.codex/config.toml`, `AGENTS.md`, and `PROJECT_LOG.md`.
+Durable memory lives in Recallant, not in those bootstrap files.
 
 `AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is a compact
 fallback/checkpoint file. Old handoffs, long history, source notes, and runbook details should be

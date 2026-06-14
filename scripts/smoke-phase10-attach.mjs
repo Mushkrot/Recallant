@@ -151,7 +151,16 @@ if (
   throw new Error(`Manual attach dry-run wrote data: ${JSON.stringify(manual)}`);
 }
 
-const guided = runJson(["attach", projectDir, "--target", "codex", "--mode", "guided", "--format", "json"]);
+const guided = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--mode",
+  "guided",
+  "--format",
+  "json"
+]);
 if (
   guided.status !== "needs_confirmation" ||
   guided.effective_mode !== "guided" ||
@@ -184,7 +193,15 @@ try {
   await readOnlyClient.end();
 }
 
-const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const attach = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
 const attachText = runText(["attach", projectDir, "--target", "codex", "--sandbox"]);
 if (
   !attachText.includes("Recallant attach") ||
@@ -230,9 +247,7 @@ if (
 }
 
 const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
-const mcpConfig = JSON.parse(
-  await readFile(join(projectDir, ".recallant", "codex-mcp.json"), "utf8")
-);
+const mcpConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
 const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 const gitignore = await readFile(join(projectDir, ".gitignore"), "utf8");
@@ -245,8 +260,9 @@ const backupManifest = JSON.parse(await readFile(attach.backup.manifest_path, "u
 
 if (
   config.project_id !== attach.project_id ||
-  attach.target_config?.config_file !== ".recallant/codex-mcp.json" ||
-  !JSON.stringify(mcpConfig).includes("recallant") ||
+  attach.target_config?.config_file !== ".codex/config.toml" ||
+  !mcpConfig.includes("[mcp_servers.recallant]") ||
+  !mcpConfig.includes('env_vars = ["RECALLANT_DATABASE_URL"]') ||
   !agents.includes("Always keep the fixture formatter deterministic.") ||
   !agents.includes("memory_start_session") ||
   !agents.includes("recallant agent-start") ||
@@ -278,7 +294,15 @@ if (
 
 const genericProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase10-generic-"));
 await writeFile(join(genericProjectDir, "README.md"), "# Generic Attach Fixture\n");
-const genericAttach = runJson(["attach", genericProjectDir, "--target", "generic", "--sandbox", "--format", "json"]);
+const genericAttach = runJson([
+  "attach",
+  genericProjectDir,
+  "--target",
+  "generic",
+  "--sandbox",
+  "--format",
+  "json"
+]);
 const genericMcpConfig = JSON.parse(
   await readFile(join(genericProjectDir, ".recallant", "generic-mcp.json"), "utf8")
 );
@@ -303,7 +327,15 @@ await writeFile(
   join(staleConfigDir, ".recallant", "config"),
   `${JSON.stringify({ project_id: hostProjectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
 );
-const staleAttach = runJson(["attach", staleConfigDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const staleAttach = runJson([
+  "attach",
+  staleConfigDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
 if (
   staleAttach.project_id === hostProjectId ||
   staleAttach.project_id_source !== "database" ||
@@ -319,7 +351,16 @@ await writeFile(
   join(prodDir, "AGENTS.md"),
   "# Live Agent Instructions\nProduction token example: OPENAI_API_KEY=sk-livefixture123456\n"
 );
-const prodPlan = runJson(["attach", prodDir, "--target", "codex", "--mode", "autopilot", "--format", "json"]);
+const prodPlan = runJson([
+  "attach",
+  prodDir,
+  "--target",
+  "codex",
+  "--mode",
+  "autopilot",
+  "--format",
+  "json"
+]);
 const prodAgentsAfter = await readFile(join(prodDir, "AGENTS.md"), "utf8");
 if (
   prodPlan.effective_mode !== "guided" ||

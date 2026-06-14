@@ -14,7 +14,9 @@ const env = {
   ...process.env,
   HOME: smokeHome,
   RECALLANT_DATABASE_URL: databaseUrl,
-  RECALLANT_DEVELOPER_ID: developerId
+  RECALLANT_DEVELOPER_ID: developerId,
+  RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+  RECALLANT_EMBEDDING_DIMS: "8"
 };
 
 function runCli(args) {
@@ -81,6 +83,29 @@ assert(
     requireCaptureBefore.json?.owner_summary?.hook_capture_ready === false &&
     requireCaptureBefore.json?.owner_summary?.headline.includes("not proven"),
   `doctor owner summary should explain configured-but-not-recording state: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
+);
+
+const legacyOnlyDir = `${projectDir}-legacy-only`;
+await mkdir(`${legacyOnlyDir}/.recallant`, { recursive: true });
+await writeFile(
+  `${legacyOnlyDir}/.recallant/config`,
+  `${JSON.stringify({ project_id: attached.project_id, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
+);
+await writeFile(
+  `${legacyOnlyDir}/.recallant/codex-mcp.json`,
+  `${JSON.stringify({ mcpServers: { recallant: { command: "recallant", args: ["mcp-server"] } } }, null, 2)}\n`
+);
+const legacyOnlyDoctor = runCliRaw(["doctor", "--project-dir", legacyOnlyDir, "--format", "json"]);
+assert(
+  legacyOnlyDoctor.status === 0 &&
+    legacyOnlyDoctor.json?.client_connection?.mcp_configured === false &&
+    legacyOnlyDoctor.json?.client_connection?.mcp_configs?.some(
+      (config) =>
+        config.path === ".recallant/codex-mcp.json" &&
+        config.present === true &&
+        config.configured === false
+    ),
+  `Legacy Codex JSON should be reported as reference-only, not configured: ${legacyOnlyDoctor.stdout} ${legacyOnlyDoctor.stderr}`
 );
 
 const dryRun = runCli([
@@ -177,7 +202,7 @@ assert(
 );
 assert(
   globalDryRun.project_local_config?.scope === "project_local_config" &&
-    globalDryRun.project_local_config?.config_file === ".recallant/codex-mcp.json",
+    globalDryRun.project_local_config?.config_file === ".codex/config.toml",
   `Global dry-run should distinguish project-local config: ${JSON.stringify(globalDryRun)}`
 );
 assert(
@@ -215,10 +240,12 @@ assert(
   connected.writes_files === false,
   `Codex connect should be idempotent after attach: ${JSON.stringify(connected)}`
 );
-const writtenConfig = JSON.parse(await readFile(`${projectDir}/.recallant/codex-mcp.json`, "utf8"));
+const writtenConfig = await readFile(`${projectDir}/.codex/config.toml`, "utf8");
 assert(
-  writtenConfig.mcpServers?.recallant?.args?.includes("mcp-server"),
-  `Codex MCP config missing Recallant server: ${JSON.stringify(writtenConfig)}`
+  writtenConfig.includes("[mcp_servers.recallant]") &&
+    writtenConfig.includes('command = "recallant"') &&
+    writtenConfig.includes('env_vars = ["RECALLANT_DATABASE_URL"]'),
+  `Codex config missing Recallant MCP server: ${writtenConfig}`
 );
 
 const idempotent = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
@@ -678,7 +705,8 @@ await chmod(wrapperPath, 0o755);
 const hookEnv = {
   ...env,
   PATH: `${hookBin}:${process.env.PATH ?? ""}`,
-  RECALLANT_PROJECT_DIR: projectDir
+  RECALLANT_PROJECT_DIR: projectDir,
+  RECALLANT_HOOK_TIMEOUT_SECONDS: "45"
 };
 
 const hookSpoolFallback = spawnSync(`${projectDir}/.recallant/hooks/tool-result.sh`, [], {

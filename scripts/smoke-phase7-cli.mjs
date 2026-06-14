@@ -96,8 +96,8 @@ if (
   dryRun.capture_profile !== "standard" ||
   dryRun.import_candidates.length < 2 ||
   dryRun.target !== "codex" ||
-  dryRun.target_config?.config_file !== ".recallant/codex-mcp.json" ||
-  !dryRun.files.includes(".recallant/codex-mcp.json")
+  dryRun.target_config?.config_file !== ".codex/config.toml" ||
+  !dryRun.files.includes(".codex/config.toml")
 ) {
   throw new Error(`Unexpected init dry-run plan: ${JSON.stringify(dryRun)}`);
 }
@@ -109,11 +109,11 @@ assert(
   `Default init did not report standard profile/valid id: ${JSON.stringify(defaultInit)}`
 );
 assert(
-  await stat(join(defaultProjectDir, ".recallant", "codex-mcp.json")).then(
+  await stat(join(defaultProjectDir, ".codex", "config.toml")).then(
     () => true,
     () => false
   ),
-  "Codex init did not write .recallant/codex-mcp.json"
+  "Codex init did not write .codex/config.toml"
 );
 
 const genericProjectDir = await mkdtemp(join(tmpdir(), "recallant-phase7-generic-"));
@@ -144,9 +144,7 @@ const init = run([
   projectDir
 ]);
 const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
-const codexMcp = JSON.parse(
-  await readFile(join(projectDir, ".recallant", "codex-mcp.json"), "utf8")
-);
+const codexMcp = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
 const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 const gitignore = await readFile(join(projectDir, ".gitignore"), "utf8");
@@ -163,9 +161,10 @@ if (
   !gitignore.includes(".recallant/") ||
   !projectLog.includes("Current focus: project onboarding") ||
   init.capture_profile !== "detailed" ||
-  init.target_config?.format !== "codex_mcp_json" ||
-  init.target_config?.config_file !== ".recallant/codex-mcp.json" ||
-  !JSON.stringify(codexMcp).includes("recallant") ||
+  init.target_config?.format !== "codex_config_toml" ||
+  init.target_config?.config_file !== ".codex/config.toml" ||
+  !codexMcp.includes("[mcp_servers.recallant]") ||
+  !codexMcp.includes('env_vars = ["RECALLANT_DATABASE_URL"]') ||
   !JSON.stringify(init.mcp_config).includes("recallant")
 ) {
   throw new Error(

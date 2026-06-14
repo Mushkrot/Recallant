@@ -71,7 +71,15 @@ await writeFile(
 );
 await writeFile(join(projectDir, "docs", "README.md"), "# Fixture Docs\n");
 
-const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const attach = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
 if (attach.status !== "attached" || !attach.backup?.path) {
   throw new Error(`Attach did not prepare cleanup fixture: ${JSON.stringify(attach)}`);
 }
@@ -121,7 +129,7 @@ const detachedDryRun = runJson(["local-cleanup", "--project-dir", projectDir, "-
 if (
   detachedDryRun.status !== "ready_for_confirmation" ||
   !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/config") ||
-  !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/codex-mcp.json") ||
+  !detachedDryRun.planned_changes.some((change) => change.path === ".codex/config.toml") ||
   !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/generic-mcp.json") ||
   !detachedDryRun.planned_changes.some(
     (change) => change.path === ".recallant/current-session.json"
@@ -135,7 +143,7 @@ if (
   cleanup.status !== "cleaned" ||
   cleanup.removed_paths.length < 3 ||
   (await exists(join(projectDir, ".recallant", "config"))) ||
-  (await exists(join(projectDir, ".recallant", "codex-mcp.json"))) ||
+  (await exists(join(projectDir, ".codex", "config.toml"))) ||
   (await exists(join(projectDir, ".recallant", "generic-mcp.json"))) ||
   (await exists(join(projectDir, ".recallant", "current-session.json")))
 ) {

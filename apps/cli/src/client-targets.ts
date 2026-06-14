@@ -19,7 +19,7 @@ type McpServerConfig = {
 export type ClientTargetConfig = {
   target: ClientKind;
   config_file: string;
-  format: "codex_mcp_json" | "cursor_mcp_json" | "claude_code_mcp_json" | "generic_mcp_json";
+  format: "codex_config_toml" | "cursor_mcp_json" | "claude_code_mcp_json" | "generic_mcp_json";
   client_specific: boolean;
   merge_mcp_servers: boolean;
   setup_hint: string;
@@ -60,6 +60,98 @@ export function mcpServerConfig(projectId: string, developerId: string): McpServ
   };
 }
 
+function parseJsonObjectOrEmpty(text: string | null) {
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function mergeMcpServersConfig(
+  existingText: string | null,
+  desiredConfig: { mcpServers: Record<string, unknown> }
+) {
+  const existingObject = parseJsonObjectOrEmpty(existingText);
+  const existingServers =
+    existingObject.mcpServers &&
+    typeof existingObject.mcpServers === "object" &&
+    !Array.isArray(existingObject.mcpServers)
+      ? (existingObject.mcpServers as Record<string, unknown>)
+      : {};
+  return {
+    ...existingObject,
+    mcpServers: {
+      ...existingServers,
+      ...desiredConfig.mcpServers
+    }
+  };
+}
+
+function tomlString(value: string) {
+  return JSON.stringify(value);
+}
+
+function tomlStringArray(values: readonly string[]) {
+  return `[${values.map((value) => tomlString(value)).join(", ")}]`;
+}
+
+function tomlInlineStringMap(values: Record<string, string>) {
+  const entries = Object.entries(values).map(([key, value]) => `${key} = ${tomlString(value)}`);
+  return `{ ${entries.join(", ")} }`;
+}
+
+export function codexConfigHasRecallantMcp(content: string | null) {
+  return /^\s*\[mcp_servers\.recallant\]\s*$/m.test(content ?? "");
+}
+
+export function codexMcpServerToml(config: McpServerConfig) {
+  const recallant = config.mcpServers.recallant;
+  const env = {
+    RECALLANT_PROJECT_ID: recallant.env.RECALLANT_PROJECT_ID,
+    RECALLANT_DEVELOPER_ID: recallant.env.RECALLANT_DEVELOPER_ID
+  };
+  return [
+    "[mcp_servers.recallant]",
+    `command = ${tomlString(recallant.command)}`,
+    `args = ${tomlStringArray(recallant.args)}`,
+    `env = ${tomlInlineStringMap(env)}`,
+    'env_vars = ["RECALLANT_DATABASE_URL"]'
+  ].join("\n");
+}
+
+function upsertTomlTable(existingText: string | null, tableName: string, tableText: string) {
+  const existing = existingText?.trimEnd() ?? "";
+  const tablePattern = new RegExp(
+    `(^|\\n)\\[${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*\\n[\\s\\S]*?(?=\\n\\[|$)`
+  );
+  if (tablePattern.test(existing)) {
+    return `${existing.replace(tablePattern, (match, prefix: string) => `${prefix}${tableText}`)}\n`;
+  }
+  return existing ? `${existing}\n\n${tableText}\n` : `${tableText}\n`;
+}
+
+export function renderClientTargetConfig(
+  existingText: string | null,
+  targetConfig: ClientTargetConfig
+) {
+  if (targetConfig.format === "codex_config_toml") {
+    return upsertTomlTable(
+      existingText,
+      "mcp_servers.recallant",
+      codexMcpServerToml(targetConfig.mcp_config)
+    );
+  }
+  const desiredConfig = targetConfig.merge_mcp_servers
+    ? mergeMcpServersConfig(existingText, targetConfig.mcp_config)
+    : targetConfig.mcp_config;
+  return `${JSON.stringify(desiredConfig, null, 2)}\n`;
+}
+
 export function clientTargetConfig(
   rawTarget: string | undefined,
   projectId: string,
@@ -70,11 +162,12 @@ export function clientTargetConfig(
   if (target === "codex") {
     return {
       target,
-      config_file: ".recallant/codex-mcp.json",
-      format: "codex_mcp_json",
+      config_file: ".codex/config.toml",
+      format: "codex_config_toml",
       client_specific: true,
-      merge_mcp_servers: false,
-      setup_hint: "Use this generated Codex MCP config for Recallant-backed sessions.",
+      merge_mcp_servers: true,
+      setup_hint:
+        "Codex reads this project-local .codex/config.toml in trusted projects. Recallant merges only its mcp_servers.recallant entry.",
       mcp_config
     };
   }

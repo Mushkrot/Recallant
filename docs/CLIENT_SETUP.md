@@ -41,26 +41,20 @@ recallant connect codex --project-dir . --dry-run
 recallant connect codex --project-dir .
 ```
 
-Generated MCP shape:
+Generated project-local Codex config:
 
-```json
-{
-  "mcpServers": {
-    "recallant": {
-      "command": "recallant",
-      "args": ["mcp-server"],
-      "env": {
-        "RECALLANT_PROJECT_ID": "<project-id>",
-        "RECALLANT_DEVELOPER_ID": "<developer-id>",
-        "RECALLANT_DATABASE_URL": "${RECALLANT_DATABASE_URL}"
-      }
-    }
-  }
-}
+```toml
+[mcp_servers.recallant]
+command = "recallant"
+args = ["mcp-server"]
+env = { RECALLANT_PROJECT_ID = "<project-id>", RECALLANT_DEVELOPER_ID = "<developer-id>" }
+env_vars = ["RECALLANT_DATABASE_URL"]
 ```
 
-If your Codex build supports `codex mcp add`, register the same command, args, and env values from
-the generated project-local config.
+Codex reads `.codex/config.toml` only for trusted projects, so onboarding writes the project-local
+config and then the next Codex session can launch the Recallant MCP server automatically. If your
+Codex build supports `codex mcp add`, global registration remains an advanced alternative rather
+than the beginner path.
 
 ## Cursor
 

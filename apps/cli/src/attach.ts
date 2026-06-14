@@ -8,7 +8,7 @@ import {
   readImportTextForCandidate,
   redactSecretValues
 } from "./discovery.js";
-import { clientTargetConfig } from "./client-targets.js";
+import { clientTargetConfig, renderClientTargetConfig } from "./client-targets.js";
 
 type AttachMode = "manual" | "guided" | "autopilot";
 
@@ -903,9 +903,18 @@ export async function runAttach(argv: readonly string[]) {
       join(options.projectDir, ".recallant", "config"),
       configJson(identity.projectId, options.serverUrl)
     );
+    await mkdir(
+      join(options.projectDir, targetConfig.config_file).split("/").slice(0, -1).join("/"),
+      {
+        recursive: true
+      }
+    );
     await writeFile(
       join(options.projectDir, targetConfig.config_file),
-      `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`
+      renderClientTargetConfig(
+        await readOptional(join(options.projectDir, targetConfig.config_file)),
+        targetConfig
+      )
     );
     await writeFile(
       join(options.projectDir, ".gitignore"),

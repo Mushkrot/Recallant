@@ -1,4 +1,4 @@
-import { readdir, readFile, rm, stat } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createRecallantDbFromEnv } from "@recallant/db";
 import { generatedMcpConfigFiles } from "./client-targets.js";
@@ -8,9 +8,10 @@ type LocalCleanupConfig = {
 };
 
 type PlannedChange = {
-  action: "remove_path";
+  action: "remove_path" | "update_file";
   path: string;
   reason: string;
+  next_content?: string;
 };
 
 function parseFlag(argv: readonly string[], name: string) {
@@ -84,6 +85,39 @@ function lifecycleAllowsCleanup(lifecycle: Record<string, unknown> | null) {
   );
 }
 
+function removeTomlTable(existing: string, tableName: string) {
+  const tablePattern = new RegExp(
+    `(^|\\n)\\[${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*\\n[\\s\\S]*?(?=\\n\\[|$)`
+  );
+  return existing.replace(tablePattern, "").trimEnd();
+}
+
+async function codexConfigCleanupChange(projectDir: string): Promise<PlannedChange | null> {
+  const path = ".codex/config.toml";
+  let existing: string;
+  try {
+    existing = await readFile(join(projectDir, path), "utf8");
+  } catch {
+    return null;
+  }
+  if (!/^\s*\[mcp_servers\.recallant\]\s*$/m.test(existing)) return null;
+  const next = removeTomlTable(existing, "mcp_servers.recallant");
+  if (!next.trim()) {
+    return {
+      action: "remove_path",
+      path,
+      reason: "Generated Recallant MCP section was the only Codex project config."
+    };
+  }
+  return {
+    action: "update_file",
+    path,
+    reason:
+      "Remove only the generated Recallant MCP section while preserving other Codex settings.",
+    next_content: `${next}\n`
+  };
+}
+
 async function plannedChanges(projectDir: string, includeBackups: boolean) {
   const candidates: PlannedChange[] = [
     {
@@ -118,6 +152,8 @@ async function plannedChanges(projectDir: string, includeBackups: boolean) {
   for (const candidate of candidates) {
     if (await pathExists(join(projectDir, candidate.path))) existing.push(candidate);
   }
+  const codexChange = await codexConfigCleanupChange(projectDir);
+  if (codexChange) existing.push(codexChange);
   return existing;
 }
 
@@ -135,6 +171,14 @@ async function removeEmptyRecallantDir(projectDir: string) {
   return false;
 }
 
+function publicPlannedChange(change: PlannedChange) {
+  return {
+    action: change.action,
+    path: change.path,
+    reason: change.reason
+  };
+}
+
 export async function runLocalCleanup(argv: readonly string[]) {
   const projectDir = resolve(
     parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()
@@ -148,7 +192,8 @@ export async function runLocalCleanup(argv: readonly string[]) {
   const changes = await plannedChanges(projectDir, includeBackups);
   const warnings = [
     "Local cleanup never deletes Recallant database records; run detach first.",
-    "AGENTS.md, PROJECT_LOG.md, .gitignore, and source files are not modified by this command."
+    "AGENTS.md, PROJECT_LOG.md, .gitignore, and source files are not modified by this command.",
+    ".codex/config.toml is modified only to remove Recallant's own MCP section."
   ];
 
   if (!allowed) {
@@ -164,10 +209,16 @@ export async function runLocalCleanup(argv: readonly string[]) {
   }
 
   const removed: string[] = [];
+  const updated: string[] = [];
   if (!dryRun) {
     for (const change of changes) {
-      await rm(join(projectDir, change.path), { recursive: true, force: true });
-      removed.push(change.path);
+      if (change.action === "update_file" && typeof change.next_content === "string") {
+        await writeFile(join(projectDir, change.path), change.next_content);
+        updated.push(change.path);
+      } else {
+        await rm(join(projectDir, change.path), { recursive: true, force: true });
+        removed.push(change.path);
+      }
     }
     if (await removeEmptyRecallantDir(projectDir)) removed.push(".recallant/");
   }
@@ -184,8 +235,9 @@ export async function runLocalCleanup(argv: readonly string[]) {
         project_id: projectId,
         lifecycle_status: lifecycle?.status ?? null,
         include_backups: includeBackups,
-        planned_changes: changes,
+        planned_changes: changes.map(publicPlannedChange),
         removed_paths: removed,
+        updated_paths: updated,
         warnings
       },
       null,

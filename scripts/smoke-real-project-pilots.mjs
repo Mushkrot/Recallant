@@ -652,7 +652,7 @@ async function runPilot(originalPath) {
     `${name} did not select any imports: ${JSON.stringify(summary.attach)}`
   );
   await stat(join(sandboxPath, ".recallant", "config"));
-  await stat(join(sandboxPath, ".recallant", "codex-mcp.json"));
+  await stat(join(sandboxPath, ".codex", "config.toml"));
   if (summary.attach.backup_created) await stat(join(sandboxPath, ".recallant", "backups"));
 
   return {

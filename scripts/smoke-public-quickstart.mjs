@@ -174,7 +174,7 @@ for (const expectedPath of [
   ".recallant/config",
   "AGENTS.md",
   "PROJECT_LOG.md",
-  ".recallant/codex-mcp.json",
+  ".codex/config.toml",
   ".recallant/hooks/manifest.json",
   ".recallant/hooks/start-session.sh",
   ".recallant/hooks/capture-event.sh",

@@ -19,7 +19,12 @@ import {
   readImportTextForCandidate
 } from "./discovery.js";
 import { runAttach } from "./attach.js";
-import { clientTargetConfig, connectClientTargetConfig } from "./client-targets.js";
+import {
+  clientTargetConfig,
+  codexConfigHasRecallantMcp,
+  connectClientTargetConfig,
+  renderClientTargetConfig
+} from "./client-targets.js";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 
@@ -930,17 +935,32 @@ async function hookKitReadiness(projectDir: string) {
 
 async function clientConnectionReadiness(projectDir: string) {
   const candidates = [
-    { client: "codex", path: ".recallant/codex-mcp.json" },
-    { client: "cursor", path: ".cursor/mcp.json" },
-    { client: "claude_code", path: ".mcp.json" },
-    { client: "generic", path: ".recallant/generic-mcp.json" }
+    { client: "codex", path: ".codex/config.toml", legacy_reference_only: false },
+    { client: "codex", path: ".recallant/codex-mcp.json", legacy_reference_only: true },
+    { client: "cursor", path: ".cursor/mcp.json", legacy_reference_only: false },
+    { client: "claude_code", path: ".mcp.json", legacy_reference_only: false },
+    { client: "generic", path: ".recallant/generic-mcp.json", legacy_reference_only: false }
   ];
   const configs = [];
   for (const candidate of candidates) {
-    const present = (await readOptional(join(projectDir, candidate.path))) !== null;
-    configs.push({ ...candidate, present });
+    const content = await readOptional(join(projectDir, candidate.path));
+    const present = content !== null;
+    const configured =
+      present &&
+      !candidate.legacy_reference_only &&
+      (candidate.client === "codex" ? codexConfigHasRecallantMcp(content) : true);
+    configs.push({
+      ...candidate,
+      present,
+      configured,
+      note: candidate.legacy_reference_only
+        ? "Legacy generated reference only; Codex does not auto-load this path."
+        : candidate.client === "codex"
+          ? "Codex project config is ready only when it contains [mcp_servers.recallant]."
+          : null
+    });
   }
-  const mcpConfigured = configs.some((config) => config.present);
+  const mcpConfigured = configs.some((config) => config.configured);
   const hookKit = await hookKitReadiness(projectDir);
   const nativeHooks = [
     {
@@ -1918,9 +1938,18 @@ async function runInit(argv: readonly string[]) {
     join(options.projectDir, ".recallant", "config"),
     configJson(projectId, options.serverUrl)
   );
+  await mkdir(
+    join(options.projectDir, targetConfig.config_file).split("/").slice(0, -1).join("/"),
+    {
+      recursive: true
+    }
+  );
   await writeFile(
     join(options.projectDir, targetConfig.config_file),
-    `${JSON.stringify(targetConfig.mcp_config, null, 2)}\n`
+    renderClientTargetConfig(
+      await readOptional(join(options.projectDir, targetConfig.config_file)),
+      targetConfig
+    )
   );
   await writeFile(
     join(options.projectDir, ".gitignore"),
@@ -4211,9 +4240,27 @@ function globalClientConfigDryRunPlan(input: {
   };
   const targetFile = targetFiles[input.target] ?? targetFiles.generic;
   const writerSupported = input.target === "cursor";
-  const desiredGlobalConfig = mergeMcpServers(
+  const desiredGlobalConfig =
+    input.targetConfig.format === "codex_config_toml"
+      ? {
+          mcp_servers: {
+            recallant: {
+              command: "recallant",
+              args: ["mcp-server"],
+              env: {
+                RECALLANT_PROJECT_ID:
+                  input.targetConfig.mcp_config.mcpServers.recallant.env.RECALLANT_PROJECT_ID,
+                RECALLANT_DEVELOPER_ID:
+                  input.targetConfig.mcp_config.mcpServers.recallant.env.RECALLANT_DEVELOPER_ID
+              },
+              env_vars: ["RECALLANT_DATABASE_URL"]
+            }
+          }
+        }
+      : mergeMcpServers(input.existingText ?? null, input.targetConfig.mcp_config);
+  const desiredGlobalText = renderClientTargetConfig(
     input.existingText ?? null,
-    input.targetConfig.mcp_config
+    input.targetConfig
   );
   return {
     mode: writerSupported ? "dry_run_or_confirmed_write" : "dry_run_only",
@@ -4237,6 +4284,7 @@ function globalClientConfigDryRunPlan(input: {
       mcp_server: input.targetConfig.mcp_config.mcpServers.recallant
     },
     desired_config: desiredGlobalConfig,
+    desired_config_text: desiredGlobalText,
     writer_supported: writerSupported,
     supported_writer_client: "cursor",
     safety: {
@@ -4388,10 +4436,7 @@ async function runConnect(argv: readonly string[]) {
   }
   const targetPath = join(dir, targetConfig.config_file);
   const existing = await readOptional(targetPath);
-  const desiredConfig = targetConfig.merge_mcp_servers
-    ? mergeMcpServers(existing, targetConfig.mcp_config)
-    : targetConfig.mcp_config;
-  const desired = `${JSON.stringify(desiredConfig, null, 2)}\n`;
+  const desired = renderClientTargetConfig(existing, targetConfig);
   const same = existing === desired;
   const hookFiles = installLocalHooks ? localHookKitFiles() : [];
   const hookFilePlans = [];
@@ -4461,9 +4506,11 @@ async function runConnect(argv: readonly string[]) {
       }
     : null;
   const desiredGlobal =
-    globalConfigPlan?.desired_config && typeof globalConfigPlan.desired_config === "object"
-      ? `${JSON.stringify(globalConfigPlan.desired_config, null, 2)}\n`
-      : null;
+    typeof globalConfigPlan?.desired_config_text === "string"
+      ? globalConfigPlan.desired_config_text
+      : globalConfigPlan?.desired_config && typeof globalConfigPlan.desired_config === "object"
+        ? `${JSON.stringify(globalConfigPlan.desired_config, null, 2)}\n`
+        : null;
   const globalSame = Boolean(
     globalTargetPath && desiredGlobal !== null && existingGlobal === desiredGlobal
   );
@@ -4622,7 +4669,8 @@ async function runConnect(argv: readonly string[]) {
       timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
       project_dir_env: "RECALLANT_PROJECT_DIR"
     },
-    mcp_config: desiredConfig
+    mcp_config: targetConfig.mcp_config,
+    rendered_config: desired
   };
   process.stdout.write(
     format === "json" ? `${JSON.stringify(result, null, 2)}\n` : connectHumanReport(result)
@@ -5474,11 +5522,43 @@ async function runSourceCommand(argv: readonly string[]) {
   }
 }
 
+function usageText(command?: string) {
+  if (command === "onboard") {
+    return [
+      "Usage: recallant onboard <project-dir> [--client <codex|cursor|claude-code|generic>] [--install-local-hooks] [--verify] [--dry-run] [--yes] [--format json]",
+      "",
+      "Beginner flow: prepare private storage, attach the project, configure the agent client, install fail-soft local hooks when supported, prove capture/recall, and print the private Workbench outcome.",
+      ""
+    ].join("\n");
+  }
+  if (command === "connect") {
+    return [
+      "Usage: recallant connect <client> --project-dir <project-dir> [--install-local-hooks] [--dry-run] [--global] [--format json]",
+      "",
+      "Configure a supported agent client to call `recallant mcp-server` for an attached project.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+}
+
+function wantsHelp(argv: readonly string[]) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
 async function main(argv: readonly string[]) {
   const command = argv[2];
 
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`recallant ${recallantCliVersion}\n`);
+    return;
+  }
+  if (!command || command === "--help" || command === "-h" || command === "help") {
+    process.stdout.write(usageText());
+    return;
+  }
+  if (wantsHelp(argv)) {
+    process.stdout.write(usageText(command));
     return;
   }
   if (command === "mcp-server") {
@@ -5516,9 +5596,7 @@ async function main(argv: readonly string[]) {
   if (command === "sync-spool") return runSyncSpool(argv);
   if (command === "prune-spool") return runPruneSpool(argv);
 
-  process.stderr.write(
-    "Usage: recallant <mcp-server|doctor|attach|connect|onboard|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n"
-  );
+  process.stderr.write(usageText());
   process.exitCode = 1;
 }
 

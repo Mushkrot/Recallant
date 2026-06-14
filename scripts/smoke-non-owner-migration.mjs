@@ -121,12 +121,7 @@ async function writeExistingProjectFixture(projectDir) {
   );
   await writeFile(
     join(projectDir, ".cursor", "rules", "release.mdc"),
-    [
-      "# Release Rule",
-      "",
-      "Release notes must mention the migration checklist.",
-      ""
-    ].join("\n")
+    ["# Release Rule", "", "Release notes must mention the migration checklist.", ""].join("\n")
   );
   await writeFile(
     join(projectDir, "CLAUDE.md"),
@@ -206,19 +201,42 @@ const plan = runJson([
   "--format",
   "json"
 ]);
-assert(plan.status === "needs_confirmation", `guided attach should require confirmation: ${JSON.stringify(plan)}`);
-assert(plan.writes_files === false, `guided attach should not write files: ${JSON.stringify(plan)}`);
-assert(plan.writes_database === false, `guided attach should not write DB: ${JSON.stringify(plan)}`);
+assert(
+  plan.status === "needs_confirmation",
+  `guided attach should require confirmation: ${JSON.stringify(plan)}`
+);
+assert(
+  plan.writes_files === false,
+  `guided attach should not write files: ${JSON.stringify(plan)}`
+);
+assert(
+  plan.writes_database === false,
+  `guided attach should not write DB: ${JSON.stringify(plan)}`
+);
 assert(
   plan.owner_report?.migration_summary?.selected_imports >= 6,
   `guided attach should expose planned migration summary: ${JSON.stringify(plan.owner_report)}`
 );
 assertNoRawSecrets(plan, "guided attach plan");
 
-const attach = runJson(["attach", sandboxDir, "--target", "codex", "--sandbox", "--format", "json"]);
+const attach = runJson([
+  "attach",
+  sandboxDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
 const attachText = runText(["attach", sandboxDir, "--target", "codex", "--sandbox"]);
-assert(attachText.includes("Migration summary:"), `attach text missing migration summary:\n${attachText}`);
-assert(attachText.includes("Needs attention:"), `attach text missing needs-attention line:\n${attachText}`);
+assert(
+  attachText.includes("Migration summary:"),
+  `attach text missing migration summary:\n${attachText}`
+);
+assert(
+  attachText.includes("Needs attention:"),
+  `attach text missing needs-attention line:\n${attachText}`
+);
 assertNoRawSecrets(attach, "attach JSON");
 assertNoRawSecrets(attachText, "attach text");
 
@@ -256,11 +274,14 @@ const projectLog = await readFile(join(sandboxDir, "PROJECT_LOG.md"), "utf8");
 const backupAgents = await readFile(join(attach.backup.path, "AGENTS.md"), "utf8");
 const backupManifest = JSON.parse(await readFile(attach.backup.manifest_path, "utf8"));
 const config = JSON.parse(await readFile(join(sandboxDir, ".recallant", "config"), "utf8"));
-const mcpConfig = JSON.parse(await readFile(join(sandboxDir, ".recallant", "codex-mcp.json"), "utf8"));
+const mcpConfig = await readFile(join(sandboxDir, ".codex", "config.toml"), "utf8");
 await stat(join(sandboxDir, ".recallant", "backups"));
 
 assert(config.project_id === attach.project_id, "Attach config does not point at created project");
-assert(JSON.stringify(mcpConfig).includes("recallant"), "Codex MCP config does not reference Recallant");
+assert(
+  mcpConfig.includes("[mcp_servers.recallant]"),
+  "Codex MCP config does not reference Recallant"
+);
 assert(agents.includes("recallant agent-start"), "AGENTS.md does not route agents to Recallant");
 assert(agents.includes("<redacted-token>"), "AGENTS.md did not mask the raw legacy token");
 assert(!agents.includes("sk-nonownerfixture123456"), "AGENTS.md still contains raw legacy token");
