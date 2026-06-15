@@ -454,6 +454,27 @@ export type DetachProjectInput = {
   };
 };
 
+export type ProjectSanitizeInput = {
+  project_id?: string | null;
+  project_path?: string | null;
+  mode?: "detach" | "purge";
+  detach_mode?: "live" | "sandbox";
+  dry_run?: boolean;
+  reason?: string | null;
+  actor_kind?: "user" | "agent" | "system";
+  actor_id?: string | null;
+  request_source?: "ui" | "cli" | "chat" | "mcp" | "system";
+  confirmation?: {
+    confirmed?: boolean;
+    confirmation_token?: string | null;
+  };
+};
+
+type ProjectManagementTarget = {
+  project_id?: string | null;
+  project_path?: string | null;
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -623,6 +644,27 @@ function projectLifecycleIsDetached(lifecycle: ProjectLifecycle) {
     lifecycle.visibility === "hidden" ||
     lifecycle.searchable === false
   );
+}
+
+function projectSanitizeConfirmationToken(
+  mode: "detach" | "purge",
+  project: { project_id: string }
+) {
+  return `recallant-${mode}-project-${project.project_id}`;
+}
+
+function countValue(counts: Record<string, unknown>, key: string) {
+  const value = counts[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function sumCounts(counts: Record<string, unknown>, keys: readonly string[]) {
+  return keys.reduce((sum, key) => sum + countValue(counts, key), 0);
 }
 
 function redactSecretValues(content: string) {
@@ -3410,6 +3452,266 @@ export class RecallantDb {
     return { ok: true, trace_id: input.trace_id };
   }
 
+  async sanitizeProject(input: ProjectSanitizeInput) {
+    const mode = input.mode ?? "purge";
+    if (mode === "detach") {
+      return this.detachProject({
+        project_id: input.project_id,
+        project_path: input.project_path,
+        mode: input.detach_mode ?? "live",
+        dry_run: input.dry_run,
+        reason: input.reason,
+        actor_kind: input.actor_kind,
+        actor_id: input.actor_id,
+        confirmation: {
+          confirmed: input.confirmation?.confirmed
+        }
+      });
+    }
+
+    const project = await this.findProjectForManagement(input);
+    if (!project) {
+      return {
+        ok: false,
+        action: "project_sanitize",
+        status: "not_found",
+        mode,
+        dry_run: true,
+        writes_database: false,
+        project: null,
+        affected: {},
+        warnings: ["No matching managed project was found. No data was changed."]
+      };
+    }
+
+    const affected = await this.countProjectRecords(project.project_id);
+    const previousLifecycle = await this.getProjectLifecycle(project.project_id);
+    const confirmationToken = projectSanitizeConfirmationToken(mode, project);
+    const dryRun =
+      input.dry_run !== false ||
+      input.confirmation?.confirmed !== true ||
+      input.confirmation?.confirmation_token !== confirmationToken;
+    const deleteKeys = [
+      "projects",
+      "project_sources",
+      "sessions",
+      "session_overrides",
+      "events",
+      "raw_artifacts",
+      "chunks",
+      "embeddings",
+      "edges",
+      "checkpoints",
+      "agent_memories",
+      "agent_memory_source_refs",
+      "agent_memory_review_actions",
+      "ingest_dedup_keys",
+      "project_settings",
+      "client_adapter_settings",
+      "settings_audit_events"
+    ];
+    const deidentifyKeys = [
+      "recall_traces",
+      "model_calls",
+      "paid_api_approvals",
+      "erasure_requests"
+    ];
+    const plannedDeletedRecords = sumCounts(affected, deleteKeys);
+    const plannedDeidentifiedRecords = sumCounts(affected, deidentifyKeys);
+    const plan = {
+      delete_records: Object.fromEntries(deleteKeys.map((key) => [key, countValue(affected, key)])),
+      deidentify_records: Object.fromEntries(
+        deidentifyKeys.map((key) => [key, countValue(affected, key)])
+      ),
+      retain_records: {
+        redacted_erasure_receipt: 1
+      },
+      local_disconnect: {
+        planned_by: "cli",
+        writes_files: false,
+        reason:
+          "Database planning does not touch project files. CLI project-sanitize performs local disconnect after DB confirmation."
+      }
+    };
+    const confirmation = {
+      required: true,
+      token: confirmationToken,
+      token_hint: "Pass this exact value with --confirm-token after reviewing the dry-run."
+    };
+
+    if (dryRun) {
+      return {
+        ok: true,
+        action: "project_sanitize",
+        status: "pending_confirmation",
+        mode,
+        dry_run: true,
+        writes_database: false,
+        project,
+        previous_lifecycle: previousLifecycle,
+        affected,
+        plan,
+        confirmation,
+        warnings: [
+          "Dry run only. No Recallant records, project files, or local artifacts were changed.",
+          "Project purge is irreversible for Recallant-controlled project memory and capture records.",
+          "Project purge does not delete source files, secrets, downloads, or arbitrary project data."
+        ]
+      };
+    }
+
+    const erasureId = randomUUID();
+    const redactedReceipt = {
+      action: "project_sanitize",
+      mode,
+      project_id: project.project_id,
+      project_name: project.name,
+      primary_path_present: Boolean(project.primary_path),
+      affected,
+      deleted_records_planned: plannedDeletedRecords,
+      deidentified_records_planned: plannedDeidentifiedRecords,
+      content_removed: true
+    };
+
+    let deletedSettingsAudit = 0;
+    let deidentifiedRecallTraces = 0;
+    let deidentifiedModelCalls = 0;
+    let updatedPaidApprovals = 0;
+    let deidentifiedErasureRequests = 0;
+    await withTransaction(this.pool, async (client) => {
+      await client.query(
+        `
+          INSERT INTO erasure_requests (
+            id, developer_id, project_id, requested_by, request_source, target_selector,
+            reason, status, requires_confirmation, confirmed_by, confirmed_at, executed_at,
+            redacted_receipt
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', true, $8, now(), now(), $9)
+        `,
+        [
+          erasureId,
+          project.developer_id,
+          project.project_id,
+          input.actor_id ?? "owner",
+          input.request_source ?? "cli",
+          JSON.stringify({ kind: "project", id: project.project_id, mode }),
+          input.reason ?? "recallant project sanitize purge",
+          input.actor_id ?? "owner",
+          JSON.stringify(redactedReceipt)
+        ]
+      );
+
+      const recallTraceResult = await client.query(
+        `
+          UPDATE recall_traces
+          SET query = NULL,
+              returned_chunk_ids = '[]'::jsonb,
+              returned_memory_ids = '[]'::jsonb,
+              used_chunk_ids = NULL,
+              used_memory_ids = NULL,
+              ignored_memory_ids = NULL,
+              metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb
+          WHERE project_id = $1
+        `,
+        [
+          project.project_id,
+          JSON.stringify({ project_purged: true, project_purge_erasure_id: erasureId })
+        ]
+      );
+      deidentifiedRecallTraces = recallTraceResult.rowCount ?? 0;
+
+      const modelCallResult = await client.query(
+        `
+          UPDATE model_calls
+          SET memory_domain = NULL,
+              metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb
+          WHERE project_id = $1
+        `,
+        [
+          project.project_id,
+          JSON.stringify({ project_purged: true, project_purge_erasure_id: erasureId })
+        ]
+      );
+      deidentifiedModelCalls = modelCallResult.rowCount ?? 0;
+
+      const paidApprovalResult = await client.query(
+        `
+          UPDATE paid_api_approval_requests
+          SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
+              decided_by = CASE WHEN status = 'pending' THEN $2 ELSE decided_by END,
+              decision_note = CASE
+                WHEN status = 'pending' THEN 'Project purged before approval'
+                ELSE decision_note
+              END,
+              decided_at = CASE WHEN status = 'pending' THEN now() ELSE decided_at END
+          WHERE project_id = $1
+        `,
+        [project.project_id, input.actor_id ?? "recallant-cli"]
+      );
+      updatedPaidApprovals = paidApprovalResult.rowCount ?? 0;
+
+      const erasureRequestResult = await client.query(
+        `
+          UPDATE erasure_requests
+          SET target_selector = $2,
+              redacted_receipt = coalesce(redacted_receipt, '{}'::jsonb) || $3::jsonb
+          WHERE project_id = $1
+            AND id <> $4
+        `,
+        [
+          project.project_id,
+          JSON.stringify({ project_purged: true, previous_selector_redacted: true }),
+          JSON.stringify({ project_purged: true, project_purge_erasure_id: erasureId }),
+          erasureId
+        ]
+      );
+      deidentifiedErasureRequests = erasureRequestResult.rowCount ?? 0;
+
+      const settingsAuditResult = await client.query(
+        "DELETE FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1",
+        [project.project_id]
+      );
+      deletedSettingsAudit = settingsAuditResult.rowCount ?? 0;
+
+      await client.query("DELETE FROM projects WHERE id = $1", [project.project_id]);
+    });
+
+    return {
+      ok: true,
+      action: "project_sanitize",
+      status: "purged",
+      mode,
+      dry_run: false,
+      writes_database: true,
+      project,
+      previous_lifecycle: previousLifecycle,
+      affected,
+      plan,
+      erasure_id: erasureId,
+      redacted_receipt: redactedReceipt,
+      changes: {
+        physically_deleted_records: plannedDeletedRecords,
+        settings_audit_events_deleted: deletedSettingsAudit,
+        deidentified_records:
+          deidentifiedRecallTraces +
+          deidentifiedModelCalls +
+          updatedPaidApprovals +
+          deidentifiedErasureRequests,
+        recall_traces_deidentified: deidentifiedRecallTraces,
+        model_calls_deidentified: deidentifiedModelCalls,
+        paid_api_approvals_cancelled_or_deidentified: updatedPaidApprovals,
+        erasure_requests_deidentified: deidentifiedErasureRequests,
+        retained_redacted_receipts: countValue(affected, "erasure_requests") + 1,
+        files_changed: 0
+      },
+      warnings: [
+        "Recallant database records for this project were purged or de-identified.",
+        "No project files were touched by the database purge.",
+        "Run local disconnect cleanup separately or through the CLI orchestration to remove local Recallant artifacts."
+      ]
+    };
+  }
+
   async detachProject(input: DetachProjectInput) {
     const mode = input.mode ?? "live";
     const project = await this.findProjectForManagement(input);
@@ -4111,6 +4413,8 @@ export class RecallantDb {
         dry_run_first: true,
         permanent_erasure_separate: true,
         detach_command: `recallant detach --project-id ${dashboardProjectId} --dry-run`,
+        sanitize_detach_command: `recallant project-sanitize --project-id ${dashboardProjectId} --mode detach --dry-run`,
+        purge_command: `recallant project-sanitize --project-id ${dashboardProjectId} --mode purge --dry-run`,
         sandbox_cleanup_command: `recallant detach --project-id ${dashboardProjectId} --mode sandbox --dry-run`,
         local_cleanup_command: localProjectPath
           ? `recallant local-cleanup --project-dir ${JSON.stringify(localProjectPath)} --dry-run`
@@ -4446,7 +4750,7 @@ export class RecallantDb {
     };
   }
 
-  private async findProjectForManagement(input: DetachProjectInput) {
+  private async findProjectForManagement(input: ProjectManagementTarget) {
     const developerId = this.config.developerId ?? this.fallbackDeveloperId;
     const projectId = input.project_id ?? this.config.projectId ?? null;
     const projectPath = input.project_path ?? this.config.projectPath ?? null;
@@ -4493,9 +4797,12 @@ export class RecallantDb {
     const result = await this.pool.query(
       `
         SELECT
+          (SELECT count(*)::int FROM projects WHERE id = $1) AS projects,
+          (SELECT count(*)::int FROM project_sources WHERE project_id = $1) AS project_sources,
           (SELECT count(*)::int FROM sessions WHERE project_id = $1) AS sessions,
           (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL) AS active_sessions,
           (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
+          (SELECT count(*)::int FROM session_overrides WHERE session_id IN (SELECT id FROM sessions WHERE project_id = $1)) AS session_overrides,
           (SELECT count(*)::int FROM events WHERE project_id = $1) AS events,
           (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events,
           (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1) AS raw_artifacts,
@@ -4508,12 +4815,16 @@ export class RecallantDb {
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status NOT IN ('archived', 'rejected', 'superseded')) AS active_agent_memories,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_needed_memories,
           (SELECT count(*)::int FROM agent_memory_source_refs r JOIN agent_memories m ON m.id = r.memory_id WHERE m.project_id = $1) AS agent_memory_source_refs,
+          (SELECT count(*)::int FROM agent_memory_review_actions a JOIN agent_memories m ON m.id = a.memory_id WHERE m.project_id = $1) AS agent_memory_review_actions,
           (SELECT count(*)::int FROM recall_traces WHERE project_id = $1) AS recall_traces,
           (SELECT count(*)::int FROM ingest_dedup_keys WHERE project_id = $1) AS ingest_dedup_keys,
           (SELECT count(*)::int FROM project_settings WHERE project_id = $1) AS project_settings,
+          (SELECT count(*)::int FROM client_adapter_settings WHERE project_id = $1) AS client_adapter_settings,
+          (SELECT count(*)::int FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1::text) AS settings_audit_events,
           (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1) AS paid_api_approvals,
-          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals
+          (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals,
+          (SELECT count(*)::int FROM erasure_requests WHERE project_id = $1) AS erasure_requests
       `,
       [projectId]
     );

@@ -27,6 +27,7 @@ import {
 } from "./client-targets.js";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
+import { runProjectSanitize } from "./project-sanitize.js";
 
 const recallantCliVersion = "0.0.0";
 
@@ -5539,7 +5540,17 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "project-sanitize" || command === "sanitize" || command === "project-purge") {
+    return [
+      "Usage: recallant project-sanitize [--project-id <id>|--project-dir <dir>] [--mode <detach|purge>] [--detach-mode <live|sandbox>] [--dry-run] [--confirm-token <token>] [--no-local] [--format json|text]",
+      "",
+      "Preview and confirm project cleanup. Detach hides a project from active Recallant views. Purge is the clean-slate path: it physically removes project-scoped Recallant records, writes a redacted receipt, and disconnects local Recallant artifacts when a project directory is known.",
+      "",
+      "Dry-run is the default. Confirmed purge requires the exact token printed by the dry-run.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -5569,6 +5580,8 @@ async function main(argv: readonly string[]) {
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
   if (command === "onboard") return runOnboard(argv);
+  if (command === "project-sanitize" || command === "sanitize" || command === "project-purge")
+    return runProjectSanitize(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
   if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
   if (command === "source" || command === "project-source") return runSourceCommand(argv);

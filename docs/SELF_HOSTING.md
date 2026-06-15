@@ -177,13 +177,31 @@ only the safe reference.
 
 ## Rollback
 
-Rollback should avoid deleting memory by accident.
+Rollback should avoid deleting memory by accident. Project lifecycle cleanup is separate from
+install rollback:
 
 - Stop services before changing ports or env values.
 - Keep the env file unless you intentionally want a fresh instance.
 - Back up the data directory before moving or reinstalling.
-- Remove source project bindings through Recallant detach/forget workflows, not by deleting random
-  database files.
+- Remove source project bindings through Recallant project sanitization workflows, not by deleting
+  random database files.
+
+For a project you only want to hide from active recall, preview detach:
+
+```bash
+recallant project-sanitize --project-id <project-id> --mode detach --dry-run
+```
+
+For a disposable or wrongly attached project that needs a clean Recallant slate, preview purge:
+
+```bash
+recallant project-sanitize --project-id <project-id> --mode purge --dry-run
+```
+
+Confirmed purge requires the exact confirmation token printed by the dry-run. It deletes
+project-scoped Recallant records, disconnects Recallant-generated local artifacts when requested,
+and writes a redacted receipt. It must not delete source files, secrets, downloads, or arbitrary
+project data.
 
 For a local disposable test install, minimal cleanup is usually:
 

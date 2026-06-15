@@ -1214,7 +1214,7 @@ try {
     !destructiveChatHtml.includes("dry-run без изменений") ||
     !destructiveChatHtml.includes("Запустить dry-run в интерфейсе") ||
     !destructiveChatHtml.includes(`name="project_id" value="${projectId}"`) ||
-    !destructiveChatHtml.includes("/project-detach#ask-recallant")
+    !destructiveChatHtml.includes("/project-sanitize#ask-recallant")
   ) {
     throw new Error(
       `Dry-run action card did not render safe UI controls: ${destructiveChatView.status}; ${destructiveChatHtml.slice(0, 900)}`
@@ -1360,7 +1360,10 @@ try {
     sandboxDestructiveChatJson.facts.target_project_id !== sandboxProjectId ||
     sandboxDestructiveChatJson.proposed_actions.length < 1 ||
     !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(sandboxProjectId) ||
-    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes("--mode sandbox") ||
+    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes("--mode detach") ||
+    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(
+      "--detach-mode sandbox"
+    ) ||
     String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(projectId)
   ) {
     throw new Error(
@@ -1635,8 +1638,9 @@ try {
     !destructiveChatFormHtml.includes("Результат: сначала dry-run") ||
     !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
     !destructiveChatFormHtml.includes("Запустить dry-run в интерфейсе") ||
-    !destructiveChatFormHtml.includes('action="/project-detach#ask-recallant"') ||
-    !destructiveChatFormHtml.includes('name="mode" value="sandbox"') ||
+    !destructiveChatFormHtml.includes('action="/project-sanitize#ask-recallant"') ||
+    !destructiveChatFormHtml.includes('name="mode" value="detach"') ||
+    !destructiveChatFormHtml.includes('name="detach_mode" value="sandbox"') ||
     !destructiveChatFormHtml.includes(sandboxProjectId) ||
     destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")
   ) {

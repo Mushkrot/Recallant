@@ -18,6 +18,7 @@ or release packaging before it should be treated as stable infrastructure.
 | Capture-active proof | Working slice with quickstart proof | Onboard verify reports structured capture/readiness/recall stages; `public-quickstart:smoke` proves installed-wrapper onboarding, capture active evidence, recall proof, and Workbench outcome; `npm run product-acceptance:smoke`, `npm run demo-capture:smoke`, `npm run agent-capture:smoke` | Keep proof visible in Workbench and docs. |
 | Context-pack startup and closeout | Working slice | MCP/CLI startup, checkpoint, closeout, recovery, and local spool paths; `npm run phase3:smoke`, `npm run spool:smoke`, `npm run product-acceptance:smoke` | Improve closeout extraction and reporting quality. |
 | Governed memory and review | Working slice | Source refs, statuses, rule promotion gates, conflict views, Review UI, Workbench migration review queue, and browser-level Workbench QA; `npm run phase6:smoke:governed`, `npm run review-ui:smoke`, `npm run review-ui:playwright` | More real-world review ergonomics after broader migration pilots. |
+| Project sanitization and purge | Working slice | `recallant project-sanitize`, DB dry-run planner, token-confirmed project purge, redacted receipts, local Recallant artifact disconnect, Workbench/API dry-run and confirmation flow; `npm run project-sanitize:smoke`, `npm run local-cleanup:smoke`, `npm run onboarding:smoke` | Broader real-project dry-run pilots and UI polish before release candidate. |
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
 | Private deployment profiles | Documented and genericized | Self-hosting profiles, `doctor` deployment profile output, production-readiness checks, capability references, private-by-default server posture; public defaults use generic paths and env-provided inventory/security references | Deployment-specific overlays stay private. |
@@ -41,6 +42,7 @@ Recent verification across the current public checkpoint sequence includes:
 - `npm run installer:smoke`
 - `npm run phase7:smoke`
 - `npm run phase10:smoke`
+- `npm run project-sanitize:smoke`
 - `npm run non-owner-migration:smoke`
 - `RECALLANT_REAL_PROJECT_PILOTS=<comma-separated paths> npm run real-project-pilots:smoke`
 - `npm run review-ui:smoke`
@@ -53,7 +55,10 @@ cross-project recall behavior, clean-host install planning, fresh public quickst
 rollback dry-run and marked-artifact cleanup, Docker-backed managed install smoke, genericized
 deployment-profile defaults, neutral non-owner migration safety, opt-in real-project pilot safety on
 sandbox copies through one-command onboarding, original-file integrity checks, Workbench browser QA,
-and lifecycle cleanup that hides temp memory spaces without deleting records. They also cover
+and lifecycle cleanup that hides temp memory spaces without deleting records. Project sanitize smoke
+adds disposable-project purge rehearsal with dry-run counts, wrong-token no-op behavior, redacted
+receipt retention, local Recallant artifact disconnect, and an explicit no-confirmed-purge guard
+when a real project path is detected. The checks also cover
 Workbench migration review ergonomics, autonomous browser QA with synthetic screenshots, pilot
 report scenarios, and production-sensitive dry-run safety, plus install/auth/Workbench/backups/secrets
 security review smoke.
@@ -68,6 +73,9 @@ security review smoke.
   beginner path should not require users to know those commands.
 - Live connector ingestion is not the default; connector records are governed references until setup,
   consent, and policy allow capture.
+- Project purge is not a substitute for source repository cleanup. It removes Recallant-controlled
+  project memory and disconnects Recallant-generated local artifacts; it must not delete source
+  files, secrets, downloads, or arbitrary project data.
 - Public exposure of Workbench, admin APIs, MCP, backups, or raw artifacts is not a default mode.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain

@@ -18,6 +18,8 @@ dependable before expanding the product surface.
 - Neutral non-owner migration smoke for sandbox-copy safety and reviewed imports.
 - Opt-in real-project pilot smoke for one-command onboarding on sandbox copies of
   maintainer-provided paths, with original-file integrity checks and lifecycle cleanup.
+- Token-confirmed project sanitization for disposable or wrongly attached projects, with dry-run DB
+  counts, redacted receipts, local Recallant artifact disconnect, and no source-file deletion.
 - Workbench migration review queue for imported evidence, conflicts, secret references, and stale
   handoffs.
 - Security review smoke for install/auth/Workbench/backups/secrets.
@@ -68,6 +70,6 @@ If selected for Codex for OSS support, Recallant will use Codex/API credits to i
 
 - Broader client pilot matrix.
 - Richer source connectors.
-- Better memory cleanup and conflict workflows.
+- Better memory conflict workflows and portable retention/export policy.
 - Export/import and portable instance migration polish.
 - Team/multi-user design after the single-maintainer path is stable.

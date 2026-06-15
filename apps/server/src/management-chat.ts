@@ -2195,7 +2195,7 @@ function answerEn(
       }
       return `${baseline}\n\nNo urgent decisions are waiting. The next useful step is to start an agent session and verify that it gets startup context from Recallant without manually reading old logs.`;
     case "cleanup":
-      return `${baseline}\n\nSafe cleanup order: dry-run first, then confirmation. Ordinary detach does not permanently erase memory; sensitive or wrong memory belongs in the separate forget-forever workflow.`;
+      return `${baseline}\n\nSafe cleanup order: dry-run first, then confirmation. Ordinary detach hides a project without deleting records. For a clean Recallant slate, use token-confirmed project purge through project-sanitize; source files and secrets are not deleted.`;
     case "settings":
       return `${baseline}\n\nProject settings are managed centrally in Recallant. Dangerous changes, such as paid API auto mode or large capture/context increases, must go through confirmation and audit.`;
     case "cost":
@@ -2337,8 +2337,12 @@ function actionsForIntent(
     const cleanup = dashboard.project_cleanup ?? {};
     const detachCommand =
       targetProject.project_id === facts.current_project_id
-        ? stringValue(cleanup.detach_command)
-        : `recallant detach --project-id ${targetProject.project_id} --mode sandbox --dry-run`;
+        ? stringValue(cleanup.sanitize_detach_command) || stringValue(cleanup.detach_command)
+        : `recallant project-sanitize --project-id ${targetProject.project_id} --mode detach --detach-mode sandbox --dry-run`;
+    const purgeCommand =
+      targetProject.project_id === facts.current_project_id
+        ? stringValue(cleanup.purge_command)
+        : `recallant project-sanitize --project-id ${targetProject.project_id} --mode purge --dry-run`;
     return [
       {
         label:
@@ -2353,13 +2357,13 @@ function actionsForIntent(
             : `Shows what would be affected in ${targetProject.project_name} without changing data.`
       },
       {
-        label:
-          language === "ru" ? "Полное удаление только отдельно" : "Use forget forever separately",
-        kind: "confirmation_required",
+        label: language === "ru" ? "Dry-run полного purge" : "Dry-run project purge",
+        kind: "dry_run",
+        command: purgeCommand,
         reason:
           language === "ru"
-            ? "Постоянное удаление чувствительной или ошибочной памяти требует отдельного подтверждения."
-            : "Permanent erasure of sensitive or wrong memory requires a separate confirmation."
+            ? "Показывает записи Recallant, которые будут удалены или деидентифицированы, и печатает confirm-token. Из чата purge не выполняется."
+            : "Shows which Recallant records would be deleted or de-identified and prints the confirm token. Chat does not execute the purge."
       }
     ];
   }

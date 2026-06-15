@@ -26,6 +26,10 @@ type DetachRenderState = {
   result?: Record<string, unknown>;
 };
 
+type SanitizeRenderState = {
+  result?: Record<string, unknown>;
+};
+
 type MemoryForgetRenderState = {
   result?: Record<string, unknown>;
   target?: {
@@ -2483,9 +2487,14 @@ function renderProjectActions(data: ReviewDashboardData) {
       <summary>Advanced cleanup details</summary>
       ${renderMeta([
         ["detach dry-run", cleanup.detach_command],
+        ["sanitize detach dry-run", cleanup.sanitize_detach_command],
+        ["purge dry-run", cleanup.purge_command],
         ["sandbox cleanup dry-run", cleanup.sandbox_cleanup_command],
         ["local cleanup dry-run", cleanup.local_cleanup_command],
-        ["permanent erasure", cleanup.permanent_erasure_separate ? "Separate forget workflow" : ""]
+        [
+          "permanent erasure",
+          cleanup.permanent_erasure_separate ? "Token-confirmed project purge" : ""
+        ]
       ])}
     </details>
   </div>`;
@@ -2535,7 +2544,57 @@ function renderProjectDetachResult(data: ReviewDashboardData, detach?: DetachRen
   </article>`;
 }
 
-function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
+function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: SanitizeRenderState) {
+  if (!sanitize?.result) return "";
+  const result = sanitize.result;
+  const project = asRecord(result.project);
+  const affected = asRecord(result.affected);
+  const changes = asRecord(result.changes);
+  const confirmation = asRecord(result.confirmation);
+  const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
+  const projectId = String(project.project_id ?? data.current_project_id ?? "");
+  const dryRun = result.dry_run !== false;
+  const status =
+    result.status === "purged"
+      ? "Project purged from Recallant."
+      : "Purge dry-run complete. Nothing changed yet.";
+  return `<article class="detach-result">
+    <strong>${escapeHtml(status)}</strong>
+    <p>${escapeHtml(
+      dryRun
+        ? "Review the affected records and confirmation token before deleting this project's Recallant memory."
+        : "Recallant database records were purged or de-identified. Project files were not deleted."
+    )}</p>
+    <div class="summary-grid">
+      <span><strong>${escapeHtml(affected.events ?? 0)}</strong> events</span>
+      <span><strong>${escapeHtml(affected.chunks ?? 0)}</strong> chunks</span>
+      <span><strong>${escapeHtml(affected.agent_memories ?? 0)}</strong> memories</span>
+      <span><strong>${escapeHtml(changes.physically_deleted_records ?? 0)}</strong> deleted records</span>
+    </div>
+    ${confirmation.token ? `<p><code>${escapeHtml(String(confirmation.token))}</code></p>` : ""}
+    ${
+      warnings.length > 0
+        ? `<ul class="attention-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+        : ""
+    }
+    ${
+      dryRun && projectId && confirmation.token
+        ? `<form class="confirm-form" method="post" action="/project-sanitize">
+            <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+            <input type="hidden" name="mode" value="purge" />
+            <input type="hidden" name="confirm_token" value="${escapeHtml(String(confirmation.token))}" />
+            <button class="danger" type="submit">Confirm purge from Recallant</button>
+          </form>`
+        : ""
+    }
+  </article>`;
+}
+
+function renderCleanup(
+  data: ReviewDashboardData,
+  detach?: DetachRenderState,
+  sanitize?: SanitizeRenderState
+) {
   const project = currentProject(data);
   const projectName =
     project.title ?? project.name ?? project.provider ?? project.key ?? data.current_project_id;
@@ -2549,12 +2608,18 @@ function renderCleanup(data: ReviewDashboardData, detach?: DetachRenderState) {
         ${renderMeta([["project_id", data.current_project_id]])}
       </details>
     </article>
-    <p>This removes the selected project from active Recallant views and search. Project files on disk are not changed. Permanent erasure uses a separate forget-forever workflow.</p>
+    <p>Detach hides the selected project from active Recallant views and search. Purge is the irreversible clean-slate path for Recallant database records. Project files on disk are not deleted.</p>
     ${renderProjectDetachResult(data, detach)}
+    ${renderProjectSanitizeResult(data, sanitize)}
     <form method="post" action="/project-detach">
       <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
       <input type="hidden" name="mode" value="sandbox" />
       <button type="submit">Dry-run remove selected project</button>
+    </form>
+    <form method="post" action="/project-sanitize">
+      <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+      <input type="hidden" name="mode" value="purge" />
+      <button class="danger" type="submit">Dry-run purge from Recallant</button>
     </form>
   </div>`;
 }
@@ -2645,14 +2710,24 @@ function renderChatActionForm(
   if (action.kind !== "dry_run" || !action.command) return "";
   const projectMatch = action.command.match(/--project-id\s+([0-9a-f-]{36})(?:\s|$)/i);
   if (!projectMatch) return "";
-  if (
-    !/\brecallant\s+detach\b/.test(action.command) ||
-    !/(?:^|\s)--dry-run(?:\s|$)/.test(action.command)
-  ) {
-    return "";
-  }
+  if (!/(?:^|\s)--dry-run(?:\s|$)/.test(action.command)) return "";
+  const sanitizeCommand = /\brecallant\s+project-sanitize\b/.test(action.command);
+  const detachCommand = /\brecallant\s+detach\b/.test(action.command);
+  if (!sanitizeCommand && !detachCommand) return "";
   const mode = /(?:^|\s)--mode\s+sandbox(?:\s|$)/.test(action.command) ? "sandbox" : "live";
+  const sanitizeMode = /(?:^|\s)--mode\s+purge(?:\s|$)/.test(action.command) ? "purge" : "detach";
+  const sanitizeDetachMode = /(?:^|\s)--detach-mode\s+sandbox(?:\s|$)/.test(action.command)
+    ? "sandbox"
+    : "live";
   const label = language === "ru" ? "Запустить dry-run в интерфейсе" : "Run dry-run in UI";
+  if (sanitizeCommand) {
+    return `<form class="chat-action-form" method="post" action="/project-sanitize#ask-recallant">
+    <input type="hidden" name="project_id" value="${escapeHtml(projectMatch[1] ?? "")}" />
+    <input type="hidden" name="mode" value="${escapeHtml(sanitizeMode)}" />
+    <input type="hidden" name="detach_mode" value="${escapeHtml(sanitizeDetachMode)}" />
+    <button type="submit">${escapeHtml(label)}</button>
+  </form>`;
+  }
   return `<form class="chat-action-form" method="post" action="/project-detach#ask-recallant">
     <input type="hidden" name="project_id" value="${escapeHtml(projectMatch[1] ?? "")}" />
     <input type="hidden" name="mode" value="${escapeHtml(mode)}" />
@@ -2762,6 +2837,7 @@ function renderDashboard(
   state?: {
     chat?: ChatRenderState;
     detach?: DetachRenderState;
+    sanitize?: SanitizeRenderState;
     memoryForget?: MemoryForgetRenderState;
     setting?: SettingRenderState;
     source?: SourceRenderState;
@@ -2770,6 +2846,7 @@ function renderDashboard(
 ) {
   const chat = state?.chat;
   const detach = state?.detach;
+  const sanitize = state?.sanitize;
   const memoryForget = state?.memoryForget;
   const setting = state?.setting;
   const source = state?.source;
@@ -3962,7 +4039,7 @@ function renderDashboard(
             </details>
             <details class="operation-panel">
               <summary><span>Cleanup / Forget</span><small>Dry-run first; permanent erasure is separate</small></summary>
-              ${renderCleanup(data, detach)}
+              ${renderCleanup(data, detach, sanitize)}
             </details>`
             }
             <details class="operation-panel" id="settings"${focused ? " open" : ""}>
@@ -4188,6 +4265,31 @@ export function createRecallantHttpServer() {
       write(response, 200, JSON.stringify(result), "application/json");
       return;
     }
+    if (request.method === "POST" && requestUrl.pathname === "/api/project-sanitize") {
+      const body = (await readJson(request)) as {
+        project_id?: string | null;
+        mode?: "detach" | "purge";
+        detach_mode?: "live" | "sandbox";
+        reason?: string | null;
+        confirmation?: { confirmed?: boolean; confirmation_token?: string | null };
+      };
+      const result = await database.sanitizeProject({
+        project_id: optionalInput(body.project_id),
+        mode: body.mode === "detach" ? "detach" : "purge",
+        detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
+        reason: optionalInput(body.reason) ?? "Review UI project sanitize",
+        dry_run: body.confirmation?.confirmed === true ? false : true,
+        actor_kind: "user",
+        actor_id: "review-ui",
+        request_source: "ui",
+        confirmation: {
+          confirmed: body.confirmation?.confirmed === true,
+          confirmation_token: optionalInput(body.confirmation?.confirmation_token)
+        }
+      });
+      write(response, 200, JSON.stringify(result), "application/json");
+      return;
+    }
     if (request.method === "POST" && requestUrl.pathname === "/project-detach") {
       const body = await readForm(request);
       const projectId = optionalInput(body.project_id);
@@ -4216,6 +4318,43 @@ export function createRecallantHttpServer() {
         response,
         200,
         renderDashboard(detachDashboard, { detach: { result } }),
+        "text/html",
+        sessionCookie ? { "set-cookie": sessionCookie } : {}
+      );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/project-sanitize") {
+      const body = await readForm(request);
+      const projectId = optionalInput(body.project_id);
+      const confirmToken = optionalInput(body.confirm_token);
+      const result = await database.sanitizeProject({
+        project_id: projectId,
+        mode: body.mode === "detach" ? "detach" : "purge",
+        detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
+        reason: "Review UI project sanitize",
+        dry_run: confirmToken ? false : true,
+        actor_kind: "user",
+        actor_id: "review-ui",
+        request_source: "ui",
+        confirmation: {
+          confirmed: Boolean(confirmToken),
+          confirmation_token: confirmToken
+        }
+      });
+      if (result.status === "purged") {
+        write(response, 303, "See other", "text/plain", { location: "/review" });
+        return;
+      }
+      const sanitizeDashboard = sanitizeDashboardForClient(
+        await database.getReviewDashboard({
+          project_id: projectId ?? dashboardInput.project_id,
+          selected_memory_id: dashboardInput.selected_memory_id
+        })
+      );
+      write(
+        response,
+        200,
+        renderDashboard(sanitizeDashboard, { sanitize: { result } }),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}
       );

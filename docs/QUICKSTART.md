@@ -73,16 +73,38 @@ The onboarding output includes the private Workbench URL when review state is av
 Workbench is used to review memories, rules, source context, capture status, migration imports, and
 safety gates.
 
-## 5. Clean Up A Test Project
+## 5. Clean Up Or Reset A Test Project
 
-For a disposable sandbox project, preview detach first:
+Recallant has separate cleanup levels so a test run does not turn into accidental data loss.
+
+To remove a project from active Recallant views and search without deleting Recallant records,
+preview detach first:
 
 ```bash
-recallant detach --project-id <project-id> --mode sandbox --dry-run
+recallant project-sanitize --project-id <project-id> --mode detach --dry-run
 ```
 
-Then confirm only after checking the target. Detach removes the project from active Recallant views;
-it should not delete your source files.
+Then confirm only after checking the target. Detach closes active Recallant sessions and hides the
+project from normal recall, but it does not physically delete Recallant database records.
+
+To start over from a clean Recallant slate for a disposable or wrongly attached project, use purge
+mode. Dry-run is still the default:
+
+```bash
+recallant project-sanitize --project-id <project-id> --mode purge --dry-run
+```
+
+The dry-run prints affected database counts, local disconnect changes, retained governance receipt
+details, and an exact confirmation token. Confirmed purge requires that token:
+
+```bash
+recallant project-sanitize --project-id <project-id> --mode purge --confirm-token "<token>"
+```
+
+Project sanitization never deletes source files, secrets, downloads, or arbitrary project data. When
+local disconnect is enabled, Recallant removes or updates only Recallant-generated artifacts such as
+`.recallant/`, Recallant MCP config, and generated bootstrap sections. If a previous file can only
+be restored from a redacted backup, Recallant reports that limitation instead of guessing.
 
 ## What Gets Written
 

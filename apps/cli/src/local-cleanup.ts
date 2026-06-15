@@ -14,6 +14,22 @@ type PlannedChange = {
   next_content?: string;
 };
 
+type LocalCleanupOptions = {
+  projectDir: string;
+  dryRun: boolean;
+  includeBackups: boolean;
+  allowWithoutDetached?: boolean;
+  includeBootstrapFiles?: boolean;
+};
+
+type AttachBackup = {
+  root: string;
+  manifest: {
+    changed_existing_agent_files?: unknown;
+    redaction_notices?: unknown;
+  };
+};
+
 function parseFlag(argv: readonly string[], name: string) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : undefined;
@@ -92,6 +108,93 @@ function removeTomlTable(existing: string, tableName: string) {
   return existing.replace(tablePattern, "").trimEnd();
 }
 
+function removeRecallantMemorySection(existing: string) {
+  const pattern = /(^|\n)## Memory \(Recallant\)\s*\n[\s\S]*?(?=\n## |\n# |$)/;
+  return existing.replace(pattern, "").trimEnd();
+}
+
+function removeRecallantGitignoreLine(existing: string) {
+  const nextLines = existing.split("\n").filter((line) => {
+    const trimmed = line.trim();
+    return trimmed !== ".recallant" && trimmed !== ".recallant/";
+  });
+  return nextLines.join("\n").trimEnd();
+}
+
+function generatedAgentsFileAfterSectionRemoval(existing: string, next: string) {
+  const normalized = next.replace(/^# Agent Instructions\s*/i, "").replace(/\s+/g, "");
+  return existing.includes("## Memory (Recallant)") && normalized.length === 0;
+}
+
+function generatedProjectLog(existing: string) {
+  return (
+    existing.includes("Status: attached to Recallant.") &&
+    existing.includes("## Recallant") &&
+    existing.includes("Recallant is the main source of truth for durable memory.")
+  );
+}
+
+async function latestAttachBackup(projectDir: string): Promise<AttachBackup | null> {
+  const backupsDir = join(projectDir, ".recallant", "backups");
+  let entries;
+  try {
+    entries = await readdir(backupsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const attachBackups = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("attach-"))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  for (const entry of attachBackups) {
+    const root = join(backupsDir, entry);
+    try {
+      const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8")) as {
+        changed_existing_agent_files?: unknown;
+        redaction_notices?: unknown;
+      };
+      return { root, manifest };
+    } catch {
+      // Ignore malformed backup manifests; cleanup should remain conservative.
+    }
+  }
+  return null;
+}
+
+function backupChangedFile(backup: AttachBackup | null, path: string) {
+  const files = Array.isArray(backup?.manifest.changed_existing_agent_files)
+    ? backup.manifest.changed_existing_agent_files.map(String)
+    : [];
+  return files.includes(path);
+}
+
+function backupRedactedFile(backup: AttachBackup | null, path: string) {
+  const notices = Array.isArray(backup?.manifest.redaction_notices)
+    ? backup.manifest.redaction_notices.map(String)
+    : [];
+  return notices.some((notice) => notice.startsWith(`${path} contained secret-like values`));
+}
+
+async function backupRestoreChange(
+  projectDir: string,
+  backup: AttachBackup | null,
+  path: string
+): Promise<PlannedChange | null> {
+  if (!backupChangedFile(backup, path) || backupRedactedFile(backup, path)) return null;
+  try {
+    const nextContent = await readFile(join(backup!.root, path), "utf8");
+    return {
+      action: "update_file",
+      path,
+      reason: "Restore pre-attach file from a local Recallant backup.",
+      next_content: nextContent.endsWith("\n") ? nextContent : `${nextContent}\n`
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function codexConfigCleanupChange(projectDir: string): Promise<PlannedChange | null> {
   const path = ".codex/config.toml";
   let existing: string;
@@ -118,7 +221,93 @@ async function codexConfigCleanupChange(projectDir: string): Promise<PlannedChan
   };
 }
 
-async function plannedChanges(projectDir: string, includeBackups: boolean) {
+async function gitignoreCleanupChange(projectDir: string): Promise<PlannedChange | null> {
+  const path = ".gitignore";
+  let existing: string;
+  try {
+    existing = await readFile(join(projectDir, path), "utf8");
+  } catch {
+    return null;
+  }
+  const next = removeRecallantGitignoreLine(existing);
+  if (next === existing.trimEnd()) return null;
+  if (!next.trim()) {
+    return {
+      action: "remove_path",
+      path,
+      reason: "Generated ignore file only contained Recallant's local state rule."
+    };
+  }
+  return {
+    action: "update_file",
+    path,
+    reason: "Remove only Recallant's .recallant/ ignore rule.",
+    next_content: `${next}\n`
+  };
+}
+
+async function agentsCleanupChange(projectDir: string): Promise<PlannedChange | null> {
+  const path = "AGENTS.md";
+  let existing: string;
+  try {
+    existing = await readFile(join(projectDir, path), "utf8");
+  } catch {
+    return null;
+  }
+  if (!existing.includes("## Memory (Recallant)")) return null;
+  const next = removeRecallantMemorySection(existing);
+  if (generatedAgentsFileAfterSectionRemoval(existing, next)) {
+    return {
+      action: "remove_path",
+      path,
+      reason: "Generated Recallant-only agent instructions file."
+    };
+  }
+  return {
+    action: "update_file",
+    path,
+    reason: "Remove only the generated Recallant memory section.",
+    next_content: `${next}\n`
+  };
+}
+
+async function projectLogCleanupChange(
+  projectDir: string,
+  backup: AttachBackup | null
+): Promise<{ change: PlannedChange | null; warning: string | null }> {
+  const path = "PROJECT_LOG.md";
+  let existing: string;
+  try {
+    existing = await readFile(join(projectDir, path), "utf8");
+  } catch {
+    return { change: null, warning: null };
+  }
+  if (!generatedProjectLog(existing)) return { change: null, warning: null };
+  const restore = await backupRestoreChange(projectDir, backup, path);
+  if (restore) return { change: restore, warning: null };
+  if (backupChangedFile(backup, path) && backupRedactedFile(backup, path)) {
+    return {
+      change: null,
+      warning:
+        "PROJECT_LOG.md was overwritten during attach, but the available backup was redacted; review it manually instead of automatic restore."
+    };
+  }
+  return {
+    change: {
+      action: "remove_path",
+      path,
+      reason: "Generated Recallant project log for a disconnected project."
+    },
+    warning: null
+  };
+}
+
+async function plannedChanges(input: {
+  projectDir: string;
+  includeBackups: boolean;
+  includeBootstrapFiles: boolean;
+}) {
+  const { projectDir, includeBackups, includeBootstrapFiles } = input;
   const candidates: PlannedChange[] = [
     {
       action: "remove_path",
@@ -154,7 +343,18 @@ async function plannedChanges(projectDir: string, includeBackups: boolean) {
   }
   const codexChange = await codexConfigCleanupChange(projectDir);
   if (codexChange) existing.push(codexChange);
-  return existing;
+  const warnings = [];
+  if (includeBootstrapFiles) {
+    const backup = await latestAttachBackup(projectDir);
+    const gitignoreChange = await gitignoreCleanupChange(projectDir);
+    if (gitignoreChange) existing.push(gitignoreChange);
+    const agentsChange = await agentsCleanupChange(projectDir);
+    if (agentsChange) existing.push(agentsChange);
+    const projectLog = await projectLogCleanupChange(projectDir, backup);
+    if (projectLog.change) existing.push(projectLog.change);
+    if (projectLog.warning) warnings.push(projectLog.warning);
+  }
+  return { changes: existing, warnings };
 }
 
 async function removeEmptyRecallantDir(projectDir: string) {
@@ -179,21 +379,28 @@ function publicPlannedChange(change: PlannedChange) {
   };
 }
 
-export async function runLocalCleanup(argv: readonly string[]) {
-  const projectDir = resolve(
-    parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()
-  );
-  const dryRun = argv.includes("--dry-run") || !argv.includes("--confirm");
-  const includeBackups = argv.includes("--include-backups");
+export async function cleanupLocalProject(options: LocalCleanupOptions) {
+  const projectDir = options.projectDir;
+  const dryRun = options.dryRun;
+  const includeBackups = options.includeBackups;
   const config = await readConfig(projectDir);
   const projectId = config?.project_id ?? null;
-  const lifecycle = await resolveLifecycle(projectId);
-  const allowed = lifecycleAllowsCleanup(lifecycle);
-  const changes = await plannedChanges(projectDir, includeBackups);
+  const lifecycle =
+    options.allowWithoutDetached === true ? null : await resolveLifecycle(projectId);
+  const allowed = options.allowWithoutDetached === true || lifecycleAllowsCleanup(lifecycle);
+  const planned = await plannedChanges({
+    projectDir,
+    includeBackups,
+    includeBootstrapFiles: options.includeBootstrapFiles === true
+  });
+  const changes = planned.changes;
   const warnings = [
     "Local cleanup never deletes Recallant database records; run detach first.",
-    "AGENTS.md, PROJECT_LOG.md, .gitignore, and source files are not modified by this command.",
-    ".codex/config.toml is modified only to remove Recallant's own MCP section."
+    options.includeBootstrapFiles
+      ? "AGENTS.md, PROJECT_LOG.md, and .gitignore are modified only when Recallant-generated content can be removed or safely restored."
+      : "AGENTS.md, PROJECT_LOG.md, .gitignore, and source files are not modified by this command.",
+    ".codex/config.toml is modified only to remove Recallant's own MCP section.",
+    ...planned.warnings
   ];
 
   if (!allowed) {
@@ -223,25 +430,35 @@ export async function runLocalCleanup(argv: readonly string[]) {
     if (await removeEmptyRecallantDir(projectDir)) removed.push(".recallant/");
   }
 
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        ok: true,
-        action: "local_cleanup",
-        status: dryRun ? (allowed ? "ready_for_confirmation" : "blocked_until_detach") : "cleaned",
-        dry_run: dryRun,
-        writes_files: !dryRun,
-        project_dir: projectDir,
-        project_id: projectId,
-        lifecycle_status: lifecycle?.status ?? null,
-        include_backups: includeBackups,
-        planned_changes: changes.map(publicPlannedChange),
-        removed_paths: removed,
-        updated_paths: updated,
-        warnings
-      },
-      null,
-      2
-    )}\n`
+  return {
+    ok: true,
+    action: "local_cleanup",
+    status: dryRun ? (allowed ? "ready_for_confirmation" : "blocked_until_detach") : "cleaned",
+    dry_run: dryRun,
+    writes_files: !dryRun,
+    project_dir: projectDir,
+    project_id: projectId,
+    lifecycle_status: lifecycle?.status ?? null,
+    include_backups: includeBackups,
+    include_bootstrap_files: options.includeBootstrapFiles === true,
+    planned_changes: changes.map(publicPlannedChange),
+    removed_paths: removed,
+    updated_paths: updated,
+    warnings
+  };
+}
+
+export async function runLocalCleanup(argv: readonly string[]) {
+  const projectDir = resolve(
+    parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()
   );
+  const dryRun = argv.includes("--dry-run") || !argv.includes("--confirm");
+  const includeBackups = argv.includes("--include-backups");
+  const result = await cleanupLocalProject({
+    projectDir,
+    dryRun,
+    includeBackups,
+    includeBootstrapFiles: argv.includes("--include-bootstrap-files")
+  });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }

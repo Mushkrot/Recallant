@@ -62,15 +62,15 @@ The important state is not "installed" or "configured". The important state is *
 Recallant has observed real context reads, memory writes, checkpoints, and recall proof for the
 project. The success output also includes a private Workbench link for review.
 
-Lower-level CLI commands such as attach, connect, doctor, agent capture, demo capture, and ask
-remain available for maintainers and automation. They are advanced/debug APIs, not the normal
-beginner path. See [Client setup](docs/CLIENT_SETUP.md).
+Lower-level CLI commands such as attach, connect, doctor, project-sanitize, agent capture, demo
+capture, and ask remain available for maintainers and automation. They are advanced/debug APIs, not
+the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 ## Product Shape
 
 Recallant runs as a local or self-hosted memory service:
 
-- CLI for install, attach, connect, doctor, capture proof, and cleanup.
+- CLI for install, attach, connect, doctor, capture proof, project sanitization, and cleanup.
 - MCP server for agent clients.
 - Postgres/pgvector-backed storage.
 - Private Workbench UI for review, rules, source context, settings, and management chat.

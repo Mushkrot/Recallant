@@ -14,7 +14,7 @@ bounded by design, and conservative about secrets.
 | Silent rule promotion | Block instruction-grade memory unless authority is explicit. |
 | Public admin exposure | Keep Workbench/admin/MCP private by default. |
 | Paid or cloud model surprises | Require explicit approval unless a project changes policy. |
-| Destructive action overreach | Require dry-run and confirmation paths. |
+| Destructive action overreach | Require dry-run, exact confirmation tokens, and redacted receipts. |
 | Huge tool output or raw artifacts | Store bounded excerpts plus hashes/pointers. |
 | Backup exposure | Keep backups private and avoid raw secret material in manifests. |
 
@@ -52,6 +52,20 @@ They should not be treated as local Ollama readiness requirements or silent loca
 Agent-created memories can be useful immediately, but durable behavioral guidance requires stronger
 authority. This protects maintainers from old or low-confidence context becoming hidden standing
 instructions.
+
+## Project Sanitization
+
+Project cleanup is intentionally split into non-destructive detach and irreversible purge.
+
+- Detach hides a project from normal Recallant views/search and closes active sessions, but does not
+  physically delete Recallant records.
+- Project purge is the clean-slate path for disposable or wrongly attached projects. It is dry-run
+  first, requires an exact confirmation token, and stores only a redacted receipt.
+- Local disconnect may remove or update Recallant-generated artifacts such as `.recallant/`, MCP
+  config, and generated bootstrap sections. It must not delete source files, secrets, downloads, or
+  arbitrary project data.
+- Chat and agent surfaces should guide users to the dry-run/confirm flow rather than executing
+  destructive project cleanup directly.
 
 ## Automated Security Review
 
