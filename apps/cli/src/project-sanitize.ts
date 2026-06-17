@@ -15,6 +15,7 @@ type ProjectSanitizeOptions = {
   confirmDetach: boolean;
   includeLocal: boolean;
   includeBackups: boolean;
+  allowOrphanLocal: boolean;
   reason?: string | null;
   format: "json" | "text";
 };
@@ -82,6 +83,7 @@ function parseProjectSanitizeOptions(argv: readonly string[]): ProjectSanitizeOp
     confirmDetach: argv.includes("--confirm"),
     includeLocal: !argv.includes("--no-local"),
     includeBackups: argv.includes("--include-backups"),
+    allowOrphanLocal: argv.includes("--allow-orphan-local"),
     reason: parseFlag(argv, "--reason") ?? null,
     format
   };
@@ -125,7 +127,9 @@ function textReport(result: Record<string, unknown>) {
 export async function runProjectSanitize(argv: readonly string[]) {
   const options = parseProjectSanitizeOptions(argv);
   const config = await readExistingConfig(options.projectDir);
-  const projectId = options.projectId ?? config?.project_id ?? null;
+  const explicitProjectId = options.projectId ?? null;
+  const projectId = explicitProjectId ?? config?.project_id ?? null;
+  const projectPath = explicitProjectId ? null : options.projectDir;
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for project sanitize");
 
@@ -133,7 +137,7 @@ export async function runProjectSanitize(argv: readonly string[]) {
   try {
     databaseResult = (await database.sanitizeProject({
       project_id: projectId,
-      project_path: projectId ? null : options.projectDir,
+      project_path: projectPath,
       mode: options.mode,
       detach_mode: options.detachMode,
       dry_run: options.dryRun,
@@ -151,17 +155,19 @@ export async function runProjectSanitize(argv: readonly string[]) {
   }
 
   const shouldPlanLocal = options.includeLocal && options.projectDir && options.mode === "purge";
+  const databasePurged = databaseResult.status === "purged" && databaseResult.dry_run === false;
+  const orphanLocalRequested =
+    options.allowOrphanLocal === true && databaseResult.status === "not_found";
+  const orphanLocalConfirmed = orphanLocalRequested && options.confirmDetach === true;
   const shouldWriteLocal =
-    shouldPlanLocal &&
-    options.mode === "purge" &&
-    databaseResult.status === "purged" &&
-    databaseResult.dry_run === false;
+    shouldPlanLocal && (databasePurged || (orphanLocalRequested && orphanLocalConfirmed));
   const localCleanup = shouldPlanLocal
     ? await cleanupLocalProject({
         projectDir: options.projectDir,
         dryRun: !shouldWriteLocal,
         includeBackups: options.includeBackups,
-        allowWithoutDetached: options.mode === "purge" || databaseResult.status === "purged",
+        allowWithoutDetached: options.mode === "purge" || databasePurged || orphanLocalRequested,
+        orphanLocal: orphanLocalRequested,
         includeBootstrapFiles: true
       })
     : {
@@ -177,11 +183,17 @@ export async function runProjectSanitize(argv: readonly string[]) {
       };
 
   const result = {
-    ok: Boolean(databaseResult.ok) && Boolean(localCleanup.ok),
+    ok: (Boolean(databaseResult.ok) || orphanLocalRequested) && Boolean(localCleanup.ok),
     action: "project_sanitize",
-    status: databaseResult.status,
+    status:
+      orphanLocalRequested && localCleanup.status === "cleaned"
+        ? "orphan_local_cleaned"
+        : databaseResult.status,
     mode: options.mode,
-    dry_run: databaseResult.dry_run,
+    dry_run: Boolean(databaseResult.dry_run) && !shouldWriteLocal,
+    writes_database: Boolean(databaseResult.writes_database),
+    writes_files: Boolean(localCleanup.writes_files),
+    local_only_cleanup: orphanLocalRequested,
     project_dir: options.projectDir,
     database: databaseResult,
     local_cleanup: localCleanup,

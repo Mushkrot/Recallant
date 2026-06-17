@@ -2544,6 +2544,26 @@ function renderProjectDetachResult(data: ReviewDashboardData, detach?: DetachRen
   </article>`;
 }
 
+function renderTargetResolution(result: Record<string, unknown>) {
+  const resolution = asRecord(result.target_resolution);
+  if (
+    !resolution.resolved_by &&
+    !resolution.requested_project_id &&
+    !resolution.resolved_project_id
+  )
+    return "";
+  return `<details class="target-resolution">
+    <summary>Target resolution</summary>
+    ${renderMeta([
+      ["resolved by", resolution.resolved_by],
+      ["requested project_id", resolution.requested_project_id],
+      ["resolved project_id", resolution.resolved_project_id],
+      ["stale project_id", resolution.stale_project_id],
+      ["project path supplied", resolution.requested_project_path ? "yes" : ""]
+    ])}
+  </details>`;
+}
+
 function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: SanitizeRenderState) {
   if (!sanitize?.result) return "";
   const result = sanitize.result;
@@ -2571,6 +2591,7 @@ function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: Sanit
       <span><strong>${escapeHtml(affected.agent_memories ?? 0)}</strong> memories</span>
       <span><strong>${escapeHtml(changes.physically_deleted_records ?? 0)}</strong> deleted records</span>
     </div>
+    ${renderTargetResolution(result)}
     ${confirmation.token ? `<p><code>${escapeHtml(String(confirmation.token))}</code></p>` : ""}
     ${
       warnings.length > 0
@@ -4268,6 +4289,7 @@ export function createRecallantHttpServer() {
     if (request.method === "POST" && requestUrl.pathname === "/api/project-sanitize") {
       const body = (await readJson(request)) as {
         project_id?: string | null;
+        project_path?: string | null;
         mode?: "detach" | "purge";
         detach_mode?: "live" | "sandbox";
         reason?: string | null;
@@ -4275,6 +4297,7 @@ export function createRecallantHttpServer() {
       };
       const result = await database.sanitizeProject({
         project_id: optionalInput(body.project_id),
+        project_path: optionalInput(body.project_path),
         mode: body.mode === "detach" ? "detach" : "purge",
         detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
         reason: optionalInput(body.reason) ?? "Review UI project sanitize",
@@ -4326,9 +4349,11 @@ export function createRecallantHttpServer() {
     if (request.method === "POST" && requestUrl.pathname === "/project-sanitize") {
       const body = await readForm(request);
       const projectId = optionalInput(body.project_id);
+      const projectPath = optionalInput(body.project_path);
       const confirmToken = optionalInput(body.confirm_token);
       const result = await database.sanitizeProject({
         project_id: projectId,
+        project_path: projectPath,
         mode: body.mode === "detach" ? "detach" : "purge",
         detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
         reason: "Review UI project sanitize",

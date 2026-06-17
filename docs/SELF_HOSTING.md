@@ -203,6 +203,22 @@ project-scoped Recallant records, disconnects Recallant-generated local artifact
 and writes a redacted receipt. It must not delete source files, secrets, downloads, or arbitrary
 project data.
 
+If `.recallant/config` contains an old project id, the sanitize dry-run reports that stale id and,
+when the path matches a current managed project for the same developer, resolves the active project
+by path. Confirmed purge still requires the exact token for the resolved project.
+
+If the database project has already been removed but local Recallant artifacts remain, use the
+explicit local-only cleanup opt-in:
+
+```bash
+recallant project-sanitize --project-dir <project-dir> --mode purge --allow-orphan-local --dry-run
+recallant project-sanitize --project-dir <project-dir> --mode purge --allow-orphan-local --confirm
+```
+
+The local-only cleanup path reports `writes_database: false` and removes only Recallant-generated
+local artifacts such as `.recallant/config`, session pointers, MCP config, and generated bootstrap
+sections.
+
 For a local disposable test install, minimal cleanup is usually:
 
 ```bash

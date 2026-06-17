@@ -95,6 +95,12 @@ async function projectExists(projectId) {
   });
 }
 
+async function deleteProject(projectId) {
+  await withClient(async (client) => {
+    await client.query("DELETE FROM projects WHERE id = $1", [projectId]);
+  });
+}
+
 async function countProjectRows(projectId) {
   return withClient(async (client) => {
     const result = await client.query(
@@ -171,8 +177,12 @@ async function retainedReceiptCount(erasureId) {
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-"));
 const detachDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-detach-"));
+const staleConfigDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-stale-"));
+const orphanLocalDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-orphan-"));
 await writeFixture(projectDir, "sanitizemarker");
 await writeFixture(detachDir, "detachmarker");
+await writeFixture(staleConfigDir, "stalemarker");
+await writeFixture(orphanLocalDir, "orphanmarker");
 
 const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
 const detachAttach = runJson([
@@ -268,6 +278,193 @@ if (
 ) {
   throw new Error(
     `Confirmed project sanitize failed: ${JSON.stringify({ confirmed, remainingRows }, null, 2)}`
+  );
+}
+
+const staleAttach = runJson([
+  "attach",
+  staleConfigDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
+await deleteProject(staleAttach.project_id);
+const liveAttach = runJson([
+  "attach",
+  staleConfigDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
+await writeFile(
+  join(staleConfigDir, ".recallant", "config"),
+  JSON.stringify(
+    {
+      project_id: staleAttach.project_id,
+      recallant_server_url: "http://127.0.0.1:3005"
+    },
+    null,
+    2
+  )
+);
+await writeFile(
+  join(staleConfigDir, ".recallant", "current-session.json"),
+  `${JSON.stringify({ session_id: "stale-local-session" }, null, 2)}\n`
+);
+const explicitStaleDryRun = runJson([
+  "project-sanitize",
+  "--project-id",
+  staleAttach.project_id,
+  "--project-dir",
+  staleConfigDir,
+  "--mode",
+  "purge",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+if (
+  explicitStaleDryRun.database?.status !== "not_found" ||
+  explicitStaleDryRun.database?.project !== null ||
+  explicitStaleDryRun.database?.target_resolution?.resolved_by !== "not_found" ||
+  explicitStaleDryRun.database?.target_resolution?.requested_project_path !== null
+) {
+  throw new Error(
+    `Explicit --project-id should remain strict for stale ids: ${JSON.stringify(explicitStaleDryRun, null, 2)}`
+  );
+}
+const staleDryRun = runJson([
+  "project-sanitize",
+  "--project-dir",
+  staleConfigDir,
+  "--mode",
+  "purge",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+const staleToken = staleDryRun.database?.confirmation?.token;
+if (
+  staleDryRun.database?.status !== "pending_confirmation" ||
+  staleDryRun.database?.project?.project_id !== liveAttach.project_id ||
+  staleDryRun.database?.target_resolution?.stale_project_id !== staleAttach.project_id ||
+  staleDryRun.database?.target_resolution?.resolved_by !== "project_path_fallback" ||
+  !staleDryRun.database?.warnings?.some((warning) => /missing project_id/.test(warning)) ||
+  staleToken !== `recallant-purge-project-${liveAttach.project_id}`
+) {
+  throw new Error(
+    `Stale config project sanitize dry-run did not resolve by path: ${JSON.stringify(staleDryRun, null, 2)}`
+  );
+}
+const staleWrongToken = runJson([
+  "project-sanitize",
+  "--project-dir",
+  staleConfigDir,
+  "--mode",
+  "purge",
+  "--confirm-token",
+  "wrong-token",
+  "--format",
+  "json"
+]);
+if (
+  staleWrongToken.database?.status !== "pending_confirmation" ||
+  !(await projectExists(liveAttach.project_id))
+) {
+  throw new Error(
+    `Wrong-token stale config purge should keep resolved project: ${JSON.stringify(staleWrongToken)}`
+  );
+}
+const staleConfirmed = runJson([
+  "project-sanitize",
+  "--project-dir",
+  staleConfigDir,
+  "--mode",
+  "purge",
+  "--confirm-token",
+  staleToken,
+  "--format",
+  "json"
+]);
+if (
+  staleConfirmed.database?.status !== "purged" ||
+  staleConfirmed.database?.project?.project_id !== liveAttach.project_id ||
+  (await projectExists(liveAttach.project_id)) ||
+  (await exists(join(staleConfigDir, ".recallant", "config"))) ||
+  (await exists(join(staleConfigDir, ".recallant", "current-session.json"))) ||
+  !(await exists(join(staleConfigDir, "README.md"))) ||
+  !(await readFile(join(staleConfigDir, "AGENTS.md"), "utf8")).includes(
+    "Keep stalemarker fixture source files untouched"
+  )
+) {
+  throw new Error(
+    `Confirmed stale config purge failed: ${JSON.stringify(staleConfirmed, null, 2)}`
+  );
+}
+
+await mkdir(join(orphanLocalDir, ".recallant"), { recursive: true });
+await writeFile(
+  join(orphanLocalDir, ".recallant", "config"),
+  `${JSON.stringify({ project_id: randomUUID() }, null, 2)}\n`
+);
+await writeFile(
+  join(orphanLocalDir, ".recallant", "current-session.json"),
+  `${JSON.stringify({ session_id: "orphan-sanitize-session" }, null, 2)}\n`
+);
+const orphanDryRun = runJson([
+  "project-sanitize",
+  "--project-dir",
+  orphanLocalDir,
+  "--mode",
+  "purge",
+  "--allow-orphan-local",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+if (
+  orphanDryRun.status !== "not_found" ||
+  orphanDryRun.database?.status !== "not_found" ||
+  orphanDryRun.database?.writes_database !== false ||
+  orphanDryRun.local_only_cleanup !== true ||
+  orphanDryRun.local_cleanup?.local_only !== true ||
+  orphanDryRun.local_cleanup?.writes_database !== false ||
+  orphanDryRun.local_cleanup?.writes_files !== false ||
+  !orphanDryRun.local_cleanup?.planned_changes?.some(
+    (change) => change.path === ".recallant/config"
+  ) ||
+  !orphanDryRun.warnings?.some((warning) => /No matching managed project/.test(warning))
+) {
+  throw new Error(`orphan project sanitize dry-run failed: ${JSON.stringify(orphanDryRun)}`);
+}
+const orphanConfirmed = runJson([
+  "project-sanitize",
+  "--project-dir",
+  orphanLocalDir,
+  "--mode",
+  "purge",
+  "--allow-orphan-local",
+  "--confirm",
+  "--format",
+  "json"
+]);
+if (
+  orphanConfirmed.status !== "orphan_local_cleaned" ||
+  orphanConfirmed.database?.status !== "not_found" ||
+  orphanConfirmed.database?.writes_database !== false ||
+  orphanConfirmed.writes_database !== false ||
+  orphanConfirmed.writes_files !== true ||
+  orphanConfirmed.local_cleanup?.status !== "cleaned" ||
+  (await exists(join(orphanLocalDir, ".recallant", "config"))) ||
+  (await exists(join(orphanLocalDir, ".recallant", "current-session.json"))) ||
+  !(await exists(join(orphanLocalDir, "README.md")))
+) {
+  throw new Error(
+    `confirmed orphan project sanitize cleanup failed: ${JSON.stringify(orphanConfirmed, null, 2)}`
   );
 }
 

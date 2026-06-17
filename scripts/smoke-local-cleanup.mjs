@@ -60,7 +60,10 @@ async function exists(path) {
 }
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-"));
+const orphanDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-orphan-"));
 await mkdir(join(projectDir, "docs"), { recursive: true });
+await mkdir(join(orphanDir, ".recallant"), { recursive: true });
+await mkdir(join(orphanDir, ".codex"), { recursive: true });
 await writeFile(
   join(projectDir, "AGENTS.md"),
   ["# Agent Instructions", "", "Keep local cleanup fixture rules intact.", ""].join("\n")
@@ -70,6 +73,16 @@ await writeFile(
   ["# Project Log", "", "## Current Session", "", "Status: fixture before attach.", ""].join("\n")
 );
 await writeFile(join(projectDir, "docs", "README.md"), "# Fixture Docs\n");
+await writeFile(join(orphanDir, "README.md"), "# Orphan Local Fixture\n");
+await writeFile(join(orphanDir, ".codex", "config.toml"), "[settings]\nmode = \"fixture\"\n");
+await writeFile(
+  join(orphanDir, ".recallant", "config"),
+  `${JSON.stringify({ project_id: randomUUID() }, null, 2)}\n`
+);
+await writeFile(
+  join(orphanDir, ".recallant", "current-session.json"),
+  `${JSON.stringify({ session_id: "orphan-local-session" }, null, 2)}\n`
+);
 
 const attach = runJson([
   "attach",
@@ -171,6 +184,55 @@ if (!backupDryRun.planned_changes.some((change) => change.path === ".recallant/b
   throw new Error(
     `include-backups dry-run did not report backups: ${JSON.stringify(backupDryRun)}`
   );
+}
+
+const orphanBlocked = runJson(["local-cleanup", "--project-dir", orphanDir, "--dry-run"]);
+if (
+  orphanBlocked.status !== "blocked_until_detach" ||
+  orphanBlocked.writes_files !== false ||
+  orphanBlocked.local_only !== false
+) {
+  throw new Error(`orphan cleanup should be blocked without opt-in: ${JSON.stringify(orphanBlocked)}`);
+}
+const orphanDryRun = runJson([
+  "local-cleanup",
+  "--project-dir",
+  orphanDir,
+  "--allow-orphan-local",
+  "--dry-run"
+]);
+if (
+  orphanDryRun.status !== "ready_for_confirmation" ||
+  orphanDryRun.local_only !== true ||
+  orphanDryRun.writes_database !== false ||
+  orphanDryRun.writes_files !== false ||
+  !orphanDryRun.planned_changes.some((change) => change.path === ".recallant/config") ||
+  !orphanDryRun.planned_changes.some(
+    (change) => change.path === ".recallant/current-session.json"
+  ) ||
+  !orphanDryRun.warnings.some((warning) => /no database records/i.test(warning))
+) {
+  throw new Error(`orphan local cleanup dry-run failed: ${JSON.stringify(orphanDryRun)}`);
+}
+const orphanCleanup = runJson([
+  "local-cleanup",
+  "--project-dir",
+  orphanDir,
+  "--allow-orphan-local",
+  "--confirm"
+]);
+const orphanCodex = await readFile(join(orphanDir, ".codex", "config.toml"), "utf8");
+if (
+  orphanCleanup.status !== "cleaned" ||
+  orphanCleanup.local_only !== true ||
+  orphanCleanup.writes_database !== false ||
+  orphanCleanup.writes_files !== true ||
+  (await exists(join(orphanDir, ".recallant", "config"))) ||
+  (await exists(join(orphanDir, ".recallant", "current-session.json"))) ||
+  !(await exists(join(orphanDir, "README.md"))) ||
+  !orphanCodex.includes("mode = \"fixture\"")
+) {
+  throw new Error(`confirmed orphan local cleanup failed: ${JSON.stringify(orphanCleanup)}`);
 }
 
 process.stdout.write("Local cleanup smoke passed\n");

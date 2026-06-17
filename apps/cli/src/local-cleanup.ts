@@ -20,6 +20,7 @@ type LocalCleanupOptions = {
   includeBackups: boolean;
   allowWithoutDetached?: boolean;
   includeBootstrapFiles?: boolean;
+  orphanLocal?: boolean;
 };
 
 type AttachBackup = {
@@ -402,6 +403,11 @@ export async function cleanupLocalProject(options: LocalCleanupOptions) {
     ".codex/config.toml is modified only to remove Recallant's own MCP section.",
     ...planned.warnings
   ];
+  if (options.orphanLocal === true) {
+    warnings.unshift(
+      "Orphan local cleanup only removes Recallant-generated local artifacts; no database records will be changed."
+    );
+  }
 
   if (!allowed) {
     warnings.unshift(
@@ -436,6 +442,8 @@ export async function cleanupLocalProject(options: LocalCleanupOptions) {
     status: dryRun ? (allowed ? "ready_for_confirmation" : "blocked_until_detach") : "cleaned",
     dry_run: dryRun,
     writes_files: !dryRun,
+    writes_database: false,
+    local_only: options.orphanLocal === true,
     project_dir: projectDir,
     project_id: projectId,
     lifecycle_status: lifecycle?.status ?? null,
@@ -454,10 +462,13 @@ export async function runLocalCleanup(argv: readonly string[]) {
   );
   const dryRun = argv.includes("--dry-run") || !argv.includes("--confirm");
   const includeBackups = argv.includes("--include-backups");
+  const allowOrphanLocal = argv.includes("--allow-orphan-local");
   const result = await cleanupLocalProject({
     projectDir,
     dryRun,
     includeBackups,
+    allowWithoutDetached: allowOrphanLocal,
+    orphanLocal: allowOrphanLocal,
     includeBootstrapFiles: argv.includes("--include-bootstrap-files")
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

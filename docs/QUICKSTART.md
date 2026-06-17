@@ -101,6 +101,26 @@ details, and an exact confirmation token. Confirmed purge requires that token:
 recallant project-sanitize --project-id <project-id> --mode purge --confirm-token "<token>"
 ```
 
+If local project metadata is stale, Recallant does not stop at the stale id. The dry-run reports the
+stale `project_id`, resolves the current managed project by path when it can do so safely, and
+prints the confirmation token for the resolved project. Review that target-resolution block before
+confirming purge.
+
+If the Recallant database no longer has a matching project but local Recallant bootstrap artifacts
+remain, use the explicit local-only cleanup path. It is also dry-run first:
+
+```bash
+recallant project-sanitize --project-dir <project-dir> --mode purge --allow-orphan-local --dry-run
+```
+
+After reviewing the planned local changes, confirm only the local Recallant artifact cleanup:
+
+```bash
+recallant project-sanitize --project-dir <project-dir> --mode purge --allow-orphan-local --confirm
+```
+
+That local-only path must report `writes_database: false`; it is not a database purge.
+
 Project sanitization never deletes source files, secrets, downloads, or arbitrary project data. When
 local disconnect is enabled, Recallant removes or updates only Recallant-generated artifacts such as
 `.recallant/`, Recallant MCP config, and generated bootstrap sections. If a previous file can only

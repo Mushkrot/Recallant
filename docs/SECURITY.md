@@ -61,6 +61,11 @@ Project cleanup is intentionally split into non-destructive detach and irreversi
   physically delete Recallant records.
 - Project purge is the clean-slate path for disposable or wrongly attached projects. It is dry-run
   first, requires an exact confirmation token, and stores only a redacted receipt.
+- Stale local project metadata must not hide the real target. Sanitize dry-runs report stale
+  `project_id` values and, when safe, resolve the managed project by path before issuing the
+  confirmation token.
+- If the database no longer contains the project, local-only cleanup requires the explicit
+  `--allow-orphan-local` opt-in and reports `writes_database: false`.
 - Local disconnect may remove or update Recallant-generated artifacts such as `.recallant/`, MCP
   config, and generated bootstrap sections. It must not delete source files, secrets, downloads, or
   arbitrary project data.

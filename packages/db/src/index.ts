@@ -475,6 +475,30 @@ type ProjectManagementTarget = {
   project_path?: string | null;
 };
 
+type ProjectManagementResolutionReason =
+  | "project_id"
+  | "project_path"
+  | "project_path_fallback"
+  | "not_found";
+
+type ManagedProjectRow = {
+  project_id: string;
+  developer_id: string;
+  name: string;
+  primary_path: string | null;
+  project_kind: string;
+  memory_domain: string;
+  updated_at: string;
+};
+
+type ProjectTargetResolution = {
+  requested_project_id: string | null;
+  requested_project_path: string | null;
+  resolved_project_id: string | null;
+  resolved_by: ProjectManagementResolutionReason;
+  stale_project_id?: string | null;
+};
+
 type ProjectContext = {
   developerId: string;
   projectId: string;
@@ -3469,7 +3493,8 @@ export class RecallantDb {
       });
     }
 
-    const project = await this.findProjectForManagement(input);
+    const target = await this.findProjectForManagement(input);
+    const project = target.project;
     if (!project) {
       return {
         ok: false,
@@ -3479,8 +3504,12 @@ export class RecallantDb {
         dry_run: true,
         writes_database: false,
         project: null,
+        target_resolution: target.target_resolution,
         affected: {},
-        warnings: ["No matching managed project was found. No data was changed."]
+        warnings: [
+          ...target.warnings,
+          "No matching managed project was found. No data was changed."
+        ]
       };
     }
 
@@ -3548,11 +3577,13 @@ export class RecallantDb {
         dry_run: true,
         writes_database: false,
         project,
+        target_resolution: target.target_resolution,
         previous_lifecycle: previousLifecycle,
         affected,
         plan,
         confirmation,
         warnings: [
+          ...target.warnings,
           "Dry run only. No Recallant records, project files, or local artifacts were changed.",
           "Project purge is irreversible for Recallant-controlled project memory and capture records.",
           "Project purge does not delete source files, secrets, downloads, or arbitrary project data."
@@ -3684,6 +3715,7 @@ export class RecallantDb {
       dry_run: false,
       writes_database: true,
       project,
+      target_resolution: target.target_resolution,
       previous_lifecycle: previousLifecycle,
       affected,
       plan,
@@ -3705,6 +3737,7 @@ export class RecallantDb {
         files_changed: 0
       },
       warnings: [
+        ...target.warnings,
         "Recallant database records for this project were purged or de-identified.",
         "No project files were touched by the database purge.",
         "Run local disconnect cleanup separately or through the CLI orchestration to remove local Recallant artifacts."
@@ -3714,7 +3747,8 @@ export class RecallantDb {
 
   async detachProject(input: DetachProjectInput) {
     const mode = input.mode ?? "live";
-    const project = await this.findProjectForManagement(input);
+    const target = await this.findProjectForManagement(input);
+    const project = target.project;
     if (!project) {
       return {
         ok: false,
@@ -3723,8 +3757,12 @@ export class RecallantDb {
         dry_run: true,
         writes_database: false,
         project: null,
+        target_resolution: target.target_resolution,
         affected: {},
-        warnings: ["No matching managed project was found. No data was changed."]
+        warnings: [
+          ...target.warnings,
+          "No matching managed project was found. No data was changed."
+        ]
       };
     }
 
@@ -3766,11 +3804,13 @@ export class RecallantDb {
         writes_database: false,
         mode,
         project,
+        target_resolution: target.target_resolution,
         previous_lifecycle: previousLifecycle,
         planned_lifecycle: lifecycle,
         affected,
         local_cleanup_plan: localCleanupPlan,
         warnings: [
+          ...target.warnings,
           "Dry run only. No Recallant records, project files, or local sandbox files were changed.",
           "Ordinary detach is not permanent erasure. Use the separate forget-forever workflow for sensitive or wrong memory."
         ]
@@ -3871,6 +3911,7 @@ export class RecallantDb {
       writes_database: true,
       mode,
       project,
+      target_resolution: target.target_resolution,
       previous_lifecycle: previousLifecycle,
       lifecycle,
       affected,
@@ -3883,6 +3924,7 @@ export class RecallantDb {
       },
       local_cleanup_plan: localCleanupPlan,
       warnings: [
+        ...target.warnings,
         "No project files were touched.",
         "No physical records were deleted.",
         "Sensitive or wrong memory still requires the separate confirmed forget-forever workflow."
@@ -4750,36 +4792,13 @@ export class RecallantDb {
     };
   }
 
-  private async findProjectForManagement(input: ProjectManagementTarget) {
-    const developerId = this.config.developerId ?? this.fallbackDeveloperId;
-    const projectId = input.project_id ?? this.config.projectId ?? null;
-    const projectPath = input.project_path ?? this.config.projectPath ?? null;
-    if (!projectId && !projectPath) return null;
-    const values: unknown[] = [];
-    const clauses: string[] = [];
-    if (projectId) {
-      values.push(projectId);
-      clauses.push(`p.id = $${values.length}::uuid`);
-    } else if (projectPath) {
-      values.push(developerId);
-      clauses.push(`p.developer_id = $${values.length}::uuid`);
-      values.push(projectPath);
-      clauses.push(`p.primary_path IS NOT DISTINCT FROM $${values.length}`);
-    }
-    const result = await this.pool.query<{
-      project_id: string;
-      developer_id: string;
-      name: string;
-      primary_path: string | null;
-      project_kind: string;
-      memory_domain: string;
-      updated_at: string;
-    }>(
+  private async queryManagedProject(whereClause: string, values: unknown[]) {
+    const result = await this.pool.query<ManagedProjectRow>(
       `
         SELECT p.id AS project_id, p.developer_id, p.name, p.primary_path,
                p.project_kind, p.memory_domain, p.updated_at
         FROM projects p
-        WHERE ${clauses.join(" AND ")}
+        WHERE ${whereClause}
         ORDER BY (
           (SELECT count(*) FROM sessions s WHERE s.project_id = p.id) +
           (SELECT count(*) FROM events e WHERE e.project_id = p.id) +
@@ -4791,6 +4810,86 @@ export class RecallantDb {
       values
     );
     return result.rows[0] ?? null;
+  }
+
+  private async findProjectForManagement(input: ProjectManagementTarget): Promise<{
+    project: ManagedProjectRow | null;
+    target_resolution: ProjectTargetResolution;
+    warnings: string[];
+  }> {
+    const developerId = this.config.developerId ?? this.fallbackDeveloperId;
+    const projectId = input.project_id ?? this.config.projectId ?? null;
+    const projectPath = input.project_path ?? this.config.projectPath ?? null;
+    const baseResolution = {
+      requested_project_id: projectId,
+      requested_project_path: projectPath,
+      resolved_project_id: null
+    };
+    if (!projectId && !projectPath) {
+      return {
+        project: null,
+        target_resolution: { ...baseResolution, resolved_by: "not_found" },
+        warnings: []
+      };
+    }
+
+    if (projectId) {
+      const project = await this.queryManagedProject("p.id = $1::uuid", [projectId]);
+      if (project) {
+        return {
+          project,
+          target_resolution: {
+            ...baseResolution,
+            resolved_project_id: project.project_id,
+            resolved_by: "project_id"
+          },
+          warnings: []
+        };
+      }
+      if (projectPath) {
+        const fallbackProject = await this.queryManagedProject(
+          "p.developer_id = $1::uuid AND p.primary_path IS NOT DISTINCT FROM $2",
+          [developerId, projectPath]
+        );
+        if (fallbackProject) {
+          return {
+            project: fallbackProject,
+            target_resolution: {
+              ...baseResolution,
+              resolved_project_id: fallbackProject.project_id,
+              resolved_by: "project_path_fallback",
+              stale_project_id: projectId
+            },
+            warnings: [
+              `Local project metadata referenced missing project_id ${projectId}; resolved the managed project by path instead.`
+            ]
+          };
+        }
+      }
+      return {
+        project: null,
+        target_resolution: {
+          ...baseResolution,
+          resolved_by: "not_found",
+          stale_project_id: projectPath ? projectId : null
+        },
+        warnings: []
+      };
+    }
+
+    const project = await this.queryManagedProject(
+      "p.developer_id = $1::uuid AND p.primary_path IS NOT DISTINCT FROM $2",
+      [developerId, projectPath]
+    );
+    return {
+      project,
+      target_resolution: {
+        ...baseResolution,
+        resolved_project_id: project?.project_id ?? null,
+        resolved_by: project ? "project_path" : "not_found"
+      },
+      warnings: []
+    };
   }
 
   private async countProjectRecords(projectId: string) {

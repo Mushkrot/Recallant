@@ -1816,6 +1816,82 @@ try {
     );
   }
 
+  const staleUiProjectId = randomUUID();
+  const liveUiProjectId = randomUUID();
+  const staleUiPath = `/ai/recallant-pilots/review-ui-stale-${randomUUID()}`;
+  const staleUiDb = new RecallantDb({
+    databaseUrl,
+    developerId,
+    projectId: staleUiProjectId,
+    projectPath: staleUiPath
+  });
+  const liveUiDb = new RecallantDb({
+    databaseUrl,
+    developerId,
+    projectId: liveUiProjectId,
+    projectPath: staleUiPath
+  });
+  try {
+    await staleUiDb.ensureProject(staleUiPath);
+    await db.pool.query("DELETE FROM projects WHERE id = $1", [staleUiProjectId]);
+    await liveUiDb.ensureProject(staleUiPath);
+    const staleSanitizeApi = await fetch(`${baseUrl}/api/project-sanitize`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        project_id: staleUiProjectId,
+        project_path: staleUiPath,
+        mode: "purge"
+      })
+    });
+    const staleSanitizeApiJson = await staleSanitizeApi.json();
+    if (
+      staleSanitizeApi.status !== 200 ||
+      staleSanitizeApiJson.status !== "pending_confirmation" ||
+      staleSanitizeApiJson.project?.project_id !== liveUiProjectId ||
+      staleSanitizeApiJson.target_resolution?.resolved_by !== "project_path_fallback" ||
+      staleSanitizeApiJson.target_resolution?.stale_project_id !== staleUiProjectId
+    ) {
+      throw new Error(
+        `Project sanitize stale-target API failed: ${JSON.stringify(staleSanitizeApiJson)}`
+      );
+    }
+    const staleSanitizeForm = await fetch(`${baseUrl}/project-sanitize`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        project_id: staleUiProjectId,
+        project_path: staleUiPath,
+        mode: "purge"
+      })
+    });
+    const staleSanitizeHtml = await staleSanitizeForm.text();
+    if (
+      staleSanitizeForm.status !== 200 ||
+      !staleSanitizeHtml.includes("Target resolution") ||
+      !staleSanitizeHtml.includes("project_path_fallback") ||
+    !staleSanitizeHtml.includes(staleUiProjectId) ||
+    !staleSanitizeHtml.includes(liveUiProjectId) ||
+    !staleSanitizeHtml.includes("missing project_id") ||
+    !staleSanitizeHtml.includes('name="confirm_token"') ||
+    staleSanitizeHtml.includes("requested_project_path")
+  ) {
+      throw new Error(
+        `Project sanitize stale-target form failed: ${staleSanitizeForm.status} ${staleSanitizeHtml}`
+      );
+    }
+  } finally {
+    await db.pool.query("DELETE FROM projects WHERE id = $1", [liveUiProjectId]);
+    await liveUiDb.close();
+    await staleUiDb.close();
+  }
+
   const detachConfirmForm = await fetch(`${baseUrl}/project-detach`, {
     method: "POST",
     redirect: "manual",
