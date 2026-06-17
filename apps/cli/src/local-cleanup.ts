@@ -329,6 +329,16 @@ async function plannedChanges(input: {
       action: "remove_path",
       path: ".recallant/current-session.json",
       reason: "Local runtime session pointer."
+    },
+    {
+      action: "remove_path",
+      path: ".recallant/hooks",
+      reason: "Generated local hook scripts for this project."
+    },
+    {
+      action: "remove_path",
+      path: ".recallant/spool",
+      reason: "Local offline capture spool for this project."
     }
   ];
   if (includeBackups) {

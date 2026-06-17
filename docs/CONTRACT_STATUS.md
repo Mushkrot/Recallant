@@ -74,8 +74,9 @@ security review smoke.
 - Live connector ingestion is not the default; connector records are governed references until setup,
   consent, and policy allow capture.
 - Project purge is not a substitute for source repository cleanup. It removes Recallant-controlled
-  project memory and disconnects Recallant-generated local artifacts; it must not delete source
-  files, secrets, downloads, or arbitrary project data.
+  project memory and disconnects Recallant-generated local artifacts, including generated hooks and
+  offline spool files; it must not delete source files, secrets, downloads, or arbitrary project
+  data.
 - Public exposure of Workbench, admin APIs, MCP, backups, or raw artifacts is not a default mode.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain

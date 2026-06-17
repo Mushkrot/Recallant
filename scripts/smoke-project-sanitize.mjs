@@ -23,10 +23,10 @@ function commandEnv(extra = {}) {
   };
 }
 
-function runJson(args) {
+function runJson(args, extraEnv = {}) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: repoRoot,
-    env: commandEnv(),
+    env: commandEnv(extraEnv),
     encoding: "utf8"
   });
   if (result.error) {
@@ -179,10 +179,12 @@ const projectDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-"));
 const detachDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-detach-"));
 const staleConfigDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-stale-"));
 const orphanLocalDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-orphan-"));
+const pathOnlyOrphanDir = await mkdtemp(join(tmpdir(), "recallant-project-sanitize-path-only-"));
 await writeFixture(projectDir, "sanitizemarker");
 await writeFixture(detachDir, "detachmarker");
 await writeFixture(staleConfigDir, "stalemarker");
 await writeFixture(orphanLocalDir, "orphanmarker");
+await writeFixture(pathOnlyOrphanDir, "pathonlymarker");
 
 const attach = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
 const detachAttach = runJson([
@@ -195,6 +197,10 @@ const detachAttach = runJson([
   "json"
 ]);
 await addGovernanceRows(attach.project_id);
+await mkdir(join(projectDir, ".recallant", "hooks"), { recursive: true });
+await mkdir(join(projectDir, ".recallant", "spool"), { recursive: true });
+await writeFile(join(projectDir, ".recallant", "hooks", "start-session.sh"), "#!/usr/bin/env sh\n");
+await writeFile(join(projectDir, ".recallant", "spool", "spool.jsonl"), "{}\n");
 
 const dryRun = runJson([
   "project-sanitize",
@@ -220,7 +226,9 @@ if (
   dryRunCounts.paid_api_approvals < 1 ||
   dryRun.local_cleanup?.writes_files !== false ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "AGENTS.md") ||
-  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "PROJECT_LOG.md")
+  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "PROJECT_LOG.md") ||
+  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/hooks") ||
+  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/spool")
 ) {
   throw new Error(`Project sanitize dry-run failed: ${JSON.stringify(dryRun, null, 2)}`);
 }
@@ -270,6 +278,8 @@ if (
   remainingRows.paid_api_approvals !== 0 ||
   remainingRows.settings_audit_events !== 0 ||
   (await exists(join(projectDir, ".recallant", "config"))) ||
+  (await exists(join(projectDir, ".recallant", "hooks"))) ||
+  (await exists(join(projectDir, ".recallant", "spool"))) ||
   agents.includes("Memory (Recallant)") ||
   !agents.includes("Keep sanitizemarker fixture source files untouched") ||
   !projectLog.includes("Status: existing sanitizemarker project fixture") ||
@@ -315,6 +325,13 @@ await writeFile(
   join(staleConfigDir, ".recallant", "current-session.json"),
   `${JSON.stringify({ session_id: "stale-local-session" }, null, 2)}\n`
 );
+await mkdir(join(staleConfigDir, ".recallant", "hooks"), { recursive: true });
+await mkdir(join(staleConfigDir, ".recallant", "spool"), { recursive: true });
+await writeFile(
+  join(staleConfigDir, ".recallant", "hooks", "start-session.sh"),
+  "#!/usr/bin/env sh\n"
+);
+await writeFile(join(staleConfigDir, ".recallant", "spool", "spool.jsonl"), "{}\n");
 const explicitStaleDryRun = runJson([
   "project-sanitize",
   "--project-id",
@@ -396,6 +413,8 @@ if (
   (await projectExists(liveAttach.project_id)) ||
   (await exists(join(staleConfigDir, ".recallant", "config"))) ||
   (await exists(join(staleConfigDir, ".recallant", "current-session.json"))) ||
+  (await exists(join(staleConfigDir, ".recallant", "hooks"))) ||
+  (await exists(join(staleConfigDir, ".recallant", "spool"))) ||
   !(await exists(join(staleConfigDir, "README.md"))) ||
   !(await readFile(join(staleConfigDir, "AGENTS.md"), "utf8")).includes(
     "Keep stalemarker fixture source files untouched"
@@ -407,6 +426,8 @@ if (
 }
 
 await mkdir(join(orphanLocalDir, ".recallant"), { recursive: true });
+await mkdir(join(orphanLocalDir, ".recallant", "hooks"), { recursive: true });
+await mkdir(join(orphanLocalDir, ".recallant", "spool"), { recursive: true });
 await writeFile(
   join(orphanLocalDir, ".recallant", "config"),
   `${JSON.stringify({ project_id: randomUUID() }, null, 2)}\n`
@@ -415,6 +436,11 @@ await writeFile(
   join(orphanLocalDir, ".recallant", "current-session.json"),
   `${JSON.stringify({ session_id: "orphan-sanitize-session" }, null, 2)}\n`
 );
+await writeFile(
+  join(orphanLocalDir, ".recallant", "hooks", "start-session.sh"),
+  "#!/usr/bin/env sh\n"
+);
+await writeFile(join(orphanLocalDir, ".recallant", "spool", "spool.jsonl"), "{}\n");
 const orphanDryRun = runJson([
   "project-sanitize",
   "--project-dir",
@@ -436,6 +462,12 @@ if (
   orphanDryRun.local_cleanup?.writes_files !== false ||
   !orphanDryRun.local_cleanup?.planned_changes?.some(
     (change) => change.path === ".recallant/config"
+  ) ||
+  !orphanDryRun.local_cleanup?.planned_changes?.some(
+    (change) => change.path === ".recallant/hooks"
+  ) ||
+  !orphanDryRun.local_cleanup?.planned_changes?.some(
+    (change) => change.path === ".recallant/spool"
   ) ||
   !orphanDryRun.warnings?.some((warning) => /No matching managed project/.test(warning))
 ) {
@@ -461,10 +493,37 @@ if (
   orphanConfirmed.local_cleanup?.status !== "cleaned" ||
   (await exists(join(orphanLocalDir, ".recallant", "config"))) ||
   (await exists(join(orphanLocalDir, ".recallant", "current-session.json"))) ||
+  (await exists(join(orphanLocalDir, ".recallant", "hooks"))) ||
+  (await exists(join(orphanLocalDir, ".recallant", "spool"))) ||
   !(await exists(join(orphanLocalDir, "README.md")))
 ) {
   throw new Error(
     `confirmed orphan project sanitize cleanup failed: ${JSON.stringify(orphanConfirmed, null, 2)}`
+  );
+}
+
+const pathOnlyOrphanDryRun = runJson(
+  [
+    "project-sanitize",
+    "--project-dir",
+    pathOnlyOrphanDir,
+    "--mode",
+    "purge",
+    "--allow-orphan-local",
+    "--dry-run",
+    "--format",
+    "json"
+  ],
+  { RECALLANT_PROJECT_ID: randomUUID() }
+);
+if (
+  pathOnlyOrphanDryRun.database?.status !== "not_found" ||
+  pathOnlyOrphanDryRun.database?.target_resolution?.requested_project_id !== null ||
+  pathOnlyOrphanDryRun.database?.target_resolution?.requested_project_path !== pathOnlyOrphanDir ||
+  pathOnlyOrphanDryRun.database?.target_resolution?.resolved_by !== "not_found"
+) {
+  throw new Error(
+    `path-only orphan sanitize should not inherit env project id: ${JSON.stringify(pathOnlyOrphanDryRun, null, 2)}`
   );
 }
 

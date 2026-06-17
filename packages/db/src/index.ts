@@ -4818,8 +4818,12 @@ export class RecallantDb {
     warnings: string[];
   }> {
     const developerId = this.config.developerId ?? this.fallbackDeveloperId;
-    const projectId = input.project_id ?? this.config.projectId ?? null;
-    const projectPath = input.project_path ?? this.config.projectPath ?? null;
+    const projectId = Object.prototype.hasOwnProperty.call(input, "project_id")
+      ? (input.project_id ?? null)
+      : (this.config.projectId ?? null);
+    const projectPath = Object.prototype.hasOwnProperty.call(input, "project_path")
+      ? (input.project_path ?? null)
+      : (this.config.projectPath ?? null);
     const baseResolution = {
       requested_project_id: projectId,
       requested_project_path: projectPath,

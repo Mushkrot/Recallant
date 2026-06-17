@@ -66,9 +66,9 @@ Project cleanup is intentionally split into non-destructive detach and irreversi
   confirmation token.
 - If the database no longer contains the project, local-only cleanup requires the explicit
   `--allow-orphan-local` opt-in and reports `writes_database: false`.
-- Local disconnect may remove or update Recallant-generated artifacts such as `.recallant/`, MCP
-  config, and generated bootstrap sections. It must not delete source files, secrets, downloads, or
-  arbitrary project data.
+- Local disconnect may remove or update Recallant-generated artifacts such as `.recallant/` pointer
+  files, generated hooks, offline spool files, MCP config, and generated bootstrap sections. It must
+  not delete source files, secrets, downloads, or arbitrary project data.
 - Chat and agent surfaces should guide users to the dry-run/confirm flow rather than executing
   destructive project cleanup directly.
 

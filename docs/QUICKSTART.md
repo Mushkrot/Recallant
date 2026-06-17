@@ -123,8 +123,9 @@ That local-only path must report `writes_database: false`; it is not a database 
 
 Project sanitization never deletes source files, secrets, downloads, or arbitrary project data. When
 local disconnect is enabled, Recallant removes or updates only Recallant-generated artifacts such as
-`.recallant/`, Recallant MCP config, and generated bootstrap sections. If a previous file can only
-be restored from a redacted backup, Recallant reports that limitation instead of guessing.
+`.recallant/` pointer files, generated hooks, offline spool files, Recallant MCP config, and
+generated bootstrap sections. If a previous file can only be restored from a redacted backup,
+Recallant reports that limitation instead of guessing.
 
 ## What Gets Written
 

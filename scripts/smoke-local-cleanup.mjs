@@ -63,6 +63,8 @@ const projectDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-"));
 const orphanDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-orphan-"));
 await mkdir(join(projectDir, "docs"), { recursive: true });
 await mkdir(join(orphanDir, ".recallant"), { recursive: true });
+await mkdir(join(orphanDir, ".recallant", "hooks"), { recursive: true });
+await mkdir(join(orphanDir, ".recallant", "spool"), { recursive: true });
 await mkdir(join(orphanDir, ".codex"), { recursive: true });
 await writeFile(
   join(projectDir, "AGENTS.md"),
@@ -83,6 +85,8 @@ await writeFile(
   join(orphanDir, ".recallant", "current-session.json"),
   `${JSON.stringify({ session_id: "orphan-local-session" }, null, 2)}\n`
 );
+await writeFile(join(orphanDir, ".recallant", "hooks", "start-session.sh"), "#!/usr/bin/env sh\n");
+await writeFile(join(orphanDir, ".recallant", "spool", "spool.jsonl"), "{}\n");
 
 const attach = runJson([
   "attach",
@@ -117,6 +121,10 @@ const closeout = runJson([
 if (closeout.closeout?.report_required !== false) {
   throw new Error(`closeout reported warnings: ${JSON.stringify(closeout)}`);
 }
+await mkdir(join(projectDir, ".recallant", "hooks"), { recursive: true });
+await mkdir(join(projectDir, ".recallant", "spool"), { recursive: true });
+await writeFile(join(projectDir, ".recallant", "hooks", "start-session.sh"), "#!/usr/bin/env sh\n");
+await writeFile(join(projectDir, ".recallant", "spool", "spool.jsonl"), "{}\n");
 
 const activeDryRun = runJson(["local-cleanup", "--project-dir", projectDir, "--dry-run"]);
 if (activeDryRun.status !== "blocked_until_detach" || activeDryRun.writes_files !== false) {
@@ -146,7 +154,9 @@ if (
   !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/generic-mcp.json") ||
   !detachedDryRun.planned_changes.some(
     (change) => change.path === ".recallant/current-session.json"
-  )
+  ) ||
+  !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/hooks") ||
+  !detachedDryRun.planned_changes.some((change) => change.path === ".recallant/spool")
 ) {
   throw new Error(`detached local cleanup dry-run failed: ${JSON.stringify(detachedDryRun)}`);
 }
@@ -158,7 +168,9 @@ if (
   (await exists(join(projectDir, ".recallant", "config"))) ||
   (await exists(join(projectDir, ".codex", "config.toml"))) ||
   (await exists(join(projectDir, ".recallant", "generic-mcp.json"))) ||
-  (await exists(join(projectDir, ".recallant", "current-session.json")))
+  (await exists(join(projectDir, ".recallant", "current-session.json"))) ||
+  (await exists(join(projectDir, ".recallant", "hooks"))) ||
+  (await exists(join(projectDir, ".recallant", "spool")))
 ) {
   throw new Error(`confirmed local cleanup failed: ${JSON.stringify(cleanup)}`);
 }
@@ -210,6 +222,8 @@ if (
   !orphanDryRun.planned_changes.some(
     (change) => change.path === ".recallant/current-session.json"
   ) ||
+  !orphanDryRun.planned_changes.some((change) => change.path === ".recallant/hooks") ||
+  !orphanDryRun.planned_changes.some((change) => change.path === ".recallant/spool") ||
   !orphanDryRun.warnings.some((warning) => /no database records/i.test(warning))
 ) {
   throw new Error(`orphan local cleanup dry-run failed: ${JSON.stringify(orphanDryRun)}`);
@@ -229,6 +243,8 @@ if (
   orphanCleanup.writes_files !== true ||
   (await exists(join(orphanDir, ".recallant", "config"))) ||
   (await exists(join(orphanDir, ".recallant", "current-session.json"))) ||
+  (await exists(join(orphanDir, ".recallant", "hooks"))) ||
+  (await exists(join(orphanDir, ".recallant", "spool"))) ||
   !(await exists(join(orphanDir, "README.md"))) ||
   !orphanCodex.includes("mode = \"fixture\"")
 ) {

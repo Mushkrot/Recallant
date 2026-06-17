@@ -216,8 +216,8 @@ recallant project-sanitize --project-dir <project-dir> --mode purge --allow-orph
 ```
 
 The local-only cleanup path reports `writes_database: false` and removes only Recallant-generated
-local artifacts such as `.recallant/config`, session pointers, MCP config, and generated bootstrap
-sections.
+local artifacts such as `.recallant/config`, session pointers, generated hooks, offline spool files,
+MCP config, and generated bootstrap sections.
 
 For a local disposable test install, minimal cleanup is usually:
 
