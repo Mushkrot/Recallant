@@ -12,7 +12,7 @@ or release packaging before it should be treated as stable infrastructure.
 
 | Contract Area | Current Status | Evidence | Remaining Work |
 |---------------|----------------|----------|----------------|
-| Agent-ready project onboarding | Working slice with one-command beginner path | `recallant onboard <project>`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-quickstart:smoke`, `npm run public-install-rollback:smoke`, `npm run public-managed-install:smoke` | External-host release rehearsal and broader client pilots before release candidate. |
+| Agent-ready project onboarding | Working slice with installed-host one-command MVP | `recallant onboard <project>`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-quickstart:smoke`, `npm run public-install-rollback:smoke`, `npm run public-managed-install:smoke`, `npm run live-acceptance:smoke` | Broader external-host and client pilots before release candidate. |
 | Thin bootstrap files | Working slice | Attach/init create `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`, client MCP config, and `.gitignore`; `npm run repo-contract:smoke`, `npm run connect:smoke` | Keep generated files compact as more clients are added. |
 | Existing-project migration | Working slice | Discovery/import classify old agent files, handoffs, `.env.example`, runbooks, secret references, risky content, backups, and migration summaries; `npm run prepilot:smoke:discovery`, `npm run prepilot:smoke:import`, `npm run phase10:smoke`, `npm run non-owner-migration:smoke`, opt-in `npm run real-project-pilots:smoke` one-command sandbox-copy pilots | More real-world pilots before release candidate. |
 | Capture-active proof | Working slice with quickstart proof | Onboard verify reports structured capture/readiness/recall stages; `public-quickstart:smoke` proves installed-wrapper onboarding, capture active evidence, recall proof, and Workbench outcome; `npm run product-acceptance:smoke`, `npm run demo-capture:smoke`, `npm run agent-capture:smoke` | Keep proof visible in Workbench and docs. |
@@ -21,7 +21,7 @@ or release packaging before it should be treated as stable infrastructure.
 | Project sanitization and purge | Working slice | `recallant project-sanitize`, DB dry-run planner, stale local config target resolution, token-confirmed project purge, redacted receipts, explicit orphan local-only cleanup, local Recallant artifact disconnect, Workbench/API dry-run and confirmation flow; `npm run project-sanitize:smoke`, `npm run local-cleanup:smoke`, `npm run onboarding:smoke` | Broader real-project dry-run pilots and UI polish before release candidate. |
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
-| Private deployment profiles | Documented and genericized | Self-hosting profiles, `doctor` deployment profile output, production-readiness checks, capability references, private-by-default server posture; public defaults use generic paths and env-provided inventory/security references | Deployment-specific overlays stay private. |
+| Private deployment profiles | Documented and genericized | Self-hosting profiles, `doctor` deployment profile output, `production_readiness.service_runtime` status checks, public route readiness checks, latest backup verification, capability references, private-by-default server posture; public defaults use generic paths and env-provided inventory/security/backup references | Deployment-specific overlays stay private. |
 | Safety gates | Working slice with security smoke | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths, install/auth/Workbench/backups/secrets security smoke, owner-only marker scans across public docs and public runtime/install code; `npm run public-security:smoke`, `npm run security-review:smoke`, `npm run phase10:smoke` | Independent release hardening review. |
 | Public OSS surface | Working slice | Public docs boundary, readiness smoke, forbidden private marker checks across docs and public code; `npm run public-readiness:smoke`, `npm run public-security:smoke` | Public screenshots and final release packaging. |
 
@@ -55,7 +55,9 @@ cross-project recall behavior, clean-host install planning, fresh public quickst
 rollback dry-run and marked-artifact cleanup, Docker-backed managed install smoke, genericized
 deployment-profile defaults, neutral non-owner migration safety, opt-in real-project pilot safety on
 sandbox copies through one-command onboarding, original-file integrity checks, Workbench browser QA,
-and lifecycle cleanup that hides temp memory spaces without deleting records. Project sanitize smoke
+and lifecycle cleanup that hides temp memory spaces without deleting records. Public readiness smoke
+also covers service-runtime branches for active, inactive, disabled, wrong bind, missing service env,
+private health failure, public 502, and anonymous public exposure. Project sanitize smoke
 adds disposable-project purge rehearsal with dry-run counts, wrong-token no-op behavior, redacted
 receipt retention, local Recallant artifact disconnect, and an explicit no-confirmed-purge guard
 when a real project path is detected. The checks also cover
@@ -66,6 +68,8 @@ security review smoke.
 ## What Is Not Ready Yet
 
 - Recallant should not be treated as stable team-wide infrastructure.
+- Browser-first project attachment from the Workbench is future work. The current beginner MVP is an
+  installed-host flow where the user runs one command: `recallant onboard <project>`.
 - Beginner onboarding is not complete unless `recallant onboard <project>` reports storage
   readiness, project attach, client connection, capture proof, recall proof, and Workbench outcome.
   `Database not configured` is a blocker, not a successful onboarding result.
@@ -81,8 +85,8 @@ security review smoke.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain
   future expansion after the coding-agent core is stable.
-- The disposable clean-host smokes are not a substitute for one final external-host release
-  rehearsal before tagging.
+- The disposable clean-host smokes are not a substitute for repeatable external-host release
+  rehearsals before tagging.
 
 ## Release-Candidate Bar
 

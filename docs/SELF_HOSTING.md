@@ -99,6 +99,9 @@ private storage profile. `recallant doctor --format json` exposes a redacted
 `service_env_profile` check when `RECALLANT_SERVICE_ENV_FILE` is set. It compares safe database
 components and credential equality without printing raw passwords or full database URLs. Treat a
 `mismatch` status as a deployment-readiness warning before sending users to the public Workbench.
+When the service env file is configured directly or discoverable from the local service manager,
+production-readiness output reports only safe metadata: whether the file is configured, whether it
+exists, which public/runtime keys are present, and whether the CLI and service profiles align.
 
 For a public Workbench, keep the Recallant origin bound to a private localhost listener and put the
 public hostname behind an authenticated access provider. `recallant doctor --format json` reports
@@ -106,6 +109,30 @@ public hostname behind an authenticated access provider. `recallant doctor --for
 Cloudflare Access profile is configured. A ready public UI means the private origin responds with an
 auth-required Workbench response and edge auth is required at the public access layer; an anonymous
 origin response or disabled edge auth is not public-ready.
+
+`recallant doctor --format json` also reports
+`production_readiness.service_runtime` when production service signals are available from the
+service env profile, explicit runtime overrides, or the local service manager. The runtime readiness
+object is designed to distinguish the common public-UI failure modes without exposing private
+deployment details:
+
+- `service_inactive` or `service_disabled`: the service is not running or will not start on boot;
+- `restart_policy_disabled`: the service manager will not restart Recallant after a crash;
+- `wrong_bind_host`: the origin is not bound to a private listener;
+- `service_env_missing`: the configured service env file is absent or unreadable;
+- `health_failed`: the private `/health` endpoint returns an error;
+- `public_bad_gateway`: the public route is returning an upstream gateway failure;
+- `public_anonymous_access`: the Workbench is reachable without the expected access protection;
+- `ready`: the service is active, private, healthy, and the public route requires authentication.
+
+Access-provider redirects or HTTP authentication challenges are classified as public-route success.
+A browser-visible gateway error or anonymous Workbench response is not.
+
+Production readiness also expects a recent backup verification signal. Configure
+`RECALLANT_LATEST_BACKUP_VERIFICATION_FILE` to point at a JSON report produced by
+`recallant backup-verify`, or provide `RECALLANT_LATEST_BACKUP_MANIFEST` so doctor can fall back to
+the latest manifest's restore-verification status. A configured backup timer without a readable
+passed verification report is not enough for the production gate.
 
 After attaching and connecting a project:
 
@@ -132,16 +159,33 @@ Its `acceptance_report` is the release gate for the one-command user story: the 
 `pass`, or `pass_with_warnings` only when every warning is explicitly recoverable, such as local
 embeddings waiting for the configured model to come back online.
 
-Optional live-host acceptance should repeat the same story against one disposable project:
+Optional live-host acceptance repeats the same story against one disposable project without
+hardcoding a maintainer's host or paths. The runner refuses to execute unless explicitly opted in:
 
-1. Run `recallant onboard /path/to/disposable-project`.
-2. Confirm the output reports capture evidence, recall proof, and a private Workbench URL.
-3. Open the public Workbench URL through the configured access provider and verify the project
-   chooser shows the disposable project before opening its selected project view.
-4. Run `recallant doctor --project-dir /path/to/disposable-project --require-capture --format json`
-   and treat missing capture, service-env mismatch, origin-not-private, disabled edge auth, or
-   unexpected pending embeddings as release blockers unless the report classifies them as
-   recoverable warnings.
+```bash
+RECALLANT_LIVE_ACCEPTANCE=1 \
+RECALLANT_LIVE_PROJECT_DIR=/path/to/disposable-project \
+RECALLANT_PUBLIC_WORKBENCH_URL=https://memory.example.com/review \
+RECALLANT_WORKBENCH_ORIGIN_URL=http://127.0.0.1:3005/review \
+RECALLANT_SERVICE_ENV_FILE=/path/to/private/recallant.env \
+RECALLANT_CLOUDFLARE_MODE=enabled \
+RECALLANT_CLOUDFLARE_EDGE_AUTH=required \
+RECALLANT_LIVE_CLEANUP_MODE=purge-dry-run \
+npm run live-acceptance
+```
+
+The `acceptance_report` covers public route auth, private origin auth posture, service-env
+alignment, service runtime readiness, `recallant onboard /path/to/project`, capture/recall proof,
+Workbench project visibility, pending embedding recovery, and optional cleanup preview. It returns
+`pass`, `pass_with_warnings`, or `fail`; public 502, anonymous origin, service-env mismatch, missing
+capture, hidden project, and unrecovered pending embeddings are blocking failures. Output redacts
+database URLs, tokens, session cookies, admin emails, and never prints raw environment contents.
+
+Fixture coverage for this release gate is deterministic and safe for CI:
+
+```bash
+npm run live-acceptance:smoke
+```
 
 The rollback smoke validates dry-run behavior, confirmed cleanup of marked disposable artifacts, and
 refusal to remove unmarked data directories:
@@ -172,16 +216,24 @@ expected to be available from that local Ollama service.
 
 Chunk embeddings are fail-soft during local Ollama cold starts. Recallant retries transient Ollama
 embedding failures with bounded attempts and per-attempt timeouts, then leaves chunks `pending` if
-Ollama remains unavailable. The event and chunk stay recorded, and `model_calls.metadata` records the
-attempt count, retry count, transient failures, and final `UNAVAILABLE` outcome for diagnosis.
-When Ollama becomes healthy again, recover pending project embeddings without manual SQL:
+Ollama remains unavailable. The event and chunk stay recorded, capture/recall remains available, and
+`model_calls.metadata` records the attempt count, retry count, transient failures, and final
+`UNAVAILABLE` outcome for diagnosis.
+
+The one-command onboarding verification path attempts a bounded, project-scoped pending-embedding
+recovery pass after capture readiness is proven. Onboard output reports whether semantic embeddings
+are current, were recovered, remain pending because the local model is unavailable, or still need a
+later bounded retry. It must not claim semantic indexing is complete while chunks remain pending.
+
+Advanced operators can still recover pending project embeddings without manual SQL:
 
 ```bash
 recallant recover-embeddings --project-dir /path/to/project --limit 50
 ```
 
 Use `--dry-run` to preview the bounded project-scoped batch. `recallant doctor --format json`
-reports `pending_embeddings.pending_chunks` and the recommended recovery command.
+reports `pending_embeddings.pending_chunks`, latest failure, latest chunk-embedding attempt, and a
+`pending_embeddings.recovery` object with project scope and default limit metadata.
 
 Optional tuning variables:
 
@@ -246,10 +298,13 @@ For a disposable or wrongly attached project that needs a clean Recallant slate,
 recallant project-sanitize --project-id <project-id> --mode purge --dry-run
 ```
 
-Confirmed purge requires the exact confirmation token printed by the dry-run. It deletes
-project-scoped Recallant records, disconnects Recallant-generated local artifacts when requested,
-and writes a redacted receipt. It must not delete source files, secrets, downloads, or arbitrary
-project data.
+Confirmed purge requires the exact confirmation token printed by the dry-run. The dry-run and
+confirmed receipts include `target`, `database_action`, `local_action`,
+`retained_governance_receipt`, and `cleanup_scope` blocks so operators can see whether the target
+came from `--project-id`, `--project-dir`, stale local metadata, or orphan local artifacts. It
+deletes project-scoped Recallant records, disconnects Recallant-generated local artifacts when
+requested, and writes a redacted receipt. It must not delete source files, secrets, downloads, the
+Recallant product repository, or arbitrary project data.
 
 If `.recallant/config` contains an old project id, the sanitize dry-run reports that stale id and,
 when the path matches a current managed project for the same developer, resolves the active project

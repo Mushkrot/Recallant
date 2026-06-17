@@ -3,6 +3,9 @@ import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { URL } from "node:url";
 import { RecallantDb } from "@recallant/db";
 import pg from "pg";
@@ -140,7 +143,13 @@ async function configureOllamaRoute(projectId) {
 async function createPendingProject(name) {
   const projectId = randomUUID();
   const developerId = randomUUID();
-  const projectPath = `/tmp/${projectId}`;
+  const projectPath = await mkdtemp(join(tmpdir(), `recallant-pending-recovery-${name}-`));
+  await writeFile(join(projectPath, "README.md"), `# Pending embedding recovery ${name}\n`);
+  await mkdir(join(projectPath, ".recallant"), { recursive: true });
+  await writeFile(
+    join(projectPath, ".recallant", "config"),
+    `${JSON.stringify({ project_id: projectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
+  );
   const db = new RecallantDb({
     databaseUrl,
     developerId,
@@ -266,6 +275,85 @@ try {
   assert(afterSecondRows.embedding_rows === 1, JSON.stringify(afterSecondRows));
   assert(afterSecondRows.chunks_with_embeddings === 1, JSON.stringify(afterSecondRows));
 
+  const onboardFlow = await createPendingProject("onboard-flow");
+  const onboardFlowEnv = {
+    ...smokeEnv,
+    RECALLANT_DEVELOPER_ID: onboardFlow.developerId,
+    RECALLANT_PROJECT_ID: onboardFlow.projectId,
+    RECALLANT_PROJECT_PATH: onboardFlow.projectPath
+  };
+  scenario = {
+    name: "onboard_flow_recovery",
+    statuses: [200, 200, 200, 200, 200, 200, 200, 200],
+    calls: 0
+  };
+  const onboardRecovery = await runCli(
+    [
+      "onboard",
+      onboardFlow.projectPath,
+      "--client",
+      "codex",
+      "--skip-vcs-safety",
+      "--format",
+      "json"
+    ],
+    onboardFlowEnv
+  );
+  assert(
+    onboardRecovery.status === "completed" &&
+      onboardRecovery.verify?.status === "passed" &&
+      onboardRecovery.embedding_recovery?.status === "recovered" &&
+      onboardRecovery.embedding_recovery?.pending_before >= 1 &&
+      onboardRecovery.embedding_recovery?.recovered_chunks >= 1 &&
+      onboardRecovery.embedding_recovery?.remaining_pending === 0 &&
+      onboardRecovery.embedding_recovery?.scope?.project_scoped === true &&
+      onboardRecovery.embedding_recovery?.scope?.bounded === true,
+    `onboard flow did not recover pending embeddings: ${JSON.stringify(onboardRecovery)}`
+  );
+  const afterOnboardRows = await embeddingRows(onboardFlow.projectId);
+  assert(afterOnboardRows.pending_chunks === 0, JSON.stringify(afterOnboardRows));
+  assert(afterOnboardRows.embedding_rows >= 1, JSON.stringify(afterOnboardRows));
+
+  const onboardUnavailable = await createPendingProject("onboard-unavailable");
+  const onboardUnavailableEnv = {
+    ...smokeEnv,
+    RECALLANT_DEVELOPER_ID: onboardUnavailable.developerId,
+    RECALLANT_PROJECT_ID: onboardUnavailable.projectId,
+    RECALLANT_PROJECT_PATH: onboardUnavailable.projectPath
+  };
+  scenario = {
+    name: "onboard_flow_unavailable",
+    statuses: Array.from({ length: 40 }, () => 503),
+    calls: 0
+  };
+  const onboardUnavailableResult = await runCli(
+    [
+      "onboard",
+      onboardUnavailable.projectPath,
+      "--client",
+      "codex",
+      "--skip-vcs-safety",
+      "--format",
+      "json"
+    ],
+    onboardUnavailableEnv
+  );
+  assert(
+    onboardUnavailableResult.status === "completed" &&
+      onboardUnavailableResult.verify?.status === "passed" &&
+      onboardUnavailableResult.embedding_recovery?.status === "model_unavailable" &&
+      onboardUnavailableResult.embedding_recovery?.remaining_pending >= 1 &&
+      onboardUnavailableResult.embedding_recovery?.recommendation.includes(
+        "Capture and recall are ready"
+      ),
+    `onboard flow did not warn on unavailable embeddings: ${JSON.stringify(
+      onboardUnavailableResult
+    )}`
+  );
+  const afterOnboardUnavailableRows = await embeddingRows(onboardUnavailable.projectId);
+  assert(afterOnboardUnavailableRows.pending_chunks >= 1, JSON.stringify(afterOnboardUnavailableRows));
+  assert(afterOnboardUnavailableRows.embedding_rows === 0, JSON.stringify(afterOnboardUnavailableRows));
+
   const persistent = await createPendingProject("persistent");
   const persistentEnv = {
     ...smokeEnv,
@@ -307,6 +395,21 @@ try {
           no_duplicate_query: {
             after_recovery: afterRecoveryRows,
             after_second_recovery: afterSecondRows
+          },
+          onboard_flow_recovery: {
+            status: onboardRecovery.embedding_recovery.status,
+            pending_before: onboardRecovery.embedding_recovery.pending_before,
+            recovered_chunks: onboardRecovery.embedding_recovery.recovered_chunks,
+            remaining_pending: onboardRecovery.embedding_recovery.remaining_pending,
+            scope: onboardRecovery.embedding_recovery.scope,
+            rows: afterOnboardRows
+          },
+          onboard_flow_unavailable: {
+            status: onboardUnavailableResult.embedding_recovery.status,
+            pending_before: onboardUnavailableResult.embedding_recovery.pending_before,
+            remaining_pending: onboardUnavailableResult.embedding_recovery.remaining_pending,
+            recommendation: onboardUnavailableResult.embedding_recovery.recommendation,
+            rows: afterOnboardUnavailableRows
           },
           persistent_failure: {
             recovery: failedRecovery,

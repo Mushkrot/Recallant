@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
-import { createRecallantDbFromEnv } from "@recallant/db";
+import { RecallantDb, createRecallantDbFromEnv } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
@@ -287,6 +287,32 @@ type OnboardVerifyPayload = {
       evidence: OnboardVerifyEvidence;
     };
     recall: { status: "done" | "skipped" | "failed"; detail: string | null };
+  };
+};
+
+type OnboardEmbeddingRecoveryPayload = {
+  status:
+    | "skipped"
+    | "no_pending"
+    | "recovered"
+    | "still_pending"
+    | "model_unavailable"
+    | "unknown";
+  attempted: boolean;
+  project_id: string | null;
+  pending_before: number | null;
+  attempted_chunks: number;
+  recovered_chunks: number;
+  remaining_pending: number | null;
+  limit: number;
+  recovery_available: boolean;
+  latest_failure: unknown;
+  warning: string | null;
+  recommendation: string;
+  scope: {
+    project_scoped: true;
+    bounded: true;
+    limit: number;
   };
 };
 
@@ -1673,6 +1699,13 @@ function doctorHumanReport(result: {
     summary.hook_capture_ready ||
     summary.actually_recording;
   const spool = result.local_spool_status;
+  const pendingEmbeddingCount = finiteNumberValue(result.pending_embeddings.pending_chunks);
+  const semanticIndexingStatus =
+    pendingEmbeddingCount === null
+      ? "unknown"
+      : pendingEmbeddingCount > 0
+        ? `catching up (${pendingEmbeddingCount} pending); capture/recall remain available`
+        : "current";
   const lines = [
     "Recallant doctor",
     "",
@@ -1683,6 +1716,7 @@ function doctorHumanReport(result: {
     `- Database: ${databaseStatus}`,
     `- Local model: ${localModelStatus}`,
     `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
+    `- Semantic indexing: ${semanticIndexingStatus}`,
     `- Service env profile: ${result.service_env_profile.status}`,
     `- Current project: ${summary.project_attached ? "attached" : "not attached"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
@@ -1710,6 +1744,7 @@ function onboardHumanReport(result: {
   version_control?: OnboardVersionControlStep | null;
   project_already_attached: boolean;
   attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
+  embedding_recovery?: OnboardEmbeddingRecoveryPayload | null;
   workbench?: OnboardWorkbenchOutcome | null;
   attached: {
     status: OnboardAttachedStep["status"];
@@ -1792,6 +1827,27 @@ function onboardHumanReport(result: {
     );
   } else {
     lines.push("Verify: skipped");
+  }
+  if (result.embedding_recovery) {
+    const recovery = result.embedding_recovery;
+    const summary =
+      recovery.status === "no_pending"
+        ? "current"
+        : recovery.status === "recovered"
+          ? `recovered ${recovery.recovered_chunks} pending chunk(s)`
+          : recovery.status === "model_unavailable"
+            ? `${recovery.remaining_pending ?? "some"} pending chunk(s); local model unavailable`
+            : recovery.status === "still_pending"
+              ? `${recovery.remaining_pending ?? "some"} pending chunk(s); retry remains bounded`
+              : recovery.status;
+    lines.push(`Embedding recovery: ${summary}`);
+    if (
+      recovery.status === "model_unavailable" ||
+      recovery.status === "still_pending" ||
+      recovery.status === "unknown"
+    ) {
+      lines.push(`  - ${recovery.recommendation}`);
+    }
   }
   if (result.workbench) {
     lines.push(
@@ -2326,12 +2382,16 @@ async function checkPendingEmbeddingStatus(
   }
 }
 
-async function checkDeploymentProfile() {
-  const plannedPort = Number(process.env.RECALLANT_PORT ?? "3005");
+async function checkDeploymentProfile(env: ProductionReadinessEnvValues = process.env) {
+  const plannedPort = Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005");
   const inventoryFile =
-    process.env.RECALLANT_SERVER_INVENTORY_FILE ?? process.env.RECALLANT_PORTS_FILE ?? null;
+    productionEnvValue(env, "RECALLANT_SERVER_INVENTORY_FILE") ??
+    productionEnvValue(env, "RECALLANT_PORTS_FILE") ??
+    null;
   const securityPath =
-    process.env.RECALLANT_SECURITY_BASELINE_PATH ?? process.env.RECALLANT_SECURITY_PATH ?? null;
+    productionEnvValue(env, "RECALLANT_SECURITY_BASELINE_PATH") ??
+    productionEnvValue(env, "RECALLANT_SECURITY_PATH") ??
+    null;
   const inventoryContent = inventoryFile ? await readOptional(inventoryFile) : null;
   const inventoryRegistered = Boolean(
     inventoryContent &&
@@ -2346,12 +2406,12 @@ async function checkDeploymentProfile() {
     );
   } else if (!inventoryRegistered) {
     warnings.push(
-      `Planned Recallant service port ${plannedPort} is not registered in ${inventoryFile}.`
+      `Planned Recallant service port ${plannedPort} is not registered in the configured server inventory file.`
     );
   }
   if (securityPath) {
     warnings.push(
-      `${securityPath} must be consulted before exposure, firewall, private access, service, or secret changes.`
+      "Configured security baseline must be consulted before exposure, firewall, private access, service, or secret changes."
     );
   } else {
     warnings.push(
@@ -2362,16 +2422,16 @@ async function checkDeploymentProfile() {
     planned_service: {
       name: "recallant",
       port: plannedPort,
-      bind_host: process.env.RECALLANT_HOST ?? "127.0.0.1"
+      bind_host: productionEnvValue(env, "RECALLANT_HOST") ?? "127.0.0.1"
     },
     server_inventory: {
-      path: inventoryFile,
+      path_configured: Boolean(inventoryFile),
       configured: Boolean(inventoryFile),
       present: inventoryContent !== null,
       registered: inventoryRegistered
     },
     security_baseline: {
-      path: securityPath,
+      path_configured: Boolean(securityPath),
       configured: Boolean(securityPath),
       present: securityPresent,
       must_consult_before_exposure: true
@@ -2400,6 +2460,54 @@ type DatabaseUrlProfile = {
     username_hash: string | null;
   } | null;
   credential: string | null;
+};
+
+const productionReadinessEnvKeys = [
+  "RECALLANT_PUBLIC_WORKBENCH_URL",
+  "RECALLANT_PUBLIC_URL",
+  "RECALLANT_WORKBENCH_ORIGIN_URL",
+  "RECALLANT_WORKBENCH_ORIGIN_STATUS",
+  "RECALLANT_CLOUDFLARE_MODE",
+  "RECALLANT_CLOUDFLARE_EDGE_AUTH",
+  "RECALLANT_ADMIN_EMAILS",
+  "RECALLANT_ADMIN_EMAIL",
+  "RECALLANT_BACKUP_TIMER_ENABLED",
+  "RECALLANT_BACKUP_TIMER_STATUS",
+  "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS",
+  "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE",
+  "RECALLANT_LATEST_BACKUP_MANIFEST",
+  "RECALLANT_SERVER_INVENTORY_FILE",
+  "RECALLANT_PORTS_FILE",
+  "RECALLANT_SECURITY_BASELINE_PATH",
+  "RECALLANT_SECURITY_PATH",
+  "RECALLANT_PRODUCTION_PROJECT_PATH",
+  "RECALLANT_HOST",
+  "RECALLANT_PORT",
+  "RECALLANT_SYSTEMD_SERVICE_NAME",
+  "RECALLANT_SERVICE_ACTIVE_STATUS",
+  "RECALLANT_SERVICE_ENABLED_STATUS",
+  "RECALLANT_SERVICE_RESTART_POLICY",
+  "RECALLANT_SERVICE_HEALTH_URL",
+  "RECALLANT_SERVICE_HEALTH_STATUS",
+  "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL",
+  "RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS"
+] as const;
+
+type ProductionReadinessEnvKey = (typeof productionReadinessEnvKeys)[number];
+type ProductionReadinessEnvValues = Partial<Record<ProductionReadinessEnvKey, string | undefined>>;
+
+type ConfiguredServiceEnvFile = {
+  source_env_var: string | null;
+  path: string;
+  source: "explicit_env" | "systemd";
+};
+
+type LoadedServiceEnv = {
+  configured: boolean;
+  source_env_var: string | null;
+  source: "none" | "explicit_env" | "systemd";
+  present: boolean;
+  values: Record<string, string> | null;
 };
 
 function parseDatabaseUrlProfile(value: string | undefined): DatabaseUrlProfile {
@@ -2469,20 +2577,117 @@ function parseEnvFileContent(content: string) {
   return values;
 }
 
-function configuredServiceEnvFile() {
+function systemctlValue(args: readonly string[]) {
+  const result = spawnSync("systemctl", [...args], { encoding: "utf8" });
+  if (result.error) return null;
+  return result.stdout.trim() || null;
+}
+
+function parseSystemdEnvironmentFilePath(value: string | null) {
+  if (!value) return null;
+  for (const token of value.split(/\s+/)) {
+    const cleaned = token.trim();
+    if (!cleaned || cleaned.startsWith("(")) continue;
+    const path = cleaned.startsWith("-") ? cleaned.slice(1) : cleaned;
+    if (path.startsWith("/") || path.startsWith("./") || path.startsWith("../")) return path;
+  }
+  return null;
+}
+
+function configuredServiceEnvFile(): ConfiguredServiceEnvFile | null {
   if (envValueIsSet(process.env.RECALLANT_SERVICE_ENV_FILE)) {
     return {
       source_env_var: "RECALLANT_SERVICE_ENV_FILE",
-      path: process.env.RECALLANT_SERVICE_ENV_FILE as string
+      path: process.env.RECALLANT_SERVICE_ENV_FILE as string,
+      source: "explicit_env"
     };
   }
   if (envValueIsSet(process.env.RECALLANT_SYSTEMD_ENV_FILE)) {
     return {
       source_env_var: "RECALLANT_SYSTEMD_ENV_FILE",
-      path: process.env.RECALLANT_SYSTEMD_ENV_FILE as string
+      path: process.env.RECALLANT_SYSTEMD_ENV_FILE as string,
+      source: "explicit_env"
+    };
+  }
+  if (process.env.RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY === "true") return null;
+  const serviceName = process.env.RECALLANT_SYSTEMD_SERVICE_NAME ?? "recallant.service";
+  const environmentFiles = systemctlValue([
+    "show",
+    serviceName,
+    "-p",
+    "EnvironmentFiles",
+    "--value"
+  ]);
+  const discovered = parseSystemdEnvironmentFilePath(environmentFiles);
+  if (discovered) {
+    return {
+      source_env_var: null,
+      path: discovered,
+      source: "systemd"
     };
   }
   return null;
+}
+
+async function loadConfiguredServiceEnv(): Promise<LoadedServiceEnv> {
+  const configured = configuredServiceEnvFile();
+  if (!configured) {
+    return {
+      configured: false,
+      source_env_var: null,
+      source: "none",
+      present: false,
+      values: null
+    };
+  }
+  const content = await readOptional(configured.path);
+  if (content === null) {
+    return {
+      configured: true,
+      source_env_var: configured.source_env_var,
+      source: configured.source,
+      present: false,
+      values: null
+    };
+  }
+  return {
+    configured: true,
+    source_env_var: configured.source_env_var,
+    source: configured.source,
+    present: true,
+    values: parseEnvFileContent(content)
+  };
+}
+
+function configuredProductionEnvKeys(values: Record<string, string> | null) {
+  if (!values) return [];
+  return productionReadinessEnvKeys.filter((key) => envValueIsSet(values[key])).sort();
+}
+
+async function productionReadinessEnvSnapshot() {
+  const serviceEnv = await loadConfiguredServiceEnv();
+  const values: ProductionReadinessEnvValues = {};
+  for (const key of productionReadinessEnvKeys) {
+    const current = process.env[key];
+    const fromService = serviceEnv.values?.[key];
+    if (envValueIsSet(current)) values[key] = current;
+    else if (envValueIsSet(fromService)) values[key] = fromService;
+  }
+  return {
+    values,
+    service_env: {
+      configured: serviceEnv.configured,
+      present: serviceEnv.present,
+      source: serviceEnv.source,
+      source_env_var: serviceEnv.source_env_var,
+      configured_keys: configuredProductionEnvKeys(serviceEnv.values)
+    }
+  };
+}
+
+function productionEnvValue(values: ProductionReadinessEnvValues, key: ProductionReadinessEnvKey) {
+  const value = values[key];
+  return envValueIsSet(value) ? value : undefined;
 }
 
 function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrlProfile) {
@@ -2499,14 +2704,15 @@ function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrl
 }
 
 async function checkServiceEnvProfile() {
-  const configured = configuredServiceEnvFile();
+  const loaded = await loadConfiguredServiceEnv();
   const cliProfile = parseDatabaseUrlProfile(process.env.RECALLANT_DATABASE_URL);
-  if (!configured) {
+  if (!loaded.configured) {
     return {
       configured: false,
       status: "not_configured",
       source_env_var: null,
-      service_env_file: { configured: false, present: false },
+      service_env_file: { configured: false, present: false, source: "none" },
+      production_env: { configured_keys: [] as string[] },
       cli_database: publicDatabaseProfile(cliProfile),
       service_database: null,
       differences: [] as string[],
@@ -2516,13 +2722,13 @@ async function checkServiceEnvProfile() {
     };
   }
 
-  const content = await readOptional(configured.path);
-  if (content === null) {
+  if (!loaded.present || !loaded.values) {
     return {
       configured: true,
       status: "service_env_file_unreadable_or_missing",
-      source_env_var: configured.source_env_var,
-      service_env_file: { configured: true, present: false },
+      source_env_var: loaded.source_env_var,
+      service_env_file: { configured: true, present: false, source: loaded.source },
+      production_env: { configured_keys: [] as string[] },
       cli_database: publicDatabaseProfile(cliProfile),
       service_database: null,
       differences: [] as string[],
@@ -2532,7 +2738,7 @@ async function checkServiceEnvProfile() {
     };
   }
 
-  const serviceEnv = parseEnvFileContent(content);
+  const serviceEnv = loaded.values;
   const serviceProfile = parseDatabaseUrlProfile(serviceEnv.RECALLANT_DATABASE_URL);
   if (cliProfile.status !== "parsed" || serviceProfile.status !== "parsed") {
     const status =
@@ -2542,8 +2748,9 @@ async function checkServiceEnvProfile() {
     return {
       configured: true,
       status,
-      source_env_var: configured.source_env_var,
-      service_env_file: { configured: true, present: true },
+      source_env_var: loaded.source_env_var,
+      service_env_file: { configured: true, present: true, source: loaded.source },
+      production_env: { configured_keys: configuredProductionEnvKeys(serviceEnv) },
       cli_database: publicDatabaseProfile(cliProfile),
       service_database: publicDatabaseProfile(serviceProfile),
       differences: [] as string[],
@@ -2562,8 +2769,9 @@ async function checkServiceEnvProfile() {
   return {
     configured: true,
     status: aligned ? "aligned" : "mismatch",
-    source_env_var: configured.source_env_var,
-    service_env_file: { configured: true, present: true },
+    source_env_var: loaded.source_env_var,
+    service_env_file: { configured: true, present: true, source: loaded.source },
+    production_env: { configured_keys: configuredProductionEnvKeys(serviceEnv) },
     cli_database: publicDatabaseProfile(cliProfile),
     service_database: publicDatabaseProfile(serviceProfile),
     differences,
@@ -2577,12 +2785,6 @@ async function checkServiceEnvProfile() {
   };
 }
 
-function systemctlValue(args: readonly string[]) {
-  const result = spawnSync("systemctl", [...args], { encoding: "utf8" });
-  if (result.error || result.status !== 0) return null;
-  return result.stdout.trim() || null;
-}
-
 function systemdBackupTimerStatus() {
   const active = systemctlValue(["is-active", "recallant-backup.timer"]);
   const enabled = systemctlValue(["is-enabled", "recallant-backup.timer"]);
@@ -2593,12 +2795,260 @@ function systemdBackupTimerStatus() {
   };
 }
 
-async function latestBackupVerificationStatus() {
-  const envStatus = process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS;
+function bindHostIsPrivate(bindHost: string) {
+  return bindHost === "127.0.0.1" || bindHost === "::1" || bindHost.endsWith(".tailnet");
+}
+
+function httpStatusReadiness(status: number | null) {
+  if (status === null) return { status: "not_checked", ok: null };
+  if (status === 401 || status === 403 || (status >= 300 && status < 400)) {
+    return { status: "auth_required", ok: true };
+  }
+  if (status === 502) return { status: "bad_gateway", ok: false };
+  if (status >= 200 && status < 300) return { status: "anonymous_access", ok: false };
+  if (status >= 500) return { status: "server_error", ok: false };
+  return { status: "unexpected_status", ok: false };
+}
+
+async function checkHttpStatus(url: string) {
+  const timeout = AbortSignal.timeout(1200);
+  try {
+    const response = await fetch(url, { redirect: "manual", signal: timeout });
+    return { http_status: response.status, error: null };
+  } catch (error) {
+    return {
+      http_status: null,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function serviceHealthReadiness(
+  env: ProductionReadinessEnvValues,
+  plannedPort: number,
+  originConfigured: string | undefined
+) {
+  const fixtureStatus = productionEnvValue(env, "RECALLANT_SERVICE_HEALTH_STATUS");
+  if (fixtureStatus) {
+    const parsed = Number(fixtureStatus);
+    return {
+      configured: true,
+      source: "env",
+      http_status: Number.isFinite(parsed) ? parsed : null,
+      status: Number.isFinite(parsed) && parsed >= 200 && parsed < 300 ? "healthy" : "unhealthy",
+      ok: Number.isFinite(parsed) && parsed >= 200 && parsed < 300,
+      error: Number.isFinite(parsed) ? null : "invalid_status"
+    };
+  }
+  const healthUrl = productionEnvValue(env, "RECALLANT_SERVICE_HEALTH_URL");
+  let url = healthUrl;
+  if (!url && originConfigured) {
+    try {
+      const parsed = new URL(originConfigured);
+      parsed.pathname = "/health";
+      parsed.search = "";
+      url = parsed.toString();
+    } catch {
+      url = undefined;
+    }
+  }
+  if (!url) url = `http://127.0.0.1:${plannedPort}/health`;
+  const local = localhostOriginUrl(url, plannedPort);
+  if (!local.valid || !local.local_only || !local.url) {
+    return {
+      configured: true,
+      source: healthUrl ? "env" : "derived",
+      http_status: null,
+      status: "invalid_or_non_private_health_url",
+      ok: false,
+      error: "invalid_or_non_private_health_url"
+    };
+  }
+  const checked = await checkHttpStatus(local.url);
+  if (checked.http_status === null && !healthUrl && !originConfigured) {
+    return {
+      configured: false,
+      source: "default",
+      http_status: null,
+      status: "not_checked",
+      ok: null,
+      error: checked.error
+    };
+  }
+  return {
+    configured: Boolean(healthUrl || originConfigured),
+    source: healthUrl ? "env" : originConfigured ? "derived" : "default",
+    http_status: checked.http_status,
+    status:
+      checked.http_status !== null && checked.http_status >= 200 && checked.http_status < 300
+        ? "healthy"
+        : checked.http_status === null
+          ? "down"
+          : "unhealthy",
+    ok: checked.http_status !== null && checked.http_status >= 200 && checked.http_status < 300,
+    error: checked.error
+  };
+}
+
+async function publicRouteReadiness(env: ProductionReadinessEnvValues) {
+  const fixtureStatus = productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS");
+  if (fixtureStatus) {
+    const parsed = Number(fixtureStatus);
+    const readiness = httpStatusReadiness(Number.isFinite(parsed) ? parsed : null);
+    return {
+      configured: true,
+      source: "env",
+      http_status: Number.isFinite(parsed) ? parsed : null,
+      status: readiness.status,
+      ok: readiness.ok === true,
+      error: Number.isFinite(parsed) ? null : "invalid_status"
+    };
+  }
+  const checkUrl =
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_URL");
+  if (!checkUrl) {
+    return {
+      configured: false,
+      source: "not_configured",
+      http_status: null,
+      status: "not_checked",
+      ok: null,
+      error: null
+    };
+  }
+  const checked = await checkHttpStatus(checkUrl);
+  const readiness = httpStatusReadiness(checked.http_status);
+  return {
+    configured: true,
+    source: productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL")
+      ? "check_url"
+      : "public_url",
+    http_status: checked.http_status,
+    status: checked.http_status === null ? "down" : readiness.status,
+    ok: checked.http_status === null ? false : readiness.ok === true,
+    error: checked.error
+  };
+}
+
+async function checkServiceRuntimeReadiness(input: {
+  env: ProductionReadinessEnvValues;
+  plannedPort: number;
+  bindHost: string;
+  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>;
+  publicWorkbenchReadiness: Awaited<ReturnType<typeof checkPublicWorkbenchReadiness>>;
+}) {
+  const serviceName =
+    productionEnvValue(input.env, "RECALLANT_SYSTEMD_SERVICE_NAME") ?? "recallant.service";
+  const activeStatus =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_ACTIVE_STATUS") ??
+    systemctlValue(["is-active", serviceName]);
+  const enabledStatus =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_ENABLED_STATUS") ??
+    systemctlValue(["is-enabled", serviceName]);
+  const restartPolicy =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_RESTART_POLICY") ??
+    systemctlValue(["show", serviceName, "-p", "Restart", "--value"]);
+  const originConfigured = productionEnvValue(input.env, "RECALLANT_WORKBENCH_ORIGIN_URL");
+  const health = await serviceHealthReadiness(input.env, input.plannedPort, originConfigured);
+  const public_route = await publicRouteReadiness(input.env);
+  const activeOk = activeStatus === null || activeStatus === "active";
+  const enabledOk =
+    enabledStatus === null ||
+    enabledStatus === "enabled" ||
+    enabledStatus === "static" ||
+    enabledStatus === "generated";
+  const restartOk = restartPolicy === null || restartPolicy === "" || restartPolicy !== "no";
+  const privateBindOk = bindHostIsPrivate(input.bindHost);
+  const serviceEnvMissing =
+    input.serviceEnvProfile.configured === true &&
+    input.serviceEnvProfile.service_env_file.present !== true;
+  const publicProtected = input.publicWorkbenchReadiness.ready === true;
+  const observed = Boolean(
+    activeStatus ||
+    enabledStatus ||
+    restartPolicy ||
+    health.configured ||
+    public_route.configured ||
+    input.serviceEnvProfile.configured ||
+    input.publicWorkbenchReadiness.configured
+  );
+  let status = observed ? "ready" : "not_checked";
+  let ok = true;
+  let operatorAction = observed
+    ? "Service runtime readiness is satisfied."
+    : "Configure service runtime checks before claiming service-level production readiness.";
+  if (!activeOk) {
+    status = "service_inactive";
+    ok = false;
+    operatorAction =
+      "Start or repair the Recallant service before sending users to the public Workbench.";
+  } else if (!enabledOk) {
+    status = "service_disabled";
+    ok = false;
+    operatorAction = "Enable the Recallant service or document an equivalent supervised lifecycle.";
+  } else if (!restartOk) {
+    status = "restart_policy_disabled";
+    ok = false;
+    operatorAction = "Configure a restart policy so Recallant recovers after process failures.";
+  } else if (!privateBindOk) {
+    status = "wrong_bind_host";
+    ok = false;
+    operatorAction = "Keep the Recallant origin bound to localhost or a private network interface.";
+  } else if (serviceEnvMissing) {
+    status = "service_env_missing";
+    ok = false;
+    operatorAction =
+      "Repair the configured service env file before treating the public Workbench as ready.";
+  } else if (health.configured && health.ok !== true) {
+    status = "health_failed";
+    ok = false;
+    operatorAction =
+      "Repair the local Recallant /health endpoint before sending users to the public Workbench.";
+  } else if (public_route.configured && public_route.ok !== true) {
+    status =
+      public_route.status === "bad_gateway"
+        ? "public_bad_gateway"
+        : public_route.status === "anonymous_access"
+          ? "public_anonymous_access"
+          : "public_route_unhealthy";
+    ok = false;
+    operatorAction = "Repair the public Workbench route or authenticated access layer.";
+  } else if (input.publicWorkbenchReadiness.configured && !publicProtected) {
+    status = "public_workbench_not_ready";
+    ok = false;
+    operatorAction = input.publicWorkbenchReadiness.operator_action;
+  }
+  return {
+    configured: observed,
+    status,
+    ok,
+    service: {
+      name: serviceName,
+      active_status: activeStatus ?? "unknown",
+      enabled_status: enabledStatus ?? "unknown",
+      restart_policy: restartPolicy ?? "unknown"
+    },
+    bind: {
+      host: input.bindHost,
+      private: privateBindOk
+    },
+    service_env_file: input.serviceEnvProfile.service_env_file,
+    health,
+    public_route,
+    operator_action: operatorAction
+  };
+}
+
+async function latestBackupVerificationStatus(env: ProductionReadinessEnvValues = process.env) {
+  const envStatus = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS");
   if (envStatus) return { status: envStatus, ok: envStatus === "passed", source: "env" };
 
-  const verificationPath = process.env.RECALLANT_LATEST_BACKUP_VERIFICATION_FILE;
-  if (!verificationPath) return { status: "unknown", ok: false, source: "not_configured" };
+  const verificationPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE");
+  if (!verificationPath) {
+    return { status: "unknown", ok: false, source: "not_configured", file_configured: false };
+  }
   try {
     const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
     const status = String(parsed.restore_verification ?? parsed.status ?? "unknown");
@@ -2606,31 +3056,38 @@ async function latestBackupVerificationStatus() {
       status,
       ok: status === "passed" && parsed.production_overwritten !== true,
       source: "latest-verification-file",
-      path: verificationPath,
+      file_configured: true,
       verified_at: parsed.verified_at ?? null,
-      manifest_path: parsed.manifest_path ?? null
+      manifest_configured: Boolean(parsed.manifest_path)
     };
   } catch {
-    const manifestPath = process.env.RECALLANT_LATEST_BACKUP_MANIFEST;
-    if (!manifestPath) return { status: "unknown", ok: false, source: "missing" };
+    const manifestPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_MANIFEST");
+    if (!manifestPath)
+      return { status: "unknown", ok: false, source: "missing", file_configured: true };
     try {
       const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as {
         restore_verification?: { status?: string };
       };
       const status = parsed.restore_verification?.status ?? "unknown";
-      return { status, ok: status === "passed", source: "manifest", path: manifestPath };
+      return {
+        status,
+        ok: status === "passed",
+        source: "manifest",
+        file_configured: true,
+        manifest_configured: true
+      };
     } catch {
-      return { status: "unknown", ok: false, source: "missing" };
+      return { status: "unknown", ok: false, source: "missing", file_configured: true };
     }
   }
 }
 
-function publicWorkbenchAccessConfig() {
-  const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
-  const edgeAuth = process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH ?? "disabled";
+function publicWorkbenchAccessConfig(env: ProductionReadinessEnvValues = process.env) {
+  const cloudflareMode = productionEnvValue(env, "RECALLANT_CLOUDFLARE_MODE") ?? "disabled";
+  const edgeAuth = productionEnvValue(env, "RECALLANT_CLOUDFLARE_EDGE_AUTH") ?? "disabled";
   const adminEmailCount = (
-    process.env.RECALLANT_ADMIN_EMAILS ??
-    process.env.RECALLANT_ADMIN_EMAIL ??
+    productionEnvValue(env, "RECALLANT_ADMIN_EMAILS") ??
+    productionEnvValue(env, "RECALLANT_ADMIN_EMAIL") ??
     ""
   )
     .split(",")
@@ -2669,11 +3126,16 @@ function localhostOriginUrl(raw: string | null, plannedPort: number) {
   }
 }
 
-async function checkPublicWorkbenchReadiness(plannedPort: number) {
-  const access = publicWorkbenchAccessConfig();
+async function checkPublicWorkbenchReadiness(
+  plannedPort: number,
+  env: ProductionReadinessEnvValues = process.env
+) {
+  const access = publicWorkbenchAccessConfig(env);
   const publicUrl =
-    process.env.RECALLANT_PUBLIC_WORKBENCH_URL ?? process.env.RECALLANT_PUBLIC_URL ?? null;
-  const originConfigured = process.env.RECALLANT_WORKBENCH_ORIGIN_URL ?? null;
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_URL") ??
+    null;
+  const originConfigured = productionEnvValue(env, "RECALLANT_WORKBENCH_ORIGIN_URL") ?? null;
   const shouldCheck =
     envValueIsSet(publicUrl ?? undefined) ||
     envValueIsSet(originConfigured ?? undefined) ||
@@ -2733,6 +3195,51 @@ async function checkPublicWorkbenchReadiness(plannedPort: number) {
       },
       operator_action:
         "Keep the Workbench origin on a private localhost listener and put Cloudflare Access in front of it."
+    };
+  }
+
+  const originStatusFixture = productionEnvValue(env, "RECALLANT_WORKBENCH_ORIGIN_STATUS");
+  if (originStatusFixture) {
+    const parsed = Number(originStatusFixture);
+    const httpStatus = Number.isFinite(parsed) ? parsed : null;
+    const originStatus =
+      httpStatus === 401 || httpStatus === 403
+        ? "auth_required"
+        : httpStatus !== null && httpStatus >= 300 && httpStatus < 400
+          ? "redirect"
+          : httpStatus !== null && httpStatus >= 200 && httpStatus < 300
+            ? "anonymous_access"
+            : httpStatus === null
+              ? "invalid_status"
+              : "unexpected_status";
+    const authRequired = originStatus === "auth_required" || originStatus === "redirect";
+    const ready = authRequired && access.ok;
+    return {
+      configured: true,
+      status: ready
+        ? "auth_ready"
+        : !access.ok
+          ? "cloudflare_access_not_required"
+          : originStatus === "anonymous_access"
+            ? "origin_allows_anonymous_access"
+            : "origin_unexpected_status",
+      ready,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: originStatus,
+        http_status: httpStatus,
+        error: httpStatus === null ? "invalid_origin_status" : null
+      },
+      operator_action: ready
+        ? "Public Workbench readiness is satisfied when users authenticate through the protected public URL."
+        : !access.ok
+          ? "Require Cloudflare Access edge auth and configure an admin allowlist for the public Workbench."
+          : originStatus === "anonymous_access"
+            ? "Require Workbench authentication at the private origin before public exposure."
+            : "Repair the private Workbench origin response before claiming public readiness."
     };
   }
 
@@ -2801,28 +3308,34 @@ async function checkPublicWorkbenchReadiness(plannedPort: number) {
 async function checkProductionReadiness(
   postgresReachable: boolean,
   projectDir: string,
-  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>
+  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>,
+  deploymentProfile: Awaited<ReturnType<typeof checkDeploymentProfile>>
 ) {
-  const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
+  const productionEnv = await productionReadinessEnvSnapshot();
+  const env = productionEnv.values;
+  const bindHost = productionEnvValue(env, "RECALLANT_HOST") ?? "127.0.0.1";
   const publicWorkbenchReadiness = await checkPublicWorkbenchReadiness(
-    Number(process.env.RECALLANT_PORT ?? "3005")
+    Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005"),
+    env
   );
+  const plannedPort = Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005");
   const envBackupTimerEnabled =
-    process.env.RECALLANT_BACKUP_TIMER_ENABLED === "true" ||
-    process.env.RECALLANT_BACKUP_TIMER_STATUS === "enabled";
-  const backupTimer = process.env.RECALLANT_BACKUP_TIMER_STATUS
+    productionEnvValue(env, "RECALLANT_BACKUP_TIMER_ENABLED") === "true" ||
+    productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS") === "enabled";
+  const backupTimer = productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS")
     ? {
         enabled: envBackupTimerEnabled,
-        status: process.env.RECALLANT_BACKUP_TIMER_STATUS,
+        status: productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS"),
         source: "env"
       }
     : envBackupTimerEnabled
       ? { enabled: true, status: "enabled", source: "env" }
       : systemdBackupTimerStatus();
-  const latestBackupVerification = await latestBackupVerificationStatus();
+  const latestBackupVerification = await latestBackupVerificationStatus(env);
   let deploymentProjectRows: number | null = null;
   let unintendedPaidApiSuccessCalls30d: number | null = null;
-  const readinessProjectPath = process.env.RECALLANT_PRODUCTION_PROJECT_PATH ?? projectDir;
+  const readinessProjectPath =
+    productionEnvValue(env, "RECALLANT_PRODUCTION_PROJECT_PATH") ?? projectDir;
   if (process.env.RECALLANT_DATABASE_URL) {
     const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
     const developerId = process.env.RECALLANT_DEVELOPER_ID ?? null;
@@ -2859,8 +3372,14 @@ async function checkProductionReadiness(
       await client.end();
     }
   }
-  const localhostOnlyOrigin =
-    bindHost === "127.0.0.1" || bindHost === "::1" || bindHost.endsWith(".tailnet");
+  const localhostOnlyOrigin = bindHostIsPrivate(bindHost);
+  const serviceRuntime = await checkServiceRuntimeReadiness({
+    env,
+    plannedPort,
+    bindHost,
+    serviceEnvProfile,
+    publicWorkbenchReadiness
+  });
   return {
     doctor_ok: postgresReachable,
     local_stdio_mcp_smoke: {
@@ -2869,6 +3388,7 @@ async function checkProductionReadiness(
     },
     review_ui_cloudflare_access: publicWorkbenchReadiness.cloudflare_access,
     public_workbench_readiness: publicWorkbenchReadiness,
+    service_runtime: serviceRuntime,
     localhost_only_origin: {
       bind_host: bindHost,
       ok: localhostOnlyOrigin
@@ -2892,11 +3412,20 @@ async function checkProductionReadiness(
       ok: serviceEnvProfile.ok,
       differences: serviceEnvProfile.differences
     },
+    deployment_profile: {
+      server_inventory: deploymentProfile.server_inventory,
+      security_baseline: deploymentProfile.security_baseline,
+      warnings: deploymentProfile.warnings
+    },
+    production_env: productionEnv.service_env,
     ready:
       postgresReachable &&
       localhostOnlyOrigin &&
       serviceEnvProfile.ok &&
       publicWorkbenchReadiness.ready &&
+      serviceRuntime.ok &&
+      deploymentProfile.server_inventory.registered &&
+      deploymentProfile.security_baseline.present &&
       backupTimer.enabled &&
       latestBackupVerification.ok &&
       deploymentProjectRows !== null &&
@@ -2926,6 +3455,8 @@ async function runDoctor(argv: readonly string[]) {
     const clientConnection = await clientConnectionReadiness(projectDir);
     const localSpoolStatus = await getLocalSpoolStatus(argv);
     const serviceEnvProfile = await checkServiceEnvProfile();
+    const productionEnv = await productionReadinessEnvSnapshot();
+    const deploymentProfile = await checkDeploymentProfile(productionEnv.values);
     const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(database, projectDir);
     const result = {
       ...describeCliBoundary(),
@@ -3011,11 +3542,12 @@ async function runDoctor(argv: readonly string[]) {
         claude_sonnet_opus_require_quality_profile: true,
         starts_local_services: false
       },
-      deployment_profile: await checkDeploymentProfile(),
+      deployment_profile: deploymentProfile,
       production_readiness: await checkProductionReadiness(
         postgres.reachable,
         projectDir,
-        serviceEnvProfile
+        serviceEnvProfile,
+        deploymentProfile
       ),
       deployment_notes: [
         "Set RECALLANT_SERVER_INVENTORY_FILE before service start.",
@@ -5170,6 +5702,155 @@ function onboardVerifyEvidenceFromDoctor(doctorJson: Record<string, unknown> | n
   };
 }
 
+const onboardEmbeddingRecoveryLimit = 50;
+
+function finiteNumberValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function baseOnboardEmbeddingRecovery(input: {
+  status: OnboardEmbeddingRecoveryPayload["status"];
+  projectId: string | null;
+  pendingBefore: number | null;
+  attempted?: boolean;
+  attemptedChunks?: number;
+  recoveredChunks?: number;
+  remainingPending?: number | null;
+  recoveryAvailable?: boolean;
+  latestFailure?: unknown;
+  warning?: string | null;
+  recommendation: string;
+}): OnboardEmbeddingRecoveryPayload {
+  return {
+    status: input.status,
+    attempted: input.attempted ?? false,
+    project_id: input.projectId,
+    pending_before: input.pendingBefore,
+    attempted_chunks: input.attemptedChunks ?? 0,
+    recovered_chunks: input.recoveredChunks ?? 0,
+    remaining_pending: input.remainingPending ?? input.pendingBefore,
+    limit: onboardEmbeddingRecoveryLimit,
+    recovery_available: input.recoveryAvailable ?? true,
+    latest_failure: input.latestFailure ?? null,
+    warning: input.warning ?? null,
+    recommendation: input.recommendation,
+    scope: {
+      project_scoped: true,
+      bounded: true,
+      limit: onboardEmbeddingRecoveryLimit
+    }
+  };
+}
+
+function createUncachedRecallantDbFromEnv() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH
+  });
+}
+
+async function recoverOnboardPendingEmbeddings(
+  projectDir: string,
+  doctorJson: Record<string, unknown> | null
+): Promise<OnboardEmbeddingRecoveryPayload> {
+  const pending = objectValue(doctorJson?.pending_embeddings);
+  const projectId = typeof pending.project_id === "string" ? pending.project_id : null;
+  const pendingBefore = finiteNumberValue(pending.pending_chunks);
+  const latestFailure =
+    pending.latest_failure ?? objectValue(pending.recovery).latest_failure ?? null;
+  if (pendingBefore !== null && pendingBefore <= 0) {
+    return baseOnboardEmbeddingRecovery({
+      status: "no_pending",
+      projectId,
+      pendingBefore,
+      remainingPending: 0,
+      latestFailure,
+      recommendation: "Semantic embeddings are current."
+    });
+  }
+  if (pendingBefore === null) {
+    return baseOnboardEmbeddingRecovery({
+      status: "unknown",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: "Pending embedding state could not be read from doctor output.",
+      recommendation:
+        "Capture and recall remain available; rerun Recallant readiness after storage is reachable."
+    });
+  }
+  const database = createUncachedRecallantDbFromEnv();
+  if (!database) {
+    return baseOnboardEmbeddingRecovery({
+      status: "skipped",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: "Recallant storage is not configured for embedding recovery.",
+      recommendation:
+        "Capture and recall remain available; semantic indexing will wait until storage is configured."
+    });
+  }
+  try {
+    const recovery = await database.recoverPendingEmbeddings({
+      project_path: projectDir,
+      limit: onboardEmbeddingRecoveryLimit
+    });
+    const embedding = objectValue(recovery.embedding);
+    const attemptedChunks = finiteNumberValue(recovery.attempted_chunks) ?? 0;
+    const recoveredChunks = finiteNumberValue(recovery.recovered_chunks) ?? 0;
+    const remainingPending = finiteNumberValue(recovery.remaining_pending) ?? pendingBefore;
+    const unavailable =
+      embedding.error === "UNAVAILABLE" ||
+      String(recovery.warning ?? "")
+        .toLowerCase()
+        .includes("provider is unavailable");
+    const status =
+      remainingPending <= 0 && recoveredChunks > 0
+        ? "recovered"
+        : remainingPending <= 0
+          ? "no_pending"
+          : unavailable
+            ? "model_unavailable"
+            : "still_pending";
+    return baseOnboardEmbeddingRecovery({
+      status,
+      projectId: typeof recovery.project_id === "string" ? recovery.project_id : projectId,
+      pendingBefore,
+      attempted: attemptedChunks > 0,
+      attemptedChunks,
+      recoveredChunks,
+      remainingPending,
+      latestFailure,
+      warning: typeof recovery.warning === "string" ? recovery.warning : null,
+      recommendation:
+        status === "recovered" || status === "no_pending"
+          ? "Semantic embeddings are current."
+          : "Capture and recall are ready; semantic embeddings are waiting for local model recovery."
+    });
+  } catch (error) {
+    return baseOnboardEmbeddingRecovery({
+      status: "unknown",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: error instanceof Error ? error.message : String(error),
+      recommendation:
+        "Capture and recall remain available; semantic indexing recovery should be retried by Recallant readiness."
+    });
+  } finally {
+    await database.close();
+  }
+}
+
 function unavailableWorkbenchOutcome(message: string): OnboardWorkbenchOutcome {
   return {
     available: false,
@@ -5343,6 +6024,7 @@ async function runOnboard(argv: readonly string[]) {
   let onboardStatus: "completed" | "needs_confirmation" | "plan_only" | "cancelled" | "incomplete" =
     "completed";
   let attachDetails: ReturnType<typeof safeAttachDetailsForOnboard> | null = null;
+  let embeddingRecovery: OnboardEmbeddingRecoveryPayload | null = null;
 
   if (versionControlBlocks) {
     const payload = {
@@ -5452,6 +6134,7 @@ async function runOnboard(argv: readonly string[]) {
         details: steps.connected.details ?? null
       },
       verify: verifyResult,
+      embedding_recovery: embeddingRecovery,
       next_command: formatOnboardRerunCommand(options, targetClient)
     };
     process.stdout.write(
@@ -5658,6 +6341,10 @@ async function runOnboard(argv: readonly string[]) {
     verifyResult.stages.readiness.status = "done";
     verifyResult.stages.readiness.detail = "capture readiness is active";
     verifyResult.capture_active = true;
+    embeddingRecovery = await recoverOnboardPendingEmbeddings(
+      options.projectDir,
+      doctorResult.json
+    );
 
     const query = "what did you remember?";
     const askCommand = [
@@ -5743,6 +6430,7 @@ async function runOnboard(argv: readonly string[]) {
       details: steps.connected.details ?? null
     },
     verify: options.verify ? verifyResult : null,
+    embedding_recovery: embeddingRecovery,
     next_command: nextCommand
   };
   process.stdout.write(

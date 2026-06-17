@@ -11,6 +11,7 @@ import {
   renderClientTargetConfig
 } from "../apps/cli/dist/client-targets.js";
 import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
+import pg from "pg";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -88,11 +89,15 @@ const envSnapshot = snapshotEnv([
   "RECALLANT_DATABASE_URL",
   "RECALLANT_DEVELOPER_ID",
   "RECALLANT_PROJECT_ID",
-  "RECALLANT_PROJECT_PATH"
+  "RECALLANT_PROJECT_PATH",
+  "RECALLANT_EMBEDDING_PROVIDER",
+  "RECALLANT_EMBEDDING_DIMS"
 ]);
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
 process.env.RECALLANT_PROJECT_ID = projectId;
+process.env.RECALLANT_EMBEDDING_PROVIDER = "deterministic";
+process.env.RECALLANT_EMBEDDING_DIMS = "8";
 delete process.env.RECALLANT_PROJECT_PATH;
 
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -105,20 +110,52 @@ const server = createRecallantMcpServer();
 let checkpointSet;
 let checkpointGet;
 let closeout;
+let started;
+let contextPack;
+let appendedEvent;
 let projectLogAfterCheckpoint;
 let projectLogAfterCloseout;
 let absentLogSet;
+let pathVerification;
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
 
-  const started = await callTool(client, "memory_start_session", {
+  started = await callTool(client, "memory_start_session", {
     client_kind: "codex",
     client_version: "smoke",
     project_path: projectDir,
     session_label: "repo-contract-smoke",
     resume_policy: "normal"
   });
+  assert(
+    started.project_id === projectId,
+    `Session started against wrong project: ${JSON.stringify(started)}`
+  );
+
+  contextPack = await callTool(client, "memory_get_context_pack", {
+    session_id: started.session_id,
+    task_hint: "verify attached project path propagation",
+    max_chars_total: 4000
+  });
+  assert(
+    contextPack.project_id === projectId && contextPack.session_id === started.session_id,
+    `Context pack resolved wrong project/session: ${JSON.stringify(contextPack)}`
+  );
+
+  appendedEvent = await callTool(client, "memory_append_event", {
+    session_id: started.session_id,
+    client_kind: "codex",
+    event_kind: "other",
+    text: "Repo contract MCP append event must stay scoped to the attached temp project.",
+    metadata: { smoke: "repo-contract-path-propagation" },
+    raw_artifacts: [],
+    dedup_key: `repo-contract-path-${randomUUID()}`
+  });
+  assert(
+    appendedEvent.status === "created" && appendedEvent.event_id,
+    `Append event failed: ${JSON.stringify(appendedEvent)}`
+  );
 
   const checkpoint = {
     current_status: "repo contract smoke synced",
@@ -183,6 +220,31 @@ try {
     `PROJECT_LOG.md was not closeout-synced correctly:\n${projectLogAfterCloseout}`
   );
 
+  const verificationClient = new pg.Client({ connectionString: databaseUrl });
+  await verificationClient.connect();
+  try {
+    const verified = await verificationClient.query(
+      `
+        SELECT
+          (SELECT primary_path FROM projects WHERE id = $2) AS primary_path,
+          (SELECT count(*)::int FROM sessions WHERE id = $1 AND project_id = $2) AS session_rows,
+          (SELECT count(*)::int FROM events WHERE id = $3 AND project_id = $2) AS event_rows,
+          (SELECT count(*)::int FROM checkpoints WHERE project_id = $2 AND payload->>'current_focus' = $4) AS checkpoint_rows
+      `,
+      [started.session_id, projectId, appendedEvent.event_id, closeoutCheckpoint.current_focus]
+    );
+    pathVerification = verified.rows[0];
+  } finally {
+    await verificationClient.end();
+  }
+  assert(
+    pathVerification.primary_path === projectDir &&
+      pathVerification.session_rows === 1 &&
+      pathVerification.event_rows === 1 &&
+      pathVerification.checkpoint_rows === 1,
+    `MCP calls did not stay scoped to temp project: ${JSON.stringify(pathVerification)}`
+  );
+
   await unlink(projectLogPath);
   absentLogSet = await callTool(client, "memory_set_checkpoint", {
     payload: {
@@ -212,6 +274,13 @@ process.stdout.write(
           .split("\n")
           .filter((line) => line.includes("RECALLANT_PROJECT_") || line.startsWith("[mcp_servers")),
         checkpoint_repo_sync: checkpointSet.repo_sync,
+        path_propagation: {
+          project_dir: projectDir,
+          started_project_id: started.project_id,
+          context_pack_project_id: contextPack.project_id,
+          append_event_id: appendedEvent.event_id,
+          database_verification: pathVerification
+        },
         checkpoint_readback: {
           current_focus: checkpointGet.payload?.current_focus,
           next_step: checkpointGet.payload?.next_step

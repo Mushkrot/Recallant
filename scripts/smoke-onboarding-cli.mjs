@@ -384,6 +384,15 @@ assert(
   `one-command proof evidence incomplete: ${JSON.stringify(oneCommand.verify?.evidence)}`
 );
 assert(
+  ["no_pending", "recovered"].includes(oneCommand.embedding_recovery?.status) &&
+    oneCommand.embedding_recovery?.scope?.project_scoped === true &&
+    oneCommand.embedding_recovery?.scope?.bounded === true &&
+    oneCommand.embedding_recovery?.limit === 50,
+  `one-command embedding recovery status incomplete: ${JSON.stringify(
+    oneCommand.embedding_recovery
+  )}`
+);
+assert(
   oneCommand.workbench?.available === true &&
     typeof oneCommand.workbench?.url === "string" &&
     oneCommand.workbench.url.includes("/review") &&
@@ -403,6 +412,10 @@ assert(
   humanSuccess.stdout.includes("Capture active: yes") &&
     humanSuccess.stdout.includes("context read, memory write, checkpoint, and recall proof"),
   `human success output did not explain capture-active proof: ${humanSuccess.stdout}`
+);
+assert(
+  humanSuccess.stdout.includes("Embedding recovery:"),
+  `human success output did not include embedding recovery state: ${humanSuccess.stdout}`
 );
 assert(
   humanSuccess.stdout.includes("Workbench:") &&

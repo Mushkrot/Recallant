@@ -23,6 +23,7 @@ function runRaw(args, extraEnv = {}) {
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: smokeDeveloperId,
       RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
       ...extraEnv
     },
     encoding: "utf8"
@@ -419,7 +420,9 @@ if (
   doctor.policy?.claude_sonnet_opus_require_quality_profile !== true ||
   doctor.deployment_profile?.server_inventory?.registered !== true ||
   doctor.deployment_profile?.security_baseline?.must_consult_before_exposure !== true ||
-  !doctor.deployment_profile?.warnings?.some((warning) => warning.includes("SECURITY"))
+  !doctor.deployment_profile?.warnings?.some((warning) =>
+    warning.toLowerCase().includes("security")
+  )
 ) {
   throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
 }
@@ -449,6 +452,12 @@ const productionDoctor = run(["doctor", "--project-dir", projectDir, "--format",
   RECALLANT_CLOUDFLARE_MODE: "enabled",
   RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
   RECALLANT_ADMIN_EMAILS: "owner@example.invalid",
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "401",
+  RECALLANT_SERVICE_ACTIVE_STATUS: "active",
+  RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
+  RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
+  RECALLANT_SERVICE_HEALTH_STATUS: "200",
+  RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
   RECALLANT_BACKUP_TIMER_ENABLED: "true",
   RECALLANT_BACKUP_TIMER_STATUS: "enabled",
   RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS: "passed"
@@ -457,6 +466,9 @@ if (
   productionDoctor.production_readiness?.doctor_ok !== true ||
   productionDoctor.production_readiness?.local_stdio_mcp_smoke?.command !== "npm run mcp:smoke" ||
   productionDoctor.production_readiness?.review_ui_cloudflare_access?.edge_auth_required !== true ||
+  productionDoctor.production_readiness?.public_workbench_readiness?.status !== "auth_ready" ||
+  productionDoctor.production_readiness?.service_runtime?.status !== "ready" ||
+  productionDoctor.production_readiness?.service_runtime?.ok !== true ||
   productionDoctor.production_readiness?.localhost_only_origin?.ok !== true ||
   productionDoctor.production_readiness?.backup_timer?.enabled !== true ||
   productionDoctor.production_readiness?.latest_backup_verification?.ok !== true ||

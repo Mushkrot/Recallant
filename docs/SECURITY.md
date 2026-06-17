@@ -27,6 +27,10 @@ bounded by design, and conservative about secrets.
   provider settings.
 - Public Workbench readiness requires an auth-protected private origin plus authenticated edge
   access. Do not make the Workbench public by changing the default bind host.
+- Production readiness treats stopped services, disabled restart behavior, missing service env
+  files, failed private `/health` checks, public gateway errors, and anonymous Workbench exposure as
+  separate service-runtime failures. Access-provider redirects or authentication challenges are
+  acceptable public-route responses; unauthenticated Workbench content is not.
 
 ## Credentials
 

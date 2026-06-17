@@ -40,6 +40,23 @@ function runJson(args, extraEnv = {}) {
   return JSON.parse(result.stdout);
 }
 
+function runText(args, extraEnv = {}) {
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: repoRoot,
+    env: commandEnv(extraEnv),
+    encoding: "utf8"
+  });
+  if (result.error) {
+    throw new Error(`Command failed to start: recallant ${args.join(" ")}\n${result.error}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
+  }
+  return result.stdout;
+}
+
 async function exists(path) {
   try {
     await stat(path);
@@ -228,9 +245,40 @@ if (
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "AGENTS.md") ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "PROJECT_LOG.md") ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/hooks") ||
-  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/spool")
+  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/spool") ||
+  dryRun.receipt?.target?.requested_via !== "--project-dir" ||
+  dryRun.receipt?.target?.matching_mode !== "project_id" ||
+  dryRun.receipt?.target?.project_id !== attach.project_id ||
+  dryRun.receipt?.database_action?.writes_database !== false ||
+  dryRun.receipt?.local_action?.writes_files !== false ||
+  dryRun.receipt?.retained_governance_receipt?.planned_or_retained !== true ||
+  dryRun.receipt?.cleanup_scope?.not_product_repo_cleanup !== true ||
+  dryRun.receipt?.cleanup_scope?.preserves_source_files !== true ||
+  dryRun.receipt?.cleanup_scope?.preserves_secrets !== true ||
+  dryRun.receipt?.cleanup_scope?.preserves_downloads !== true ||
+  dryRun.receipt?.cleanup_scope?.preserves_dependencies !== true
 ) {
   throw new Error(`Project sanitize dry-run failed: ${JSON.stringify(dryRun, null, 2)}`);
+}
+const dryRunText = runText([
+  "project-sanitize",
+  "--project-dir",
+  projectDir,
+  "--mode",
+  "purge",
+  "--dry-run",
+  "--format",
+  "text"
+]);
+if (
+  !dryRunText.includes("Target source: --project-dir") ||
+  !dryRunText.includes("Target match: project_id") ||
+  !dryRunText.includes("Cleanup scope: remove_recallant_from_target_project") ||
+  !dryRunText.includes("Product repo cleanup: no") ||
+  !dryRunText.includes("Database action: pending_confirmation, writes=false") ||
+  !dryRunText.includes("Local action: ready_for_confirmation, writes=false")
+) {
+  throw new Error(`Project sanitize text dry-run was ambiguous:\n${dryRunText}`);
 }
 if (!(await projectExists(attach.project_id)) || !(await exists(join(projectDir, ".recallant", "config")))) {
   throw new Error("Project sanitize dry-run changed database or local files.");
@@ -277,6 +325,15 @@ if (
   remainingRows.model_calls !== 0 ||
   remainingRows.paid_api_approvals !== 0 ||
   remainingRows.settings_audit_events !== 0 ||
+  confirmed.receipt?.target?.requested_via !== "--project-dir" ||
+  confirmed.receipt?.database_action?.status !== "purged" ||
+  confirmed.receipt?.database_action?.writes_database !== true ||
+  confirmed.receipt?.local_action?.status !== "cleaned" ||
+  confirmed.receipt?.local_action?.writes_files !== true ||
+  confirmed.receipt?.retained_governance_receipt?.retained !== true ||
+  confirmed.receipt?.retained_governance_receipt?.redacted !== true ||
+  confirmed.receipt?.retained_governance_receipt?.erasure_id !== confirmed.database.erasure_id ||
+  confirmed.receipt?.cleanup_scope?.not_product_repo_cleanup !== true ||
   (await exists(join(projectDir, ".recallant", "config"))) ||
   (await exists(join(projectDir, ".recallant", "hooks"))) ||
   (await exists(join(projectDir, ".recallant", "spool"))) ||
@@ -348,7 +405,9 @@ if (
   explicitStaleDryRun.database?.status !== "not_found" ||
   explicitStaleDryRun.database?.project !== null ||
   explicitStaleDryRun.database?.target_resolution?.resolved_by !== "not_found" ||
-  explicitStaleDryRun.database?.target_resolution?.requested_project_path !== null
+  explicitStaleDryRun.database?.target_resolution?.requested_project_path !== null ||
+  explicitStaleDryRun.receipt?.target?.requested_via !== "--project-id" ||
+  explicitStaleDryRun.receipt?.target?.matching_mode !== "not_found"
 ) {
   throw new Error(
     `Explicit --project-id should remain strict for stale ids: ${JSON.stringify(explicitStaleDryRun, null, 2)}`
@@ -370,6 +429,9 @@ if (
   staleDryRun.database?.project?.project_id !== liveAttach.project_id ||
   staleDryRun.database?.target_resolution?.stale_project_id !== staleAttach.project_id ||
   staleDryRun.database?.target_resolution?.resolved_by !== "project_path_fallback" ||
+  staleDryRun.receipt?.target?.requested_via !== "--project-dir" ||
+  staleDryRun.receipt?.target?.matching_mode !== "project_path_fallback" ||
+  staleDryRun.receipt?.target?.stale_project_id !== staleAttach.project_id ||
   !staleDryRun.database?.warnings?.some((warning) => /missing project_id/.test(warning)) ||
   staleToken !== `recallant-purge-project-${liveAttach.project_id}`
 ) {
@@ -460,6 +522,11 @@ if (
   orphanDryRun.local_cleanup?.local_only !== true ||
   orphanDryRun.local_cleanup?.writes_database !== false ||
   orphanDryRun.local_cleanup?.writes_files !== false ||
+  orphanDryRun.receipt?.target?.requested_via !== "orphan_local_artifacts" ||
+  orphanDryRun.receipt?.target?.matching_mode !== "not_found" ||
+  orphanDryRun.receipt?.database_action?.writes_database !== false ||
+  orphanDryRun.receipt?.local_action?.local_only !== true ||
+  orphanDryRun.receipt?.cleanup_scope?.not_product_repo_cleanup !== true ||
   !orphanDryRun.local_cleanup?.planned_changes?.some(
     (change) => change.path === ".recallant/config"
   ) ||
@@ -491,6 +558,9 @@ if (
   orphanConfirmed.writes_database !== false ||
   orphanConfirmed.writes_files !== true ||
   orphanConfirmed.local_cleanup?.status !== "cleaned" ||
+  orphanConfirmed.receipt?.target?.requested_via !== "orphan_local_artifacts" ||
+  orphanConfirmed.receipt?.database_action?.writes_database !== false ||
+  orphanConfirmed.receipt?.local_action?.writes_files !== true ||
   (await exists(join(orphanLocalDir, ".recallant", "config"))) ||
   (await exists(join(orphanLocalDir, ".recallant", "current-session.json"))) ||
   (await exists(join(orphanLocalDir, ".recallant", "hooks"))) ||
@@ -569,4 +639,43 @@ if (realProjectDryRunPath && (await exists(realProjectDryRunPath))) {
   );
 }
 
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      project_sanitize_receipts: {
+        dry_run: {
+          target: dryRun.receipt.target,
+          database_action: dryRun.receipt.database_action,
+          local_action: dryRun.receipt.local_action,
+          cleanup_scope: dryRun.receipt.cleanup_scope
+        },
+        confirmed: {
+          target: confirmed.receipt.target,
+          database_action: confirmed.receipt.database_action,
+          local_action: confirmed.receipt.local_action,
+          retained_governance_receipt: confirmed.receipt.retained_governance_receipt,
+          cleanup_scope: confirmed.receipt.cleanup_scope
+        },
+        orphan_local: {
+          dry_run_target: orphanDryRun.receipt.target,
+          confirmed_status: orphanConfirmed.status,
+          writes_database: orphanConfirmed.writes_database,
+          writes_files: orphanConfirmed.writes_files
+        },
+        preservation: {
+          readme_preserved: await exists(join(projectDir, "README.md")),
+          agents_source_preserved: agents.includes(
+            "Keep sanitizemarker fixture source files untouched"
+          ),
+          project_log_preserved: projectLog.includes(
+            "Status: existing sanitizemarker project fixture"
+          ),
+          source_files_deleted: false
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 process.stdout.write("Project sanitize smoke passed\n");

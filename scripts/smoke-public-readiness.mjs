@@ -144,7 +144,8 @@ mustInclude(
     "Product Contract Status",
     "Contract Coverage",
     "Agent-ready project onboarding",
-    "one-command beginner path",
+    "installed-host one-command MVP",
+    "Browser-first project attachment from the Workbench is future work",
     "recallant onboard <project>",
     "Database not configured",
     "Existing-project migration",
@@ -262,6 +263,7 @@ async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
         ...process.env,
         RECALLANT_DATABASE_URL: "",
         RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
         RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
         RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
         RECALLANT_CLOUDFLARE_MODE: "enabled",
@@ -285,6 +287,43 @@ async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
     throw new Error(`doctor public readiness fixture failed: ${stderr}\n${stdout}`);
   }
   return JSON.parse(stdout).production_readiness?.public_workbench_readiness;
+}
+
+async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
+  const child = spawn(
+    process.execPath,
+    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        RECALLANT_DATABASE_URL: "",
+        RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+        RECALLANT_SERVICE_ACTIVE_STATUS: "active",
+        RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
+        RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
+        RECALLANT_HOST: "127.0.0.1",
+        RECALLANT_SERVICE_HEALTH_STATUS: "200",
+        RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
+        ...extraEnv
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const [code] = await once(child, "close");
+  if (code !== 0) {
+    throw new Error(`doctor service runtime fixture failed: ${stderr}\n${stdout}`);
+  }
+  return JSON.parse(stdout).production_readiness?.service_runtime;
 }
 
 async function closedLocalOriginUrl() {
@@ -323,8 +362,42 @@ async function withAuthRequiredOrigin(callback) {
   }
 }
 
+async function withAnonymousOrigin(callback) {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, {
+      "content-type": "text/html"
+    });
+    response.end("<h1>Recallant Workbench</h1>");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Unable to allocate anonymous origin port");
+  try {
+    return await callback(`http://127.0.0.1:${address.port}/review`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
 const publicUiFixtureDir = await mkdtemp(join(tmpdir(), "recallant-public-ui-readiness-"));
 const publicBindHost = ["0", "0", "0", "0"].join(".");
+const notConfigured = await runDoctorWithOrigin(publicUiFixtureDir, "", {
+  RECALLANT_PUBLIC_WORKBENCH_URL: "",
+  RECALLANT_WORKBENCH_ORIGIN_URL: "",
+  RECALLANT_CLOUDFLARE_MODE: "disabled",
+  RECALLANT_CLOUDFLARE_EDGE_AUTH: "",
+  RECALLANT_ADMIN_EMAILS: ""
+});
+assert(
+  notConfigured?.status === "not_configured" &&
+    notConfigured?.configured === false &&
+    notConfigured?.ready === false,
+  `Unconfigured readiness did not report not_configured: ${JSON.stringify(notConfigured)}`
+);
+
 const downReadiness = await runDoctorWithOrigin(publicUiFixtureDir, await closedLocalOriginUrl());
 assert(
   downReadiness?.status === "origin_unreachable" &&
@@ -363,10 +436,85 @@ assert(
   `Missing edge auth should not be public-ready: ${JSON.stringify(missingEdgeAuth)}`
 );
 
+const anonymousOrigin = await withAnonymousOrigin((originUrl) =>
+  runDoctorWithOrigin(publicUiFixtureDir, originUrl)
+);
+assert(
+  anonymousOrigin?.status === "origin_allows_anonymous_access" &&
+    anonymousOrigin?.origin?.status === "anonymous_access" &&
+    anonymousOrigin?.ready === false,
+  `Anonymous origin should not be public-ready: ${JSON.stringify(anonymousOrigin)}`
+);
+
+const runtimeReady = await runServiceRuntimeFixture(publicUiFixtureDir);
+assert(
+  runtimeReady?.status === "ready" &&
+    runtimeReady?.ok === true &&
+    runtimeReady?.health?.status === "healthy" &&
+    runtimeReady?.public_route?.status === "auth_required",
+  `Runtime ready fixture failed: ${JSON.stringify(runtimeReady)}`
+);
+const runtimeInactive = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ACTIVE_STATUS: "inactive"
+});
+assert(
+  runtimeInactive?.status === "service_inactive" && runtimeInactive?.ok === false,
+  `Runtime inactive fixture failed: ${JSON.stringify(runtimeInactive)}`
+);
+const runtimeDisabled = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ENABLED_STATUS: "disabled"
+});
+assert(
+  runtimeDisabled?.status === "service_disabled" && runtimeDisabled?.ok === false,
+  `Runtime disabled fixture failed: ${JSON.stringify(runtimeDisabled)}`
+);
+const runtimeWrongBind = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_HOST: publicBindHost
+});
+assert(
+  runtimeWrongBind?.status === "wrong_bind_host" && runtimeWrongBind?.bind?.private === false,
+  `Runtime wrong-bind fixture failed: ${JSON.stringify(runtimeWrongBind)}`
+);
+const runtimeMissingEnv = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ENV_FILE: join(publicUiFixtureDir, "missing-service.env")
+});
+assert(
+  runtimeMissingEnv?.status === "service_env_missing" && runtimeMissingEnv?.ok === false,
+  `Runtime missing-env fixture failed: ${JSON.stringify(runtimeMissingEnv)}`
+);
+const runtimeHealthFailed = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_HEALTH_STATUS: "503"
+});
+assert(
+  runtimeHealthFailed?.status === "health_failed" &&
+    runtimeHealthFailed?.health?.status === "unhealthy",
+  `Runtime health-failed fixture failed: ${JSON.stringify(runtimeHealthFailed)}`
+);
+const runtimeBadGateway = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "502"
+});
+assert(
+  runtimeBadGateway?.status === "public_bad_gateway" &&
+    runtimeBadGateway?.public_route?.status === "bad_gateway",
+  `Runtime bad-gateway fixture failed: ${JSON.stringify(runtimeBadGateway)}`
+);
+const runtimeAnonymousPublic = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "200"
+});
+assert(
+  runtimeAnonymousPublic?.status === "public_anonymous_access" &&
+    runtimeAnonymousPublic?.public_route?.status === "anonymous_access",
+  `Runtime public-anonymous fixture failed: ${JSON.stringify(runtimeAnonymousPublic)}`
+);
+
 process.stdout.write(
   `${JSON.stringify(
     {
       public_workbench_readiness: {
+        not_configured: {
+          status: notConfigured.status,
+          ready: notConfigured.ready
+        },
         down_origin: {
           status: downReadiness.status,
           ready: downReadiness.ready,
@@ -381,6 +529,34 @@ process.stdout.write(
         missing_edge_auth: {
           status: missingEdgeAuth.status,
           ready: missingEdgeAuth.ready
+        },
+        anonymous_origin: {
+          status: anonymousOrigin.status,
+          ready: anonymousOrigin.ready,
+          origin: anonymousOrigin.origin.status
+        }
+      },
+      service_runtime: {
+        ready: {
+          status: runtimeReady.status,
+          health: runtimeReady.health.status,
+          public_route: runtimeReady.public_route.status
+        },
+        inactive: { status: runtimeInactive.status, ok: runtimeInactive.ok },
+        disabled: { status: runtimeDisabled.status, ok: runtimeDisabled.ok },
+        wrong_bind: { status: runtimeWrongBind.status, private: runtimeWrongBind.bind.private },
+        missing_env: { status: runtimeMissingEnv.status, ok: runtimeMissingEnv.ok },
+        health_503: {
+          status: runtimeHealthFailed.status,
+          health: runtimeHealthFailed.health.status
+        },
+        public_502: {
+          status: runtimeBadGateway.status,
+          public_route: runtimeBadGateway.public_route.status
+        },
+        public_anonymous: {
+          status: runtimeAnonymousPublic.status,
+          public_route: runtimeAnonymousPublic.public_route.status
         }
       }
     },

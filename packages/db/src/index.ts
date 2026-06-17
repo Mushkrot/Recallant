@@ -4149,23 +4149,47 @@ export class RecallantDb {
               AND status = 'failed'
             ORDER BY created_at DESC
             LIMIT 1
-          ) AS latest_failure
+          ) AS latest_failure,
+          (
+            SELECT jsonb_build_object(
+              'status', status,
+              'error_code', error_code,
+              'provider', provider,
+              'model', model,
+              'metadata', metadata,
+              'created_at', created_at
+            )
+            FROM model_calls
+            WHERE project_id = $1
+              AND purpose = 'chunk_embedding'
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) AS latest_attempt
       `,
       [context.projectId]
     );
     const row = status.rows[0] ?? {};
     const pendingChunks = Number(row.pending_chunks ?? 0);
+    const recoveryCommand = `recallant recover-embeddings --project-id ${context.projectId} --limit 50`;
     return {
       project_id: context.projectId,
       active_chunks: Number(row.active_chunks ?? 0),
       embedded_chunks: Number(row.embedded_chunks ?? 0),
       pending_chunks: pendingChunks,
       latest_failure: row.latest_failure ?? null,
+      latest_attempt: row.latest_attempt ?? null,
       recovery_available: true,
-      recommendation:
-        pendingChunks > 0
-          ? `recallant recover-embeddings --project-id ${context.projectId} --limit 50`
-          : "No pending embeddings to recover."
+      recommendation: pendingChunks > 0 ? recoveryCommand : "No pending embeddings to recover.",
+      recovery: {
+        available: true,
+        recommended: pendingChunks > 0,
+        attempted: Boolean(row.latest_attempt),
+        latest_attempt: row.latest_attempt ?? null,
+        latest_failure: row.latest_failure ?? null,
+        command: pendingChunks > 0 ? recoveryCommand : null,
+        scope: "project",
+        default_limit: 50
+      }
     };
   }
 

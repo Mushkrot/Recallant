@@ -1,7 +1,9 @@
+import { once } from "node:events";
 import { mkdtemp, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { URL } from "node:url";
 
 const repoRoot = process.cwd();
@@ -39,6 +41,7 @@ function runDoctor(projectDir, serviceEnvFile, extraEnv = {}) {
         ...process.env,
         RECALLANT_DATABASE_URL: databaseUrl,
         RECALLANT_SERVICE_ENV_FILE: serviceEnvFile,
+        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
         RECALLANT_OLLAMA_URL: "http://127.0.0.1:1",
         ...extraEnv
       },
@@ -49,6 +52,38 @@ function runDoctor(projectDir, serviceEnvFile, extraEnv = {}) {
     throw new Error(`doctor failed (${result.status}): ${result.stderr}\n${result.stdout}`);
   }
   return { json: JSON.parse(result.stdout), raw: result.stdout };
+}
+
+async function runDoctorAsync(projectDir, serviceEnvFile, extraEnv = {}) {
+  const child = spawn(
+    process.execPath,
+    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        RECALLANT_DATABASE_URL: databaseUrl,
+        RECALLANT_SERVICE_ENV_FILE: serviceEnvFile,
+        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+        RECALLANT_OLLAMA_URL: "http://127.0.0.1:1",
+        ...extraEnv
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const [code] = await once(child, "close");
+  if (code !== 0) {
+    throw new Error(`doctor failed (${code}): ${stderr}\n${stdout}`);
+  }
+  return { json: JSON.parse(stdout), raw: stdout };
 }
 
 function assertRedacted(raw, forbiddenValues) {
@@ -111,6 +146,69 @@ assert(
   "doctor without service env file should remain backwards-compatible"
 );
 
+async function withAuthOrigin(callback) {
+  const server = createServer((_request, response) => {
+    response.writeHead(401, { "content-type": "text/plain" });
+    response.end("auth required");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Unable to allocate auth origin");
+  try {
+    return await callback(`http://127.0.0.1:${address.port}/review`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+const publicEnvDir = await mkdtemp(join(tmpdir(), "recallant-service-env-public-"));
+const publicEnv = join(publicEnvDir, "recallant.env");
+const adminEmail = "admin@example.invalid";
+const publicReadiness = await withAuthOrigin(async (originUrl) => {
+  await writeFile(
+    publicEnv,
+    [
+      `RECALLANT_DATABASE_URL=${databaseUrl}`,
+      "RECALLANT_PUBLIC_WORKBENCH_URL=https://recallant.example.invalid/review",
+      `RECALLANT_WORKBENCH_ORIGIN_URL=${originUrl}`,
+      "RECALLANT_CLOUDFLARE_MODE=enabled",
+      "RECALLANT_CLOUDFLARE_EDGE_AUTH=required",
+      `RECALLANT_ADMIN_EMAILS=${adminEmail}`
+    ].join("\n")
+  );
+  return runDoctorAsync(publicEnvDir, publicEnv, {
+    RECALLANT_PUBLIC_WORKBENCH_URL: "",
+    RECALLANT_WORKBENCH_ORIGIN_URL: "",
+    RECALLANT_CLOUDFLARE_MODE: "",
+    RECALLANT_CLOUDFLARE_EDGE_AUTH: "",
+    RECALLANT_ADMIN_EMAILS: ""
+  });
+});
+assert(
+  publicReadiness.json.service_env_profile?.production_env?.configured_keys?.includes(
+    "RECALLANT_PUBLIC_WORKBENCH_URL"
+  ),
+  "service env production keys did not include public Workbench URL"
+);
+assert(
+  publicReadiness.json.production_readiness?.public_workbench_readiness?.status === "auth_ready" &&
+    publicReadiness.json.production_readiness?.public_workbench_readiness?.ready === true,
+  `service-env supplied public readiness was not auth_ready: ${JSON.stringify(
+    publicReadiness.json.production_readiness?.public_workbench_readiness
+  )}`
+);
+assert(
+  publicReadiness.json.production_readiness?.production_env?.source === "explicit_env" &&
+    publicReadiness.json.production_readiness?.production_env?.configured_keys?.includes(
+      "RECALLANT_ADMIN_EMAILS"
+    ),
+  "production readiness did not report redacted service-env key metadata"
+);
+assertRedacted(publicReadiness.raw, [adminEmail, "recallant_dev_password"]);
+
 process.stdout.write(
   JSON.stringify(
     {
@@ -127,6 +225,13 @@ process.stdout.write(
       unconfigured: {
         status: plain.json.service_env_profile.status,
         ok: plain.json.service_env_profile.ok
+      },
+      service_env_public_readiness: {
+        status: publicReadiness.json.production_readiness.public_workbench_readiness.status,
+        ready: publicReadiness.json.production_readiness.public_workbench_readiness.ready,
+        source: publicReadiness.json.production_readiness.production_env.source,
+        configured_keys:
+          publicReadiness.json.production_readiness.production_env.configured_keys
       }
     },
     null,

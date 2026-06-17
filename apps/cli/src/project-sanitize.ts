@@ -99,9 +99,138 @@ async function readExistingConfig(projectDir: string) {
   }
 }
 
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function numberValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function plannedCount(local: Record<string, unknown> | undefined) {
+  return Array.isArray(local?.planned_changes) ? local.planned_changes.length : 0;
+}
+
+function targetRequestSource(input: {
+  explicitProjectId: string | null;
+  orphanLocalRequested: boolean;
+}) {
+  if (input.orphanLocalRequested) return "orphan_local_artifacts";
+  return input.explicitProjectId ? "--project-id" : "--project-dir";
+}
+
+function buildSanitizeReceipt(input: {
+  options: ProjectSanitizeOptions;
+  config: ProjectSanitizeConfig | null;
+  explicitProjectId: string | null;
+  databaseResult: Record<string, unknown>;
+  localCleanup: Record<string, unknown>;
+  orphanLocalRequested: boolean;
+}) {
+  const database = input.databaseResult;
+  const local = input.localCleanup;
+  const project = objectValue(database.project);
+  const plan = objectValue(database.plan);
+  const changes = objectValue(database.changes);
+  const resolution = objectValue(database.target_resolution);
+  const deleteRecords = objectValue(plan.delete_records);
+  const deidentifyRecords = objectValue(plan.deidentify_records);
+  const confirmation = objectValue(database.confirmation);
+  const erasureId = typeof database.erasure_id === "string" ? database.erasure_id : null;
+  const resolvedProjectId =
+    typeof resolution.resolved_project_id === "string"
+      ? resolution.resolved_project_id
+      : typeof project.project_id === "string"
+        ? project.project_id
+        : null;
+  const projectPath =
+    typeof project.primary_path === "string" ? project.primary_path : input.options.projectDir;
+  return {
+    target: {
+      requested_via: targetRequestSource({
+        explicitProjectId: input.explicitProjectId,
+        orphanLocalRequested: input.orphanLocalRequested
+      }),
+      matching_mode: String(resolution.resolved_by ?? "unknown"),
+      requested_project_id:
+        typeof resolution.requested_project_id === "string"
+          ? resolution.requested_project_id
+          : null,
+      requested_project_path:
+        typeof resolution.requested_project_path === "string"
+          ? resolution.requested_project_path
+          : null,
+      stale_project_id:
+        typeof resolution.stale_project_id === "string" ? resolution.stale_project_id : null,
+      resolved_project_id: resolvedProjectId,
+      project_id: resolvedProjectId,
+      project_path: projectPath,
+      local_project_dir: input.options.projectDir,
+      local_config_project_id: input.config?.project_id ?? null,
+      database_project_found: Boolean(project.project_id)
+    },
+    database_action: {
+      mode: input.options.mode,
+      status: String(database.status ?? "unknown"),
+      dry_run: Boolean(database.dry_run),
+      writes_database: Boolean(database.writes_database),
+      records_to_delete: Object.values(deleteRecords).reduce(
+        (total: number, value) => total + numberValue(value),
+        0
+      ),
+      records_to_deidentify: Object.values(deidentifyRecords).reduce(
+        (total: number, value) => total + numberValue(value),
+        0
+      ),
+      physically_deleted_records: numberValue(changes.physically_deleted_records),
+      deidentified_records: numberValue(changes.deidentified_records),
+      confirmation_required: Boolean(confirmation.required),
+      confirmation_token: typeof confirmation.token === "string" ? confirmation.token : null,
+      erasure_id: erasureId
+    },
+    local_action: {
+      included: input.options.includeLocal,
+      status: String(local.status ?? "unknown"),
+      dry_run: Boolean(local.dry_run),
+      writes_files: Boolean(local.writes_files),
+      local_only: Boolean(local.local_only),
+      planned_changes: plannedCount(local),
+      removed_paths: Array.isArray(local.removed_paths) ? local.removed_paths.map(String) : [],
+      updated_paths: Array.isArray(local.updated_paths) ? local.updated_paths.map(String) : []
+    },
+    retained_governance_receipt: {
+      planned_or_retained: input.options.mode === "purge" && !input.orphanLocalRequested,
+      retained: Boolean(erasureId),
+      redacted: input.options.mode === "purge",
+      table: "erasure_requests",
+      erasure_id: erasureId
+    },
+    cleanup_scope: {
+      operation: "remove_recallant_from_target_project",
+      not_product_repo_cleanup: true,
+      removes_recallant_database_records:
+        input.options.mode === "purge" && database.status === "purged",
+      disconnects_local_recallant_artifacts: Boolean(local.writes_files),
+      preserves_source_files: true,
+      preserves_secrets: true,
+      preserves_downloads: true,
+      preserves_dependencies: true,
+      refuses_unmarked_data: true
+    }
+  };
+}
+
 function textReport(result: Record<string, unknown>) {
   const database = result.database as Record<string, unknown> | undefined;
   const local = result.local_cleanup as Record<string, unknown> | undefined;
+  const receipt = objectValue(result.receipt);
+  const target = objectValue(receipt.target);
+  const databaseAction = objectValue(receipt.database_action);
+  const localAction = objectValue(receipt.local_action);
+  const cleanupScope = objectValue(receipt.cleanup_scope);
   const project = database?.project as Record<string, unknown> | null | undefined;
   const affected = database?.affected as Record<string, unknown> | undefined;
   const confirmation = database?.confirmation as Record<string, unknown> | undefined;
@@ -109,10 +238,16 @@ function textReport(result: Record<string, unknown>) {
   const lines = [
     `Recallant project sanitize: ${database?.status ?? result.status}`,
     `Mode: ${database?.mode ?? result.mode}`,
+    `Target source: ${String(target.requested_via ?? "unknown")}`,
+    `Target match: ${String(target.matching_mode ?? "unknown")}`,
+    `Resolved project id: ${String(target.resolved_project_id ?? "none")}`,
+    `Project path: ${String(target.project_path ?? result.project_dir)}`,
+    `Cleanup scope: ${String(cleanupScope.operation ?? "remove_recallant_from_target_project")}`,
+    `Product repo cleanup: ${cleanupScope.not_product_repo_cleanup ? "no" : "unknown"}`,
     `Project: ${project?.name ?? project?.project_id ?? "not found"}`,
     `Dry run: ${database?.dry_run ?? result.dry_run}`,
-    `Database writes: ${database?.writes_database ?? false}`,
-    `Local writes: ${local?.writes_files ?? false}`,
+    `Database action: ${databaseAction.status ?? database?.status ?? "unknown"}, writes=${database?.writes_database ?? false}`,
+    `Local action: ${localAction.status ?? local?.status ?? "unknown"}, writes=${local?.writes_files ?? false}`,
     `Affected: ${affected?.events ?? 0} events, ${affected?.chunks ?? 0} chunks, ${affected?.agent_memories ?? 0} memories`,
     `Deleted records: ${changes?.physically_deleted_records ?? 0}`
   ];
@@ -181,6 +316,14 @@ export async function runProjectSanitize(argv: readonly string[]) {
           : "Local cleanup disabled by --no-local.",
         warnings: []
       };
+  const receipt = buildSanitizeReceipt({
+    options,
+    config,
+    explicitProjectId,
+    databaseResult,
+    localCleanup,
+    orphanLocalRequested
+  });
 
   const result = {
     ok: (Boolean(databaseResult.ok) || orphanLocalRequested) && Boolean(localCleanup.ok),
@@ -195,6 +338,7 @@ export async function runProjectSanitize(argv: readonly string[]) {
     writes_files: Boolean(localCleanup.writes_files),
     local_only_cleanup: orphanLocalRequested,
     project_dir: options.projectDir,
+    receipt,
     database: databaseResult,
     local_cleanup: localCleanup,
     warnings: [

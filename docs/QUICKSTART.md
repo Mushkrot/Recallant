@@ -43,6 +43,8 @@ does not stage or commit project files, secrets, or data automatically.
 Expected success:
 
 - `Capture active: yes` after context read, memory write, checkpoint, and recall proof are present;
+- `Embedding recovery: current` or a bounded recovery/waiting status when local embeddings are
+  catching up;
 - a Workbench link with private/auth-required posture;
 - project visibility and review queue status.
 
@@ -103,8 +105,11 @@ mode. Dry-run is still the default:
 recallant project-sanitize --project-id <project-id> --mode purge --dry-run
 ```
 
-The dry-run prints affected database counts, local disconnect changes, retained governance receipt
-details, and an exact confirmation token. Confirmed purge requires that token:
+The dry-run prints a receipt with `target`, `database_action`, `local_action`,
+`retained_governance_receipt`, and `cleanup_scope`. The `target` block names whether the request
+came from `--project-id`, `--project-dir`, or orphan local artifacts, and `cleanup_scope` must say
+this is not Recallant product-repo cleanup. Confirmed purge requires the exact token printed in the
+dry-run:
 
 ```bash
 recallant project-sanitize --project-id <project-id> --mode purge --confirm-token "<token>"
