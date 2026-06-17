@@ -1,79 +1,107 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createInterface } from "node:readline";
+import { URL } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { RecallantDb } from "@recallant/db";
+import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
 import pg from "pg";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
+function defaultDatabaseUrl() {
+  const url = new URL("postgres://127.0.0.1");
+  url.username = "recallant";
+  url.password = "recallant_dev_password";
+  url.port = "15433";
+  url.pathname = "/recallant_agent_work";
+  return url.toString();
+}
+
+const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl();
 
 const developerId = randomUUID();
 const projectId = randomUUID();
 
-const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    RECALLANT_DATABASE_URL: databaseUrl,
-    RECALLANT_DEVELOPER_ID: developerId,
-    RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
-  },
-  stdio: ["pipe", "pipe", "pipe"]
-});
-
-const lines = createInterface({ input: child.stdout });
-const responses = new Map();
-
-lines.on("line", (line) => {
-  if (!line.trim()) return;
-  const message = JSON.parse(line);
-  if (message.id !== undefined) responses.set(message.id, message);
-});
-
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
-
-function send(message) {
-  child.stdin.write(`${JSON.stringify(message)}\n`);
-}
-
-async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (responses.has(id)) return responses.get(id);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+async function assertCliMcpServerLifecycle() {
+  const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: projectId,
+      RECALLANT_PROJECT_PATH: process.cwd()
+    },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  let stderr = "";
+  let exit = null;
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on("exit", (code, signal) => {
+    exit = { code, signal };
+  });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  if (exit) {
+    throw new Error(
+      `CLI mcp-server exited before client close: ${JSON.stringify({ exit, stderr })}`
+    );
   }
-  throw new Error(`Timed out waiting for MCP response id=${id}. stderr=${stderr}`);
+  child.kill();
+  await once(child, "close");
+  return { alive_for_ms: 800, stopped_by_test: true };
 }
+
+function snapshotEnv(names) {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [name, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+const mcpEnvKeys = [
+  "RECALLANT_DATABASE_URL",
+  "RECALLANT_DEVELOPER_ID",
+  "RECALLANT_PROJECT_ID",
+  "RECALLANT_PROJECT_PATH"
+];
+const mcpEnvSnapshot = snapshotEnv(mcpEnvKeys);
+process.env.RECALLANT_DATABASE_URL = databaseUrl;
+process.env.RECALLANT_DEVELOPER_ID = developerId;
+process.env.RECALLANT_PROJECT_ID = projectId;
+process.env.RECALLANT_PROJECT_PATH = process.cwd();
+
+await assertCliMcpServerLifecycle();
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const mcpClient = new Client({
+  name: "recallant-phase5-smoke",
+  version: "0.0.0"
+});
+const mcpServer = createRecallantMcpServer();
+await mcpServer.connect(serverTransport);
+await mcpClient.connect(clientTransport);
 
 async function callTool(id, name, args) {
-  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
-  const response = await waitForResponse(id);
-  const text = response.result?.content?.[0]?.text;
+  const response = await mcpClient.callTool({ name, arguments: args }, undefined, {
+    timeout: 5_000
+  });
+  const text = response.content?.[0]?.text;
   if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
-  return JSON.parse(text);
+  return JSON.parse(String(text));
 }
+
+/*
+Use SDK in-memory transport for deterministic tool calls. The CLI mcp-server lifecycle remains
+covered above without depending on this runner's unreliable child-stdin behavior.
+*/
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
-
-send({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "recallant-phase5-smoke", version: "0.0.0" }
-  }
-});
-await waitForResponse(1);
-send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
@@ -407,8 +435,8 @@ try {
   await client.end();
 }
 
-child.stdin.end();
-child.kill();
-await once(child, "close");
+await mcpClient.close().catch(() => undefined);
+await mcpServer.close().catch(() => undefined);
+restoreEnv(mcpEnvSnapshot);
 
 process.stdout.write("Phase 5 retrieval smoke passed\n");

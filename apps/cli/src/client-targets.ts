@@ -10,6 +10,7 @@ type McpServerConfig = {
       env: {
         RECALLANT_PROJECT_ID: string;
         RECALLANT_DEVELOPER_ID: string;
+        RECALLANT_PROJECT_PATH: string;
         RECALLANT_DATABASE_URL: string;
       };
     };
@@ -44,7 +45,11 @@ export function normalizeClientTarget(raw: string | undefined): ClientKind {
   );
 }
 
-export function mcpServerConfig(projectId: string, developerId: string): McpServerConfig {
+export function mcpServerConfig(
+  projectId: string,
+  developerId: string,
+  projectPath: string
+): McpServerConfig {
   return {
     mcpServers: {
       recallant: {
@@ -53,6 +58,7 @@ export function mcpServerConfig(projectId: string, developerId: string): McpServ
         env: {
           RECALLANT_PROJECT_ID: projectId,
           RECALLANT_DEVELOPER_ID: developerId,
+          RECALLANT_PROJECT_PATH: projectPath,
           RECALLANT_DATABASE_URL: "${RECALLANT_DATABASE_URL}"
         }
       }
@@ -113,7 +119,8 @@ export function codexMcpServerToml(config: McpServerConfig) {
   const recallant = config.mcpServers.recallant;
   const env = {
     RECALLANT_PROJECT_ID: recallant.env.RECALLANT_PROJECT_ID,
-    RECALLANT_DEVELOPER_ID: recallant.env.RECALLANT_DEVELOPER_ID
+    RECALLANT_DEVELOPER_ID: recallant.env.RECALLANT_DEVELOPER_ID,
+    RECALLANT_PROJECT_PATH: recallant.env.RECALLANT_PROJECT_PATH
   };
   return [
     "[mcp_servers.recallant]",
@@ -155,10 +162,11 @@ export function renderClientTargetConfig(
 export function clientTargetConfig(
   rawTarget: string | undefined,
   projectId: string,
-  developerId: string
+  developerId: string,
+  projectPath: string
 ): ClientTargetConfig {
   const target = normalizeClientTarget(rawTarget);
-  const mcp_config = mcpServerConfig(projectId, developerId);
+  const mcp_config = mcpServerConfig(projectId, developerId, projectPath);
   if (target === "codex") {
     return {
       target,
@@ -200,10 +208,11 @@ export function clientTargetConfig(
 export function connectClientTargetConfig(
   rawTarget: string | undefined,
   projectId: string,
-  developerId: string
+  developerId: string,
+  projectPath: string
 ): ClientTargetConfig {
   const target = normalizeClientTarget(rawTarget);
-  const mcp_config = mcpServerConfig(projectId, developerId);
+  const mcp_config = mcpServerConfig(projectId, developerId, projectPath);
   if (target === "cursor") {
     return {
       target,
@@ -216,7 +225,7 @@ export function connectClientTargetConfig(
       mcp_config
     };
   }
-  return clientTargetConfig(rawTarget, projectId, developerId);
+  return clientTargetConfig(rawTarget, projectId, developerId, projectPath);
 }
 
 export const generatedMcpConfigFiles = [

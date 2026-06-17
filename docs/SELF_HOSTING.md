@@ -94,6 +94,19 @@ After install:
 recallant doctor
 ```
 
+For production service profiles, configure the CLI runtime and the service manager to use the same
+private storage profile. `recallant doctor --format json` exposes a redacted
+`service_env_profile` check when `RECALLANT_SERVICE_ENV_FILE` is set. It compares safe database
+components and credential equality without printing raw passwords or full database URLs. Treat a
+`mismatch` status as a deployment-readiness warning before sending users to the public Workbench.
+
+For a public Workbench, keep the Recallant origin bound to a private localhost listener and put the
+public hostname behind an authenticated access provider. `recallant doctor --format json` reports
+`production_readiness.public_workbench_readiness` when a public Workbench URL, private origin URL, or
+Cloudflare Access profile is configured. A ready public UI means the private origin responds with an
+auth-required Workbench response and edge auth is required at the public access layer; an anonymous
+origin response or disabled edge auth is not public-ready.
+
 After attaching and connecting a project:
 
 ```bash
@@ -115,6 +128,21 @@ npm run public-quickstart:smoke
 Those smokes validate install-plan dry-runs, profile defaults, override handling, the installed CLI
 wrapper, and a fresh quickstart path in isolated temporary directories. The quickstart smoke runs
 the unified onboarding proof, including capture, readiness, recall, and Workbench outcome checks.
+Its `acceptance_report` is the release gate for the one-command user story: the report must be
+`pass`, or `pass_with_warnings` only when every warning is explicitly recoverable, such as local
+embeddings waiting for the configured model to come back online.
+
+Optional live-host acceptance should repeat the same story against one disposable project:
+
+1. Run `recallant onboard /path/to/disposable-project`.
+2. Confirm the output reports capture evidence, recall proof, and a private Workbench URL.
+3. Open the public Workbench URL through the configured access provider and verify the project
+   chooser shows the disposable project before opening its selected project view.
+4. Run `recallant doctor --project-dir /path/to/disposable-project --require-capture --format json`
+   and treat missing capture, service-env mismatch, origin-not-private, disabled edge auth, or
+   unexpected pending embeddings as release blockers unless the report classifies them as
+   recoverable warnings.
+
 The rollback smoke validates dry-run behavior, confirmed cleanup of marked disposable artifacts, and
 refusal to remove unmarked data directories:
 
@@ -141,6 +169,26 @@ still recommended before a release-candidate tag.
 Recallant is local-first. The local model route points at Ollama through
 `RECALLANT_OLLAMA_URL`, and `RECALLANT_EXPECTED_OLLAMA_MODELS` should list only models that are
 expected to be available from that local Ollama service.
+
+Chunk embeddings are fail-soft during local Ollama cold starts. Recallant retries transient Ollama
+embedding failures with bounded attempts and per-attempt timeouts, then leaves chunks `pending` if
+Ollama remains unavailable. The event and chunk stay recorded, and `model_calls.metadata` records the
+attempt count, retry count, transient failures, and final `UNAVAILABLE` outcome for diagnosis.
+When Ollama becomes healthy again, recover pending project embeddings without manual SQL:
+
+```bash
+recallant recover-embeddings --project-dir /path/to/project --limit 50
+```
+
+Use `--dry-run` to preview the bounded project-scoped batch. `recallant doctor --format json`
+reports `pending_embeddings.pending_chunks` and the recommended recovery command.
+
+Optional tuning variables:
+
+- `RECALLANT_OLLAMA_EMBED_MAX_ATTEMPTS` defaults to 3 and is capped at 5.
+- `RECALLANT_OLLAMA_EMBED_TIMEOUT_MS` defaults to 30000 and is capped at 120000 per attempt.
+- `RECALLANT_OLLAMA_EMBED_RETRY_DELAY_MS` defaults to 250 and is capped at 5000.
+- `RECALLANT_OLLAMA_EMBED_MAX_RETRY_DELAY_MS` defaults to 1000 and is capped at 10000.
 
 Do not add Ollama cloud tags such as `*:cloud` to the expected local model list. They are external
 model routes, even when they are launched through the Ollama CLI. Treat cloud or paid model use as a

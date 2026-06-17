@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
 import {
   createRecallantDbFromEnv,
   type AgentMemorySourceRefInput,
@@ -115,12 +115,61 @@ function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemoryS
   ];
 }
 
-async function syncProjectLog(payload: JsonObject) {
-  const projectPath = process.env.RECALLANT_PROJECT_PATH;
-  if (!projectPath) {
-    return { status: "skipped", reason: "RECALLANT_PROJECT_PATH is not configured" };
+async function resolveProjectPath(database?: ReturnType<typeof createRecallantDbFromEnv>) {
+  const envProjectPath = process.env.RECALLANT_PROJECT_PATH;
+  if (envProjectPath) return { path: envProjectPath, source: "env" };
+  const databaseProjectPath = database
+    ? await database.projectPrimaryPath(process.env.RECALLANT_PROJECT_ID)
+    : null;
+  if (databaseProjectPath) return { path: databaseProjectPath, source: "database_primary_path" };
+  return null;
+}
+
+async function syncProjectLog(
+  payload: JsonObject,
+  database?: ReturnType<typeof createRecallantDbFromEnv>
+) {
+  const resolvedProjectPath = await resolveProjectPath(database);
+  if (!resolvedProjectPath) {
+    return {
+      status: "skipped",
+      reason: "No project path is configured and no database primary path was found."
+    };
   }
-  const projectLogPath = join(projectPath, "PROJECT_LOG.md");
+  let projectRoot: string;
+  try {
+    projectRoot = await realpath(resolvedProjectPath.path);
+  } catch {
+    return {
+      status: "skipped",
+      reason: "Configured project path is not present.",
+      project_path: resolvedProjectPath.path,
+      project_path_source: resolvedProjectPath.source
+    };
+  }
+  const projectLogPath = join(projectRoot, "PROJECT_LOG.md");
+  let projectLogRealPath: string;
+  try {
+    projectLogRealPath = await realpath(projectLogPath);
+  } catch {
+    return {
+      status: "skipped",
+      reason: "PROJECT_LOG.md is not present in the attached project.",
+      project_path: projectRoot,
+      project_path_source: resolvedProjectPath.source,
+      path: projectLogPath
+    };
+  }
+  const relativePath = relative(projectRoot, projectLogRealPath);
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    return {
+      status: "skipped",
+      reason: "PROJECT_LOG.md resolved outside the attached project path.",
+      project_path: projectRoot,
+      project_path_source: resolvedProjectPath.source,
+      path: projectLogRealPath
+    };
+  }
   const openQuestions = Array.isArray(payload.open_questions)
     ? (payload.open_questions as unknown[]).map(String)
     : [];
@@ -134,19 +183,9 @@ Next step: ${String(payload.next_step ?? "")}
 
 ${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).join("\n") : "- None recorded."}
 `;
-  const fallback = `# Project Log
-
-${currentSession}
-
-${questions}
-
-## Notes
-
-- Long history belongs in Recallant memory, not this file.
-`;
-  let rendered = fallback;
+  let rendered = "";
   try {
-    const existing = await readFile(projectLogPath, "utf8");
+    const existing = await readFile(projectLogRealPath, "utf8");
     rendered = existing;
     const currentPattern = /## Current Session[\s\S]*?(?=\n## |$)/;
     rendered = currentPattern.test(rendered)
@@ -156,11 +195,22 @@ ${questions}
     rendered = questionsPattern.test(rendered)
       ? rendered.replace(questionsPattern, questions)
       : `${rendered.trimEnd()}\n\n${questions}`;
-  } catch {
-    return { status: "skipped", reason: "PROJECT_LOG.md is not present", path: projectLogPath };
+  } catch (error) {
+    return {
+      status: "skipped",
+      reason: error instanceof Error ? error.message : String(error),
+      project_path: projectRoot,
+      project_path_source: resolvedProjectPath.source,
+      path: projectLogRealPath
+    };
   }
-  await writeFile(projectLogPath, rendered);
-  return { status: "updated", path: projectLogPath };
+  await writeFile(projectLogRealPath, rendered);
+  return {
+    status: "updated",
+    path: projectLogRealPath,
+    project_path: projectRoot,
+    project_path_source: resolvedProjectPath.source
+  };
 }
 
 export const recallantTools: readonly RecallantToolDefinition[] = [
@@ -538,7 +588,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
-            repo_sync: await syncProjectLog(args.payload as JsonObject)
+            repo_sync: await syncProjectLog(args.payload as JsonObject, database)
           };
         } catch (error) {
           return {
@@ -872,7 +922,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         }
         let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
         try {
-          projectLogUpdate = await syncProjectLog(args.checkpoint_payload as JsonObject);
+          projectLogUpdate = await syncProjectLog(args.checkpoint_payload as JsonObject, database);
         } catch (error) {
           projectLogUpdate = {
             status: "failed",

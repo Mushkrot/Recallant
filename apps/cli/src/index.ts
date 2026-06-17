@@ -37,8 +37,8 @@ const memorySection = `## Memory (Recallant)
 - Before non-trivial work after session start: call \`memory_get_context_pack\` with the current task hint.
 - Use \`memory_search\` for raw evidence/chunks only when the context pack says more evidence is needed or the task changes.
 - Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
-- After meaningful progress: write meaningful events/memories through \`memory_append_event\` or \`memory_create_agent_memory\`, update checkpoint via \`memory_set_checkpoint\`, and update \`PROJECT_LOG.md\` to match fields \`current_focus\` and \`next_step\`.
-- On clear pause/exit/closeout intent: call \`memory_closeout\` and update \`PROJECT_LOG.md\` from the closeout payload.
+- After meaningful progress: write meaningful events/memories through \`memory_append_event\` or \`memory_create_agent_memory\`, then call \`memory_set_checkpoint\`; Recallant syncs the compact \`PROJECT_LOG.md\` fallback when it exists.
+- On clear pause/exit/closeout intent: call \`memory_closeout\`; rely on its repo-sync result instead of editing \`PROJECT_LOG.md\` by hand.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
 - Never paste secrets into memory tools.
 - If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
@@ -1652,6 +1652,8 @@ function doctorHumanReport(result: {
   client_connection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
   local_spool_status: Awaited<ReturnType<typeof getLocalSpoolStatus>>;
   local_model: Awaited<ReturnType<typeof checkOllama>>;
+  service_env_profile: Awaited<ReturnType<typeof checkServiceEnvProfile>>;
+  pending_embeddings: Awaited<ReturnType<typeof checkPendingEmbeddingStatus>>;
 }) {
   const summary = result.owner_summary;
   const localModelReady = result.local_model.reachable === true;
@@ -1680,6 +1682,8 @@ function doctorHumanReport(result: {
     `- Recallant CLI: installed`,
     `- Database: ${databaseStatus}`,
     `- Local model: ${localModelStatus}`,
+    `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
+    `- Service env profile: ${result.service_env_profile.status}`,
     `- Current project: ${summary.project_attached ? "attached" : "not attached"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
     `- Agent capture active: ${okNo(summary.actually_recording)}`,
@@ -1691,6 +1695,7 @@ function doctorHumanReport(result: {
     `- Project config: ${result.project_config.present ? result.project_config.path : "not found"}`,
     `- Client connection: ${summary.connection_status}`,
     `- Capture status: ${result.capture_readiness.status}`,
+    `- Embedding recovery: ${result.pending_embeddings.recommendation}`,
     `- Spool path: ${spool.spool_path}`,
     `- Spool replay dry-run: ${spool.replay_command}`,
     `- JSON output: recallant doctor --format json`
@@ -1908,7 +1913,12 @@ async function runInit(argv: readonly string[]) {
   const options = parseInitOptions(argv);
   const projectId = randomUUID();
   const developerId = process.env.RECALLANT_DEVELOPER_ID ?? randomUUID();
-  const targetConfig = clientTargetConfig(options.target, projectId, developerId);
+  const targetConfig = clientTargetConfig(
+    options.target,
+    projectId,
+    developerId,
+    options.projectDir
+  );
   const plan = {
     action: "init",
     target: targetConfig.target,
@@ -2287,6 +2297,35 @@ async function checkOllama() {
   }
 }
 
+async function checkPendingEmbeddingStatus(
+  database: ReturnType<typeof createRecallantDbFromEnv>,
+  projectDir: string
+) {
+  if (!database) {
+    return {
+      status: "unavailable",
+      pending_chunks: null,
+      recovery_available: false,
+      recommendation: "Configure Recallant storage before checking embedding recovery."
+    };
+  }
+  try {
+    const status = await database.pendingEmbeddingStatus({ project_path: projectDir });
+    return {
+      status: "ok",
+      ...status
+    };
+  } catch (error) {
+    return {
+      status: "unknown",
+      pending_chunks: null,
+      recovery_available: false,
+      recommendation: "Run recallant doctor again after storage is reachable.",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 async function checkDeploymentProfile() {
   const plannedPort = Number(process.env.RECALLANT_PORT ?? "3005");
   const inventoryFile =
@@ -2341,6 +2380,203 @@ async function checkDeploymentProfile() {
   };
 }
 
+function shortHash(value: unknown) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16)}`;
+}
+
+function defaultDatabasePort(protocol: string) {
+  return protocol === "postgres" || protocol === "postgresql" ? "5432" : null;
+}
+
+type DatabaseUrlProfile = {
+  configured: boolean;
+  status: "missing" | "parsed" | "invalid";
+  safe_fingerprint: string | null;
+  components: {
+    scheme: string;
+    host: string | null;
+    port: string | null;
+    database: string | null;
+    username_hash: string | null;
+  } | null;
+  credential: string | null;
+};
+
+function parseDatabaseUrlProfile(value: string | undefined): DatabaseUrlProfile {
+  if (!envValueIsSet(value)) {
+    return {
+      configured: false,
+      status: "missing",
+      safe_fingerprint: null,
+      components: null,
+      credential: null
+    };
+  }
+  try {
+    const parsed = new URL(String(value));
+    const scheme = parsed.protocol.replace(/:$/, "");
+    const username = parsed.username ? decodeURIComponent(parsed.username) : "";
+    const host = parsed.hostname || null;
+    const port = parsed.port || defaultDatabasePort(scheme);
+    const database = parsed.pathname
+      ? decodeURIComponent(parsed.pathname.replace(/^\/+/, "")) || null
+      : null;
+    const components = {
+      scheme,
+      host,
+      port,
+      database,
+      username_hash: username ? shortHash({ username }) : null
+    };
+    return {
+      configured: true,
+      status: "parsed",
+      safe_fingerprint: shortHash(components),
+      components,
+      credential: parsed.password ? decodeURIComponent(parsed.password) : null
+    };
+  } catch {
+    return {
+      configured: true,
+      status: "invalid",
+      safe_fingerprint: null,
+      components: null,
+      credential: null
+    };
+  }
+}
+
+function publicDatabaseProfile(profile: DatabaseUrlProfile) {
+  return {
+    configured: profile.configured,
+    status: profile.status,
+    safe_fingerprint: profile.safe_fingerprint,
+    components: profile.components
+  };
+}
+
+function parseEnvFileContent(content: string) {
+  const values: Record<string, string> = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+    const [rawKey, ...rawValueParts] = trimmed.split("=");
+    let key = rawKey?.trim() ?? "";
+    if (key.startsWith("export ")) key = key.slice("export ".length).trim();
+    if (!key) continue;
+    values[key] = parseEnvValue(rawValueParts.join("="));
+  }
+  return values;
+}
+
+function configuredServiceEnvFile() {
+  if (envValueIsSet(process.env.RECALLANT_SERVICE_ENV_FILE)) {
+    return {
+      source_env_var: "RECALLANT_SERVICE_ENV_FILE",
+      path: process.env.RECALLANT_SERVICE_ENV_FILE as string
+    };
+  }
+  if (envValueIsSet(process.env.RECALLANT_SYSTEMD_ENV_FILE)) {
+    return {
+      source_env_var: "RECALLANT_SYSTEMD_ENV_FILE",
+      path: process.env.RECALLANT_SYSTEMD_ENV_FILE as string
+    };
+  }
+  return null;
+}
+
+function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrlProfile) {
+  const differences: string[] = [];
+  if (!cli.components || !service.components) return differences;
+  if (cli.components.scheme !== service.components.scheme) differences.push("scheme");
+  if (cli.components.username_hash !== service.components.username_hash)
+    differences.push("username");
+  if (cli.components.host !== service.components.host) differences.push("host");
+  if (cli.components.port !== service.components.port) differences.push("port");
+  if (cli.components.database !== service.components.database) differences.push("database");
+  if (cli.credential !== service.credential) differences.push("credential");
+  return differences;
+}
+
+async function checkServiceEnvProfile() {
+  const configured = configuredServiceEnvFile();
+  const cliProfile = parseDatabaseUrlProfile(process.env.RECALLANT_DATABASE_URL);
+  if (!configured) {
+    return {
+      configured: false,
+      status: "not_configured",
+      source_env_var: null,
+      service_env_file: { configured: false, present: false },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: null,
+      differences: [] as string[],
+      credential_match: null,
+      ok: true,
+      warnings: [] as string[]
+    };
+  }
+
+  const content = await readOptional(configured.path);
+  if (content === null) {
+    return {
+      configured: true,
+      status: "service_env_file_unreadable_or_missing",
+      source_env_var: configured.source_env_var,
+      service_env_file: { configured: true, present: false },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: null,
+      differences: [] as string[],
+      credential_match: null,
+      ok: false,
+      warnings: ["Configured service env file is missing or unreadable."]
+    };
+  }
+
+  const serviceEnv = parseEnvFileContent(content);
+  const serviceProfile = parseDatabaseUrlProfile(serviceEnv.RECALLANT_DATABASE_URL);
+  if (cliProfile.status !== "parsed" || serviceProfile.status !== "parsed") {
+    const status =
+      cliProfile.status !== "parsed"
+        ? "cli_database_url_missing_or_invalid"
+        : "service_database_url_missing_or_invalid";
+    return {
+      configured: true,
+      status,
+      source_env_var: configured.source_env_var,
+      service_env_file: { configured: true, present: true },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: publicDatabaseProfile(serviceProfile),
+      differences: [] as string[],
+      credential_match: null,
+      ok: false,
+      warnings: [
+        cliProfile.status !== "parsed"
+          ? "CLI database profile is missing or invalid."
+          : "Service env database profile is missing or invalid."
+      ]
+    };
+  }
+
+  const differences = serviceProfileDifferences(cliProfile, serviceProfile);
+  const aligned = differences.length === 0;
+  return {
+    configured: true,
+    status: aligned ? "aligned" : "mismatch",
+    source_env_var: configured.source_env_var,
+    service_env_file: { configured: true, present: true },
+    cli_database: publicDatabaseProfile(cliProfile),
+    service_database: publicDatabaseProfile(serviceProfile),
+    differences,
+    credential_match: cliProfile.credential === serviceProfile.credential,
+    ok: aligned,
+    warnings: aligned
+      ? ([] as string[])
+      : [
+          "CLI and service env database profiles differ; align them before treating the public Workbench origin as production-ready."
+        ]
+  };
+}
+
 function systemctlValue(args: readonly string[]) {
   const result = spawnSync("systemctl", [...args], { encoding: "utf8" });
   if (result.error || result.status !== 0) return null;
@@ -2389,10 +2625,188 @@ async function latestBackupVerificationStatus() {
   }
 }
 
-async function checkProductionReadiness(postgresReachable: boolean, projectDir: string) {
-  const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
+function publicWorkbenchAccessConfig() {
   const cloudflareMode = process.env.RECALLANT_CLOUDFLARE_MODE ?? "disabled";
   const edgeAuth = process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH ?? "disabled";
+  const adminEmailCount = (
+    process.env.RECALLANT_ADMIN_EMAILS ??
+    process.env.RECALLANT_ADMIN_EMAIL ??
+    ""
+  )
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean).length;
+  return {
+    mode: cloudflareMode,
+    edge_auth_required: edgeAuth === "required",
+    admin_email_count: adminEmailCount,
+    ok: cloudflareMode === "enabled" && edgeAuth === "required" && adminEmailCount > 0
+  };
+}
+
+function localhostOriginUrl(raw: string | null, plannedPort: number) {
+  const value = raw ?? `http://127.0.0.1:${plannedPort}/review`;
+  try {
+    const parsed = new URL(value);
+    if (parsed.pathname === "/" || parsed.pathname === "") parsed.pathname = "/review";
+    const localHost =
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "::1";
+    return {
+      url: parsed.toString(),
+      host: parsed.hostname,
+      local_only: localHost,
+      valid: true
+    };
+  } catch {
+    return {
+      url: null,
+      host: null,
+      local_only: false,
+      valid: false
+    };
+  }
+}
+
+async function checkPublicWorkbenchReadiness(plannedPort: number) {
+  const access = publicWorkbenchAccessConfig();
+  const publicUrl =
+    process.env.RECALLANT_PUBLIC_WORKBENCH_URL ?? process.env.RECALLANT_PUBLIC_URL ?? null;
+  const originConfigured = process.env.RECALLANT_WORKBENCH_ORIGIN_URL ?? null;
+  const shouldCheck =
+    envValueIsSet(publicUrl ?? undefined) ||
+    envValueIsSet(originConfigured ?? undefined) ||
+    access.mode === "enabled";
+  const origin = localhostOriginUrl(originConfigured, plannedPort);
+
+  if (!shouldCheck) {
+    return {
+      configured: false,
+      status: "not_configured",
+      ready: false,
+      public_url_configured: false,
+      cloudflare_access: access,
+      origin: {
+        configured: false,
+        local_only: origin.local_only,
+        status: "not_checked",
+        http_status: null,
+        error: null
+      },
+      operator_action:
+        "Configure the public Workbench URL and protected private origin before claiming public UI readiness."
+    };
+  }
+
+  if (!origin.valid || !origin.url) {
+    return {
+      configured: true,
+      status: "invalid_origin_url",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: false,
+        status: "invalid_url",
+        http_status: null,
+        error: "invalid_origin_url"
+      },
+      operator_action: "Fix the configured private Workbench origin URL."
+    };
+  }
+
+  if (!origin.local_only) {
+    return {
+      configured: true,
+      status: "origin_not_private",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: false,
+        status: "not_localhost",
+        http_status: null,
+        error: null
+      },
+      operator_action:
+        "Keep the Workbench origin on a private localhost listener and put Cloudflare Access in front of it."
+    };
+  }
+
+  const timeout = AbortSignal.timeout(1200);
+  try {
+    const response = await fetch(origin.url, {
+      redirect: "manual",
+      signal: timeout
+    });
+    const originStatus =
+      response.status === 401 || response.status === 403
+        ? "auth_required"
+        : response.status >= 300 && response.status < 400
+          ? "redirect"
+          : response.status >= 200 && response.status < 300
+            ? "anonymous_access"
+            : "unexpected_status";
+    const authRequired = originStatus === "auth_required" || originStatus === "redirect";
+    const ready = authRequired && access.ok;
+    return {
+      configured: true,
+      status: ready
+        ? "auth_ready"
+        : !access.ok
+          ? "cloudflare_access_not_required"
+          : originStatus === "anonymous_access"
+            ? "origin_allows_anonymous_access"
+            : "origin_unexpected_status",
+      ready,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: originStatus,
+        http_status: response.status,
+        error: null
+      },
+      operator_action: ready
+        ? "Public Workbench readiness is satisfied when users authenticate through the protected public URL."
+        : !access.ok
+          ? "Require Cloudflare Access edge auth and configure an admin allowlist for the public Workbench."
+          : originStatus === "anonymous_access"
+            ? "Require Workbench authentication at the private origin before public exposure."
+            : "Repair the private Workbench origin response before claiming public readiness."
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      status: "origin_unreachable",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: "down",
+        http_status: null,
+        error: error instanceof Error ? error.message : String(error)
+      },
+      operator_action: "Repair the private Workbench origin that serves the protected public route."
+    };
+  }
+}
+
+async function checkProductionReadiness(
+  postgresReachable: boolean,
+  projectDir: string,
+  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>
+) {
+  const bindHost = process.env.RECALLANT_HOST ?? "127.0.0.1";
+  const publicWorkbenchReadiness = await checkPublicWorkbenchReadiness(
+    Number(process.env.RECALLANT_PORT ?? "3005")
+  );
   const envBackupTimerEnabled =
     process.env.RECALLANT_BACKUP_TIMER_ENABLED === "true" ||
     process.env.RECALLANT_BACKUP_TIMER_STATUS === "enabled";
@@ -2453,19 +2867,8 @@ async function checkProductionReadiness(postgresReachable: boolean, projectDir: 
       required: true,
       command: "npm run mcp:smoke"
     },
-    review_ui_cloudflare_access: {
-      required: true,
-      mode: cloudflareMode,
-      edge_auth_required: edgeAuth === "required",
-      admin_email_count: (
-        process.env.RECALLANT_ADMIN_EMAILS ??
-        process.env.RECALLANT_ADMIN_EMAIL ??
-        ""
-      )
-        .split(",")
-        .map((email) => email.trim())
-        .filter(Boolean).length
-    },
+    review_ui_cloudflare_access: publicWorkbenchReadiness.cloudflare_access,
+    public_workbench_readiness: publicWorkbenchReadiness,
     localhost_only_origin: {
       bind_host: bindHost,
       ok: localhostOnlyOrigin
@@ -2483,11 +2886,17 @@ async function checkProductionReadiness(postgresReachable: boolean, projectDir: 
     unintended_paid_api_success_calls_30d: unintendedPaidApiSuccessCalls30d,
     no_unintended_paid_api_use:
       unintendedPaidApiSuccessCalls30d === null ? null : unintendedPaidApiSuccessCalls30d === 0,
+    service_env_profile: {
+      required_when_configured: true,
+      status: serviceEnvProfile.status,
+      ok: serviceEnvProfile.ok,
+      differences: serviceEnvProfile.differences
+    },
     ready:
       postgresReachable &&
       localhostOnlyOrigin &&
-      cloudflareMode === "enabled" &&
-      edgeAuth === "required" &&
+      serviceEnvProfile.ok &&
+      publicWorkbenchReadiness.ready &&
       backupTimer.enabled &&
       latestBackupVerification.ok &&
       deploymentProjectRows !== null &&
@@ -2516,6 +2925,8 @@ async function runDoctor(argv: readonly string[]) {
     const captureReadiness = await checkCaptureReadiness({ projectDir, database });
     const clientConnection = await clientConnectionReadiness(projectDir);
     const localSpoolStatus = await getLocalSpoolStatus(argv);
+    const serviceEnvProfile = await checkServiceEnvProfile();
+    const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(database, projectDir);
     const result = {
       ...describeCliBoundary(),
       owner_summary: doctorOwnerSummary({
@@ -2537,6 +2948,8 @@ async function runDoctor(argv: readonly string[]) {
       client_connection: clientConnection,
       local_spool_status: localSpoolStatus,
       local_model: await checkOllama(),
+      pending_embeddings: pendingEmbeddingStatus,
+      service_env_profile: serviceEnvProfile,
       model_routes: {
         local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
         active_agent: {
@@ -2599,7 +3012,11 @@ async function runDoctor(argv: readonly string[]) {
         starts_local_services: false
       },
       deployment_profile: await checkDeploymentProfile(),
-      production_readiness: await checkProductionReadiness(postgres.reachable, projectDir),
+      production_readiness: await checkProductionReadiness(
+        postgres.reachable,
+        projectDir,
+        serviceEnvProfile
+      ),
       deployment_notes: [
         "Set RECALLANT_SERVER_INVENTORY_FILE before service start.",
         "Set RECALLANT_SECURITY_BASELINE_PATH before public exposure."
@@ -2615,6 +3032,52 @@ async function runDoctor(argv: readonly string[]) {
     if (database) {
       await database.close();
     }
+  }
+}
+
+function recoverEmbeddingsHumanReport(result: Record<string, unknown>) {
+  const status = String(result.status ?? "unknown");
+  const lines = [
+    "Recallant embedding recovery",
+    "",
+    `Status: ${status}`,
+    `Project: ${String(result.project_id ?? "unknown")}`,
+    `Limit: ${String(result.limit ?? "unknown")}`,
+    `Attempted chunks: ${String(result.attempted_chunks ?? result.eligible_chunks ?? 0)}`,
+    `Recovered chunks: ${String(result.recovered_chunks ?? 0)}`,
+    `Remaining pending: ${String(result.remaining_pending ?? result.pending_before ?? "unknown")}`
+  ];
+  if (result.warning) lines.push(`Warning: ${String(result.warning)}`);
+  lines.push("", "JSON output: recallant recover-embeddings --format json");
+  return `${lines.join("\n")}\n`;
+}
+
+async function runRecoverEmbeddings(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for embedding recovery");
+  const projectId = parseFlag(argv, "--project-id") ?? null;
+  const projectDir = projectId ? null : resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const rawLimit = parseFlag(argv, "--limit");
+  const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error("--limit must be a positive integer");
+  }
+  try {
+    const result = await database.recoverPendingEmbeddings({
+      project_id: projectId,
+      project_path: projectDir,
+      limit,
+      dry_run: argv.includes("--dry-run")
+    });
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : recoverEmbeddingsHumanReport(result)
+    );
+  } finally {
+    await database.close();
   }
 }
 
@@ -4425,7 +4888,7 @@ async function runConnect(argv: readonly string[]) {
   const developerId = await resolveConnectDeveloperId({
     projectId: config.project_id
   });
-  const targetConfig = connectClientTargetConfig(target, config.project_id, developerId);
+  const targetConfig = connectClientTargetConfig(target, config.project_id, developerId, dir);
   if (
     globalConfigRequested &&
     (confirmGlobalWrite || restoreGlobalBackup) &&
@@ -5550,7 +6013,15 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "recover-embeddings") {
+    return [
+      "Usage: recallant recover-embeddings [--project-id <id>|--project-dir <dir>] [--limit <n>] [--dry-run] [--format json|text]",
+      "",
+      "Recover pending project chunk embeddings with a bounded local-model pass. This is project-scoped by default and does not reindex the whole database.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|recover-embeddings|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -5580,6 +6051,7 @@ async function main(argv: readonly string[]) {
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
   if (command === "onboard") return runOnboard(argv);
+  if (command === "recover-embeddings") return runRecoverEmbeddings(argv);
   if (command === "project-sanitize" || command === "sanitize" || command === "project-purge")
     return runProjectSanitize(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);

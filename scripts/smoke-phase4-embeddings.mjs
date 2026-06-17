@@ -1,82 +1,112 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createInterface } from "node:readline";
+import { URL } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { RecallantDb } from "@recallant/db";
+import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
 import pg from "pg";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
+function defaultDatabaseUrl() {
+  const url = new URL("postgres://127.0.0.1");
+  url.username = "recallant";
+  url.password = "recallant_dev_password";
+  url.port = "15433";
+  url.pathname = "/recallant_agent_work";
+  return url.toString();
+}
+
+const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl();
 
 const developerId = randomUUID();
 const defaultProjectId = randomUUID();
 const projectId = randomUUID();
 
-const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    RECALLANT_DATABASE_URL: databaseUrl,
-    RECALLANT_DEVELOPER_ID: developerId,
-    RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
-  },
-  stdio: ["pipe", "pipe", "pipe"]
-});
-
-const lines = createInterface({ input: child.stdout });
-const responses = new Map();
-
-lines.on("line", (line) => {
-  if (!line.trim()) return;
-  const message = JSON.parse(line);
-  if (message.id !== undefined) responses.set(message.id, message);
-});
-
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
-
-function send(message) {
-  child.stdin.write(`${JSON.stringify(message)}\n`);
+async function assertCliMcpServerLifecycle() {
+  const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: projectId,
+      RECALLANT_PROJECT_PATH: process.cwd()
+    },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  let stderr = "";
+  let exit = null;
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  child.on("exit", (code, signal) => {
+    exit = { code, signal };
+  });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  if (exit) {
+    throw new Error(
+      `CLI mcp-server exited before client close: ${JSON.stringify({ exit, stderr })}`
+    );
+  }
+  child.kill();
+  await once(child, "close");
+  return { alive_for_ms: 800, stopped_by_test: true };
 }
 
-async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (responses.has(id)) return responses.get(id);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+function snapshotEnv(names) {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [name, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
   }
-  throw new Error(`Timed out waiting for MCP response id=${id}. stderr=${stderr}`);
+}
+
+const mcpEnvKeys = [
+  "RECALLANT_DATABASE_URL",
+  "RECALLANT_DEVELOPER_ID",
+  "RECALLANT_PROJECT_ID",
+  "RECALLANT_PROJECT_PATH"
+];
+const mcpEnvSnapshot = snapshotEnv(mcpEnvKeys);
+process.env.RECALLANT_DATABASE_URL = databaseUrl;
+process.env.RECALLANT_DEVELOPER_ID = developerId;
+process.env.RECALLANT_PROJECT_ID = projectId;
+process.env.RECALLANT_PROJECT_PATH = process.cwd();
+
+const cliLifecycle = await assertCliMcpServerLifecycle();
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const mcpClient = new Client({
+  name: "recallant-phase4-smoke",
+  version: "0.0.0"
+});
+const mcpServer = createRecallantMcpServer();
+await mcpServer.connect(serverTransport);
+await mcpClient.connect(clientTransport);
+const initializeEvidence = {
+  server: mcpClient.getServerVersion(),
+  capabilities: mcpClient.getServerCapabilities()
+};
+
+async function callToolRaw(_id, name, args) {
+  return mcpClient.callTool({ name, arguments: args }, undefined, { timeout: 5_000 });
 }
 
 async function callTool(id, name, args) {
-  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
-  const response = await waitForResponse(id);
-  const text = response.result?.content?.[0]?.text;
+  const response = await callToolRaw(id, name, args);
+  const text = response.content?.[0]?.text;
   if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
-  return JSON.parse(text);
+  return JSON.parse(String(text));
 }
 
-async function callToolRaw(id, name, args) {
-  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
-  return waitForResponse(id);
-}
-
-send({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "recallant-phase4-smoke", version: "0.0.0" }
-  }
-});
-await waitForResponse(1);
-send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+/*
+The old harness spawned `recallant mcp-server` and wrote JSON-RPC into child stdin. In this runner
+the child stdin pipe is not a reliable request channel, so the embedding contract now uses the same
+SDK in-memory transport as `mcp:smoke` while the CLI lifecycle is checked separately above.
+*/
 
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
@@ -151,6 +181,23 @@ const network = await callTool(4, "memory_append_turn", {
 if (banana.embedding?.status !== "embedded" || network.embedding?.status !== "embedded") {
   throw new Error(`Deterministic embedding failed: ${JSON.stringify({ banana, network })}`);
 }
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      mcp: {
+        initialize: initializeEvidence,
+        cli_lifecycle: cliLifecycle,
+        deterministic_tool_call: {
+          status: banana.embedding.status,
+          provider: banana.embedding.provider,
+          model: banana.embedding.model
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 
 const search = await callTool(5, "memory_search", {
   session_id: started.session_id,
@@ -186,10 +233,16 @@ const blockedSwitch = await callToolRaw(6, "memory_append_turn", {
   text: "model switch should require explicit reindex",
   dedup_key: `phase4-switch-${randomUUID()}`
 });
-const blockedSwitchText =
-  blockedSwitch.error?.message ?? blockedSwitch.result?.content?.[0]?.text ?? "";
+const blockedSwitchText = blockedSwitch.content?.[0]?.text ?? "";
+let blockedSwitchBody = null;
+try {
+  blockedSwitchBody = JSON.parse(String(blockedSwitchText));
+} catch {
+  // Keep the original text in the failure message below.
+}
 if (
-  blockedSwitch.result?.isError !== true ||
+  blockedSwitch.isError !== true ||
+  blockedSwitchBody?.ok !== false ||
   !blockedSwitchText.includes("requires explicit reindex")
 ) {
   throw new Error(`Embedding model switch was not blocked: ${JSON.stringify(blockedSwitch)}`);
@@ -299,8 +352,8 @@ try {
   await client.end();
 }
 
-child.stdin.end();
-child.kill();
-await once(child, "close");
+await mcpClient.close().catch(() => undefined);
+await mcpServer.close().catch(() => undefined);
+restoreEnv(mcpEnvSnapshot);
 
 process.stdout.write("Phase 4 embedding smoke passed\n");

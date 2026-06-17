@@ -53,6 +53,15 @@ directories:
 npm run public-quickstart:smoke
 ```
 
+That smoke prints an `acceptance_report` for the beginner path. A release-ready run means:
+
+- `status: "pass"`: onboarding, Codex MCP config, hook kit, capture-active doctor, context pack
+  recall, checkpoint fallback, Workbench navigation, embedding baseline, and public UI readiness
+  fixtures all passed;
+- `status: "pass_with_warnings"`: no blocking failure occurred, but a recoverable condition such as
+  pending local embeddings needs attention;
+- `status: "fail"`: at least one required proof is missing, so the one-command path is not ready.
+
 ## 3. If Onboarding Stops
 
 If storage is missing in an interactive terminal, onboarding asks whether to set up local single-user

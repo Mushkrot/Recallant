@@ -473,7 +473,39 @@ try {
     }
   }
 
-  const html = await fetch(`${baseUrl}/review`, {
+  const chooser = await fetch(`${baseUrl}/review?view=review`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const chooserText = await chooser.text();
+  const chooserRequired = [
+    "Project chooser",
+    "Choose a memory space",
+    "Selecting a space opens the requested Workbench view for that project.",
+    `href="/review?project_id=${projectId}&amp;view=review"`,
+    projectId.slice(0, 8),
+    process.cwd(),
+    "Primary path",
+    "Short id",
+    "Personal Operations UI Smoke",
+    "Registered only"
+  ];
+  const chooserMissing = chooserRequired.filter((marker) => !chooserText.includes(marker));
+  const chooserProjectCaptureStatus = ["Interrupted", "Capture active", "Started, not complete"].some(
+    (marker) => chooserText.includes(marker)
+  );
+  if (
+    chooser.status !== 200 ||
+    chooserMissing.length > 0 ||
+    !chooserProjectCaptureStatus ||
+    chooserText.includes('id="ask-recallant"') ||
+    chooserText.includes('id="command-center"')
+  ) {
+    throw new Error(
+      `Project chooser smoke failed: ${chooser.status}; missing ${JSON.stringify(chooserMissing)}; captureStatus=${chooserProjectCaptureStatus}; ${chooserText.slice(0, 900)}`
+    );
+  }
+
+  const html = await fetch(`${baseUrl}/review?project_id=${projectId}`, {
     headers: { authorization: `Bearer ${token}` }
   });
   const htmlText = await html.text();
@@ -573,6 +605,9 @@ try {
     "System setting",
     "Ask Recallant",
     'id="ask-recallant"',
+    "Selected project",
+    `id ${projectId.slice(0, 8)}`,
+    process.cwd(),
     "Agent Readiness",
     "Current Recallant signals",
     "Interrupted",

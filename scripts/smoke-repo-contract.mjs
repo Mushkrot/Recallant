@@ -1,20 +1,54 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
+import { URL } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { RecallantDb } from "@recallant/db";
+import {
+  connectClientTargetConfig,
+  renderClientTargetConfig
+} from "../apps/cli/dist/client-targets.js";
+import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
 
+function defaultDatabaseUrl() {
+  const url = new URL("postgres://127.0.0.1");
+  url.username = "recallant";
+  url.password = "recallant_dev_password";
+  url.port = "15433";
+  url.pathname = "/recallant_agent_work";
+  return url.toString();
+}
+
+function snapshotEnv(names) {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [name, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+async function callTool(client, name, args) {
+  const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 5_000 });
+  const text = response.content?.[0]?.text;
+  if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
+  return JSON.parse(String(text));
+}
+
+const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl();
+const developerId = randomUUID();
+const projectId = randomUUID();
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-repo-contract-"));
 const projectLogPath = join(projectDir, "PROJECT_LOG.md");
-await writeFile(
-  projectLogPath,
-  `# Project Log
+const projectLogBefore = `# Project Log
 
 ## Current Session
 
@@ -29,70 +63,56 @@ Next step: old step
 ## Notes
 
 - Preserve this note.
-`
+`;
+await writeFile(projectLogPath, projectLogBefore);
+
+const generatedConfig = renderClientTargetConfig(
+  null,
+  connectClientTargetConfig("codex", projectId, developerId, projectDir)
+);
+assert(
+  generatedConfig.includes("RECALLANT_PROJECT_PATH") && generatedConfig.includes(projectDir),
+  `Generated MCP config did not include project path: ${generatedConfig}`
 );
 
-const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    RECALLANT_DATABASE_URL: databaseUrl,
-    RECALLANT_DEVELOPER_ID: randomUUID(),
-    RECALLANT_PROJECT_ID: randomUUID(),
-    RECALLANT_PROJECT_PATH: projectDir
-  },
-  stdio: ["pipe", "pipe", "pipe"]
+const setupDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId,
+  projectPath: projectDir
 });
+await setupDb.ensureProject(projectDir);
+await setupDb.close();
 
-const lines = createInterface({ input: child.stdout });
-const responses = new Map();
-lines.on("line", (line) => {
-  if (!line.trim()) return;
-  const message = JSON.parse(line);
-  if (message.id !== undefined) responses.set(message.id, message);
+const envSnapshot = snapshotEnv([
+  "RECALLANT_DATABASE_URL",
+  "RECALLANT_DEVELOPER_ID",
+  "RECALLANT_PROJECT_ID",
+  "RECALLANT_PROJECT_PATH"
+]);
+process.env.RECALLANT_DATABASE_URL = databaseUrl;
+process.env.RECALLANT_DEVELOPER_ID = developerId;
+process.env.RECALLANT_PROJECT_ID = projectId;
+delete process.env.RECALLANT_PROJECT_PATH;
+
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+const client = new Client({
+  name: "recallant-repo-contract-smoke",
+  version: "0.0.0"
 });
+const server = createRecallantMcpServer();
 
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-  stderr += chunk.toString();
-});
-
-function send(message) {
-  child.stdin.write(`${JSON.stringify(message)}\n`);
-}
-
-async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (responses.has(id)) return responses.get(id);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for MCP response id=${id}. stderr=${stderr}`);
-}
-
-async function callTool(id, name, args) {
-  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
-  const response = await waitForResponse(id);
-  const text = response.result?.content?.[0]?.text;
-  if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
-  return JSON.parse(text);
-}
-
+let checkpointSet;
+let checkpointGet;
+let closeout;
+let projectLogAfterCheckpoint;
+let projectLogAfterCloseout;
+let absentLogSet;
 try {
-  send({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "recallant-repo-contract-smoke", version: "0.0.0" }
-    }
-  });
-  await waitForResponse(1);
-  send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
 
-  const started = await callTool(2, "memory_start_session", {
+  const started = await callTool(client, "memory_start_session", {
     client_kind: "codex",
     client_version: "smoke",
     project_path: projectDir,
@@ -106,27 +126,30 @@ try {
     next_step: "continue implementation",
     open_questions: ["How often should async sync retry?"]
   };
-  const set = await callTool(3, "memory_set_checkpoint", { payload: checkpoint });
-  if (set.ok !== true || set.repo_sync?.status !== "updated") {
-    throw new Error(`Checkpoint repo sync failed: ${JSON.stringify(set)}`);
-  }
-  const get = await callTool(4, "memory_get_checkpoint", {});
-  if (
-    get.payload?.current_focus !== checkpoint.current_focus ||
-    get.payload?.next_step !== checkpoint.next_step
-  ) {
-    throw new Error(`Checkpoint readback failed: ${JSON.stringify(get)}`);
-  }
-  const projectLog = await readFile(projectLogPath, "utf8");
-  if (
-    !projectLog.includes("Current focus: repo checkpoint mirror") ||
-    !projectLog.includes("Next step: continue implementation") ||
-    !projectLog.includes("- How often should async sync retry?") ||
-    !projectLog.includes("Next step: continue implementation\n\n## Open Questions") ||
-    !projectLog.includes("- Preserve this note.")
-  ) {
-    throw new Error(`PROJECT_LOG.md was not synced correctly:\n${projectLog}`);
-  }
+  checkpointSet = await callTool(client, "memory_set_checkpoint", { payload: checkpoint });
+  assert(
+    checkpointSet.ok === true &&
+      checkpointSet.repo_sync?.status === "updated" &&
+      checkpointSet.repo_sync?.project_path_source === "database_primary_path",
+    `Checkpoint repo sync failed: ${JSON.stringify(checkpointSet)}`
+  );
+  checkpointGet = await callTool(client, "memory_get_checkpoint", {});
+  assert(
+    checkpointGet.payload?.current_focus === checkpoint.current_focus &&
+      checkpointGet.payload?.next_step === checkpoint.next_step,
+    `Checkpoint readback failed: ${JSON.stringify(checkpointGet)}`
+  );
+  projectLogAfterCheckpoint = await readFile(projectLogPath, "utf8");
+  assert(
+    projectLogAfterCheckpoint.includes("Current focus: repo checkpoint mirror") &&
+      projectLogAfterCheckpoint.includes("Next step: continue implementation") &&
+      projectLogAfterCheckpoint.includes("- How often should async sync retry?") &&
+      projectLogAfterCheckpoint.includes(
+        "Next step: continue implementation\n\n## Open Questions"
+      ) &&
+      projectLogAfterCheckpoint.includes("- Preserve this note."),
+    `PROJECT_LOG.md was not synced correctly:\n${projectLogAfterCheckpoint}`
+  );
 
   const closeoutCheckpoint = {
     current_status: "repo contract closeout synced",
@@ -134,7 +157,7 @@ try {
     next_step: "continue closeout implementation",
     open_questions: []
   };
-  const closeout = await callTool(5, "memory_closeout", {
+  closeout = await callTool(client, "memory_closeout", {
     session_id: started.session_id,
     closeout_intent: "task_complete",
     summary: "Repo contract closeout sync smoke complete.",
@@ -142,23 +165,66 @@ try {
     governed_memory_candidates: [],
     artifact_refs: []
   });
-  if (closeout.ok !== true || closeout.project_log_update?.status !== "updated") {
-    throw new Error(`Closeout repo sync failed: ${JSON.stringify(closeout)}`);
-  }
-  const closeoutProjectLog = await readFile(projectLogPath, "utf8");
-  if (
-    !closeoutProjectLog.includes("Status: repo contract closeout synced") ||
-    !closeoutProjectLog.includes("Current focus: repo closeout mirror") ||
-    !closeoutProjectLog.includes("Next step: continue closeout implementation") ||
-    !closeoutProjectLog.includes("Next step: continue closeout implementation\n\n## Open Questions") ||
-    !closeoutProjectLog.includes("- Preserve this note.")
-  ) {
-    throw new Error(`PROJECT_LOG.md was not closeout-synced correctly:\n${closeoutProjectLog}`);
-  }
+  assert(
+    closeout.ok === true &&
+      closeout.project_log_update?.status === "updated" &&
+      closeout.project_log_update?.project_path_source === "database_primary_path",
+    `Closeout repo sync failed: ${JSON.stringify(closeout)}`
+  );
+  projectLogAfterCloseout = await readFile(projectLogPath, "utf8");
+  assert(
+    projectLogAfterCloseout.includes("Status: repo contract closeout synced") &&
+      projectLogAfterCloseout.includes("Current focus: repo closeout mirror") &&
+      projectLogAfterCloseout.includes("Next step: continue closeout implementation") &&
+      projectLogAfterCloseout.includes(
+        "Next step: continue closeout implementation\n\n## Open Questions"
+      ) &&
+      projectLogAfterCloseout.includes("- Preserve this note."),
+    `PROJECT_LOG.md was not closeout-synced correctly:\n${projectLogAfterCloseout}`
+  );
+
+  await unlink(projectLogPath);
+  absentLogSet = await callTool(client, "memory_set_checkpoint", {
+    payload: {
+      current_status: "repo contract absent log skipped",
+      current_focus: "absent log",
+      next_step: "do not edit manually",
+      open_questions: []
+    }
+  });
+  assert(
+    absentLogSet.ok === true &&
+      absentLogSet.repo_sync?.status === "skipped" &&
+      String(absentLogSet.repo_sync?.reason ?? "").includes("PROJECT_LOG.md is not present"),
+    `Absent PROJECT_LOG skip was not precise: ${JSON.stringify(absentLogSet)}`
+  );
 } finally {
-  child.stdin.end();
-  child.kill();
-  await once(child, "close");
+  await client.close().catch(() => undefined);
+  await server.close().catch(() => undefined);
+  restoreEnv(envSnapshot);
 }
 
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      repo_contract: {
+        mcp_config_excerpt: generatedConfig
+          .split("\n")
+          .filter((line) => line.includes("RECALLANT_PROJECT_") || line.startsWith("[mcp_servers")),
+        checkpoint_repo_sync: checkpointSet.repo_sync,
+        checkpoint_readback: {
+          current_focus: checkpointGet.payload?.current_focus,
+          next_step: checkpointGet.payload?.next_step
+        },
+        project_log_before: projectLogBefore.split("\n").slice(0, 9),
+        project_log_after_checkpoint: projectLogAfterCheckpoint.split("\n").slice(0, 9),
+        closeout_project_log_update: closeout.project_log_update,
+        project_log_after_closeout: projectLogAfterCloseout.split("\n").slice(0, 9),
+        absent_log_repo_sync: absentLogSet.repo_sync
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 process.stdout.write("Repo contract smoke passed\n");

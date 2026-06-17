@@ -1,6 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, mkdtemp } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repoRoot = process.cwd();
@@ -247,6 +250,143 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run security-review:smoke"),
   "smoke:core must include security-review:smoke"
+);
+
+async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
+  const child = spawn(
+    process.execPath,
+    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        RECALLANT_DATABASE_URL: "",
+        RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+        RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
+        RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
+        RECALLANT_CLOUDFLARE_MODE: "enabled",
+        RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+        RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
+        ...extraEnv
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const [code] = await once(child, "close");
+  if (code !== 0) {
+    throw new Error(`doctor public readiness fixture failed: ${stderr}\n${stdout}`);
+  }
+  return JSON.parse(stdout).production_readiness?.public_workbench_readiness;
+}
+
+async function closedLocalOriginUrl() {
+  const server = createServer((_request, response) => {
+    response.writeHead(503);
+    response.end("closing");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Unable to allocate closed origin port");
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return `http://127.0.0.1:${address.port}/review`;
+}
+
+async function withAuthRequiredOrigin(callback) {
+  const server = createServer((_request, response) => {
+    response.writeHead(401, {
+      "content-type": "text/plain",
+      "www-authenticate": "Bearer"
+    });
+    response.end("auth required");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Unable to allocate auth origin port");
+  try {
+    return await callback(`http://127.0.0.1:${address.port}/review`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+const publicUiFixtureDir = await mkdtemp(join(tmpdir(), "recallant-public-ui-readiness-"));
+const publicBindHost = ["0", "0", "0", "0"].join(".");
+const downReadiness = await runDoctorWithOrigin(publicUiFixtureDir, await closedLocalOriginUrl());
+assert(
+  downReadiness?.status === "origin_unreachable" &&
+    downReadiness?.origin?.status === "down" &&
+    downReadiness?.ready === false,
+  `Down-origin readiness did not report origin_unreachable: ${JSON.stringify(downReadiness)}`
+);
+assert(
+  !String(downReadiness.operator_action ?? "").includes(publicBindHost),
+  `Down-origin action must not recommend public bind: ${downReadiness.operator_action}`
+);
+
+const authReady = await withAuthRequiredOrigin((originUrl) =>
+  runDoctorWithOrigin(publicUiFixtureDir, originUrl)
+);
+assert(
+  authReady?.status === "auth_ready" &&
+    authReady?.ready === true &&
+    authReady?.origin?.status === "auth_required" &&
+    authReady?.cloudflare_access?.edge_auth_required === true,
+  `Auth-ready readiness failed: ${JSON.stringify(authReady)}`
+);
+assert(
+  String(authReady.operator_action ?? "").includes("protected public URL") &&
+    !String(authReady.operator_action ?? "").includes(publicBindHost),
+  `Auth-ready operator action is unsafe or unclear: ${authReady.operator_action}`
+);
+
+const missingEdgeAuth = await withAuthRequiredOrigin((originUrl) =>
+  runDoctorWithOrigin(publicUiFixtureDir, originUrl, {
+    RECALLANT_CLOUDFLARE_EDGE_AUTH: "disabled"
+  })
+);
+assert(
+  missingEdgeAuth?.status === "cloudflare_access_not_required" && missingEdgeAuth?.ready === false,
+  `Missing edge auth should not be public-ready: ${JSON.stringify(missingEdgeAuth)}`
+);
+
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      public_workbench_readiness: {
+        down_origin: {
+          status: downReadiness.status,
+          ready: downReadiness.ready,
+          origin: downReadiness.origin.status
+        },
+        auth_ready: {
+          status: authReady.status,
+          ready: authReady.ready,
+          origin: authReady.origin.status,
+          edge_auth_required: authReady.cloudflare_access.edge_auth_required
+        },
+        missing_edge_auth: {
+          status: missingEdgeAuth.status,
+          ready: missingEdgeAuth.ready
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
 );
 
 const forbiddenPrivateMarkers = [

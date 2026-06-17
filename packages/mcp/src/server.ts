@@ -114,8 +114,8 @@ export async function runRecallantStdioServer() {
   process.stdin.resume();
   const keepAlive = setInterval(() => undefined, 60_000);
   await new Promise<void>((resolve) => {
-    process.stdin.once("end", resolve);
-    process.stdin.once("close", resolve);
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
   });
   clearInterval(keepAlive);
   await server.close();

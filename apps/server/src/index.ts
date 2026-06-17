@@ -296,6 +296,14 @@ function reviewPathWithParams(projectId: unknown, params: Record<string, unknown
   return `/review${rendered ? `?${rendered}` : ""}`;
 }
 
+function rootWorkbenchPath(view: WorkbenchView) {
+  return view === "all" ? "/review" : `/review?view=${encodeURIComponent(view)}`;
+}
+
+function projectSelectionPath(projectId: unknown, view: WorkbenchView) {
+  return view === "all" ? reviewPath(projectId) : reviewPathWithParams(projectId, { view });
+}
+
 function shortId(value: unknown) {
   return String(value ?? "").slice(0, 8);
 }
@@ -1232,6 +1240,13 @@ function currentProjectSources(data: ReviewDashboardData) {
   return Array.isArray(sources) ? (sources as Array<Record<string, unknown>>) : [];
 }
 
+function projectPathLabel(row: Record<string, unknown>) {
+  const primaryPath = row.primary_path;
+  if (!primaryPath) return "No primary path recorded";
+  if (publicScreenshotMode()) return "Workspace folder attached";
+  return String(primaryPath);
+}
+
 function sourceStatusLabel(source: Record<string, unknown>) {
   const health = asRecord(source.source_health);
   if (typeof health.label === "string" && health.label.length > 0) {
@@ -1605,7 +1620,7 @@ function renderSelectedSources(data: ReviewDashboardData) {
   </div>`;
 }
 
-function renderMemorySpaces(data: ReviewDashboardData) {
+function renderMemorySpaces(data: ReviewDashboardData, activeView: WorkbenchView = "all") {
   const renderSpaceCard = (row: Record<string, unknown>) => {
     const active = row.project_id === data.current_project_id;
     const state = captureState(row);
@@ -1619,7 +1634,7 @@ function renderMemorySpaces(data: ReviewDashboardData) {
     ).length;
     return `<article class="memory-space ${active ? "active" : ""} ${human ? "human-domain" : "code-domain"}">
       <div class="memory-space-head">
-        <h3><a href="${escapeHtml(reviewPath(row.project_id))}">${escapeHtml(projectDisplayName(row))}</a></h3>
+        <h3><a href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}">${escapeHtml(projectDisplayName(row))}</a></h3>
         <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
       </div>
       <p><strong>${escapeHtml(profile.label)}</strong></p>
@@ -1677,6 +1692,89 @@ function renderMemorySpaces(data: ReviewDashboardData) {
       </div>`;
   return `<div class="memory-spaces">
     ${spaceList}
+  </div>`;
+}
+
+function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchView) {
+  const rows = data.projects;
+  if (rows.length === 0) {
+    return `<section class="panel project-chooser empty-project-chooser" id="project-chooser">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">Project chooser</span>
+          <h2>Choose a memory space</h2>
+        </div>
+      </div>
+      <p class="empty">No projects are attached yet. Run <code>recallant onboard /path/to/project</code> once from the project folder; Recallant will register storage, connect supported agent clients, and bring this Workbench to the project automatically.</p>
+    </section>`;
+  }
+  const renderChoice = (row: Record<string, unknown>) => {
+    const state = captureState(row);
+    const profile = memoryProfile(row);
+    const sources = Array.isArray(row.sources)
+      ? (row.sources as Array<Record<string, unknown>>)
+      : [];
+    const activeSources = sources.filter((source) => source.status === "active").length;
+    return `<a class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}">
+      <article>
+        <div class="memory-space-head">
+          <h3>${escapeHtml(projectDisplayName(row))}</h3>
+          <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+        </div>
+        <p><strong>${escapeHtml(profile.label)}</strong></p>
+        <dl class="project-choice-meta">
+          <dt>Short id</dt>
+          <dd>${escapeHtml(shortId(row.project_id))}</dd>
+          <dt>Primary path</dt>
+          <dd>${escapeHtml(projectPathLabel(row))}</dd>
+          <dt>Sources</dt>
+          <dd>${escapeHtml(activeSources)} active / ${escapeHtml(sources.length)} total</dd>
+        </dl>
+        <div class="metrics">
+          <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
+          <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
+          <span>${escapeHtml(row.event_count ?? 0)} events</span>
+        </div>
+      </article>
+    </a>`;
+  };
+  return `<section class="panel project-chooser" id="project-chooser">
+    <div class="section-head">
+      <div>
+        <span class="section-kicker">Project chooser</span>
+        <h2>Choose a memory space</h2>
+      </div>
+      <p>Selecting a space opens the requested Workbench view for that project.</p>
+    </div>
+    <div class="project-choice-grid">
+      ${rows.map(renderChoice).join("")}
+    </div>
+  </section>`;
+}
+
+function currentProjectHeaderLabel(data: ReviewDashboardData) {
+  if (publicProjectBadge()) return publicProjectBadge();
+  const project = currentProject(data);
+  const name = projectDisplayName(project) || data.current_project_id;
+  return `Current: ${String(name)} · ${shortId(data.current_project_id)}`;
+}
+
+function renderCurrentProjectContext(data: ReviewDashboardData) {
+  const project = currentProject(data);
+  const state = captureState(project);
+  const sources = currentProjectSources(data);
+  const activeSources = sources.filter((source) => source.status === "active").length;
+  return `<div class="current-project-context" aria-label="Selected project context">
+    <div>
+      <span class="section-kicker">Selected project</span>
+      <strong>${escapeHtml(projectDisplayName(project) || data.current_project_id)}</strong>
+      <p>${escapeHtml(projectPathLabel(project))}</p>
+    </div>
+    <div class="current-project-facts">
+      <span>id ${escapeHtml(shortId(data.current_project_id))}</span>
+      <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+      <span>${escapeHtml(activeSources)} active sources</span>
+    </div>
   </div>`;
 }
 
@@ -2100,6 +2198,7 @@ function renderTextBlock(text: string) {
 
 function renderAttention(data: ReviewDashboardData) {
   const pendingReview = criticalCount(data, "pending_review");
+  const pendingEmbeddings = criticalCount(data, "pending_embeddings");
   const conflicts = rowCount(data.duplicate_conflicts);
   const imports = rowCount(data.import_candidates);
   const interrupted = criticalCount(data, "interrupted_sessions");
@@ -2116,6 +2215,9 @@ function renderAttention(data: ReviewDashboardData) {
     unsyncedSpool +
     highRiskConflicts;
   if (urgent === 0) {
+    if (pendingEmbeddings > 0) {
+      return `<p>${escapeHtml(`${pendingEmbeddings} chunk embedding${pendingEmbeddings === 1 ? "" : "s"} are waiting for local model recovery. Recall remains available while semantic indexing catches up.`)}</p>`;
+    }
     return `<p>No urgent owner decision is waiting. The useful check now is whether the next agent starts from Recallant context instead of reading old project logs by hand.</p>`;
   }
   const items = [
@@ -2140,6 +2242,9 @@ function renderAttention(data: ReviewDashboardData) {
     unsyncedSpool > 0
       ? `${unsyncedSpool} local spool record${unsyncedSpool === 1 ? "" : "s"} are not synced yet.`
       : "",
+    pendingEmbeddings > 0
+      ? `${pendingEmbeddings} chunk embedding${pendingEmbeddings === 1 ? "" : "s"} are waiting for local model recovery.`
+      : "",
     paidApprovals > 0
       ? `${paidApprovals} paid API approval${paidApprovals === 1 ? "" : "s"} are pending.`
       : ""
@@ -2153,6 +2258,7 @@ function renderCurrentSignals(data: ReviewDashboardData) {
     <span><strong>${escapeHtml(data.critical?.interrupted_sessions ?? 0)}</strong> Interrupted</span>
     <span><strong>${escapeHtml(data.critical?.pending_review ?? 0)}</strong> Review</span>
     <span><strong>${escapeHtml(data.critical?.high_risk_conflicts ?? 0)}</strong> Conflicts</span>
+    <span><strong>${escapeHtml(data.critical?.pending_embeddings ?? 0)}</strong> Pending embed</span>
     <span><strong>${escapeHtml(data.critical?.pending_paid_approvals ?? 0)}</strong> Paid API</span>
   </div>`;
 }
@@ -2830,7 +2936,11 @@ function workbenchViewHref(data: ReviewDashboardData, view: WorkbenchView) {
     : reviewPathWithParams(data.current_project_id, { view });
 }
 
-function renderWorkbenchNav(data: ReviewDashboardData, activeView: WorkbenchView) {
+function renderWorkbenchNav(
+  data: ReviewDashboardData,
+  activeView: WorkbenchView,
+  options?: { rootChooser?: boolean }
+) {
   const items: Array<{ view: WorkbenchView; label: string }> = [
     { view: "ask", label: "Ask Recallant" },
     { view: "all", label: "Workbench" },
@@ -2846,7 +2956,7 @@ function renderWorkbenchNav(data: ReviewDashboardData, activeView: WorkbenchView
       .map(
         (item) =>
           `<a class="${item.view === activeView ? "active" : ""}" href="${escapeHtml(
-            workbenchViewHref(data, item.view)
+            options?.rootChooser ? rootWorkbenchPath(item.view) : workbenchViewHref(data, item.view)
           )}">${escapeHtml(item.label)}</a>`
       )
       .join("")}
@@ -2863,6 +2973,7 @@ function renderDashboard(
     setting?: SettingRenderState;
     source?: SourceRenderState;
     view?: WorkbenchView;
+    projectChooser?: boolean;
   }
 ) {
   const chat = state?.chat;
@@ -2872,13 +2983,14 @@ function renderDashboard(
   const setting = state?.setting;
   const source = state?.source;
   const activeView = normalizeWorkbenchView(state?.view);
-  const showAsk = showWorkbenchView(activeView, "ask");
-  const showMemory = showWorkbenchView(activeView, "memory");
-  const showCommand = showWorkbenchView(activeView, "command");
-  const showSources = showWorkbenchView(activeView, "sources");
-  const showActivity = showWorkbenchView(activeView, "activity");
-  const showReview = showWorkbenchView(activeView, "review");
-  const showSettings = showWorkbenchView(activeView, "settings");
+  const projectChooser = state?.projectChooser === true;
+  const showAsk = !projectChooser && showWorkbenchView(activeView, "ask");
+  const showMemory = !projectChooser && showWorkbenchView(activeView, "memory");
+  const showCommand = !projectChooser && showWorkbenchView(activeView, "command");
+  const showSources = !projectChooser && showWorkbenchView(activeView, "sources");
+  const showActivity = !projectChooser && showWorkbenchView(activeView, "activity");
+  const showReview = !projectChooser && showWorkbenchView(activeView, "review");
+  const showSettings = !projectChooser && showWorkbenchView(activeView, "settings");
   const showBody =
     showMemory || showCommand || showSources || showActivity || showReview || showSettings;
   const focused = activeView !== "all";
@@ -2992,6 +3104,21 @@ function renderDashboard(
     .selected-project-card strong, .selected-project-card span { display: block; overflow-wrap: anywhere; }
     .selected-project-card strong { font-size: 14px; margin-bottom: 4px; }
     .selected-project-card span { color: #4f5867; font-size: 12px; line-height: 1.35; }
+    .project-chooser { max-width: 1180px; width: 100%; justify-self: center; }
+    .project-choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+    .project-choice { display: block; color: inherit; }
+    .project-choice article { border: 1px solid #dbe5e1; border-radius: var(--radius); padding: 12px; background: var(--surface-soft); min-height: 100%; }
+    .project-choice:hover article { border-color: var(--line-strong); background: #fff; }
+    .project-choice h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+    .project-choice p { margin: 7px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .project-choice-meta { grid-template-columns: 96px minmax(0, 1fr); gap: 5px 8px; margin-top: 10px; }
+    .project-choice-meta dt { font-size: 11px; }
+    .project-choice-meta dd { font-size: 12px; }
+    .current-project-context { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #d5e1dd; border-radius: var(--radius); padding: 12px; margin: 0 0 14px; background: #fff; }
+    .current-project-context strong { display: block; color: #20242c; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
+    .current-project-context p { margin: 6px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .current-project-facts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .current-project-facts span { border: 1px solid #d6dde7; border-radius: 999px; padding: 3px 7px; background: #f8fafc; color: #4f5867; font-size: 11px; }
     .readiness strong { display: block; font-size: 15px; margin-bottom: 6px; }
     .readiness p { margin: 0 0 10px; color: #4f5867; font-size: 13px; line-height: 1.4; }
     .readiness.ready strong { color: #166454; }
@@ -3219,11 +3346,11 @@ function renderDashboard(
     .activity-item strong { display: block; font-size: 13px; margin-bottom: 3px; }
     .activity-item p { margin: 0 0 3px; color: #4f5867; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
     .activity-item time { color: #6f7785; font-size: 12px; }
-    .panel, .operation-panel, .memory-space, .source-card, .source-result, .source-tree-group, .review-lane, .activity-group, .activity-item, .item { min-width: 0; }
+    .panel, .operation-panel, .memory-space, .project-choice, .source-card, .source-result, .source-tree-group, .review-lane, .activity-group, .activity-item, .item { min-width: 0; }
     .empty { color: var(--muted); font-size: 13px; line-height: 1.4; border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
     a:focus-visible, button:focus-visible, summary:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #7eb6a9; outline-offset: 2px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid, .source-tree { grid-template-columns: 1fr; } .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary, .source-map-legend { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary, .source-map-legend, .project-choice-grid, .current-project-context { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .current-project-facts { justify-content: flex-start; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
 
     /* Stage 1 Workbench design architecture corrective pass */
     :root {
@@ -3538,6 +3665,26 @@ function renderDashboard(
     }
     .memory-space h3 { font-size: 13px; }
     .memory-space p { font-size: 11.5px; color: var(--text-muted); }
+    .project-chooser {
+      background: rgba(251, 250, 246, 0.96);
+    }
+    .project-choice article,
+    .current-project-context {
+      border-color: rgba(216, 213, 202, 0.95);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.68);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset;
+    }
+    .project-choice:hover article {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+      box-shadow: 0 10px 22px rgba(23, 26, 31, 0.055);
+    }
+    .project-choice-meta dt,
+    .project-choice-meta dd,
+    .current-project-facts span {
+      font-family: var(--mono);
+    }
     .memory-space .state,
     .badges span,
     .source-health,
@@ -3805,7 +3952,8 @@ function renderDashboard(
       html, body { max-width: 100%; overflow-x: hidden; }
       header, main, section, aside,
       .panel, .workbench-body, .workbench-main, .left-rail,
-      .ask-panel, .ask-layout, .ask-work, .memory-profile,
+      .ask-panel, .ask-layout, .ask-work, .memory-profile, .project-chooser,
+      .project-choice-grid, .project-choice, .current-project-context,
       .source-workbench, .source-tree, .source-tree-root, .source-tree-groups,
       .source-tree-group, .source-filter-panel, .source-filter-chips,
       .source-workspace-grid, .source-management, .source-list,
@@ -3957,14 +4105,15 @@ function renderDashboard(
   <header>
     <div>
       <h1>Recallant Workbench</h1>
-      ${renderWorkbenchNav(data, activeView)}
+      ${renderWorkbenchNav(data, activeView, { rootChooser: projectChooser })}
     </div>
     <div class="status">
-      <span class="pill">${escapeHtml(publicProjectBadge() || `Project ${shortId(data.current_project_id)}`)}</span>
+      <span class="pill">${escapeHtml(projectChooser ? "Choose project" : currentProjectHeaderLabel(data))}</span>
       <span class="pill">Private UI</span>
     </div>
   </header>
   <main>
+    ${projectChooser ? renderProjectChooser(data, activeView) : ""}
     ${
       showAsk
         ? `<section class="panel ask-panel" id="ask-recallant">
@@ -3973,6 +4122,7 @@ function renderDashboard(
           <span class="section-kicker">AI control surface</span>
           <h2>Ask Recallant</h2>
           <p class="workbench-promise">Ask what Recallant remembers, whether agents are recording, which sources support an answer, what needs review, or how to act safely.</p>
+          ${renderCurrentProjectContext(data)}
           ${renderFirstScreenSnapshot(data)}
           ${renderManagementChat(data, chat, activeView)}
         </div>
@@ -3989,7 +4139,7 @@ function renderDashboard(
           ? `<aside class="left-rail">
         <section class="panel" id="memory-spaces">
           <h2>Memory Spaces</h2>
-          ${renderMemorySpaces(data)}
+          ${renderMemorySpaces(data, activeView)}
         </section>
       </aside>`
           : ""
@@ -4114,13 +4264,14 @@ export function createRecallantHttpServer() {
       rule_memory_domain: requestUrl.searchParams.get("rule_domain")
     };
     const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
+    const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
     if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
       write(
         response,
         200,
         renderDashboard(
           sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
-          { view: workbenchView }
+          { view: workbenchView, projectChooser: !explicitProjectId }
         ),
         "text/html",
         sessionCookie ? { "set-cookie": sessionCookie } : {}

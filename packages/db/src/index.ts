@@ -613,6 +613,10 @@ function readPositiveIntEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readBoundedPositiveIntEnv(name: string, fallback: number, max: number) {
+  return Math.min(readPositiveIntEnv(name, fallback), max);
+}
+
 function readPositiveFloatEnv(name: string, fallback: number) {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -746,6 +750,45 @@ function ollamaUrl(path: string) {
   return new URL(path, base.endsWith("/") ? base : `${base}/`);
 }
 
+type OllamaEmbeddingAttemptFailure = {
+  attempt: number;
+  code: string;
+  retryable: boolean;
+  message: string;
+};
+
+type OllamaEmbeddingFetchResult = {
+  embedding: number[];
+  attempts: number;
+  failures: OllamaEmbeddingAttemptFailure[];
+  latencyMs: number;
+};
+
+class OllamaEmbeddingRequestError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(message: string, code: string, retryable: boolean) {
+    super(message);
+    this.name = "OllamaEmbeddingRequestError";
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+class OllamaEmbeddingUnavailableError extends Error {
+  readonly code = "UNAVAILABLE";
+  readonly attempts: number;
+  readonly failures: OllamaEmbeddingAttemptFailure[];
+
+  constructor(message: string, attempts: number, failures: OllamaEmbeddingAttemptFailure[]) {
+    super(message);
+    this.name = "OllamaEmbeddingUnavailableError";
+    this.attempts = attempts;
+    this.failures = failures;
+  }
+}
+
 function parseEmbedding(payload: unknown, dims: number) {
   const object = readObjectSetting(payload);
   const embedding = object?.embedding;
@@ -762,11 +805,27 @@ function parseEmbedding(payload: unknown, dims: number) {
   return values;
 }
 
-async function fetchOllamaEmbedding(route: EmbeddingRoute, text: string) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableOllamaStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function normalizeOllamaEmbeddingError(error: unknown) {
+  if (error instanceof OllamaEmbeddingRequestError) return error;
+  if (error instanceof Error && error.name === "AbortError") {
+    return new OllamaEmbeddingRequestError("Ollama embedding request timed out", "TIMEOUT", true);
+  }
+  return new OllamaEmbeddingRequestError(errorMessage(error), "UNAVAILABLE", true);
+}
+
+async function fetchOllamaEmbeddingOnce(route: EmbeddingRoute, text: string) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    readPositiveIntEnv("RECALLANT_OLLAMA_EMBED_TIMEOUT_MS", 30_000)
+    readBoundedPositiveIntEnv("RECALLANT_OLLAMA_EMBED_TIMEOUT_MS", 30_000, 120_000)
   );
   try {
     const response = await fetch(ollamaUrl("/api/embeddings"), {
@@ -777,12 +836,104 @@ async function fetchOllamaEmbedding(route: EmbeddingRoute, text: string) {
     });
     const payload = (await response.json().catch(() => ({}))) as unknown;
     if (!response.ok) {
-      throw new Error(`Ollama embedding request failed with HTTP ${response.status}`);
+      throw new OllamaEmbeddingRequestError(
+        `Ollama embedding request failed with HTTP ${response.status}`,
+        `HTTP_${response.status}`,
+        isRetryableOllamaStatus(response.status)
+      );
     }
-    return parseEmbedding(payload, route.dims);
+    try {
+      return parseEmbedding(payload, route.dims);
+    } catch (error) {
+      throw new OllamaEmbeddingRequestError(errorMessage(error), "INVALID_RESPONSE", false);
+    }
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchOllamaEmbedding(route: EmbeddingRoute, text: string) {
+  const maxAttempts = readBoundedPositiveIntEnv("RECALLANT_OLLAMA_EMBED_MAX_ATTEMPTS", 3, 5);
+  const baseDelayMs = readBoundedPositiveIntEnv(
+    "RECALLANT_OLLAMA_EMBED_RETRY_DELAY_MS",
+    250,
+    5_000
+  );
+  const maxDelayMs = readBoundedPositiveIntEnv(
+    "RECALLANT_OLLAMA_EMBED_MAX_RETRY_DELAY_MS",
+    1_000,
+    10_000
+  );
+  const startedAt = Date.now();
+  const failures: OllamaEmbeddingAttemptFailure[] = [];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return {
+        embedding: await fetchOllamaEmbeddingOnce(route, text),
+        attempts: attempt,
+        failures,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      const failure = normalizeOllamaEmbeddingError(error);
+      failures.push({
+        attempt,
+        code: failure.code,
+        retryable: failure.retryable,
+        message: capText(failure.message, 300) ?? failure.code
+      });
+      if (!failure.retryable || attempt >= maxAttempts) {
+        throw new OllamaEmbeddingUnavailableError(failure.message, attempt, failures);
+      }
+      const delayMs = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+      await sleep(delayMs);
+    }
+  }
+
+  throw new OllamaEmbeddingUnavailableError(
+    "Ollama embedding retry attempts exhausted",
+    maxAttempts,
+    failures
+  );
+}
+
+function summarizeOllamaEmbeddingResults(results: readonly OllamaEmbeddingFetchResult[]) {
+  const attemptCount = results.reduce((total, result) => total + result.attempts, 0);
+  const transientFailures = results.flatMap((result) => result.failures);
+  return {
+    attempt_count: attemptCount,
+    retry_count: Math.max(0, attemptCount - results.length),
+    max_latency_ms: results.reduce((max, result) => Math.max(max, result.latencyMs), 0),
+    transient_failures: transientFailures
+  };
+}
+
+function summarizeOllamaEmbeddingFailure(error: unknown, textCount: number) {
+  if (error instanceof OllamaEmbeddingUnavailableError) {
+    return {
+      message: error.message,
+      attempt_count: error.attempts,
+      retry_count: Math.max(0, error.attempts - 1),
+      retry_exhausted: error.failures.some((failure) => failure.retryable),
+      transient_failures: error.failures
+    };
+  }
+  return {
+    message: errorMessage(error),
+    attempt_count: 1,
+    retry_count: 0,
+    retry_exhausted: false,
+    transient_failures: [
+      {
+        attempt: 1,
+        code: "UNAVAILABLE",
+        retryable: false,
+        message: capText(errorMessage(error), 300) ?? "UNAVAILABLE"
+      }
+    ],
+    text_count: textCount
+  };
 }
 
 function capText(text: string | null | undefined, maxChars: number) {
@@ -1075,7 +1226,8 @@ export class RecallantDb {
 
   async ensureProject(projectPath?: string | null): Promise<ProjectContext> {
     const developerId = this.config.developerId ?? this.fallbackDeveloperId;
-    const primaryPath = projectPath ?? this.config.projectPath ?? process.cwd();
+    const primaryPath =
+      projectPath ?? this.config.projectPath ?? (this.config.projectId ? null : process.cwd());
     const usesConfiguredProjectBinding =
       !projectPath || (Boolean(this.config.projectPath) && primaryPath === this.config.projectPath);
     if (
@@ -1096,7 +1248,7 @@ export class RecallantDb {
       );
 
       let projectId = usesConfiguredProjectBinding ? this.config.projectId : undefined;
-      const projectName = primaryPath.split("/").filter(Boolean).at(-1) ?? "recallant-project";
+      const projectName = primaryPath?.split("/").filter(Boolean).at(-1) ?? "recallant-project";
       if (!projectId) {
         const existing = await client.query<{ id: string }>(
           `
@@ -1140,6 +1292,15 @@ export class RecallantDb {
       }
       return context;
     });
+  }
+
+  async projectPrimaryPath(projectId: string | null | undefined) {
+    if (!projectId) return null;
+    const result = await this.pool.query<{ primary_path: string | null }>(
+      "SELECT primary_path FROM projects WHERE id = $1",
+      [projectId]
+    );
+    return result.rows[0]?.primary_path ?? null;
   }
 
   async registerProject(input: {
@@ -1938,8 +2099,22 @@ export class RecallantDb {
         queryVector = deterministicEmbedding(input.query, route.dims);
       } else if (route.provider === "ollama") {
         try {
-          queryVector = await fetchOllamaEmbedding(route, input.query);
+          const queryEmbedding = await fetchOllamaEmbedding(route, input.query);
+          queryVector = queryEmbedding.embedding;
+          await this.recordModelCall(this.pool, {
+            developerId: context.developerId,
+            projectId: context.projectId,
+            sessionId: input.session_id ?? null,
+            route,
+            purpose: "query_embedding",
+            status: "success",
+            metadata: {
+              text_count: 1,
+              ...summarizeOllamaEmbeddingResults([queryEmbedding])
+            }
+          });
         } catch (error) {
+          const failureSummary = summarizeOllamaEmbeddingFailure(error, 1);
           await this.recordModelCall(this.pool, {
             developerId: context.developerId,
             projectId: context.projectId,
@@ -1948,20 +2123,22 @@ export class RecallantDb {
             purpose: "query_embedding",
             status: "failed",
             errorCode: "UNAVAILABLE",
-            metadata: { text_count: 1, message: errorMessage(error) }
+            metadata: { text_count: 1, ...failureSummary }
           });
         }
       }
       if (queryVector) {
-        await this.recordModelCall(this.pool, {
-          developerId: context.developerId,
-          projectId: context.projectId,
-          sessionId: input.session_id ?? null,
-          route,
-          purpose: "query_embedding",
-          status: "success",
-          metadata: { text_count: 1 }
-        });
+        if (route.provider !== "ollama") {
+          await this.recordModelCall(this.pool, {
+            developerId: context.developerId,
+            projectId: context.projectId,
+            sessionId: input.session_id ?? null,
+            route,
+            purpose: "query_embedding",
+            status: "success",
+            metadata: { text_count: 1 }
+          });
+        }
         const vectorRows = await this.pool.query<{
           id: string;
           text: string;
@@ -3932,6 +4109,147 @@ export class RecallantDb {
     };
   }
 
+  private async resolveProjectContext(input?: {
+    project_id?: string | null;
+    project_path?: string | null;
+  }): Promise<ProjectContext> {
+    if (!input?.project_id) return this.ensureProject(input?.project_path);
+    const project = await this.pool.query<{ developer_id: string }>(
+      "SELECT developer_id FROM projects WHERE id = $1",
+      [input.project_id]
+    );
+    const developerId = project.rows[0]?.developer_id;
+    if (!developerId) throw new Error(`Project not found: ${input.project_id}`);
+    return { projectId: input.project_id, developerId };
+  }
+
+  async pendingEmbeddingStatus(input?: {
+    project_id?: string | null;
+    project_path?: string | null;
+  }) {
+    const context = await this.resolveProjectContext(input);
+    const status = await this.pool.query(
+      `
+        SELECT
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL) AS active_chunks,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL AND embed_status = 'pending') AS pending_chunks,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL AND embed_status = 'embedded') AS embedded_chunks,
+          (
+            SELECT jsonb_build_object(
+              'status', status,
+              'error_code', error_code,
+              'provider', provider,
+              'model', model,
+              'metadata', metadata,
+              'created_at', created_at
+            )
+            FROM model_calls
+            WHERE project_id = $1
+              AND purpose = 'chunk_embedding'
+              AND status = 'failed'
+            ORDER BY created_at DESC
+            LIMIT 1
+          ) AS latest_failure
+      `,
+      [context.projectId]
+    );
+    const row = status.rows[0] ?? {};
+    const pendingChunks = Number(row.pending_chunks ?? 0);
+    return {
+      project_id: context.projectId,
+      active_chunks: Number(row.active_chunks ?? 0),
+      embedded_chunks: Number(row.embedded_chunks ?? 0),
+      pending_chunks: pendingChunks,
+      latest_failure: row.latest_failure ?? null,
+      recovery_available: true,
+      recommendation:
+        pendingChunks > 0
+          ? `recallant recover-embeddings --project-id ${context.projectId} --limit 50`
+          : "No pending embeddings to recover."
+    };
+  }
+
+  async recoverPendingEmbeddings(input?: {
+    project_id?: string | null;
+    project_path?: string | null;
+    limit?: number | null;
+    dry_run?: boolean | null;
+  }) {
+    const context = await this.resolveProjectContext(input);
+    const limit = Math.min(Math.max(Number(input?.limit ?? 50), 1), 500);
+    const before = await this.pendingEmbeddingStatus({ project_id: context.projectId });
+    return withTransaction(this.pool, async (client) => {
+      const pending = await client.query<{ id: string; text: string }>(
+        `
+          SELECT id, text
+          FROM chunks
+          WHERE project_id = $1
+            AND archived_at IS NULL
+            AND embed_status = 'pending'
+          ORDER BY created_at ASC, id ASC
+          LIMIT $2
+        `,
+        [context.projectId, limit]
+      );
+      if (input?.dry_run) {
+        return {
+          status: "dry_run",
+          project_id: context.projectId,
+          limit,
+          pending_before: before.pending_chunks,
+          eligible_chunks: pending.rows.length,
+          recovery_available: true
+        };
+      }
+      if (pending.rows.length === 0) {
+        return {
+          status: "nothing_to_do",
+          project_id: context.projectId,
+          limit,
+          pending_before: before.pending_chunks,
+          recovered_chunks: 0,
+          remaining_pending: before.pending_chunks
+        };
+      }
+      const embedding = await this.embedChunks(client, {
+        developerId: context.developerId,
+        projectId: context.projectId,
+        sessionId: null,
+        chunkIds: pending.rows.map((row) => row.id),
+        texts: pending.rows.map((row) => row.text)
+      });
+      const after = await client.query<{ pending_chunks: number; embedding_rows: number }>(
+        `
+          SELECT
+            (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL AND embed_status = 'pending') AS pending_chunks,
+            (
+              SELECT count(*)::int
+              FROM embeddings e
+              JOIN chunks c ON c.id = e.chunk_id
+              WHERE c.project_id = $1
+                AND c.archived_at IS NULL
+            ) AS embedding_rows
+        `,
+        [context.projectId]
+      );
+      const pendingAfter = Number(after.rows[0]?.pending_chunks ?? 0);
+      return {
+        status: embedding.status === "embedded" ? "completed" : "pending",
+        project_id: context.projectId,
+        limit,
+        attempted_chunks: pending.rows.length,
+        recovered_chunks: embedding.status === "embedded" ? pending.rows.length : 0,
+        remaining_pending: pendingAfter,
+        embedding_rows: Number(after.rows[0]?.embedding_rows ?? 0),
+        embedding,
+        warning:
+          embedding.status === "embedded"
+            ? null
+            : "Pending embeddings remain because the embedding provider is unavailable."
+      };
+    });
+  }
+
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
@@ -4151,6 +4469,7 @@ export class RecallantDb {
           (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL) AS active_sessions,
           (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
           (SELECT count(*)::int FROM agent_memories WHERE (project_id = $1 OR scope = 'developer') AND status IN ('candidate', 'needs_review')) AS pending_review,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL AND embed_status = 'pending') AS pending_embeddings,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals,
           (
             SELECT coalesce((payload->'metadata'->'local_spool_status'->>'unsynced_count')::int, 0)
@@ -5493,12 +5812,12 @@ export class RecallantDb {
 
     if (route.provider === "ollama") {
       try {
-        const embeddings: number[][] = [];
+        const embeddingResults: OllamaEmbeddingFetchResult[] = [];
         for (const text of input.texts) {
-          embeddings.push(await fetchOllamaEmbedding(route, text));
+          embeddingResults.push(await fetchOllamaEmbedding(route, text));
         }
         for (const [index, chunkId] of input.chunkIds.entries()) {
-          const embedding = embeddings[index];
+          const embedding = embeddingResults[index]?.embedding;
           if (!embedding) throw new Error(`Missing Ollama embedding for chunk ${chunkId}`);
           await client.query(
             `
@@ -5521,15 +5840,22 @@ export class RecallantDb {
           route,
           purpose: "chunk_embedding",
           status: "success",
-          metadata: { text_count: input.texts.length }
+          metadata: {
+            text_count: input.texts.length,
+            ...summarizeOllamaEmbeddingResults(embeddingResults)
+          }
         });
+        const retrySummary = summarizeOllamaEmbeddingResults(embeddingResults);
         return {
           status: "embedded",
           provider: route.provider,
           model: route.model,
-          dims: route.dims
+          dims: route.dims,
+          attempt_count: retrySummary.attempt_count,
+          retry_count: retrySummary.retry_count
         };
       } catch (error) {
+        const failureSummary = summarizeOllamaEmbeddingFailure(error, input.texts.length);
         await this.recordModelCall(client, {
           developerId: input.developerId,
           projectId: input.projectId,
@@ -5538,7 +5864,10 @@ export class RecallantDb {
           purpose: "chunk_embedding",
           status: "failed",
           errorCode: "UNAVAILABLE",
-          metadata: { text_count: input.texts.length, message: errorMessage(error) }
+          metadata: {
+            text_count: input.texts.length,
+            ...failureSummary
+          }
         });
         await client.query(
           "UPDATE chunks SET embed_status = 'pending' WHERE id = ANY($1::uuid[])",
@@ -5548,7 +5877,9 @@ export class RecallantDb {
           status: "pending",
           provider: route.provider,
           model: route.model,
-          error: "UNAVAILABLE"
+          error: "UNAVAILABLE",
+          attempt_count: failureSummary.attempt_count,
+          retry_count: failureSummary.retry_count
         };
       }
     }

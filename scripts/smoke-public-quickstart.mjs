@@ -1,8 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { access, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRecallantHttpServer } from "../apps/server/dist/index.js";
 
 const repoRoot = process.cwd();
 const databaseUrl =
@@ -66,6 +69,46 @@ function runJson(command, args, options = {}) {
   }
 }
 
+async function runJsonAsync(command, args, options = {}) {
+  const child = spawn(command, args, {
+    cwd: options.cwd ?? repoRoot,
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${prefix}:${process.env.PATH ?? ""}`,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: "",
+      RECALLANT_PROJECT_PATH: "",
+      RECALLANT_ENV_FILE: envFile,
+      RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+      RECALLANT_EMBEDDING_DIMS: "8",
+      RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
+      ...(options.env ?? {})
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const [code] = await once(child, "close");
+  if (code !== 0) {
+    throw new Error(
+      `Command failed: ${command} ${args.join(" ")}\nSTDERR:\n${stderr}\nSTDOUT:\n${stdout}`
+    );
+  }
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(`Expected JSON from ${command} ${args.join(" ")}: ${String(error)}\n${stdout}`);
+  }
+}
+
 function assertNoPrivatePathLeak(value, label) {
   const text = JSON.stringify(value);
   const privateMarkers = [
@@ -75,6 +118,149 @@ function assertNoPrivatePathLeak(value, label) {
   ];
   for (const marker of privateMarkers) {
     assert(!text.includes(marker), `${label} leaked private host marker: ${marker}`);
+  }
+}
+
+function acceptanceStatus(checks, warnings) {
+  const blockingFailures = checks.filter((check) => check.status === "fail");
+  return blockingFailures.length > 0
+    ? "fail"
+    : warnings.length > 0
+      ? "pass_with_warnings"
+      : "pass";
+}
+
+function makeAcceptanceReport({ checks, warnings, evidence, examples }) {
+  const blockingFailures = checks.filter((check) => check.status === "fail");
+  return {
+    status: acceptanceStatus(checks, warnings),
+    blocking_failures: blockingFailures,
+    warnings,
+    checks,
+    evidence,
+    examples
+  };
+}
+
+function snapshotEnv(names) {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+
+function restoreEnv(snapshot) {
+  for (const [name, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+async function withAuthRequiredOrigin(callback) {
+  const server = createServer((_request, response) => {
+    response.writeHead(401, {
+      "content-type": "text/plain",
+      "www-authenticate": "Bearer"
+    });
+    response.end("auth required");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Unable to allocate auth origin port");
+  try {
+    return await callback(`http://127.0.0.1:${address.port}/review`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+async function publicReadiness(recallant, originUrl, extraEnv = {}) {
+  return (
+    await runJsonAsync(
+    recallant,
+    ["doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: projectDir,
+      env: {
+        RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
+        RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
+        RECALLANT_CLOUDFLARE_MODE: "enabled",
+        RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+        RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
+        ...extraEnv
+      }
+    }
+    )
+  ).production_readiness?.public_workbench_readiness;
+}
+
+async function workbenchNavigationProof(projectId) {
+  const token = `quickstart-workbench-${randomUUID()}`;
+  const envSnapshot = snapshotEnv([
+    "RECALLANT_DATABASE_URL",
+    "RECALLANT_DEVELOPER_ID",
+    "RECALLANT_PROJECT_ID",
+    "RECALLANT_PROJECT_PATH",
+    "RECALLANT_AUTH_TOKEN",
+    "RECALLANT_SESSION_SECRET",
+    "RECALLANT_CLOUDFLARE_MODE",
+    "RECALLANT_CLOUDFLARE_EDGE_AUTH",
+    "RECALLANT_ADMIN_EMAILS"
+  ]);
+  Object.assign(process.env, {
+    RECALLANT_DATABASE_URL: databaseUrl,
+    RECALLANT_DEVELOPER_ID: developerId,
+    RECALLANT_PROJECT_ID: projectId,
+    RECALLANT_PROJECT_PATH: projectDir,
+    RECALLANT_AUTH_TOKEN: token,
+    RECALLANT_SESSION_SECRET: `quickstart-session-${randomUUID()}`
+  });
+  delete process.env.RECALLANT_CLOUDFLARE_MODE;
+  delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
+  delete process.env.RECALLANT_ADMIN_EMAILS;
+  const server = createRecallantHttpServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address !== "string", "Workbench smoke server did not bind");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const rootResponse = await fetch(`${baseUrl}/review?view=review`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const rootHtml = await rootResponse.text();
+    const selectedResponse = await fetch(`${baseUrl}/review?project_id=${projectId}`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const selectedHtml = await selectedResponse.text();
+    const rootChooser =
+      rootResponse.status === 200 &&
+      rootHtml.includes('id="project-chooser"') &&
+      rootHtml.includes("Choose a memory space");
+    const viewPreserved = rootHtml.includes(
+      `href="/review?project_id=${projectId}&amp;view=review"`
+    );
+    const selectedContext =
+      selectedResponse.status === 200 &&
+      selectedHtml.includes('aria-label="Selected project context"') &&
+      selectedHtml.includes(`id ${projectId.slice(0, 8)}`) &&
+      selectedHtml.includes("Current:");
+    assert(rootChooser, `Workbench root chooser missing: ${rootHtml.slice(0, 900)}`);
+    assert(viewPreserved, `Workbench chooser did not preserve view: ${rootHtml.slice(0, 900)}`);
+    assert(
+      selectedContext,
+      `Workbench selected project context missing: ${selectedHtml.slice(0, 900)}`
+    );
+    return {
+      root_chooser: rootChooser,
+      view_preserved: viewPreserved,
+      selected_project_context: selectedContext
+    };
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+    restoreEnv(envSnapshot);
   }
 }
 
@@ -216,6 +402,183 @@ assert(
 );
 assertNoPrivatePathLeak(ask, "ask result");
 
+const projectId = doctorAfter.capture_readiness?.project_config?.project_id;
+assert(projectId, `doctor did not expose project id: ${JSON.stringify(doctorAfter)}`);
+
+const codexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
+assert(
+  codexConfig.includes("[mcp_servers.recallant]") &&
+    codexConfig.includes('RECALLANT_PROJECT_PATH = "') &&
+    codexConfig.includes('env_vars = ["RECALLANT_DATABASE_URL"]'),
+  `Codex MCP config did not include project identity/path: ${codexConfig}`
+);
+const hookManifest = JSON.parse(
+  await readFile(join(projectDir, ".recallant", "hooks", "manifest.json"), "utf8")
+);
+assert(
+  hookManifest.hooks?.some?.((hook) => hook.path?.includes("start-session.sh")) ||
+    hookManifest.files?.some?.((file) => String(file).includes("start-session.sh")) ||
+    JSON.stringify(hookManifest).includes("start-session.sh"),
+  `Hook manifest did not include start-session hook: ${JSON.stringify(hookManifest)}`
+);
+
+const contextPack = runJson(
+  recallant,
+  ["context", "--project-dir", projectDir, "--task-hint", "Recallant demo memory"],
+  { cwd: projectDir }
+);
+assert(
+  contextPack.sections?.working_memories?.some((memory) =>
+    String(memory.body ?? "").includes("The agent remembered this Recallant demo memory")
+  ),
+  `Context pack did not recall demo memory: ${JSON.stringify(contextPack.sections)}`
+);
+
+const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
+assert(
+  projectLog.includes("Project id:") && projectLog.includes(projectId),
+  `PROJECT_LOG.md did not preserve attached project checkpoint metadata: ${projectLog}`
+);
+
+const pendingChunks = Number(doctorAfter.pending_embeddings?.pending_chunks ?? 0);
+assert(pendingChunks === 0, `Quickstart left pending embeddings: ${JSON.stringify(doctorAfter)}`);
+
+const navigation = await workbenchNavigationProof(projectId);
+const publicUiReadiness = await withAuthRequiredOrigin(async (originUrl) => {
+  const authReady = await publicReadiness(recallant, originUrl);
+  const missingEdgeAuth = await publicReadiness(recallant, originUrl, {
+    RECALLANT_CLOUDFLARE_EDGE_AUTH: "disabled"
+  });
+  assert(
+    authReady?.status === "auth_ready" &&
+      authReady?.ready === true &&
+      authReady?.origin?.status === "auth_required",
+    `Auth-ready public UI fixture failed: ${JSON.stringify(authReady)}`
+  );
+  assert(
+    missingEdgeAuth?.status === "cloudflare_access_not_required" &&
+      missingEdgeAuth?.ready === false,
+    `Missing-edge-auth fixture should not be public-ready: ${JSON.stringify(missingEdgeAuth)}`
+  );
+  return {
+    auth_ready: {
+      status: authReady.status,
+      ready: authReady.ready,
+      origin: authReady.origin.status
+    },
+    missing_edge_auth: {
+      status: missingEdgeAuth.status,
+      ready: missingEdgeAuth.ready
+    }
+  };
+});
+
+const checks = [
+  {
+    name: "one_command_onboarding_completed",
+    status: onboard.status === "completed" ? "pass" : "fail",
+    evidence: onboard.status
+  },
+  {
+    name: "codex_mcp_config_written",
+    status: codexConfig.includes("[mcp_servers.recallant]") ? "pass" : "fail",
+    evidence: ".codex/config.toml"
+  },
+  {
+    name: "hook_kit_installed",
+    status: JSON.stringify(hookManifest).includes("start-session.sh") ? "pass" : "fail",
+    evidence: ".recallant/hooks/manifest.json"
+  },
+  {
+    name: "capture_active_doctor",
+    status: doctorAfter.capture_readiness?.ready === true ? "pass" : "fail",
+    evidence: doctorAfter.capture_readiness?.status ?? "unknown"
+  },
+  {
+    name: "context_pack_recalled_memory",
+    status: contextPack.sections?.working_memories?.length > 0 ? "pass" : "fail",
+    evidence: contextPack.context_pack_id
+  },
+  {
+    name: "checkpoint_sync_present",
+    status: projectLog.includes(projectId) ? "pass" : "fail",
+    evidence: "PROJECT_LOG.md"
+  },
+  {
+    name: "workbench_project_navigation",
+    status:
+      navigation.root_chooser && navigation.view_preserved && navigation.selected_project_context
+        ? "pass"
+        : "fail",
+    evidence: navigation
+  },
+  {
+    name: "embedding_baseline",
+    status: pendingChunks === 0 ? "pass" : "fail",
+    evidence: {
+      provider: "deterministic",
+      pending_chunks: pendingChunks,
+      recovery_available: doctorAfter.pending_embeddings?.recovery_available === true
+    }
+  },
+  {
+    name: "public_ui_readiness_fixture",
+    status:
+      publicUiReadiness.auth_ready.ready === true &&
+      publicUiReadiness.missing_edge_auth.ready === false
+        ? "pass"
+        : "fail",
+    evidence: publicUiReadiness
+  }
+];
+const warnings =
+  pendingChunks > 0
+    ? [
+        {
+          code: "pending_embeddings",
+          message: `${pendingChunks} embedding chunk(s) are waiting for local model recovery.`
+        }
+      ]
+    : [];
+const examples = {
+  pass: acceptanceStatus([{ name: "all_required_checks", status: "pass" }], []),
+  pass_with_warnings: acceptanceStatus(
+    [{ name: "all_required_checks", status: "pass" }],
+    [{ code: "pending_embeddings", message: "2 chunks are waiting for local model recovery." }]
+  ),
+  fail: acceptanceStatus([{ name: "capture_active_doctor", status: "fail" }], [])
+};
+assert(
+  examples.pass === "pass" &&
+    examples.pass_with_warnings === "pass_with_warnings" &&
+    examples.fail === "fail",
+  `Acceptance status examples failed: ${JSON.stringify(examples)}`
+);
+const acceptanceReport = makeAcceptanceReport({
+  checks,
+  warnings,
+  evidence: {
+    onboarding: {
+      proof: onboard.verify?.proof,
+      structured_proof: onboard.verify?.stages,
+      workbench: onboard.workbench
+    },
+    context_pack: {
+      context_pack_id: contextPack.context_pack_id,
+      working_memory_count: contextPack.sections?.working_memories?.length ?? 0
+    },
+    embedding_baseline: {
+      provider: "deterministic",
+      pending_chunks: pendingChunks,
+      recovery_available: doctorAfter.pending_embeddings?.recovery_available === true
+    },
+    public_ui_readiness: publicUiReadiness,
+    workbench_navigation: navigation
+  },
+  examples
+});
+assert(acceptanceReport.status === "pass", `Acceptance report was not pass: ${JSON.stringify(acceptanceReport)}`);
+
 process.stdout.write(
   JSON.stringify(
     {
@@ -223,12 +586,13 @@ process.stdout.write(
       clean_root: cleanRoot,
       project_dir: projectDir,
       installed_cli: recallant,
-      project_id: doctorAfter.capture_readiness?.project_config?.project_id ?? null,
+      project_id: projectId,
       proof: onboard.verify?.proof,
       structured_proof: onboard.verify?.stages,
       workbench: onboard.workbench,
       capture_ready: doctorAfter.capture_readiness?.ready === true,
-      recalled: ask.recalled === true
+      recalled: ask.recalled === true,
+      acceptance_report: acceptanceReport
     },
     null,
     2

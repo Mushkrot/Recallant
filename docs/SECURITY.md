@@ -25,6 +25,8 @@ bounded by design, and conservative about secrets.
 - Remote admin/API access must require authentication.
 - No unauthenticated public route should expose the Workbench, MCP tools, backups, raw artifacts, or
   provider settings.
+- Public Workbench readiness requires an auth-protected private origin plus authenticated edge
+  access. Do not make the Workbench public by changing the default bind host.
 
 ## Credentials
 
@@ -33,6 +35,12 @@ only references such as variable names or configuration labels.
 
 Browser clients must never receive provider API keys, database passwords, session secrets, auth
 tokens, or connector secrets.
+
+Production service managers should reuse the same private Recallant storage profile as the CLI.
+When a service env file is configured through `RECALLANT_SERVICE_ENV_FILE`, `recallant doctor`
+reports only a redacted `service_env_profile` status, safe database components, and mismatch labels.
+It must never print raw database passwords, auth tokens, session secrets, or a full credentialed
+database URL.
 
 ## External Services And Deployment Profiles
 
@@ -46,6 +54,9 @@ route, spend money, delete data, or bypass a private access boundary.
 
 Ollama-hosted cloud model tags, including `*:cloud` model names, are external model capabilities.
 They should not be treated as local Ollama readiness requirements or silent local-model fallbacks.
+Retrying a cold local Ollama embedding call is still local-model behavior. If local Ollama remains
+unavailable, Recallant records `UNAVAILABLE` and leaves chunks pending; it must not switch to paid or
+external embedding providers without the normal explicit approval path.
 
 ## Memory Governance
 
