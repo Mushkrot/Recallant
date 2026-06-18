@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
-import { RecallantDb, createRecallantDbFromEnv } from "@recallant/db";
+import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
 import { runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
@@ -197,6 +197,10 @@ function positionalArgs(argv: readonly string[]) {
     "--label",
     "--uri",
     "--query",
+    "--since",
+    "--until",
+    "--surface",
+    "--slow-ms",
     "--top-k",
     "--marker",
     "--previewed-global-target"
@@ -429,6 +433,10 @@ function spoolPath(argv: readonly string[]) {
 
 function spoolManifestPath(argv: readonly string[]) {
   return join(spoolDir(argv), "sync-manifest.json");
+}
+
+function auditSpoolPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "audit.jsonl");
 }
 
 async function readJsonl(path: string) {
@@ -739,6 +747,278 @@ async function appendSpoolRecord(
   await mkdir(spoolDir(argv), { recursive: true });
   await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
   return record;
+}
+
+const auditedCliCommands = new Set([
+  "agent-checkpoint",
+  "agent-event",
+  "agent-start",
+  "audit",
+  "ask",
+  "context",
+  "doctor",
+  "onboard",
+  "project-sanitize",
+  "sanitize",
+  "project-purge"
+]);
+
+type CliAuditStatus = {
+  durable: boolean;
+  surface: "cli";
+  operation: string;
+  status: "recorded" | "pending_durable_audit" | "failed";
+  activity_id?: string;
+  trace_id?: string;
+  spool_path?: string;
+  local_id?: string;
+  error_code?: string;
+  reason?: string;
+};
+
+type CliAuditContext = {
+  command: string;
+  database: RecallantDb | null;
+  activityId: string | null;
+  traceId: string | null;
+  startStatus: CliAuditStatus;
+};
+
+function shouldAuditCliCommand(command: string | undefined) {
+  return Boolean(command && auditedCliCommands.has(command));
+}
+
+function createCliAuditDb() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH
+  });
+}
+
+function cliAuditCodeFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("VALIDATION_ERROR:")) return "VALIDATION_ERROR";
+  if (message.startsWith("POLICY_BLOCKED:")) return "POLICY_BLOCKED";
+  if (message.startsWith("RATE_LIMITED:")) return "RATE_LIMITED";
+  return "CLI_ERROR";
+}
+
+function safeCliErrorMessage(error: unknown) {
+  return String(redactSystemActivityValue(error instanceof Error ? error.message : String(error)));
+}
+
+function hashForAudit(value: string | null | undefined) {
+  if (!value) return null;
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function summarizeCliArg(value: string) {
+  if (/^(\/|~\/|[a-z]:\\)/i.test(value)) {
+    return { type: "path", hash: hashForAudit(resolve(value)) };
+  }
+  return redactSystemActivityValue(value);
+}
+
+function summarizeCliArgs(argv: readonly string[]) {
+  const command = argv[2] ?? "unknown";
+  const args = argv.slice(3).map((arg) => summarizeCliArg(arg));
+  const project = parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? null;
+  return {
+    command,
+    arg_count: Math.max(0, argv.length - 3),
+    args,
+    flags: argv
+      .slice(3)
+      .filter((arg) => arg.startsWith("--"))
+      .sort(),
+    project_dir_hash: hashForAudit(project ? resolve(project) : null),
+    project_dir_basename: project ? resolve(project).split("/").filter(Boolean).at(-1) : null,
+    dry_run: argv.includes("--dry-run"),
+    yes: argv.includes("--yes") || argv.includes("-y"),
+    confirm_token_present: Boolean(parseFlag(argv, "--confirm-token")),
+    dedup_key_present: Boolean(parseFlag(argv, "--dedup-key"))
+  };
+}
+
+function cliOutcomeKind(argv: readonly string[], exitCode: number, error?: unknown) {
+  if (error) return "thrown_error";
+  if (exitCode !== 0) return "blocked_or_failed";
+  if (argv.includes("--dry-run")) return "dry_run";
+  if (parseFlag(argv, "--confirm-token")) return "confirmed_write";
+  if (parseFlag(argv, "--dedup-key")) return "idempotent_keyed";
+  return "completed";
+}
+
+function currentCliExitCode(error?: unknown) {
+  if (typeof process.exitCode === "number") return process.exitCode;
+  if (typeof process.exitCode === "string") {
+    const parsed = Number.parseInt(process.exitCode, 10);
+    return Number.isFinite(parsed) ? parsed : 1;
+  }
+  return error ? 1 : 0;
+}
+
+async function appendCliAuditSpool(
+  argv: readonly string[],
+  payload: Record<string, unknown>
+): Promise<CliAuditStatus> {
+  const record = {
+    local_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    record_kind: "cli_audit",
+    payload: redactSystemActivityValue(payload)
+  };
+  await mkdir(spoolDir(argv), { recursive: true });
+  await appendFile(auditSpoolPath(argv), `${JSON.stringify(record)}\n`);
+  return {
+    durable: false,
+    surface: "cli",
+    operation: String(payload.operation ?? argv[2] ?? "unknown"),
+    status: "pending_durable_audit",
+    spool_path: auditSpoolPath(argv),
+    local_id: record.local_id
+  };
+}
+
+async function startCliAudit(argv: readonly string[]): Promise<CliAuditContext | null> {
+  const command = argv[2];
+  if (!shouldAuditCliCommand(command)) return null;
+  const operation = command ?? "unknown";
+  const database = createCliAuditDb();
+  if (!database) {
+    return {
+      command: operation,
+      database: null,
+      activityId: null,
+      traceId: null,
+      startStatus: {
+        durable: false,
+        surface: "cli",
+        operation,
+        status: "pending_durable_audit",
+        reason: "Recallant storage is not configured for this CLI process."
+      }
+    };
+  }
+  try {
+    const activity = await database.startSystemActivity({
+      surface: "cli",
+      operation,
+      actor_kind: "user",
+      actor_id: "recallant-cli",
+      client_kind: "recallant-cli",
+      client_version: recallantCliVersion,
+      related_ids: {
+        project_id: process.env.RECALLANT_PROJECT_ID ?? null,
+        session_id: parseFlag(argv, "--session-id") ?? null
+      },
+      metadata: {
+        env_source: envLoadState.source,
+        env_status: envLoadState.status,
+        argv: summarizeCliArgs(argv)
+      }
+    });
+    return {
+      command: operation,
+      database,
+      activityId: activity.id,
+      traceId: activity.trace_id,
+      startStatus: {
+        durable: true,
+        surface: "cli",
+        operation,
+        status: "recorded",
+        activity_id: activity.id,
+        trace_id: activity.trace_id
+      }
+    };
+  } catch (error) {
+    await database.close().catch(() => undefined);
+    return {
+      command: operation,
+      database: null,
+      activityId: null,
+      traceId: null,
+      startStatus: {
+        durable: false,
+        surface: "cli",
+        operation,
+        status: "failed",
+        error_code: cliAuditCodeFromError(error),
+        reason: safeCliErrorMessage(error)
+      }
+    };
+  }
+}
+
+async function finishCliAudit(
+  argv: readonly string[],
+  audit: CliAuditContext | null,
+  error?: unknown
+) {
+  if (!audit) return null;
+  const exitCode = currentCliExitCode(error);
+  const status = error ? "error" : exitCode === 0 ? "success" : "skipped";
+  const metadata = {
+    exit_code: exitCode,
+    outcome_kind: cliOutcomeKind(argv, exitCode, error),
+    argv: summarizeCliArgs(argv)
+  };
+  if (!audit.database || !audit.activityId) {
+    return appendCliAuditSpool(argv, {
+      surface: "cli",
+      operation: audit.command,
+      status,
+      error_code: error
+        ? cliAuditCodeFromError(error)
+        : exitCode === 0
+          ? null
+          : `CLI_EXIT_${exitCode}`,
+      error_message: error ? safeCliErrorMessage(error) : null,
+      durable_status: audit.startStatus,
+      metadata
+    });
+  }
+  try {
+    const finished = await audit.database.finishSystemActivity({
+      id: audit.activityId,
+      status,
+      error_code: error
+        ? cliAuditCodeFromError(error)
+        : exitCode === 0
+          ? null
+          : `CLI_EXIT_${exitCode}`,
+      error_message: error ? safeCliErrorMessage(error) : null,
+      metadata
+    });
+    return {
+      durable: true,
+      surface: "cli" as const,
+      operation: audit.command,
+      status: "recorded" as const,
+      activity_id: finished?.id ?? audit.activityId,
+      trace_id: finished?.trace_id ?? audit.traceId ?? undefined
+    };
+  } catch (finishError) {
+    return appendCliAuditSpool(argv, {
+      surface: "cli",
+      operation: audit.command,
+      status,
+      durable_status: {
+        ...audit.startStatus,
+        status: "failed",
+        error_code: cliAuditCodeFromError(finishError),
+        reason: safeCliErrorMessage(finishError)
+      },
+      metadata
+    });
+  } finally {
+    await audit.database.close().catch(() => undefined);
+  }
 }
 
 function parseInitOptions(argv: readonly string[]): InitOptions {
@@ -3596,6 +3876,120 @@ async function runDoctor(argv: readonly string[]) {
   }
 }
 
+function auditArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function auditHumanReport(report: Record<string, unknown>) {
+  const filters = objectValue(report.filters);
+  const summary = objectValue(report.summary);
+  const capture = objectValue(report.capture);
+  const modelProvider = objectValue(report.model_provider);
+  const failures = auditArray(report.failures).map((row) => objectValue(row));
+  const recommendations = auditArray(report.recommendations).map((row) => objectValue(row));
+  const topErrors = auditArray(report.top_errors).map((row) => objectValue(row));
+  const timeline = auditArray(report.timeline).map((row) => objectValue(row));
+  const lines = [
+    "Recallant audit report",
+    "",
+    `Window: ${String(filters.since ?? "unknown")} to ${String(filters.until ?? "unknown")}`,
+    `Project: ${String(filters.project_id ?? filters.project_path ?? "all projects")}`,
+    `Filters: surface=${String(filters.surface ?? "all")} status=${String(filters.status ?? "all")} limit=${String(filters.limit ?? "default")}`,
+    "",
+    "Summary",
+    `- Activity rows: ${String(summary.total ?? 0)}`,
+    `- Failures/skips needing attention: ${String(summary.failures ?? 0)}`,
+    `- Slow operations: ${String(summary.slow_operations ?? 0)}`,
+    `- Open started rows: ${String(summary.pending_started ?? 0)}`,
+    "",
+    "Capture",
+    `- Sessions started: ${String(capture.sessions_started ?? 0)}`,
+    `- Events: ${String(capture.events ?? 0)}`,
+    `- Checkpoints: ${String(capture.checkpoints ?? 0)}`,
+    `- Recall traces: ${String(capture.recall_traces ?? 0)}`,
+    `- Pending embeddings: ${String(capture.pending_embeddings ?? 0)}`,
+    "",
+    "Model/provider",
+    `- Model calls: ${String(modelProvider.total_calls ?? 0)}`,
+    `- Failed model calls: ${String(modelProvider.failed_calls ?? 0)}`,
+    "",
+    "Failures"
+  ];
+  if (failures.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of failures.slice(0, 8)) {
+      lines.push(
+        `- ${String(row.surface ?? "surface")}/${String(row.operation ?? "operation")}: ${String(row.status ?? "unknown")} ${String(row.error_code ?? "")} trace=${String(row.trace_id ?? "none")}`
+      );
+    }
+  }
+  lines.push("", "Top errors");
+  if (topErrors.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of topErrors.slice(0, 8)) {
+      lines.push(`- ${String(row.error_code ?? "unknown")}: ${String(row.count ?? 0)}`);
+    }
+  }
+  lines.push("", "Recent timeline");
+  if (timeline.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of timeline.slice(0, 8)) {
+      lines.push(
+        `- ${String(row.started_at ?? "unknown")} ${String(row.surface ?? "surface")}/${String(row.operation ?? "operation")} ${String(row.status ?? "unknown")} trace=${String(row.trace_id ?? "none")}`
+      );
+    }
+  }
+  lines.push("", "Recommendations");
+  for (const recommendation of recommendations.slice(0, 8)) {
+    lines.push(
+      `- ${String(recommendation.severity ?? "info")}: ${String(recommendation.message ?? "No recommendation text.")}`
+    );
+  }
+  lines.push("", "JSON output: recallant audit --format json");
+  return `${lines.join("\n")}\n`;
+}
+
+async function runAudit(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for audit reports");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const rawLimit = parseFlag(argv, "--limit");
+  const rawSlowMs = parseFlag(argv, "--slow-ms");
+  const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+  const slowMs = rawSlowMs ? Number.parseInt(rawSlowMs, 10) : undefined;
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error("--limit must be a positive integer");
+  }
+  if (slowMs !== undefined && (!Number.isFinite(slowMs) || slowMs <= 0)) {
+    throw new Error("--slow-ms must be a positive integer");
+  }
+  try {
+    const report = await database.getSystemAuditReport({
+      project_id: parseFlag(argv, "--project-id") ?? null,
+      project_path: parseFlag(argv, "--project-id")
+        ? null
+        : resolve(parseFlag(argv, "--project-dir") ?? process.cwd()),
+      since: parseFlag(argv, "--since") ?? null,
+      until: parseFlag(argv, "--until") ?? null,
+      surface: parseFlag(argv, "--surface") ?? null,
+      status: parseFlag(argv, "--status") ?? null,
+      limit,
+      slow_ms: slowMs
+    });
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(report, null, 2)}\n`
+        : auditHumanReport(report as Record<string, unknown>)
+    );
+  } finally {
+    await database.close();
+  }
+}
+
 function recoverEmbeddingsHumanReport(result: Record<string, unknown>) {
   const status = String(result.status ?? "unknown");
   const lines = [
@@ -3666,7 +4060,8 @@ async function snapshotTables(client: pg.Client) {
     "project_settings",
     "session_overrides",
     "client_adapter_settings",
-    "settings_audit_events"
+    "settings_audit_events",
+    "system_activity_events"
   ];
   const tables: Record<string, unknown[]> = {};
   for (const table of tableNames) {
@@ -3771,7 +4166,8 @@ async function runBackupVerify(argv: readonly string[]) {
           jsonb_array_length(payload->'checkpoints') AS checkpoint_count,
           jsonb_array_length(payload->'chunks') AS chunk_count,
           jsonb_array_length(payload->'agent_memories') AS governed_memory_count,
-          jsonb_array_length(payload->'raw_artifacts') AS raw_artifact_count
+          jsonb_array_length(payload->'raw_artifacts') AS raw_artifact_count,
+          jsonb_array_length(payload->'system_activity_events') AS system_activity_event_count
         FROM ${schema}.backup_snapshot
         LIMIT 1
       `
@@ -3787,6 +4183,7 @@ async function runBackupVerify(argv: readonly string[]) {
           governed_memory_count: checks.rows[0]?.governed_memory_count ?? agentMemories.length,
           chunk_count: checks.rows[0]?.chunk_count ?? chunks.length,
           raw_artifact_count: checks.rows[0]?.raw_artifact_count ?? rawArtifacts.length,
+          system_activity_event_count: checks.rows[0]?.system_activity_event_count ?? 0,
           raw_artifact_pointer_issues: rawArtifactPointerIssues,
           bounded_search_checked: true,
           bounded_search_query: searchQuery ?? null,
@@ -6736,6 +7133,14 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (command === "audit") {
+    return [
+      "Usage: recallant audit [--project-id <id>|--project-dir <dir>] [--since <iso>] [--until <iso>] [--surface <name>] [--status <name>] [--limit <n>] [--format json|text]",
+      "",
+      "Build an owner-readable system activity report from the Recallant audit ledger.",
+      ""
+    ].join("\n");
+  }
   if (command === "recover-embeddings") {
     return [
       "Usage: recallant recover-embeddings [--project-id <id>|--project-dir <dir>] [--limit <n>] [--dry-run] [--format json|text]",
@@ -6744,7 +7149,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|doctor|attach|connect|onboard|recover-embeddings|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|doctor|audit|attach|connect|onboard|recover-embeddings|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -6771,6 +7176,7 @@ async function main(argv: readonly string[]) {
     return;
   }
   if (command === "doctor") return runDoctor(argv);
+  if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
   if (command === "onboard") return runOnboard(argv);
@@ -6809,4 +7215,11 @@ async function main(argv: readonly string[]) {
 }
 
 await loadDefaultEnv();
-await main(process.argv);
+const cliAudit = await startCliAudit(process.argv);
+try {
+  await main(process.argv);
+  await finishCliAudit(process.argv, cliAudit);
+} catch (error) {
+  await finishCliAudit(process.argv, cliAudit, error);
+  throw error;
+}

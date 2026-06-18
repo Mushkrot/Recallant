@@ -3,6 +3,14 @@ import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { Pool, type PoolClient } from "pg";
 import { deriveCanonCapabilityContext } from "./canon-capability-context.js";
+import {
+  ensureSystemActivitySchema,
+  normalizeSystemActivityFinish,
+  normalizeSystemActivityStart,
+  type FinishSystemActivityInput,
+  type SystemActivityInput,
+  type SystemActivityRecord
+} from "./system-activity.js";
 
 export {
   buildCanonCapabilityContext,
@@ -21,6 +29,16 @@ export {
   type CanonCapabilityServerCanonLink,
   type DocumentationAuthorityMapItem
 } from "./canon-capability-context.js";
+export {
+  ensureSystemActivitySchema,
+  redactSystemActivityValue,
+  redactedSystemActivityObject,
+  systemActivitySchemaStatements,
+  type FinishSystemActivityInput,
+  type SystemActivityInput,
+  type SystemActivityRecord,
+  type SystemActivityStatus
+} from "./system-activity.js";
 
 export const recallantDatabasePackage = "recallant-db";
 
@@ -33,8 +51,47 @@ export type RecallantDbConfig = {
 
 export type JsonObject = Record<string, unknown>;
 
+export type SystemAuditReportInput = {
+  project_id?: string | null;
+  project_path?: string | null;
+  since?: string | Date | null;
+  until?: string | Date | null;
+  surface?: string | null;
+  status?: string | null;
+  limit?: number | null;
+  slow_ms?: number | null;
+};
+
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function auditDateOrNull(value: string | Date | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function auditIso(value: Date) {
+  return value.toISOString();
+}
+
+function boundedAuditLimit(value: number | null | undefined) {
+  if (!value || !Number.isFinite(value)) return 100;
+  return Math.max(1, Math.min(500, Math.floor(value)));
+}
+
+function auditCountBy<T extends Record<string, unknown>>(rows: T[], key: keyof T) {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const value = String(row[key] ?? "unknown");
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function auditRecommendation(severity: string, message: string, evidence: Record<string, unknown>) {
+  return { severity, message, evidence };
 }
 
 function rawSecretLikeFindings(value: unknown, path = "value"): string[] {
@@ -1362,6 +1419,332 @@ export class RecallantDb {
 
   async close() {
     await this.pool.end();
+  }
+
+  async ensureSystemActivitySchema() {
+    await ensureSystemActivitySchema(this.pool);
+  }
+
+  async startSystemActivity(input: SystemActivityInput): Promise<SystemActivityRecord> {
+    await this.ensureSystemActivitySchema();
+    const activity = normalizeSystemActivityStart(input);
+    const result = await this.pool.query<SystemActivityRecord>(
+      `
+        INSERT INTO system_activity_events (
+          trace_id, parent_trace_id, developer_id, project_id, session_id, surface, operation,
+          actor_kind, actor_id, client_kind, client_version, related_ids, redacted_metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *
+      `,
+      [
+        activity.trace_id,
+        activity.parent_trace_id,
+        activity.developer_id,
+        activity.project_id,
+        activity.session_id,
+        activity.surface,
+        activity.operation,
+        activity.actor_kind,
+        activity.actor_id,
+        activity.client_kind,
+        activity.client_version,
+        JSON.stringify(activity.related_ids),
+        JSON.stringify(activity.redacted_metadata)
+      ]
+    );
+    return result.rows[0] as SystemActivityRecord;
+  }
+
+  async finishSystemActivity(input: FinishSystemActivityInput) {
+    await this.ensureSystemActivitySchema();
+    const activity = normalizeSystemActivityFinish(input);
+    const result = await this.pool.query<SystemActivityRecord>(
+      `
+        UPDATE system_activity_events
+        SET status = $2,
+            finished_at = now(),
+            duration_ms = greatest(0, floor(extract(epoch FROM (now() - started_at)) * 1000)::int),
+            error_code = $3,
+            error_message = $4,
+            related_ids = related_ids || $5::jsonb,
+            redacted_metadata = redacted_metadata || $6::jsonb,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        activity.id,
+        activity.status,
+        activity.error_code ?? null,
+        activity.error_message,
+        JSON.stringify(activity.related_ids),
+        JSON.stringify(activity.redacted_metadata)
+      ]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async getSystemAuditReport(input: SystemAuditReportInput = {}) {
+    await this.ensureSystemActivitySchema();
+    let projectId = stringOrNull(input.project_id);
+    const projectPath = stringOrNull(input.project_path);
+    if (!projectId && projectPath) {
+      const project = await this.pool.query<{ id: string }>(
+        "SELECT id FROM projects WHERE primary_path = $1 ORDER BY created_at DESC LIMIT 1",
+        [projectPath]
+      );
+      projectId = project.rows[0]?.id ?? null;
+    }
+
+    const untilDate = auditDateOrNull(input.until) ?? new Date();
+    const sinceDate =
+      auditDateOrNull(input.since) ?? new Date(untilDate.getTime() - 24 * 60 * 60 * 1000);
+    const limit = boundedAuditLimit(input.limit);
+    const slowMs = Math.max(1, Number(input.slow_ms ?? 1000));
+    const filters = {
+      project_id: projectId,
+      project_path: projectPath,
+      since: auditIso(sinceDate),
+      until: auditIso(untilDate),
+      surface: stringOrNull(input.surface),
+      status: stringOrNull(input.status),
+      limit,
+      slow_ms: slowMs,
+      default_window_hours: input.since ? null : 24
+    };
+
+    const where = ["started_at >= $1::timestamptz", "started_at <= $2::timestamptz"];
+    const values: unknown[] = [filters.since, filters.until];
+    if (projectId) {
+      values.push(projectId);
+      where.push(`project_id = $${values.length}`);
+    }
+    if (filters.surface) {
+      values.push(filters.surface);
+      where.push(`surface = $${values.length}`);
+    }
+    if (filters.status) {
+      values.push(filters.status);
+      where.push(`status = $${values.length}`);
+    }
+    values.push(limit);
+    const limitPlaceholder = `$${values.length}`;
+    const activityResult = await this.pool.query<
+      SystemActivityRecord & {
+        activity_id: string;
+      }
+    >(
+      `
+        SELECT id AS activity_id, trace_id, parent_trace_id, developer_id, project_id, session_id,
+               surface, operation, actor_kind, actor_id, client_kind, client_version, status,
+               duration_ms, error_code, error_message, related_ids, redacted_metadata,
+               started_at, finished_at, created_at, updated_at
+        FROM system_activity_events
+        WHERE ${where.join(" AND ")}
+        ORDER BY started_at DESC
+        LIMIT ${limitPlaceholder}
+      `,
+      values
+    );
+    const rows = activityResult.rows;
+    const timeline = rows.map((row) => ({
+      activity_id: row.activity_id,
+      trace_id: row.trace_id,
+      parent_trace_id: row.parent_trace_id,
+      project_id: row.project_id,
+      session_id: row.session_id,
+      surface: row.surface,
+      operation: row.operation,
+      status: row.status,
+      duration_ms: row.duration_ms,
+      error_code: row.error_code,
+      started_at: row.started_at,
+      finished_at: row.finished_at,
+      route_template:
+        typeof row.redacted_metadata?.route_template === "string"
+          ? row.redacted_metadata.route_template
+          : null,
+      related_ids: row.related_ids,
+      links: {
+        activity_id: row.activity_id,
+        trace_id: row.trace_id,
+        project_id: row.project_id,
+        session_id: row.session_id
+      }
+    }));
+    const failures = timeline
+      .filter((row) => row.status === "error" || (row.status === "skipped" && row.error_code))
+      .map((row) => ({
+        activity_id: row.activity_id,
+        trace_id: row.trace_id,
+        surface: row.surface,
+        operation: row.operation,
+        status: row.status,
+        error_code: row.error_code,
+        started_at: row.started_at,
+        links: row.links
+      }));
+    const slowOperations = timeline
+      .filter((row) => typeof row.duration_ms === "number" && row.duration_ms >= slowMs)
+      .slice(0, 10);
+    const topErrors = Object.entries(auditCountBy(failures, "error_code"))
+      .map(([error_code, count]) => ({ error_code, count }))
+      .sort(
+        (left, right) => right.count - left.count || left.error_code.localeCompare(right.error_code)
+      )
+      .slice(0, 10);
+
+    const projectWhere = projectId ? "AND project_id = $3" : "";
+    const projectValues = projectId
+      ? [filters.since, filters.until, projectId]
+      : [filters.since, filters.until];
+    const capture = await this.pool.query<{
+      sessions_started: number;
+      active_sessions: number;
+      events: number;
+      checkpoints: number;
+      recall_traces: number;
+      pending_embeddings: number;
+      failed_embeddings: number;
+    }>(
+      `
+        SELECT
+          (SELECT count(*)::int FROM sessions
+            WHERE started_at >= $1::timestamptz AND started_at <= $2::timestamptz ${projectWhere}) AS sessions_started,
+          (SELECT count(*)::int FROM sessions
+            WHERE status = 'active' ${projectId ? "AND project_id = $3" : ""}) AS active_sessions,
+          (SELECT count(*)::int FROM events
+            WHERE occurred_at >= $1::timestamptz AND occurred_at <= $2::timestamptz ${projectWhere}) AS events,
+          (SELECT count(*)::int FROM checkpoints
+            WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ${projectWhere}) AS checkpoints,
+          (SELECT count(*)::int FROM recall_traces
+            WHERE created_at >= $1::timestamptz AND created_at <= $2::timestamptz ${projectWhere}) AS recall_traces,
+          (SELECT count(*)::int FROM chunks
+            WHERE embed_status = 'pending' ${projectId ? "AND project_id = $3" : ""}) AS pending_embeddings,
+          (SELECT count(*)::int FROM chunks
+            WHERE embed_status = 'failed' ${projectId ? "AND project_id = $3" : ""}) AS failed_embeddings
+      `,
+      projectValues
+    );
+    const modelProvider = await this.pool.query<{
+      provider: string;
+      model: string;
+      status: string;
+      calls: number;
+      avg_latency_ms: number | null;
+      errors: number;
+    }>(
+      `
+        SELECT provider, model, status, count(*)::int AS calls,
+               round(avg(latency_ms))::int AS avg_latency_ms,
+               count(*) FILTER (WHERE status = 'failed')::int AS errors
+        FROM model_calls
+        WHERE created_at >= $1::timestamptz
+          AND created_at <= $2::timestamptz
+          ${projectWhere}
+        GROUP BY provider, model, status
+        ORDER BY calls DESC, provider ASC, model ASC
+        LIMIT 20
+      `,
+      projectValues
+    );
+    const modelRows = modelProvider.rows;
+    const modelFailures = modelRows.reduce((total, row) => total + Number(row.errors ?? 0), 0);
+    const pendingStarted = timeline.filter((row) => row.status === "started").length;
+    const recommendations = [];
+    if (failures.length > 0) {
+      recommendations.push(
+        auditRecommendation(
+          "warning",
+          "Review failed or skipped operations before claiming the system is healthy.",
+          {
+            failure_count: failures.length,
+            top_errors: topErrors
+          }
+        )
+      );
+    }
+    if (pendingStarted > 0) {
+      recommendations.push(
+        auditRecommendation(
+          "warning",
+          "Some activity rows are still open; check for crashed or long-running operations.",
+          {
+            started_count: pendingStarted
+          }
+        )
+      );
+    }
+    if (Number(capture.rows[0]?.pending_embeddings ?? 0) > 0) {
+      recommendations.push(
+        auditRecommendation(
+          "warning",
+          "Pending embeddings are present; verify local model recovery.",
+          {
+            pending_embeddings: capture.rows[0]?.pending_embeddings ?? 0
+          }
+        )
+      );
+    }
+    if (modelFailures > 0) {
+      recommendations.push(
+        auditRecommendation(
+          "warning",
+          "Model provider failures were recorded in the selected window.",
+          {
+            failed_model_calls: modelFailures
+          }
+        )
+      );
+    }
+    if (rows.length === 0) {
+      recommendations.push(
+        auditRecommendation("info", "No system activity rows matched these filters.", filters)
+      );
+    }
+    if (recommendations.length === 0) {
+      recommendations.push(
+        auditRecommendation("ok", "No urgent audit issues were detected in this window.", {
+          checked_rows: rows.length
+        })
+      );
+    }
+
+    return {
+      schema_version: 1,
+      generated_at: new Date().toISOString(),
+      filters,
+      summary: {
+        total: rows.length,
+        by_status: auditCountBy(rows, "status"),
+        by_surface: auditCountBy(rows, "surface"),
+        by_operation: auditCountBy(rows, "operation"),
+        failures: failures.length,
+        slow_operations: slowOperations.length,
+        pending_started: pendingStarted,
+        window_truncated: rows.length >= limit
+      },
+      timeline,
+      failures,
+      slow_operations: slowOperations,
+      top_errors: topErrors,
+      model_provider: {
+        total_calls: modelRows.reduce((total, row) => total + Number(row.calls ?? 0), 0),
+        failed_calls: modelFailures,
+        by_provider_model: modelRows
+      },
+      capture: capture.rows[0] ?? {
+        sessions_started: 0,
+        active_sessions: 0,
+        events: 0,
+        checkpoints: 0,
+        recall_traces: 0,
+        pending_embeddings: 0,
+        failed_embeddings: 0
+      },
+      recommendations
+    };
   }
 
   private async upsertProjectSource(
@@ -4051,7 +4434,8 @@ export class RecallantDb {
       "recall_traces",
       "model_calls",
       "paid_api_approvals",
-      "erasure_requests"
+      "erasure_requests",
+      "system_activity_events"
     ];
     const plannedDeletedRecords = sumCounts(affected, deleteKeys);
     const plannedDeidentifiedRecords = sumCounts(affected, deidentifyKeys);
@@ -4109,6 +4493,7 @@ export class RecallantDb {
       affected,
       deleted_records_planned: plannedDeletedRecords,
       deidentified_records_planned: plannedDeidentifiedRecords,
+      system_activity_events_policy: "deidentified_governance_audit_rows_retained",
       content_removed: true
     };
 
@@ -4117,6 +4502,7 @@ export class RecallantDb {
     let deidentifiedModelCalls = 0;
     let updatedPaidApprovals = 0;
     let deidentifiedErasureRequests = 0;
+    let deidentifiedSystemActivity = 0;
     await withTransaction(this.pool, async (client) => {
       await client.query(
         `
@@ -4206,6 +4592,27 @@ export class RecallantDb {
       );
       deidentifiedErasureRequests = erasureRequestResult.rowCount ?? 0;
 
+      const systemActivityResult = await client.query(
+        `
+          UPDATE system_activity_events
+          SET project_id = NULL,
+              session_id = NULL,
+              related_ids = (coalesce(related_ids, '{}'::jsonb) - 'project_id' - 'session_id') || $2::jsonb,
+              redacted_metadata = (coalesce(redacted_metadata, '{}'::jsonb) - 'project_id' - 'project_path' - 'session_id') || $3::jsonb
+          WHERE project_id = $1
+        `,
+        [
+          project.project_id,
+          JSON.stringify({ project_purged: true, project_purge_erasure_id: erasureId }),
+          JSON.stringify({
+            project_purged: true,
+            project_purge_erasure_id: erasureId,
+            project_identity_redacted: true
+          })
+        ]
+      );
+      deidentifiedSystemActivity = systemActivityResult.rowCount ?? 0;
+
       const settingsAuditResult = await client.query(
         "DELETE FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1",
         [project.project_id]
@@ -4236,17 +4643,20 @@ export class RecallantDb {
           deidentifiedRecallTraces +
           deidentifiedModelCalls +
           updatedPaidApprovals +
-          deidentifiedErasureRequests,
+          deidentifiedErasureRequests +
+          deidentifiedSystemActivity,
         recall_traces_deidentified: deidentifiedRecallTraces,
         model_calls_deidentified: deidentifiedModelCalls,
         paid_api_approvals_cancelled_or_deidentified: updatedPaidApprovals,
         erasure_requests_deidentified: deidentifiedErasureRequests,
+        system_activity_events_deidentified: deidentifiedSystemActivity,
         retained_redacted_receipts: countValue(affected, "erasure_requests") + 1,
         files_changed: 0
       },
       warnings: [
         ...target.warnings,
         "Recallant database records for this project were purged or de-identified.",
+        "System activity ledger rows were retained only as de-identified governance evidence.",
         "No project files were touched by the database purge.",
         "Run local disconnect cleanup separately or through the CLI orchestration to remove local Recallant artifacts."
       ]
@@ -5642,6 +6052,7 @@ export class RecallantDb {
           (SELECT count(*)::int FROM project_settings WHERE project_id = $1) AS project_settings,
           (SELECT count(*)::int FROM client_adapter_settings WHERE project_id = $1) AS client_adapter_settings,
           (SELECT count(*)::int FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1::text) AS settings_audit_events,
+          (SELECT count(*)::int FROM system_activity_events WHERE project_id = $1) AS system_activity_events,
           (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1) AS paid_api_approvals,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1 AND status = 'pending') AS pending_paid_approvals,

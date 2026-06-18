@@ -98,6 +98,22 @@ environment facts, capability references, secret reference names, server canon l
 documentation authority map. These are guidance and provenance for agents. They do not activate
 connectors, reveal secret values, or turn recalled text into binding rules.
 
+The Workbench also has an Audit view for the system activity ledger. It summarizes redacted activity
+rows, failures, skipped operations, slow operations, capture/model health, and recent timeline rows
+for the current project. The Audit view is for owner diagnosis, not public observability: request
+bodies, auth headers, cookies, raw environment values, provider keys, and database URLs are not
+shown.
+
+Maintainers can get the same report from the CLI:
+
+```bash
+recallant audit --project-dir /path/to/project
+```
+
+Useful filters include `--since`, `--until`, `--surface`, `--status`, `--slow-ms`, `--limit`, and
+`--format json`. The default report window is bounded so an accidental command does not dump the
+whole system history.
+
 ## 5. Clean Up Or Reset A Test Project
 
 Recallant has separate cleanup levels so a test run does not turn into accidental data loss.
@@ -155,6 +171,11 @@ local disconnect is enabled, Recallant removes or updates only Recallant-generat
 generated bootstrap sections. If a previous file can only be restored from a redacted backup,
 Recallant reports that limitation instead of guessing.
 
+Project purge also accounts for the system activity ledger. Project-scoped memory/capture records
+are removed according to the dry-run plan, while ledger rows are retained only as de-identified
+governance evidence with project/session identity removed. The receipt calls this out so an owner
+can tell the difference between content removal and auditability retention.
+
 ## What Gets Written
 
 Project attach may create small local pointer/config files such as `.recallant/config`,
@@ -184,5 +205,6 @@ reviewed before docs are rewritten.
 ## Advanced / Debug CLI
 
 Maintainers and automation can still use lower-level commands such as attach, connect, doctor,
-agent capture, demo capture, and ask when they need explicit control. See [Client setup](CLIENT_SETUP.md)
-for that advanced path. These commands are not required for the beginner quickstart above.
+agent capture, audit, demo capture, and ask when they need explicit control. See
+[Client setup](CLIENT_SETUP.md) for that advanced path. These commands are not required for the
+beginner quickstart above.

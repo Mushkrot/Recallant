@@ -1,5 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  createRecallantDbFromEnv,
+  redactSystemActivityValue,
+  type RecallantDb,
+  type SystemActivityRecord
+} from "@recallant/db";
 import process from "node:process";
 
 import { recallantTools } from "./tools.js";
@@ -10,6 +16,24 @@ type RateLimitState = {
 };
 
 const rateLimits = new Map<string, RateLimitState>();
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type McpAuditStatus = {
+  durable: boolean;
+  surface: "mcp";
+  operation: string;
+  status: "recorded" | "unavailable" | "failed";
+  activity_id?: string;
+  trace_id?: string;
+  error_code?: string;
+  reason?: string;
+};
+
+type McpAuditContext = {
+  database: RecallantDb | null;
+  activity: SystemActivityRecord | null;
+  status: McpAuditStatus;
+};
 
 function readRateLimitPerMinute() {
   const raw = process.env.RECALLANT_MCP_RATE_LIMIT_PER_MINUTE;
@@ -41,8 +65,13 @@ function codeFromError(error: unknown) {
   return "INTERNAL_ERROR";
 }
 
-function structuredError(toolName: string, error: unknown) {
+function safeErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
+  return String(redactSystemActivityValue(message, "error_message"));
+}
+
+function structuredError(toolName: string, error: unknown, audit?: McpAuditStatus) {
+  const message = safeErrorMessage(error);
   const code = codeFromError(error);
   return {
     isError: true,
@@ -57,6 +86,7 @@ function structuredError(toolName: string, error: unknown) {
               message,
               retryable: code === "RATE_LIMITED"
             },
+            audit,
             tool: toolName
           },
           null,
@@ -65,6 +95,167 @@ function structuredError(toolName: string, error: unknown) {
       }
     ]
   };
+}
+
+function uuidOrNull(value: unknown) {
+  return typeof value === "string" && uuidPattern.test(value) ? value : null;
+}
+
+function summarizeArgument(value: unknown, key: string): unknown {
+  if (value === null || value === undefined) return null;
+  if (uuidPattern.test(String(value))) return value;
+  if (typeof value === "string") {
+    if (/secret|token|password|api[_-]?key|authorization|cookie|database[_-]?url/i.test(key)) {
+      return "[REDACTED]";
+    }
+    if (/text|body|query|summary|note|payload/i.test(key)) {
+      return { type: "string", length: value.length };
+    }
+    return value.length > 120 ? { type: "string", length: value.length } : value;
+  }
+  if (Array.isArray(value)) return { type: "array", length: value.length };
+  if (typeof value === "object") return { type: "object", keys: Object.keys(value).sort() };
+  return value;
+}
+
+function summarizeArgs(args: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => [key, summarizeArgument(value, key)])
+  );
+}
+
+function relatedIdsFromArgs(args: Record<string, unknown>) {
+  return {
+    project_id: uuidOrNull(args.project_id) ?? uuidOrNull(process.env.RECALLANT_PROJECT_ID),
+    session_id: uuidOrNull(args.session_id),
+    trace_id: uuidOrNull(args.trace_id),
+    memory_id: uuidOrNull(args.memory_id),
+    chunk_id: uuidOrNull(args.chunk_id)
+  };
+}
+
+function relatedIdsFromResult(payload: Record<string, unknown>) {
+  const related: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (uuidPattern.test(String(value)) && /(?:^|_)id$/.test(key)) {
+      related[key] = value;
+      continue;
+    }
+    if (
+      Array.isArray(value) &&
+      /(?:^|_)ids$/.test(key) &&
+      value.every((item) => uuidPattern.test(String(item)))
+    ) {
+      related[key] = value.slice(0, 20);
+    }
+  }
+  return related;
+}
+
+function attachAuditStatus(payload: Record<string, unknown>, audit: McpAuditStatus) {
+  return { ...payload, audit };
+}
+
+async function startMcpAudit(
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<McpAuditContext> {
+  const database = createRecallantDbFromEnv();
+  const unavailable: McpAuditStatus = {
+    durable: false,
+    surface: "mcp",
+    operation: toolName,
+    status: "unavailable",
+    reason: "Recallant storage is not configured for this MCP server process."
+  };
+  if (!database) return { database: null, activity: null, status: unavailable };
+  try {
+    const activity = await database.startSystemActivity({
+      surface: "mcp",
+      operation: toolName,
+      actor_kind: "agent",
+      actor_id: typeof args.client_kind === "string" ? args.client_kind : "mcp-client",
+      client_kind: typeof args.client_kind === "string" ? args.client_kind : "mcp",
+      client_version:
+        typeof args.client_version === "string"
+          ? args.client_version
+          : process.env.RECALLANT_CLIENT_VERSION,
+      developer_id: null,
+      project_id: null,
+      session_id: null,
+      related_ids: relatedIdsFromArgs(args),
+      metadata: {
+        argument_keys: Object.keys(args).sort(),
+        arguments: summarizeArgs(args)
+      }
+    });
+    return {
+      database,
+      activity,
+      status: {
+        durable: true,
+        surface: "mcp",
+        operation: toolName,
+        status: "recorded",
+        activity_id: activity.id,
+        trace_id: activity.trace_id
+      }
+    };
+  } catch (error) {
+    return {
+      database: null,
+      activity: null,
+      status: {
+        durable: false,
+        surface: "mcp",
+        operation: toolName,
+        status: "failed",
+        error_code: codeFromError(error),
+        reason: safeErrorMessage(error)
+      }
+    };
+  }
+}
+
+async function finishMcpAudit(
+  audit: McpAuditContext,
+  status: "success" | "error" | "cancelled" | "skipped",
+  payload: Record<string, unknown> | null,
+  error?: unknown
+) {
+  if (!audit.database || !audit.activity) return audit.status;
+  try {
+    const finished = await audit.database.finishSystemActivity({
+      id: audit.activity.id,
+      status,
+      error_code: error ? codeFromError(error) : null,
+      error_message: error ? safeErrorMessage(error) : null,
+      related_ids: payload ? relatedIdsFromResult(payload) : {},
+      metadata: {
+        result_keys: payload ? Object.keys(payload).sort() : [],
+        error_code: error ? codeFromError(error) : null
+      }
+    });
+    return {
+      durable: true,
+      surface: "mcp" as const,
+      operation: audit.status.operation,
+      status: "recorded" as const,
+      activity_id: finished?.id ?? audit.activity.id,
+      trace_id: finished?.trace_id ?? audit.activity.trace_id
+    };
+  } catch (finishError) {
+    return {
+      durable: false,
+      surface: "mcp" as const,
+      operation: audit.status.operation,
+      status: "failed" as const,
+      activity_id: audit.activity.id,
+      trace_id: audit.activity.trace_id,
+      error_code: codeFromError(finishError),
+      reason: safeErrorMessage(finishError)
+    };
+  }
 }
 
 export function createRecallantMcpServer() {
@@ -82,18 +273,23 @@ export function createRecallantMcpServer() {
         inputSchema: tool.inputSchema
       },
       async (args) => {
+        const toolArgs = args as Record<string, unknown>;
+        const audit = await startMcpAudit(tool.name, toolArgs);
         try {
           checkRateLimit(tool.name);
+          const payload = await tool.handler(toolArgs);
+          const auditStatus = await finishMcpAudit(audit, "success", payload);
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify(await tool.handler(args as Record<string, unknown>), null, 2)
+                text: JSON.stringify(attachAuditStatus(payload, auditStatus), null, 2)
               }
             ]
           };
         } catch (error) {
-          return structuredError(tool.name, error);
+          const auditStatus = await finishMcpAudit(audit, "error", null, error);
+          return structuredError(tool.name, error, auditStatus);
         }
       }
     );

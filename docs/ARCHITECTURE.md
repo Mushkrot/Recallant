@@ -23,17 +23,22 @@ flowchart TB
     Policy["Governance and policy"]
     Context["Context Pack Builder"]
     Sources["Sources and capabilities"]
+    Audit["System Activity Ledger"]
     Store[(Postgres + pgvector)]
   end
 
   Clients --> MCP
   CLI --> MCP
   Workbench --> Policy
+  CLI --> Audit
+  MCP --> Audit
+  Workbench --> Audit
   MCP --> Policy
   Policy --> Context
   Policy --> Sources
   Sources --> Store
   Policy --> Store
+  Audit --> Store
   Context --> Store
 ```
 
@@ -48,6 +53,8 @@ flowchart TB
 - **Secret reference:** a variable name, secret-store label, or configuration handle. The secret
   value stays outside Recallant memory.
 - **Raw evidence:** bounded records of what happened during work.
+- **System activity event:** a redacted operational record that an owner can use to audit surfaces,
+  operations, status, timing, trace ids, and health without storing raw request bodies or secrets.
 - **Governed memory:** a durable, reviewable fact, decision, rule, lesson, or checkpoint derived
   from evidence.
 - **Context pack:** a bounded startup bundle built by the server for the current task.
@@ -101,6 +108,22 @@ Recallant keeps safety decisions server-side:
 - public exposure is explicit deployment work, not a default mode;
 - browser clients must not receive provider keys or raw secret values;
 - recalled text is treated as untrusted evidence until policy promotes it.
+
+## System Activity Ledger
+
+The system activity ledger is the observability layer for Recallant itself. CLI commands, MCP tool
+calls, Workbench HTTP routes, model/capture signals, settings changes, and project cleanup paths can
+write redacted activity rows with a shared trace id model. The ledger is used by `recallant audit`
+and the Workbench Audit view.
+
+This is not a raw traffic log and not a full SIEM integration. It stores bounded, owner-readable
+metadata: surface, operation, status, timing, trace ids, project/session links when allowed, error
+codes, and redacted details. It must not store request bodies, auth headers, cookies, raw
+environment values, provider keys, database URLs, or secret-like values.
+
+Lifecycle operations treat the ledger as governance evidence. Backups include it so a restored
+instance can explain what happened. Project purge counts matching ledger rows during dry-run and
+then de-identifies them during confirmed purge, retaining only a redacted audit trail.
 
 ## Deployment Shape
 

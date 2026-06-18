@@ -202,6 +202,7 @@ async function run() {
     ask: join(publicReportDir, "recallant-workbench-ask.png"),
     sources: join(publicReportDir, "recallant-workbench-sources.png"),
     activity: join(publicReportDir, "recallant-workbench-activity.png"),
+    audit: join(publicReportDir, "recallant-workbench-audit.png"),
     review: join(publicReportDir, "recallant-workbench-review.png"),
     mobile: join(publicReportDir, "recallant-workbench-mobile.png")
   };
@@ -921,6 +922,31 @@ async function run() {
       forbiddenPublicText
     );
 
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=audit`, {
+      waitUntil: "networkidle"
+    });
+    await desktop.getByRole("heading", { name: "Audit", exact: true }).waitFor();
+    await noHorizontalScroll(desktop, "desktop focused Audit view");
+    await assertResponsiveBounds(desktop, "desktop focused Audit view");
+    const focusedAuditBox = await visibleBox(desktop.locator("#audit"), "desktop focused Audit");
+    assert(
+      focusedAuditBox.width >= 980,
+      `desktop focused Audit is too narrow: ${JSON.stringify(focusedAuditBox)}`
+    );
+    await desktop.getByText("System activity ledger").waitFor();
+    await desktop.getByText("Audit report").waitFor();
+    await visibleBox(desktop.locator("#audit .audit-summary"), "desktop Audit summary");
+    await desktop.locator("#audit", { hasText: "activity rows" }).waitFor();
+    await desktop.locator("#audit", { hasText: "Recommendations" }).waitFor();
+    await absent(desktop.locator("#ask-recallant"), "focused Audit Ask panel");
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-audit.png"),
+      publicScreenshots.audit,
+      "desktop focused Audit",
+      forbiddenPublicText
+    );
+
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=review`, {
       waitUntil: "networkidle"
     });
@@ -1101,6 +1127,7 @@ async function run() {
             join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
             join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
             join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
+            join(reportDir, "recallant-workbench-desktop-focused-audit.png"),
             join(reportDir, "recallant-workbench-desktop-focused-review.png"),
             join(reportDir, "recallant-workbench-dense-review.png"),
             join(reportDir, "recallant-workbench-migration-review-queue.png"),
@@ -1124,6 +1151,7 @@ async function run() {
             "public_safe_screenshot_candidates",
             "desktop_focused_source_filtered_activity_view",
             "activity_replay_readability",
+            "desktop_focused_audit_view",
             "desktop_focused_settings_view",
             "visual_system_responsive_bounds",
             "default_visible_language_is_human_first",

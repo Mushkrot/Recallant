@@ -105,7 +105,12 @@ mustInclude(
     "npm run security-review:smoke",
     "install/auth/Workbench/backups/secrets",
     "browser-facing secret redaction",
-    "redacted local backups"
+    "redacted local backups",
+    "System Activity Ledger",
+    "redacted system activity ledger",
+    "bodies, auth headers, cookies",
+    "Project purge must account for the ledger",
+    "Backups include the ledger table"
   ],
   "docs/SECURITY.md"
 );

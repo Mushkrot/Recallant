@@ -74,6 +74,8 @@ Recallant runs as a local or self-hosted memory service:
 - MCP server for agent clients.
 - Postgres/pgvector-backed storage.
 - Private Workbench UI for review, rules, source context, settings, and management chat.
+- System activity ledger for owner-readable audit reports across CLI, MCP, Workbench HTTP, capture,
+  model, and cleanup paths.
 - Local-first model routing with explicit approval gates for paid APIs.
 - Source, capability, and secret-reference model for agent-ready project setup without storing raw
   secrets.
@@ -115,6 +117,7 @@ Current strengths:
   handoffs;
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
+- redacted system activity audit reports in the CLI and Workbench;
 - explicit security and cost governance design;
 - public/private boundary guards across docs and runtime/install defaults;
 - smoke coverage for the core capture/recall path.

@@ -213,6 +213,37 @@ Postgres reachability, attaches a project, writes capture evidence, verifies `do
 --require-capture`, and removes the temporary container afterward. Independent-host validation is
 still recommended before a release-candidate tag.
 
+## System Activity Audits
+
+Recallant keeps a redacted system activity ledger for owner diagnosis. It is intended to answer:
+which project used Recallant, through which surface, what operation ran, whether it succeeded,
+whether storage/model/capture paths were healthy, and which failures or slow operations need
+attention.
+
+Use the CLI report when debugging a host:
+
+```bash
+recallant audit --project-dir /path/to/project
+recallant audit --project-dir /path/to/project --surface mcp --status error --format json
+```
+
+The report defaults to a bounded recent window and supports `--since`, `--until`, `--surface`,
+`--status`, `--slow-ms`, and `--limit`. It includes summary counts, recent failures, slow
+operations, top error codes, model-provider health, capture counts, pending/failed embeddings, and
+timeline rows with traceable ids.
+
+The private Workbench has the same project-scoped report in the Audit view. Keep that view behind
+Workbench authentication; it should not be exposed as an anonymous monitoring endpoint.
+
+Audit records are redacted by design. They do not store request bodies, auth headers, cookies, raw
+secret values, raw database URLs, or full environment values. Health, favicon, robots, and similar
+probe routes are intentionally skipped to keep the ledger useful instead of noisy.
+
+Backups include `system_activity_events` together with the memory/capture tables, and
+`recallant backup-verify` reports a system activity row count. Project purge does not silently erase
+system history: the dry-run counts project-scoped ledger rows, and confirmed purge de-identifies
+them by clearing project/session links while retaining a redacted governance trail.
+
 ## Model Routing
 
 Recallant is local-first. The local model route points at Ollama through

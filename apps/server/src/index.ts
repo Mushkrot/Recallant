@@ -3,19 +3,27 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 import { getRecallantCoreInfo } from "@recallant/core";
 import {
+  RecallantDb,
   createRecallantDbFromEnv,
   recallantDatabasePackage,
   type ForgetInput,
   type ProjectSourceKind,
   type ProjectSettingInput,
-  type ReviewAgentMemoryInput
+  redactSystemActivityValue,
+  type ReviewAgentMemoryInput,
+  type SystemActivityRecord
 } from "@recallant/db";
 import { recallantMcpServerName } from "@recallant/mcp";
 import { buildManagementChatResponse, type ManagementChatResponse } from "./management-chat.js";
 
 type ReviewDashboardData = Awaited<
   ReturnType<NonNullable<ReturnType<typeof createRecallantDbFromEnv>>["getReviewDashboard"]>
-> & { starter_docs?: unknown; canon_capability_context?: unknown };
+> & {
+  starter_docs?: unknown;
+  canon_capability_context?: unknown;
+  audit_report?: unknown;
+  audit_error?: unknown;
+};
 
 type ChatRenderState = {
   question?: string;
@@ -250,6 +258,238 @@ function authorize(request: IncomingMessage) {
   return { ok: false, mode: "none" };
 }
 
+type WorkbenchAuth = ReturnType<typeof authorize>;
+
+type HttpAuditRoute = {
+  operation: string;
+  group: string;
+  route_template: string;
+  noisy?: boolean;
+};
+
+type HttpAuditContext = {
+  database: RecallantDb | null;
+  activity: SystemActivityRecord | null;
+  route: HttpAuditRoute;
+};
+
+const httpAuditSkipRoutes = [
+  { method: "GET", path: "/health", reason: "health readiness probe" },
+  { method: "GET", path: "/favicon.ico", reason: "browser favicon probe" },
+  { method: "GET", path: "/robots.txt", reason: "crawler metadata probe" }
+] as const;
+
+const httpUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function uuidOrNull(value: unknown) {
+  return typeof value === "string" && httpUuidPattern.test(value) ? value : null;
+}
+
+function isSkippedHttpAuditRoute(method: string, pathname: string) {
+  return httpAuditSkipRoutes.some((route) => route.method === method && route.path === pathname);
+}
+
+function classifyHttpAuditRoute(method: string, pathname: string): HttpAuditRoute {
+  if (pathname === "/" || pathname === "/review") {
+    return { operation: "workbench.review", group: "review", route_template: "/review" };
+  }
+  if (pathname === "/api/review-dashboard") {
+    return {
+      operation: "workbench.api.review_dashboard",
+      group: "review",
+      route_template: "/api/review-dashboard"
+    };
+  }
+  if (
+    method === "POST" &&
+    (pathname === "/api/management-chat" || pathname === "/management-chat")
+  ) {
+    return {
+      operation: "workbench.management_chat",
+      group: "management_chat",
+      route_template: pathname.startsWith("/api/") ? "/api/management-chat" : "/management-chat"
+    };
+  }
+  if (method === "POST" && (pathname === "/api/review-action" || pathname === "/review-action")) {
+    return {
+      operation: "workbench.review_action",
+      group: "review",
+      route_template: pathname.startsWith("/api/") ? "/api/review-action" : "/review-action"
+    };
+  }
+  if (
+    method === "POST" &&
+    (pathname === "/api/project-setting" || pathname === "/project-setting")
+  ) {
+    return {
+      operation: "workbench.settings_update",
+      group: "settings",
+      route_template: pathname.startsWith("/api/") ? "/api/project-setting" : "/project-setting"
+    };
+  }
+  if (
+    method === "POST" &&
+    (pathname === "/api/project-sanitize" || pathname === "/project-sanitize")
+  ) {
+    return {
+      operation: "workbench.project_sanitize",
+      group: "sanitize",
+      route_template: pathname.startsWith("/api/") ? "/api/project-sanitize" : "/project-sanitize"
+    };
+  }
+  if (method === "POST" && (pathname === "/api/project-detach" || pathname === "/project-detach")) {
+    return {
+      operation: "workbench.project_detach",
+      group: "sanitize",
+      route_template: pathname.startsWith("/api/") ? "/api/project-detach" : "/project-detach"
+    };
+  }
+  if (method === "POST" && (pathname === "/api/memory-forget" || pathname === "/memory-forget")) {
+    return {
+      operation: "workbench.memory_forget",
+      group: "forget",
+      route_template: pathname.startsWith("/api/") ? "/api/memory-forget" : "/memory-forget"
+    };
+  }
+  if (method === "POST" && pathname === "/memory-space") {
+    return {
+      operation: "workbench.memory_space",
+      group: "sources",
+      route_template: "/memory-space"
+    };
+  }
+  if (method === "POST" && (pathname === "/source-attach" || pathname === "/source-detach")) {
+    return { operation: "workbench.source", group: "sources", route_template: pathname };
+  }
+  return {
+    operation: "workbench.unknown",
+    group: "unknown",
+    route_template: pathname || "/"
+  };
+}
+
+function summarizeHttpHeaders(request: IncomingMessage) {
+  return {
+    header_names: Object.keys(request.headers).sort(),
+    access_header_seen: Boolean(request.headers.authorization),
+    browser_session_header_seen: Boolean(request.headers.cookie),
+    edge_email_header_seen: Boolean(getHeaderValue(request, "cf-access-authenticated-user-email")),
+    edge_assertion_header_seen: Boolean(getHeaderValue(request, "cf-access-jwt-assertion")),
+    content_type: request.headers["content-type"] ?? null,
+    content_length_present: Boolean(request.headers["content-length"]),
+    user_agent_present: Boolean(request.headers["user-agent"])
+  };
+}
+
+function httpAuditErrorCode(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("VALIDATION_ERROR:")) return "VALIDATION_ERROR";
+  if (message.startsWith("POLICY_BLOCKED:")) return "POLICY_BLOCKED";
+  return "HTTP_HANDLER_ERROR";
+}
+
+function safeHttpAuditErrorMessage(error: unknown) {
+  return String(redactSystemActivityValue(error instanceof Error ? error.message : String(error)));
+}
+
+function createHttpAuditDb() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH
+  });
+}
+
+async function startHttpAudit(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestUrl: URL,
+  auth: WorkbenchAuth
+): Promise<HttpAuditContext | null> {
+  const method = request.method ?? "GET";
+  if (isSkippedHttpAuditRoute(method, requestUrl.pathname)) return null;
+  const route = classifyHttpAuditRoute(method, requestUrl.pathname);
+  const database = createHttpAuditDb();
+  if (!database) return { database: null, activity: null, route };
+  try {
+    const activity = await database.startSystemActivity({
+      surface: "workbench_http",
+      operation: route.operation,
+      actor_kind: auth.ok ? "user" : "anonymous",
+      actor_id: auth.ok ? `auth:${auth.mode}` : "unauthorized",
+      client_kind: "workbench",
+      project_id: uuidOrNull(requestUrl.searchParams.get("project_id")),
+      related_ids: {
+        route_template: route.route_template,
+        query_project_id: requestUrl.searchParams.get("project_id"),
+        selected_memory_id: requestUrl.searchParams.get("memory_id")
+      },
+      metadata: {
+        audit_policy: "health_favicon_robots_skipped; bodies_summarized_not_stored",
+        method,
+        pathname: requestUrl.pathname,
+        route_template: route.route_template,
+        operation_group: route.group,
+        auth_mode: auth.mode,
+        authorized: auth.ok,
+        query_keys: Array.from(requestUrl.searchParams.keys()).sort(),
+        headers: summarizeHttpHeaders(request)
+      }
+    });
+    response.setHeader("x-recallant-audit-trace-id", activity.trace_id);
+    return { database, activity, route };
+  } catch {
+    await database.close().catch(() => undefined);
+    return { database: null, activity: null, route };
+  }
+}
+
+async function finishHttpAudit(
+  audit: HttpAuditContext | null,
+  response: ServerResponse,
+  error?: unknown
+) {
+  if (!audit?.database || !audit.activity) return;
+  const statusCode = response.statusCode || (error ? 500 : 200);
+  const status = error
+    ? "error"
+    : statusCode >= 500
+      ? "error"
+      : statusCode >= 400
+        ? "skipped"
+        : "success";
+  try {
+    await audit.database.finishSystemActivity({
+      id: audit.activity.id,
+      status,
+      error_code: error
+        ? httpAuditErrorCode(error)
+        : statusCode >= 400
+          ? `HTTP_${statusCode}`
+          : null,
+      error_message: error ? safeHttpAuditErrorMessage(error) : null,
+      metadata: {
+        route_template: audit.route.route_template,
+        operation_group: audit.route.group,
+        status_code: statusCode,
+        response_finished: response.writableEnded
+      }
+    });
+  } catch (finishError) {
+    if (process.env.RECALLANT_HTTP_AUDIT_DEBUG === "true") {
+      process.stderr.write(
+        `Recallant HTTP audit finish failed: ${safeHttpAuditErrorMessage(finishError)}\n`
+      );
+    }
+    // Audit logging must never break the Workbench response path.
+  } finally {
+    await audit.database.close().catch(() => undefined);
+  }
+}
+
 function write(
   response: ServerResponse,
   statusCode: number,
@@ -419,6 +659,33 @@ function sanitizeDashboardForClient(data: ReviewDashboardData): ReviewDashboardD
     ...data,
     settings: data.settings.map(sanitizeSettingRow)
   };
+}
+
+async function withAuditReport(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  dashboard: ReviewDashboardData,
+  requestUrl: URL,
+  activeView: WorkbenchView
+) {
+  if (activeView !== "audit") return dashboard;
+  try {
+    return {
+      ...dashboard,
+      audit_report: await database.getSystemAuditReport({
+        project_id: optionalInput(requestUrl.searchParams.get("project_id")),
+        since: optionalInput(requestUrl.searchParams.get("since")),
+        until: optionalInput(requestUrl.searchParams.get("until")),
+        surface: optionalInput(requestUrl.searchParams.get("surface")),
+        status: optionalInput(requestUrl.searchParams.get("status")),
+        limit: 100
+      })
+    };
+  } catch (error) {
+    return {
+      ...dashboard,
+      audit_error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 function parseSettingValue(value: unknown) {
@@ -2035,6 +2302,61 @@ function canonCapabilityList(
   </div>`;
 }
 
+function publicSafeDefaultReferenceLabel(value: unknown, fallback: string) {
+  const label = String(value ?? "").trim();
+  if (!label) return fallback;
+  if (!publicScreenshotMode()) return label;
+  if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(label)) {
+    return fallback;
+  }
+  if (/^(\/|~\/|[a-z]:\\)/i.test(label) || label.includes("\\") || label.includes("/")) {
+    return fallback;
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(label)) {
+    return fallback;
+  }
+  if (/^agents\.md$/i.test(label)) {
+    return fallback;
+  }
+  return label;
+}
+
+function capabilityKindLabel(kind: unknown) {
+  const labels: Record<string, string> = {
+    connector: "Connector capability reference",
+    deployment: "Deployment capability reference",
+    model: "Model capability reference",
+    other: "Capability reference",
+    server: "Server capability reference",
+    storage: "Storage/source capability reference"
+  };
+  return labels[String(kind ?? "")] ?? "Capability reference";
+}
+
+function renderSecretReferenceOverview(items: unknown) {
+  const rows = asArray(items)
+    .map((item) => asRecord(item))
+    .filter((item) => Object.keys(item).length > 0);
+  const statusCounts = new Map<string, number>();
+  for (const row of rows) {
+    const status = String(row.status ?? "names_only");
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+  const statusSummary = Array.from(statusCounts.entries())
+    .map(([status, count]) => `${count} ${status.replaceAll("_", " ")}`)
+    .join(", ");
+  return `<div class="canon-capability-group">
+    <h4>Secret references</h4>
+    ${
+      rows.length
+        ? `<ul><li>${escapeHtml(
+            `${rows.length} reference name${rows.length === 1 ? "" : "s"} recorded`
+          )}<span>${escapeHtml(statusSummary || "names only")}</span><p class="strategy-note">Names stay hidden on this default screen; use explicit settings or review surfaces for safe reference names.</p></li></ul>`
+        : `<p class="empty">No secret reference names are recorded yet.</p>`
+    }
+  </div>`;
+}
+
 function renderCanonCapabilityContext(value: unknown) {
   const context = asRecord(value);
   const status = String(context.status ?? "not_recorded");
@@ -2057,20 +2379,12 @@ function renderCanonCapabilityContext(value: unknown) {
         "Capabilities",
         context.capability_references,
         (item) =>
-          `${escapeHtml(String(item.label ?? item.id ?? "Capability reference"))}<span>${escapeHtml(
-            `${String(item.status ?? "review")} / ${String(item.access ?? "reference_only")}`
-          )}</span>`,
+          `${escapeHtml(
+            publicSafeDefaultReferenceLabel(item.label ?? item.id, capabilityKindLabel(item.kind))
+          )}<span>${escapeHtml(`${String(item.status ?? "review")} / ${String(item.access ?? "reference_only")}`)}</span>`,
         "No capability references are recorded yet."
       )}
-      ${canonCapabilityList(
-        "Secret references",
-        context.secret_references,
-        (item) =>
-          `${escapeHtml(String(item.name ?? "SECRET_REFERENCE"))}<span>${escapeHtml(
-            String(item.status ?? "names_only")
-          )}</span>`,
-        "No secret reference names are recorded yet."
-      )}
+      ${renderSecretReferenceOverview(context.secret_references)}
       ${canonCapabilityList(
         "Server canon",
         context.server_canon_links,
@@ -2084,9 +2398,9 @@ function renderCanonCapabilityContext(value: unknown) {
         "Documentation authority",
         context.documentation_authority_map,
         (item) =>
-          `${escapeHtml(String(item.path ?? "project docs"))}<span>${escapeHtml(
-            String(item.role ?? "review_required")
-          )}</span>`,
+          `${escapeHtml(
+            publicSafeDefaultReferenceLabel(item.path, "Project documentation reference")
+          )}<span>${escapeHtml(String(item.role ?? "review_required"))}</span>`,
         "No documentation authority map is recorded yet."
       )}
     </div>
@@ -2853,6 +3167,120 @@ function renderActivityReplay(data: ReviewDashboardData) {
   </div>`;
 }
 
+function auditMetric(report: Record<string, unknown>, key: string) {
+  return String(asRecord(report.summary)[key] ?? 0);
+}
+
+function renderAuditFilters(data: ReviewDashboardData, report: Record<string, unknown>) {
+  const filters = asRecord(report.filters);
+  return `<form class="audit-filter-form" method="get" action="/review">
+    <input type="hidden" name="view" value="audit" />
+    <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+    <label>Since <input name="since" value="${escapeHtml(filters.since ?? "")}" /></label>
+    <label>Until <input name="until" value="${escapeHtml(filters.until ?? "")}" /></label>
+    <label>Surface <input name="surface" placeholder="all" value="${escapeHtml(filters.surface ?? "")}" /></label>
+    <label>Status <input name="status" placeholder="all" value="${escapeHtml(filters.status ?? "")}" /></label>
+    <button type="submit">Apply</button>
+  </form>`;
+}
+
+function renderAuditRows(rows: unknown, emptyLabel: string) {
+  const normalized = asArray(rows).map((row) => asRecord(row));
+  if (normalized.length === 0) return `<p class="empty">${escapeHtml(emptyLabel)}</p>`;
+  return `<div class="audit-row-list">
+    ${normalized
+      .slice(0, 12)
+      .map((row) => {
+        const link = row.project_id
+          ? reviewPathWithParams(row.project_id, { view: "activity" })
+          : null;
+        const content = `<article class="audit-row">
+          <div>
+            <strong>${escapeHtml(`${String(row.surface ?? "system")}/${String(row.operation ?? "operation")}`)}</strong>
+            <p>${escapeHtml(`${String(row.status ?? "unknown")}${row.error_code ? ` · ${String(row.error_code)}` : ""}`)}</p>
+            <time>${escapeHtml(formatDate(row.started_at))}</time>
+          </div>
+          <dl>
+            <dt>trace</dt><dd>${escapeHtml(shortId(row.trace_id))}</dd>
+            <dt>activity</dt><dd>${escapeHtml(shortId(row.activity_id))}</dd>
+          </dl>
+        </article>`;
+        return link ? `<a class="row-link" href="${escapeHtml(link)}">${content}</a>` : content;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderAuditWorkbench(data: ReviewDashboardData) {
+  if (data.audit_error) {
+    return `<div class="audit-workbench">
+      <p class="empty">Audit report is unavailable right now: ${escapeHtml(data.audit_error)}</p>
+    </div>`;
+  }
+  const report = asRecord(data.audit_report);
+  if (Object.keys(report).length === 0) {
+    return `<div class="audit-workbench">
+      <p class="empty">Audit report has not been loaded for this view yet.</p>
+    </div>`;
+  }
+  const summary = asRecord(report.summary);
+  const model = asRecord(report.model_provider);
+  const capture = asRecord(report.capture);
+  const recommendations = asArray(report.recommendations).map((row) => asRecord(row));
+  const total = Number(summary.total ?? 0);
+  return `<div class="audit-workbench">
+    <div class="section-head">
+      <div>
+        <span class="section-kicker">System activity ledger</span>
+        <h3>Audit report</h3>
+      </div>
+      <p>Summarized from redacted system activity rows. Request bodies, auth headers, cookies, and secret-like values are not shown here.</p>
+    </div>
+    ${renderAuditFilters(data, report)}
+    <div class="audit-summary" aria-label="Audit summary">
+      <span><strong>${escapeHtml(total)}</strong> activity rows</span>
+      <span><strong>${escapeHtml(auditMetric(report, "failures"))}</strong> failures/skips</span>
+      <span><strong>${escapeHtml(auditMetric(report, "slow_operations"))}</strong> slow operations</span>
+      <span><strong>${escapeHtml(auditMetric(report, "pending_started"))}</strong> open started</span>
+      <span><strong>${escapeHtml(model.failed_calls ?? 0)}</strong> model failures</span>
+      <span><strong>${escapeHtml(capture.pending_embeddings ?? 0)}</strong> pending embeddings</span>
+    </div>
+    ${
+      total === 0
+        ? `<p class="empty">No audit activity matched these filters.</p>`
+        : `<div class="audit-columns">
+            <section>
+              <h3>Recent failures</h3>
+              ${renderAuditRows(report.failures, "No failed or skipped operations in this window.")}
+            </section>
+            <section>
+              <h3>Slow operations</h3>
+              ${renderAuditRows(report.slow_operations, "No slow operations crossed the configured threshold.")}
+            </section>
+          </div>
+          <section>
+            <h3>Timeline</h3>
+            ${renderAuditRows(report.timeline, "No audit timeline rows are available.")}
+          </section>`
+    }
+    <section class="audit-recommendations">
+      <h3>Recommendations</h3>
+      ${
+        recommendations.length === 0
+          ? `<p class="empty">No recommendations for this window.</p>`
+          : `<ul>${recommendations
+              .map(
+                (row) =>
+                  `<li><strong>${escapeHtml(row.severity ?? "info")}</strong> ${escapeHtml(
+                    row.message ?? "Review audit report."
+                  )}</li>`
+              )
+              .join("")}</ul>`
+      }
+    </section>
+  </div>`;
+}
+
 function renderProjectActions(data: ReviewDashboardData) {
   const cleanup = asRecord(data.project_cleanup);
   return `<div class="action-plan">
@@ -3176,6 +3604,7 @@ type WorkbenchView =
   | "command"
   | "sources"
   | "activity"
+  | "audit"
   | "review"
   | "settings";
 
@@ -3188,6 +3617,7 @@ function normalizeWorkbenchView(value: unknown): WorkbenchView {
     "command",
     "sources",
     "activity",
+    "audit",
     "review",
     "settings"
   ];
@@ -3215,6 +3645,7 @@ function renderWorkbenchNav(
     { view: "memory", label: "Memory Spaces" },
     { view: "sources", label: "Sources" },
     { view: "activity", label: "Activity / Replay" },
+    { view: "audit", label: "Audit" },
     { view: "review", label: "Review" },
     { view: "command", label: "Command Center" },
     { view: "settings", label: "Settings" }
@@ -3257,10 +3688,17 @@ function renderDashboard(
   const showCommand = !projectChooser && showWorkbenchView(activeView, "command");
   const showSources = !projectChooser && showWorkbenchView(activeView, "sources");
   const showActivity = !projectChooser && showWorkbenchView(activeView, "activity");
+  const showAudit = !projectChooser && activeView === "audit";
   const showReview = !projectChooser && showWorkbenchView(activeView, "review");
   const showSettings = !projectChooser && showWorkbenchView(activeView, "settings");
   const showBody =
-    showMemory || showCommand || showSources || showActivity || showReview || showSettings;
+    showMemory ||
+    showCommand ||
+    showSources ||
+    showActivity ||
+    showAudit ||
+    showReview ||
+    showSettings;
   const focused = activeView !== "all";
   return `<!doctype html>
 <html lang="en">
@@ -3315,9 +3753,10 @@ function renderDashboard(
     .workbench-main.production-first-screen { align-content: start; }
     .overview-memory-map { order: 1; }
     .overview-activity { order: 2; }
-    .overview-review { order: 3; }
-    .overview-command { order: 4; }
-    .overview-operations { order: 5; }
+    .overview-audit { order: 3; }
+    .overview-review { order: 4; }
+    .overview-command { order: 5; }
+    .overview-operations { order: 6; }
     .workbench-main.production-first-screen > .secondary-workspace { order: 5; }
     .primary-workspace { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
     .command-card h3 { margin: 0 0 8px; font-size: 14px; }
@@ -3627,6 +4066,22 @@ function renderDashboard(
     .activity-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
     .activity-summary span { border: 1px solid #dce3ec; border-radius: 7px; padding: 9px; background: #fbfcfe; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
     .activity-summary strong { display: block; color: #166454; font-size: 15px; }
+    .audit-workbench { display: grid; gap: 12px; }
+    .audit-filter-form { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: end; border: 1px solid #dce3ec; border-radius: 7px; padding: 10px; background: #fbfcfe; }
+    .audit-filter-form label { display: grid; gap: 4px; color: #4f5867; font-size: 12px; font-weight: 650; }
+    .audit-filter-form input { min-width: 0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px; font: inherit; font-size: 12px; }
+    .audit-filter-form button { align-self: end; }
+    .audit-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+    .audit-summary span { border: 1px solid #dce3ec; border-radius: 7px; padding: 9px; background: #f8fafc; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .audit-summary strong { display: block; color: #166454; font-size: 15px; }
+    .audit-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .audit-row-list { display: grid; gap: 8px; }
+    .audit-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 0.34fr); gap: 10px; border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; background: var(--surface-soft); }
+    .audit-row strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+    .audit-row p { margin: 4px 0; color: #4f5867; font-size: 12px; overflow-wrap: anywhere; }
+    .audit-row time { color: #6f7785; font-size: 11px; }
+    .audit-row dl { grid-template-columns: 58px minmax(0, 1fr); font-size: 11px; }
+    .audit-recommendations ul { margin: 0; padding-left: 18px; color: #303845; font-size: 13px; line-height: 1.45; }
     .activity-list { display: grid; gap: 12px; }
     .activity-group { border: 1px solid #dfe8e4; border-radius: var(--radius); padding: 11px; background: var(--surface); }
     .activity-group-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 9px; }
@@ -3642,7 +4097,7 @@ function renderDashboard(
     .empty { color: var(--muted); font-size: 13px; line-height: 1.4; border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
     a:focus-visible, button:focus-visible, summary:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #7eb6a9; outline-offset: 2px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid, .source-tree { grid-template-columns: 1fr; } .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .posture-grid, .canon-capability-grid, .source-tree-groups, .activity-summary, .source-map-legend, .project-choice-grid, .current-project-context { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .current-project-facts { justify-content: flex-start; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .audit-summary, .review-guide, .signal-strip, .first-screen-snapshot, .posture-grid, .canon-capability-grid, .source-tree-groups, .activity-summary, .source-map-legend, .project-choice-grid, .current-project-context { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .current-project-facts { justify-content: flex-start; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
 
     /* Stage 1 Workbench design architecture corrective pass */
     :root {
@@ -3736,6 +4191,7 @@ function renderDashboard(
     .workbench-main.production-first-screen > .ask-panel,
     .workbench-main.production-first-screen > .source-workbench,
     .workbench-main.production-first-screen > .overview-activity,
+    .workbench-main.production-first-screen > .overview-audit,
     .workbench-main.production-first-screen > .overview-review,
     .workbench-main.production-first-screen > .overview-command {
       grid-column: 1;
@@ -4104,6 +4560,7 @@ function renderDashboard(
       font-size: 10.5px;
     }
     .activity-item strong { font-size: 12.5px; }
+    .overview-audit,
     .overview-review,
     .overview-command { background: rgba(251, 250, 246, 0.82); }
     .review-guide {
@@ -4199,6 +4656,10 @@ function renderDashboard(
       .source-tree-groups,
       .operation-panels,
       .activity-summary,
+      .audit-summary,
+      .audit-columns,
+      .audit-filter-form,
+      .audit-row,
       .summary-grid,
       .review-overview,
       .signal-strip { grid-template-columns: 1fr; }
@@ -4222,7 +4683,8 @@ function renderDashboard(
       overflow: visible;
     }
     .workbench-main.production-first-screen > .overview-activity { order: 3; }
-    .workbench-main.production-first-screen > .overview-review { order: 4; }
+    .workbench-main.production-first-screen > .overview-audit { order: 4; }
+    .workbench-main.production-first-screen > .overview-review { order: 5; }
     .workbench-main.production-first-screen > .overview-command { order: 6; }
     .workbench-main.production-first-screen .operation-panels {
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4450,6 +4912,14 @@ function renderDashboard(
             : ""
         }
         ${
+          showAudit
+            ? `<section class="panel ${focused ? "" : "overview-audit"}" id="audit">
+          <h2>Audit</h2>
+          ${renderAuditWorkbench(data)}
+        </section>`
+            : ""
+        }
+        ${
           showReview
             ? `<section class="panel ${focused ? "" : "overview-review"}" id="review">
           <h2>Review</h2>
@@ -4536,429 +5006,445 @@ export function createRecallantHttpServer() {
       return;
     }
     const auth = authorize(request);
-    if (!auth.ok) {
-      write(response, 401, "Unauthorized", "text/plain");
-      return;
-    }
-    const sessionCookie =
-      auth.mode === "cloudflare" && auth.email ? createSessionCookie(auth.email) : "";
-    const database = createRecallantDbFromEnv();
-    if (!database) {
-      write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
-      return;
-    }
-    const dashboardInput = {
-      project_id: requestUrl.searchParams.get("project_id"),
-      selected_memory_id: requestUrl.searchParams.get("memory_id"),
-      source_id: requestUrl.searchParams.get("source_id"),
-      rule_scope: requestUrl.searchParams.get("scope"),
-      rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
-      rule_memory_type: requestUrl.searchParams.get("rule_type"),
-      rule_memory_domain: requestUrl.searchParams.get("rule_domain")
-    };
-    const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
-    const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
-    if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
-      write(
-        response,
-        200,
-        renderDashboard(
+    const audit = await startHttpAudit(request, response, requestUrl, auth);
+    let routeError: unknown;
+    try {
+      if (!auth.ok) {
+        write(response, 401, "Unauthorized", "text/plain");
+        return;
+      }
+      const sessionCookie =
+        auth.mode === "cloudflare" && auth.email ? createSessionCookie(auth.email) : "";
+      const database = createRecallantDbFromEnv();
+      if (!database) {
+        write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
+        return;
+      }
+      const dashboardInput = {
+        project_id: requestUrl.searchParams.get("project_id"),
+        selected_memory_id: requestUrl.searchParams.get("memory_id"),
+        source_id: requestUrl.searchParams.get("source_id"),
+        rule_scope: requestUrl.searchParams.get("scope"),
+        rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
+        rule_memory_type: requestUrl.searchParams.get("rule_type"),
+        rule_memory_domain: requestUrl.searchParams.get("rule_domain")
+      };
+      const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
+      const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
+      if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
+        const dashboard = await withAuditReport(
+          database,
           sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
-          { view: workbenchView, projectChooser: !explicitProjectId }
-        ),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (requestUrl.pathname === "/api/review-dashboard") {
-      write(
-        response,
-        200,
-        JSON.stringify(
-          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput))
-        ),
-        "application/json"
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/management-chat") {
-      const body = (await readJson(request)) as {
-        project_id?: string | null;
-        source_id?: string | null;
-        selected_memory_id?: string | null;
-        memory_id?: string | null;
-        message?: string;
-        clarification_context?: unknown;
-      };
-      const chatDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
-          source_id: optionalInput(body.source_id),
-          selected_memory_id:
-            optionalInput(body.selected_memory_id) ??
-            optionalInput(body.memory_id) ??
-            dashboardInput.selected_memory_id
-        })
-      );
-      const result = await buildManagementChatResponse({
-        message: String(body.message ?? ""),
-        dashboard: chatDashboard,
-        database,
-        clarification_context: parseOptionalJsonObject(body.clarification_context)
-      });
-      write(response, 200, JSON.stringify(result), "application/json");
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/management-chat") {
-      const body = await readForm(request);
-      const chatDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
-          source_id: optionalInput(body.source_id),
-          selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
-        })
-      );
-      const question = String(body.message ?? "");
-      const result = await buildManagementChatResponse({
-        message: question,
-        dashboard: chatDashboard,
-        database,
-        clarification_context: parseOptionalJsonObject(body.clarification_context)
-      });
-      write(
-        response,
-        200,
-        renderDashboard(chatDashboard, {
-          chat: { question, response: result },
-          view: normalizeWorkbenchView(body.view)
-        }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/review-action") {
-      const body = (await readJson(request)) as ReviewAgentMemoryInput;
-      const result = await database.reviewAgentMemory({
-        ...body,
-        actor_kind: body.actor_kind ?? "user"
-      });
-      write(response, result.ok === false ? 409 : 200, JSON.stringify(result), "application/json");
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/review-action") {
-      const body = await readForm(request);
-      const action = String(body.action ?? "");
-      const patch =
-        action === "edit"
-          ? {
-              title: optionalInput(body.title),
-              body: optionalInput(body.body)
+          requestUrl,
+          workbenchView
+        );
+        write(
+          response,
+          200,
+          renderDashboard(dashboard, { view: workbenchView, projectChooser: !explicitProjectId }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
+        return;
+      }
+      if (requestUrl.pathname === "/api/review-dashboard") {
+        const dashboard = await withAuditReport(
+          database,
+          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
+          requestUrl,
+          workbenchView
+        );
+        write(response, 200, JSON.stringify(dashboard), "application/json");
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/management-chat") {
+        const body = (await readJson(request)) as {
+          project_id?: string | null;
+          source_id?: string | null;
+          selected_memory_id?: string | null;
+          memory_id?: string | null;
+          message?: string;
+          clarification_context?: unknown;
+        };
+        const chatDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+            source_id: optionalInput(body.source_id),
+            selected_memory_id:
+              optionalInput(body.selected_memory_id) ??
+              optionalInput(body.memory_id) ??
+              dashboardInput.selected_memory_id
+          })
+        );
+        const result = await buildManagementChatResponse({
+          message: String(body.message ?? ""),
+          dashboard: chatDashboard,
+          database,
+          clarification_context: parseOptionalJsonObject(body.clarification_context)
+        });
+        write(response, 200, JSON.stringify(result), "application/json");
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/management-chat") {
+        const body = await readForm(request);
+        const chatDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+            source_id: optionalInput(body.source_id),
+            selected_memory_id: optionalInput(body.memory_id) ?? dashboardInput.selected_memory_id
+          })
+        );
+        const question = String(body.message ?? "");
+        const result = await buildManagementChatResponse({
+          message: question,
+          dashboard: chatDashboard,
+          database,
+          clarification_context: parseOptionalJsonObject(body.clarification_context)
+        });
+        write(
+          response,
+          200,
+          renderDashboard(chatDashboard, {
+            chat: { question, response: result },
+            view: normalizeWorkbenchView(body.view)
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/review-action") {
+        const body = (await readJson(request)) as ReviewAgentMemoryInput;
+        const result = await database.reviewAgentMemory({
+          ...body,
+          actor_kind: body.actor_kind ?? "user"
+        });
+        write(
+          response,
+          result.ok === false ? 409 : 200,
+          JSON.stringify(result),
+          "application/json"
+        );
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/review-action") {
+        const body = await readForm(request);
+        const action = String(body.action ?? "");
+        const patch =
+          action === "edit"
+            ? {
+                title: optionalInput(body.title),
+                body: optionalInput(body.body)
+              }
+            : undefined;
+        const mergeMemoryIds = optionalInput(body.merge_memory_ids)
+          ?.split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        const result = await database.reviewAgentMemory({
+          memory_id: String(body.memory_id ?? ""),
+          action,
+          actor_kind: "user",
+          note: optionalInput(body.note),
+          superseded_by: optionalInput(body.superseded_by),
+          merge_memory_ids: mergeMemoryIds,
+          patch
+        });
+        const location = reviewPath(body.project_id, result.memory_id);
+        write(response, 303, "See other", "text/plain", { location });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/memory-forget") {
+        const body = (await readJson(request)) as Record<string, unknown>;
+        write(
+          response,
+          200,
+          JSON.stringify(await database.forget(buildForgetInput(body))),
+          "application/json"
+        );
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/memory-forget") {
+        const body = await readForm(request);
+        const result = await database.forget(buildForgetInput(body));
+        const targetId = optionalInput(body.target_id) ?? optionalInput(body.memory_id);
+        const targetKind = optionalInput(body.target_kind) ?? "agent_memory";
+        const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+        const forgetDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId,
+            selected_memory_id: targetId
+          })
+        );
+        write(
+          response,
+          200,
+          renderDashboard(forgetDashboard, {
+            memoryForget: {
+              result: result as Record<string, unknown>,
+              target: { kind: targetKind, id: targetId },
+              reason: optionalInput(body.reason)
             }
-          : undefined;
-      const mergeMemoryIds = optionalInput(body.merge_memory_ids)
-        ?.split(",")
-        .map((value) => value.trim())
-        .filter(Boolean);
-      const result = await database.reviewAgentMemory({
-        memory_id: String(body.memory_id ?? ""),
-        action,
-        actor_kind: "user",
-        note: optionalInput(body.note),
-        superseded_by: optionalInput(body.superseded_by),
-        merge_memory_ids: mergeMemoryIds,
-        patch
-      });
-      const location = reviewPath(body.project_id, result.memory_id);
-      write(response, 303, "See other", "text/plain", { location });
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/memory-forget") {
-      const body = (await readJson(request)) as Record<string, unknown>;
-      write(
-        response,
-        200,
-        JSON.stringify(await database.forget(buildForgetInput(body))),
-        "application/json"
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/memory-forget") {
-      const body = await readForm(request);
-      const result = await database.forget(buildForgetInput(body));
-      const targetId = optionalInput(body.target_id) ?? optionalInput(body.memory_id);
-      const targetKind = optionalInput(body.target_kind) ?? "agent_memory";
-      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
-      const forgetDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: projectId,
-          selected_memory_id: targetId
-        })
-      );
-      write(
-        response,
-        200,
-        renderDashboard(forgetDashboard, {
-          memoryForget: {
-            result: result as Record<string, unknown>,
-            target: { kind: targetKind, id: targetId },
-            reason: optionalInput(body.reason)
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/project-detach") {
+        const body = (await readJson(request)) as {
+          project_id?: string | null;
+          mode?: "live" | "sandbox";
+          reason?: string | null;
+          confirmation?: { confirmed?: boolean };
+        };
+        const result = await database.detachProject({
+          project_id: optionalInput(body.project_id),
+          mode: body.mode === "live" ? "live" : "sandbox",
+          reason: optionalInput(body.reason) ?? "Review UI project removal",
+          dry_run: body.confirmation?.confirmed === true ? false : true,
+          actor_kind: "user",
+          actor_id: "review-ui",
+          confirmation: { confirmed: body.confirmation?.confirmed === true }
+        });
+        write(response, 200, JSON.stringify(result), "application/json");
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/project-sanitize") {
+        const body = (await readJson(request)) as {
+          project_id?: string | null;
+          project_path?: string | null;
+          mode?: "detach" | "purge";
+          detach_mode?: "live" | "sandbox";
+          reason?: string | null;
+          confirmation?: { confirmed?: boolean; confirmation_token?: string | null };
+        };
+        const result = await database.sanitizeProject({
+          project_id: optionalInput(body.project_id),
+          project_path: optionalInput(body.project_path),
+          mode: body.mode === "detach" ? "detach" : "purge",
+          detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
+          reason: optionalInput(body.reason) ?? "Review UI project sanitize",
+          dry_run: body.confirmation?.confirmed === true ? false : true,
+          actor_kind: "user",
+          actor_id: "review-ui",
+          request_source: "ui",
+          confirmation: {
+            confirmed: body.confirmation?.confirmed === true,
+            confirmation_token: optionalInput(body.confirmation?.confirmation_token)
           }
-        }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/project-detach") {
-      const body = (await readJson(request)) as {
-        project_id?: string | null;
-        mode?: "live" | "sandbox";
-        reason?: string | null;
-        confirmation?: { confirmed?: boolean };
-      };
-      const result = await database.detachProject({
-        project_id: optionalInput(body.project_id),
-        mode: body.mode === "live" ? "live" : "sandbox",
-        reason: optionalInput(body.reason) ?? "Review UI project removal",
-        dry_run: body.confirmation?.confirmed === true ? false : true,
-        actor_kind: "user",
-        actor_id: "review-ui",
-        confirmation: { confirmed: body.confirmation?.confirmed === true }
-      });
-      write(response, 200, JSON.stringify(result), "application/json");
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/project-sanitize") {
-      const body = (await readJson(request)) as {
-        project_id?: string | null;
-        project_path?: string | null;
-        mode?: "detach" | "purge";
-        detach_mode?: "live" | "sandbox";
-        reason?: string | null;
-        confirmation?: { confirmed?: boolean; confirmation_token?: string | null };
-      };
-      const result = await database.sanitizeProject({
-        project_id: optionalInput(body.project_id),
-        project_path: optionalInput(body.project_path),
-        mode: body.mode === "detach" ? "detach" : "purge",
-        detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
-        reason: optionalInput(body.reason) ?? "Review UI project sanitize",
-        dry_run: body.confirmation?.confirmed === true ? false : true,
-        actor_kind: "user",
-        actor_id: "review-ui",
-        request_source: "ui",
-        confirmation: {
-          confirmed: body.confirmation?.confirmed === true,
-          confirmation_token: optionalInput(body.confirmation?.confirmation_token)
+        });
+        write(response, 200, JSON.stringify(result), "application/json");
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/project-detach") {
+        const body = await readForm(request);
+        const projectId = optionalInput(body.project_id);
+        const mode = body.mode === "live" ? "live" : "sandbox";
+        const confirmed = body.confirm === "true";
+        const result = await database.detachProject({
+          project_id: projectId,
+          mode,
+          reason: "Review UI project removal",
+          dry_run: confirmed ? false : true,
+          actor_kind: "user",
+          actor_id: "review-ui",
+          confirmation: { confirmed }
+        });
+        if (confirmed && result.status === "detached") {
+          write(response, 303, "See other", "text/plain", { location: "/review" });
+          return;
         }
-      });
-      write(response, 200, JSON.stringify(result), "application/json");
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/project-detach") {
-      const body = await readForm(request);
-      const projectId = optionalInput(body.project_id);
-      const mode = body.mode === "live" ? "live" : "sandbox";
-      const confirmed = body.confirm === "true";
-      const result = await database.detachProject({
-        project_id: projectId,
-        mode,
-        reason: "Review UI project removal",
-        dry_run: confirmed ? false : true,
-        actor_kind: "user",
-        actor_id: "review-ui",
-        confirmation: { confirmed }
-      });
-      if (confirmed && result.status === "detached") {
-        write(response, 303, "See other", "text/plain", { location: "/review" });
+        const detachDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId ?? dashboardInput.project_id,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          200,
+          renderDashboard(detachDashboard, { detach: { result } }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
         return;
       }
-      const detachDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: projectId ?? dashboardInput.project_id,
-          selected_memory_id: dashboardInput.selected_memory_id
-        })
-      );
-      write(
-        response,
-        200,
-        renderDashboard(detachDashboard, { detach: { result } }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/project-sanitize") {
-      const body = await readForm(request);
-      const projectId = optionalInput(body.project_id);
-      const projectPath = optionalInput(body.project_path);
-      const confirmToken = optionalInput(body.confirm_token);
-      const result = await database.sanitizeProject({
-        project_id: projectId,
-        project_path: projectPath,
-        mode: body.mode === "detach" ? "detach" : "purge",
-        detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
-        reason: "Review UI project sanitize",
-        dry_run: confirmToken ? false : true,
-        actor_kind: "user",
-        actor_id: "review-ui",
-        request_source: "ui",
-        confirmation: {
-          confirmed: Boolean(confirmToken),
-          confirmation_token: confirmToken
+      if (request.method === "POST" && requestUrl.pathname === "/project-sanitize") {
+        const body = await readForm(request);
+        const projectId = optionalInput(body.project_id);
+        const projectPath = optionalInput(body.project_path);
+        const confirmToken = optionalInput(body.confirm_token);
+        const result = await database.sanitizeProject({
+          project_id: projectId,
+          project_path: projectPath,
+          mode: body.mode === "detach" ? "detach" : "purge",
+          detach_mode: body.detach_mode === "sandbox" ? "sandbox" : "live",
+          reason: "Review UI project sanitize",
+          dry_run: confirmToken ? false : true,
+          actor_kind: "user",
+          actor_id: "review-ui",
+          request_source: "ui",
+          confirmation: {
+            confirmed: Boolean(confirmToken),
+            confirmation_token: confirmToken
+          }
+        });
+        if (result.status === "purged") {
+          write(response, 303, "See other", "text/plain", { location: "/review" });
+          return;
         }
-      });
-      if (result.status === "purged") {
-        write(response, 303, "See other", "text/plain", { location: "/review" });
+        const sanitizeDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId ?? dashboardInput.project_id,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          200,
+          renderDashboard(sanitizeDashboard, { sanitize: { result } }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
         return;
       }
-      const sanitizeDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: projectId ?? dashboardInput.project_id,
-          selected_memory_id: dashboardInput.selected_memory_id
-        })
-      );
-      write(
-        response,
-        200,
-        renderDashboard(sanitizeDashboard, { sanitize: { result } }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/api/project-setting") {
-      const body = (await readJson(request)) as ProjectSettingInput;
-      const result = await database.setProjectSetting({
-        ...body,
-        actor_kind: body.actor_kind ?? "user"
-      });
-      write(response, result.ok ? 200 : 409, JSON.stringify(result), "application/json");
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/project-setting") {
-      const body = await readForm(request);
-      const key = String(body.key ?? "");
-      const rawValue = String(body.value ?? "");
-      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
-      const result = await database.setProjectSetting({
-        project_id: projectId,
-        key,
-        value: parseProjectSettingFormValue(key, rawValue),
-        reason: optionalInput(body.reason) ?? "Review UI setting change",
-        actor_kind: "user",
-        actor_id: "review-ui",
-        confirmation: { confirmed: body.confirm === "true" }
-      });
-      const settingDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
+      if (request.method === "POST" && requestUrl.pathname === "/api/project-setting") {
+        const body = (await readJson(request)) as ProjectSettingInput;
+        const result = await database.setProjectSetting({
+          ...body,
+          actor_kind: body.actor_kind ?? "user"
+        });
+        write(response, result.ok ? 200 : 409, JSON.stringify(result), "application/json");
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/project-setting") {
+        const body = await readForm(request);
+        const key = String(body.key ?? "");
+        const rawValue = String(body.value ?? "");
+        const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+        const result = await database.setProjectSetting({
           project_id: projectId,
-          selected_memory_id: dashboardInput.selected_memory_id
-        })
-      );
-      write(
-        response,
-        result.ok ? 200 : 409,
-        renderDashboard(settingDashboard, {
-          setting: {
-            result: result as Record<string, unknown>,
-            key,
-            rawValue,
-            reason: optionalInput(body.reason)
-          },
-          view: "settings"
-        }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/memory-space") {
-      const body = await readForm(request);
-      const name = optionalInput(body.name);
-      if (!name) {
-        write(response, 400, "Memory space name is required", "text/plain");
+          key,
+          value: parseProjectSettingFormValue(key, rawValue),
+          reason: optionalInput(body.reason) ?? "Review UI setting change",
+          actor_kind: "user",
+          actor_id: "review-ui",
+          confirmation: { confirmed: body.confirm === "true" }
+        });
+        const settingDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          result.ok ? 200 : 409,
+          renderDashboard(settingDashboard, {
+            setting: {
+              result: result as Record<string, unknown>,
+              key,
+              rawValue,
+              reason: optionalInput(body.reason)
+            },
+            view: "settings"
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
         return;
       }
-      const result = await database.createMemorySpace({
-        name,
-        projectKind: parseProjectKindFormValue(body.project_kind),
-        memoryDomain: optionalInput(body.memory_domain) ?? "agent_work",
-        primaryPath: optionalInput(body.primary_path)
-      });
-      const location = reviewPath(result.project_id);
-      write(response, 303, "See other", "text/plain", { location });
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/source-attach") {
-      const body = await readForm(request);
-      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
-      const label = optionalInput(body.label);
-      if (!projectId || !label) {
-        write(response, 400, "Project and source label are required", "text/plain");
+      if (request.method === "POST" && requestUrl.pathname === "/memory-space") {
+        const body = await readForm(request);
+        const name = optionalInput(body.name);
+        if (!name) {
+          write(response, 400, "Memory space name is required", "text/plain");
+          return;
+        }
+        const result = await database.createMemorySpace({
+          name,
+          projectKind: parseProjectKindFormValue(body.project_kind),
+          memoryDomain: optionalInput(body.memory_domain) ?? "agent_work",
+          primaryPath: optionalInput(body.primary_path)
+        });
+        const location = reviewPath(result.project_id);
+        write(response, 303, "See other", "text/plain", { location });
         return;
       }
-      const sourceKind = parseSourceKindFormValue(body.source_kind);
-      const result = await database.attachProjectSource({
-        project_id: projectId,
-        source_kind: sourceKind,
-        label,
-        uri: optionalInput(body.uri),
-        is_primary: body.primary === "true",
-        status: "active",
-        metadata: { created_by: "review-ui" }
-      });
-      const sourceDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
+      if (request.method === "POST" && requestUrl.pathname === "/source-attach") {
+        const body = await readForm(request);
+        const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+        const label = optionalInput(body.label);
+        if (!projectId || !label) {
+          write(response, 400, "Project and source label are required", "text/plain");
+          return;
+        }
+        const sourceKind = parseSourceKindFormValue(body.source_kind);
+        const result = await database.attachProjectSource({
           project_id: projectId,
-          selected_memory_id: dashboardInput.selected_memory_id
-        })
-      );
-      write(
-        response,
-        200,
-        renderDashboard(sourceDashboard, {
-          source: { action: "attach_source", result: result as Record<string, unknown> },
-          view: "sources"
-        }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
-    }
-    if (request.method === "POST" && requestUrl.pathname === "/source-detach") {
-      const body = await readForm(request);
-      const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
-      const sourceId = optionalInput(body.source_id);
-      if (!projectId || !sourceId) {
-        write(response, 400, "Project and source id are required", "text/plain");
+          source_kind: sourceKind,
+          label,
+          uri: optionalInput(body.uri),
+          is_primary: body.primary === "true",
+          status: "active",
+          metadata: { created_by: "review-ui" }
+        });
+        const sourceDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          200,
+          renderDashboard(sourceDashboard, {
+            source: { action: "attach_source", result: result as Record<string, unknown> },
+            view: "sources"
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
         return;
       }
-      const result = await database.detachProjectSource({
-        source_id: sourceId,
-        reason: "Review UI source detach"
-      });
-      const sourceDashboard = sanitizeDashboardForClient(
-        await database.getReviewDashboard({
-          project_id: projectId,
-          selected_memory_id: dashboardInput.selected_memory_id
-        })
-      );
-      write(
-        response,
-        200,
-        renderDashboard(sourceDashboard, {
-          source: { action: "detach_source", result: result as Record<string, unknown> },
-          view: "sources"
-        }),
-        "text/html",
-        sessionCookie ? { "set-cookie": sessionCookie } : {}
-      );
-      return;
+      if (request.method === "POST" && requestUrl.pathname === "/source-detach") {
+        const body = await readForm(request);
+        const projectId = optionalInput(body.project_id) ?? dashboardInput.project_id;
+        const sourceId = optionalInput(body.source_id);
+        if (!projectId || !sourceId) {
+          write(response, 400, "Project and source id are required", "text/plain");
+          return;
+        }
+        const result = await database.detachProjectSource({
+          source_id: sourceId,
+          reason: "Review UI source detach"
+        });
+        const sourceDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: projectId,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          200,
+          renderDashboard(sourceDashboard, {
+            source: { action: "detach_source", result: result as Record<string, unknown> },
+            view: "sources"
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
+        return;
+      }
+      write(response, 404, "Not found", "text/plain");
+    } catch (error) {
+      routeError = error;
+      throw error;
+    } finally {
+      await finishHttpAudit(audit, response, routeError);
     }
-    write(response, 404, "Not found", "text/plain");
   });
 }
 

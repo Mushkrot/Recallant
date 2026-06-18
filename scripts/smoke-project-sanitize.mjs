@@ -130,7 +130,8 @@ async function countProjectRows(projectId) {
           (SELECT count(*)::int FROM recall_traces WHERE project_id = $1) AS recall_traces,
           (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
           (SELECT count(*)::int FROM paid_api_approval_requests WHERE project_id = $1) AS paid_api_approvals,
-          (SELECT count(*)::int FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1::text) AS settings_audit_events
+          (SELECT count(*)::int FROM settings_audit_events WHERE scope_kind = 'project' AND scope_id = $1::text) AS settings_audit_events,
+          (SELECT count(*)::int FROM system_activity_events WHERE project_id = $1) AS system_activity_events
       `,
       [projectId]
     );
@@ -179,6 +180,17 @@ async function addGovernanceRows(projectId) {
       `,
       [developerId, projectId]
     );
+    await client.query(
+      `
+        INSERT INTO system_activity_events (
+          developer_id, project_id, surface, operation, actor_kind, actor_id,
+          status, related_ids, redacted_metadata
+        )
+        VALUES ($1, $2, 'cli', 'project-sanitize-smoke', 'system', 'smoke',
+                'success', '{"project_id":"fixture"}'::jsonb, '{"project_path":"[REDACTED_PATH]"}'::jsonb)
+      `,
+      [developerId, projectId]
+    );
   });
 }
 
@@ -186,6 +198,23 @@ async function retainedReceiptCount(erasureId) {
   return withClient(async (client) => {
     const result = await client.query(
       "SELECT count(*)::int AS count FROM erasure_requests WHERE id = $1 AND project_id IS NULL AND redacted_receipt->>'content_removed' = 'true'",
+      [erasureId]
+    );
+    return result.rows[0]?.count ?? 0;
+  });
+}
+
+async function deidentifiedSystemActivityCount(erasureId) {
+  return withClient(async (client) => {
+    const result = await client.query(
+      `
+        SELECT count(*)::int AS count
+        FROM system_activity_events
+        WHERE project_id IS NULL
+          AND session_id IS NULL
+          AND related_ids->>'project_purge_erasure_id' = $1
+          AND redacted_metadata->>'project_identity_redacted' = 'true'
+      `,
       [erasureId]
     );
     return result.rows[0]?.count ?? 0;
@@ -238,6 +267,7 @@ if (
   dryRunCounts.events < 1 ||
   dryRunCounts.agent_memory_source_refs < 1 ||
   dryRunCounts.settings_audit_events < 1 ||
+  dryRunCounts.system_activity_events < 1 ||
   dryRunCounts.recall_traces < 1 ||
   dryRunCounts.model_calls < 1 ||
   dryRunCounts.paid_api_approvals < 1 ||
@@ -325,6 +355,8 @@ if (
   remainingRows.model_calls !== 0 ||
   remainingRows.paid_api_approvals !== 0 ||
   remainingRows.settings_audit_events !== 0 ||
+  remainingRows.system_activity_events !== 0 ||
+  confirmed.database?.changes?.system_activity_events_deidentified < 1 ||
   confirmed.receipt?.target?.requested_via !== "--project-dir" ||
   confirmed.receipt?.database_action?.status !== "purged" ||
   confirmed.receipt?.database_action?.writes_database !== true ||
@@ -341,7 +373,8 @@ if (
   !agents.includes("Keep sanitizemarker fixture source files untouched") ||
   !projectLog.includes("Status: existing sanitizemarker project fixture") ||
   !(await exists(join(projectDir, "README.md"))) ||
-  (await retainedReceiptCount(confirmed.database.erasure_id)) !== 1
+  (await retainedReceiptCount(confirmed.database.erasure_id)) !== 1 ||
+  (await deidentifiedSystemActivityCount(confirmed.database.erasure_id)) < 1
 ) {
   throw new Error(
     `Confirmed project sanitize failed: ${JSON.stringify({ confirmed, remainingRows }, null, 2)}`

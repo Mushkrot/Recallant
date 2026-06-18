@@ -46,6 +46,29 @@ reports only a redacted `service_env_profile` status, safe database components, 
 It must never print raw database passwords, auth tokens, session secrets, or a full credentialed
 database URL.
 
+## System Activity Ledger
+
+Recallant records a redacted system activity ledger so an owner can audit what the system did across
+CLI commands, MCP tools, Workbench HTTP routes, model/capture health, settings changes, and project
+cleanup flows.
+
+The ledger is diagnostic evidence, not a raw request log. Entries store operation names, status,
+timing, trace ids, project/session links when allowed, error codes, and redacted metadata. Request
+bodies, auth headers, cookies, provider keys, database URLs, raw environment values, and secret-like
+strings must not be stored in ledger rows or shown in audit reports. Health, favicon, robots, and
+other noise routes are intentionally excluded rather than logged as user activity.
+
+`recallant audit` and the Workbench Audit view summarize that ledger with bounded windows, filters,
+failure/slow-operation sections, model/capture health, and timeline rows. They are owner/admin
+surfaces and must remain behind the same private/authenticated Workbench posture as the rest of the
+management UI.
+
+Project purge must account for the ledger without pretending governed operations never happened.
+Project-scoped content records are removed according to the dry-run plan, but system activity rows
+are retained only as de-identified governance evidence: project and session links are cleared, and
+the redacted receipt records the purge. Backups include the ledger table so restore verification can
+audit history, while manifests continue to exclude raw secrets.
+
 ## External Services And Deployment Profiles
 
 Projects may need to remember that an external service, private access provider, server inventory,

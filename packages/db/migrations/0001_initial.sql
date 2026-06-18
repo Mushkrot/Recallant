@@ -383,6 +383,33 @@ CREATE TABLE settings_audit_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE system_activity_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trace_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  parent_trace_id UUID,
+  developer_id UUID REFERENCES developers(id) ON DELETE SET NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  session_id UUID REFERENCES sessions(id) ON DELETE SET NULL,
+  surface TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  actor_kind TEXT NOT NULL DEFAULT 'system',
+  actor_id TEXT,
+  client_kind TEXT,
+  client_version TEXT,
+  status TEXT NOT NULL DEFAULT 'started' CHECK (
+    status IN ('started', 'success', 'error', 'cancelled', 'skipped')
+  ),
+  duration_ms INT CHECK (duration_ms IS NULL OR duration_ms >= 0),
+  error_code TEXT,
+  error_message TEXT,
+  related_ids JSONB NOT NULL DEFAULT '{}'::jsonb,
+  redacted_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX idx_projects_developer_parent ON projects (developer_id, parent_project_id);
 CREATE INDEX idx_projects_developer_domain_kind ON projects (developer_id, memory_domain, project_kind);
 CREATE INDEX idx_project_sources_project_status ON project_sources (project_id, status, is_primary DESC);
@@ -429,5 +456,11 @@ CREATE UNIQUE INDEX idx_client_adapter_settings_unique
   ON client_adapter_settings (developer_id, coalesce(project_id, '00000000-0000-0000-0000-000000000000'::uuid), client_kind, key);
 CREATE INDEX idx_settings_audit_scope ON settings_audit_events (scope_kind, scope_id, created_at DESC);
 CREATE INDEX idx_settings_audit_key ON settings_audit_events (key, created_at DESC);
+
+CREATE INDEX idx_system_activity_project_time ON system_activity_events (project_id, started_at DESC);
+CREATE INDEX idx_system_activity_trace ON system_activity_events (trace_id);
+CREATE INDEX idx_system_activity_parent_trace ON system_activity_events (parent_trace_id) WHERE parent_trace_id IS NOT NULL;
+CREATE INDEX idx_system_activity_surface_status_time ON system_activity_events (surface, status, started_at DESC);
+CREATE INDEX idx_system_activity_error_time ON system_activity_events (error_code, started_at DESC) WHERE error_code IS NOT NULL;
 
 COMMIT;

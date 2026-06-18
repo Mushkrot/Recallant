@@ -821,6 +821,7 @@ try {
     "Command Center",
     "What Needs Attention",
     "Memory Spaces",
+    "Audit",
     "Human memory domains",
     "Virtual personal / work memory",
     "Personal Operations UI Smoke",
@@ -1031,6 +1032,48 @@ try {
       `Settings focused view failed: ${settingsView.status}; ${settingsViewText.slice(0, 500)}`
     );
   }
+
+  const auditApi = await fetch(`${baseUrl}/api/review-dashboard?project_id=${projectId}&view=audit`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const auditJson = await auditApi.json();
+  if (
+    auditApi.status !== 200 ||
+    !auditJson.audit_report ||
+    auditJson.audit_report.summary?.total < 1 ||
+    !Array.isArray(auditJson.audit_report.timeline) ||
+    !Array.isArray(auditJson.audit_report.recommendations)
+  ) {
+    throw new Error(`Audit API failed: ${auditApi.status}; ${JSON.stringify(auditJson.audit_report)}`);
+  }
+  const auditView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=audit`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const auditViewText = await auditView.text();
+  if (
+    auditView.status !== 200 ||
+    !auditViewText.includes('id="audit"') ||
+    !auditViewText.includes("System activity ledger") ||
+    !auditViewText.includes("Audit report") ||
+    !auditViewText.includes("activity rows") ||
+    !auditViewText.includes("Recommendations") ||
+    auditViewText.includes(rawProviderSecret) ||
+    auditViewText.includes(rawDatabaseSecret)
+  ) {
+    throw new Error(`Audit focused view failed: ${auditView.status}; ${auditViewText.slice(0, 700)}`);
+  }
+  const futureSince = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const emptyAuditView = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=audit&since=${encodeURIComponent(futureSince)}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  const emptyAuditText = await emptyAuditView.text();
+  if (
+    emptyAuditView.status !== 200 ||
+    !emptyAuditText.includes("No audit activity matched these filters.")
+  ) {
+    throw new Error(`Audit empty state failed: ${emptyAuditView.status}; ${emptyAuditText.slice(0, 700)}`);
+  }
   const requiredLayoutContracts = [
     "main { display: grid; grid-template-columns: minmax(0, 1fr)",
     ".workbench-body { display: grid",
@@ -1047,6 +1090,9 @@ try {
     ".review-overview { display: grid",
     ".review-lanes { display: grid",
     ".activity-summary { display: grid",
+    ".audit-summary { display: grid",
+    ".audit-filter-form { display: grid",
+    ".audit-row { display: grid",
     ".activity-group { border:",
     ".secondary-workspace { display: block",
     ".operation-panels { display: grid",

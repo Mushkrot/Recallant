@@ -99,6 +99,8 @@ mustInclude(
     "storage_blocked",
     "Workbench link",
     "capture active",
+    "System activity ledger",
+    "redacted system activity audit reports",
     "docs/AGENT_READY_PROJECTS.md",
     "docs/CONTRACT_STATUS.md",
     "pre-release",
@@ -136,6 +138,10 @@ mustInclude(
     "discuss first",
     "Empty projects may receive starter docs during the confirmed",
     "Existing-doc canonicalization and broader doc rewriting",
+    "Audit view",
+    "recallant audit --project-dir /path/to/project",
+    "bodies, auth headers, cookies",
+    "Project purge also accounts for the system activity ledger",
     "Advanced / Debug CLI",
     "Agent-ready projects"
   ],
@@ -217,6 +223,12 @@ mustInclude(
     "Existing-project migration",
     "Capture-active proof",
     "Documentation posture + context routing",
+    "System activity ledger and audit reports",
+    "Redacted `system_activity_events` schema",
+    "recallant audit",
+    "Workbench Audit view",
+    "project-sanitize de-identification policy",
+    "backup inclusion",
     "Working slice with Workbench strategy surface, empty-project starter docs, and minimal canon/capability context",
     "compact `starter_docs` plan/outcome",
     "`sections.canon_capability_context`",
@@ -238,6 +250,12 @@ mustInclude(
     "npm run non-owner-migration:smoke",
     "npm run real-project-pilots:smoke",
     "npm run review-ui:playwright",
+    "npm run system-audit:schema-smoke",
+    "npm run system-audit:mcp-smoke",
+    "npm run system-audit:cli-smoke",
+    "npm run system-audit:http-smoke",
+    "npm run system-audit:report-smoke",
+    "npm run phase8:smoke:backup",
     "Workbench migration review queue",
     "Release-Candidate Bar"
   ],
@@ -261,6 +279,35 @@ mustInclude(
     "Honest Status"
   ],
   "COMPARISON"
+);
+
+const architecture = await read("docs/ARCHITECTURE.md");
+mustInclude(
+  architecture,
+  [
+    "System Activity Ledger",
+    "redacted operational record",
+    "recallant audit",
+    "Workbench Audit view",
+    "not a raw traffic log",
+    "Backups include it",
+    "de-identifies them during confirmed purge"
+  ],
+  "ARCHITECTURE"
+);
+
+const selfHosting = await read("docs/SELF_HOSTING.md");
+mustInclude(
+  selfHosting,
+  [
+    "System Activity Audits",
+    "recallant audit --project-dir /path/to/project",
+    "--surface mcp --status error --format json",
+    "system_activity_events",
+    "backup-verify",
+    "confirmed purge de-identifies"
+  ],
+  "SELF_HOSTING"
 );
 
 const referenceProjects = await read("docs/REFERENCE_PROJECTS.md");

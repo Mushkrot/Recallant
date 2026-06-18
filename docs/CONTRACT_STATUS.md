@@ -19,6 +19,7 @@ or release packaging before it should be treated as stable infrastructure.
 | Context-pack startup and closeout | Working slice | MCP/CLI startup, checkpoint, closeout, recovery, and local spool paths; `npm run phase3:smoke`, `npm run spool:smoke`, `npm run product-acceptance:smoke` | Improve closeout extraction and reporting quality. |
 | Documentation posture + context routing | Working slice with Workbench strategy surface, empty-project starter docs, and minimal canon/capability context | Onboarding analyzes docs presence, missing surfaces, stale handoffs, production/server hints, Recallant workflow coverage, and canon/capability-link needs; human onboard output summarizes this as `empty`, `healthy`, `needs_attention`, or `risky`; confirmed attach stores `documentation_posture` and compact `starter_docs` plan/outcome; context packs expose `sections.documentation_posture` and `sections.canon_capability_context`; Workbench shows documentation strategy choices plus environment facts, capability references, secret reference names, server canon link status, and documentation authority labels; empty projects can receive base starter docs plus profile-specific service/product/library docs during confirmed onboarding; `npm run documentation-posture:smoke`, `npm run onboarding:smoke`, `npm run mcp:smoke`, `npm run review-ui:smoke` | Workbench-confirmed existing-doc rewriting, full external resource registry, connector activation, and broader real-project posture pilots remain future work. |
 | Governed memory and review | Working slice | Source refs, statuses, rule promotion gates, conflict views, Review UI, Workbench migration review queue, and browser-level Workbench QA; `npm run phase6:smoke:governed`, `npm run review-ui:smoke`, `npm run review-ui:playwright` | More real-world review ergonomics after broader migration pilots. |
+| System activity ledger and audit reports | Working slice | Redacted `system_activity_events` schema, CLI/MCP/Workbench HTTP audit envelopes, `recallant audit`, Workbench Audit view, bounded report filters, model/capture summary, project-sanitize de-identification policy, and backup inclusion; `npm run system-audit:schema-smoke`, `npm run system-audit:mcp-smoke`, `npm run system-audit:cli-smoke`, `npm run system-audit:http-smoke`, `npm run system-audit:report-smoke`, `npm run review-ui:smoke`, `npm run review-ui:playwright`, `npm run phase8:smoke:backup`, `npm run project-sanitize:smoke` | Broader live-host audit review, operator polish, and external monitoring/export integrations remain future work. |
 | Project sanitization and purge | Working slice | `recallant project-sanitize`, DB dry-run planner, stale local config target resolution, token-confirmed project purge, redacted receipts, explicit orphan local-only cleanup, local Recallant artifact disconnect, Workbench/API dry-run and confirmation flow; `npm run project-sanitize:smoke`, `npm run local-cleanup:smoke`, `npm run onboarding:smoke` | Broader real-project dry-run pilots and UI polish before release candidate. |
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
@@ -46,6 +47,12 @@ Recent verification across the current public checkpoint sequence includes:
 - `npm run phase7:smoke`
 - `npm run phase10:smoke`
 - `npm run project-sanitize:smoke`
+- `npm run system-audit:schema-smoke`
+- `npm run system-audit:mcp-smoke`
+- `npm run system-audit:cli-smoke`
+- `npm run system-audit:http-smoke`
+- `npm run system-audit:report-smoke`
+- `npm run phase8:smoke:backup`
 - `npm run non-owner-migration:smoke`
 - `RECALLANT_REAL_PROJECT_PILOTS=<comma-separated paths> npm run real-project-pilots:smoke`
 - `npm run review-ui:smoke`
@@ -63,7 +70,10 @@ also covers service-runtime branches for active, inactive, disabled, wrong bind,
 private health failure, public 502, and anonymous public exposure. Project sanitize smoke
 adds disposable-project purge rehearsal with dry-run counts, wrong-token no-op behavior, redacted
 receipt retention, local Recallant artifact disconnect, and an explicit no-confirmed-purge guard
-when a real project path is detected. The checks also cover
+when a real project path is detected. System audit smokes cover the redacted ledger schema, CLI/MCP
+and Workbench HTTP instrumentation, storage-blocked CLI audit spool, owner-readable audit reports,
+Workbench Audit view, model/capture summaries, and backup/verify inclusion of ledger rows. The
+checks also cover
 Workbench migration review ergonomics, autonomous browser QA with synthetic screenshots, pilot
 report scenarios, and production-sensitive dry-run safety, plus install/auth/Workbench/backups/secrets
 security review smoke.
@@ -87,7 +97,10 @@ security review smoke.
 - Project purge is not a substitute for source repository cleanup. It removes Recallant-controlled
   project memory and disconnects Recallant-generated local artifacts, including generated hooks and
   offline spool files; it must not delete source files, secrets, downloads, or arbitrary project
-  data.
+  data. System activity rows are retained only as de-identified governance evidence after purge, not
+  as a project recall source.
+- The system activity ledger is an owner-readable Recallant audit report, not a full SIEM, metrics
+  platform, or external monitoring export.
 - Public exposure of Workbench, admin APIs, MCP, backups, or raw artifacts is not a default mode.
 - Protected public Workbench access is not the same as remote project access. The current agent
   connection path is local stdio MCP on an installed host; projects on another server or workstation

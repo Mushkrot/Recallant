@@ -68,6 +68,23 @@ try {
     created_by: "agent",
     source_refs: [{ source_kind: "event", source_id: event.event_id, quote: searchNeedle }]
   });
+  const activity = await db.startSystemActivity({
+    developer_id: developerId,
+    project_id: projectId,
+    surface: "cli",
+    operation: "backup-smoke",
+    actor_kind: "system",
+    actor_id: "phase8-backup-smoke",
+    metadata: {
+      smoke: true,
+      policy: "backup must preserve redacted system activity ledger rows"
+    }
+  });
+  await db.finishSystemActivity({
+    id: activity.id,
+    status: "success",
+    metadata: { verified: true }
+  });
 } finally {
   await db.close();
 }
@@ -114,6 +131,7 @@ if (
   !Array.isArray(tables.edges) ||
   !Array.isArray(tables.model_calls) ||
   !Array.isArray(tables.settings_audit_events) ||
+  !Array.isArray(tables.system_activity_events) ||
   !tables.projects.some((project) => project.id === projectId) ||
   !tables.checkpoints.some((checkpoint) => checkpoint.project_id === projectId) ||
   !tables.chunks.some(
@@ -122,6 +140,9 @@ if (
   !tables.agent_memories.some((memory) => memory.project_id === projectId) ||
   !tables.raw_artifacts.some(
     (artifact) => artifact.project_id === projectId && artifact.sha256 === "2".repeat(64)
+  ) ||
+  !tables.system_activity_events.some(
+    (activity) => activity.project_id === projectId && activity.operation === "backup-smoke"
   )
 ) {
   throw new Error(`Backup manifest/tables failed: ${JSON.stringify({ manifest, tablesHash })}`);
@@ -154,6 +175,7 @@ if (
   Number(verify.governed_memory_count) < 1 ||
   Number(verify.chunk_count) < 1 ||
   Number(verify.raw_artifact_count) < 1 ||
+  Number(verify.system_activity_event_count) < 1 ||
   verify.raw_artifact_pointer_issues !== 0 ||
   Number(verify.bounded_search_matches) < 1
 ) {
