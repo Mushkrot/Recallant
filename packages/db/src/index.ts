@@ -2,6 +2,25 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { Pool, type PoolClient } from "pg";
+import { deriveCanonCapabilityContext } from "./canon-capability-context.js";
+
+export {
+  buildCanonCapabilityContext,
+  canonCapabilityContextContainsRawSecret,
+  deriveCanonCapabilityContext,
+  emptyCanonCapabilityContext,
+  type CanonCapabilityAuthority,
+  type CanonCapabilityContext,
+  type CanonCapabilityContextInput,
+  type CanonCapabilityDerivationInput,
+  type CanonCapabilityEnvironmentFact,
+  type CanonCapabilityProvenance,
+  type CanonCapabilityReference,
+  type CanonCapabilityReferenceState,
+  type CanonCapabilitySecretReference,
+  type CanonCapabilityServerCanonLink,
+  type DocumentationAuthorityMapItem
+} from "./canon-capability-context.js";
 
 export const recallantDatabasePackage = "recallant-db";
 
@@ -1035,6 +1054,231 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function stringArraySetting(value: unknown, maxItems = 20) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => (typeof item === "string" ? item : null))
+        .filter((item): item is string => item !== null)
+        .slice(0, maxItems)
+    : [];
+}
+
+function documentationPostureSection(value: unknown) {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const reviewOptions = Array.isArray(record?.review_options)
+    ? record.review_options
+        .filter(
+          (item): item is Record<string, unknown> => typeof item === "object" && item !== null
+        )
+        .slice(0, 8)
+        .map((item) => ({
+          option: stringOrNull(item.option) ?? "discuss_first",
+          recommended: item.recommended === true,
+          reason: stringOrNull(item.reason)
+        }))
+    : [];
+  const canonContext =
+    record?.canon_context && typeof record.canon_context === "object"
+      ? (record.canon_context as Record<string, unknown>)
+      : {};
+  const signals = Array.isArray(record?.signals)
+    ? record.signals
+        .filter(
+          (item): item is Record<string, unknown> => typeof item === "object" && item !== null
+        )
+        .slice(0, 12)
+        .map((item) => ({
+          code: stringOrNull(item.code) ?? "unknown",
+          severity: stringOrNull(item.severity) ?? "info",
+          message: stringOrNull(item.message)
+        }))
+    : [];
+  if (!record) {
+    return {
+      status: "not_recorded",
+      profile: "unknown",
+      summary: "No documentation posture has been recorded for this project yet.",
+      missing_recommended_docs: [],
+      review_options: [
+        {
+          option: "discuss_first",
+          recommended: true,
+          reason: "Run onboarding or open Workbench review before changing project documentation."
+        }
+      ],
+      authority: {
+        source: "project_settings",
+        key: "documentation_posture",
+        role: "startup_guidance",
+        instruction_grade: false,
+        notes: [
+          "Placeholder only. No project documentation posture setting is stored yet.",
+          "This section is guidance, not binding rules."
+        ]
+      },
+      canon_context: {
+        needed: false,
+        reason: null,
+        recommended_reference_kinds: [],
+        configured_references: []
+      },
+      capability_hints: []
+    };
+  }
+  const canonNeeded = canonContext.needed === true;
+  return {
+    status: stringOrNull(record.status) ?? "unknown",
+    profile: stringOrNull(record.profile) ?? "unknown",
+    analysis_source: stringOrNull(record.analysis_source) ?? "rules",
+    confidence:
+      typeof record.confidence === "number" && Number.isFinite(record.confidence)
+        ? record.confidence
+        : null,
+    summary: stringOrNull(record.summary),
+    review_needed_reason: stringOrNull(record.review_needed_reason),
+    existing_docs: stringArraySetting(record.existing_docs),
+    missing_recommended_docs: stringArraySetting(record.missing_recommended_docs),
+    review_options: reviewOptions,
+    signals,
+    authority: {
+      source: "project_settings",
+      key: "documentation_posture",
+      role: "startup_guidance",
+      instruction_grade: false,
+      notes: [
+        "Documentation posture helps agents start with the current docs/canon state.",
+        "Imported docs and old handoffs remain evidence unless separately promoted by review.",
+        "Raw source text and raw secrets are excluded from this context-pack section."
+      ]
+    },
+    canon_context: {
+      needed: canonNeeded,
+      reason: stringOrNull(canonContext.reason),
+      recommended_reference_kinds: stringArraySetting(canonContext.recommended_reference_kinds),
+      configured_references: stringArraySetting(canonContext.configured_references)
+    },
+    capability_hints: canonNeeded
+      ? [
+          {
+            kind: "owner_server_canon",
+            status: "needed",
+            guidance:
+              "Use configured security, ports, and capability references; do not search for secrets blindly."
+          }
+        ]
+      : []
+  };
+}
+
+function starterDocsFileList(value: unknown, maxItems = 20) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => {
+          if (typeof item === "string") return { path: item };
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            const record = item as Record<string, unknown>;
+            const path = stringOrNull(record.path);
+            if (!path) return null;
+            return {
+              path,
+              kind: stringOrNull(record.kind),
+              profile: stringOrNull(record.profile),
+              required: record.required === true
+            };
+          }
+          return null;
+        })
+        .filter((item) => item !== null)
+        .slice(0, maxItems)
+    : [];
+}
+
+function starterDocsSkippedFiles(value: unknown, maxItems = 20) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            const record = item as Record<string, unknown>;
+            const path = stringOrNull(record.path);
+            if (!path) return null;
+            return {
+              path,
+              reason: stringOrNull(record.reason)
+            };
+          }
+          return null;
+        })
+        .filter((item): item is { path: string; reason: string | null } => item !== null)
+        .slice(0, maxItems)
+    : [];
+}
+
+function starterDocsSection(value: unknown) {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!record) {
+    return {
+      status: "not_recorded",
+      profile: "unknown",
+      reason: "No starter-doc plan has been recorded for this project yet.",
+      eligible_for_apply: false,
+      writes_files: false,
+      planned_files: [],
+      generated_files: [],
+      skipped_files: [],
+      outcome: null,
+      authority: {
+        source: "project_settings",
+        key: "starter_docs",
+        role: "documentation_bootstrap",
+        instruction_grade: false,
+        notes: [
+          "Placeholder only. No starter-doc plan or outcome is stored yet.",
+          "Raw starter document content is excluded from this dashboard section."
+        ]
+      }
+    };
+  }
+  const outcome =
+    record.outcome && typeof record.outcome === "object" && !Array.isArray(record.outcome)
+      ? (record.outcome as Record<string, unknown>)
+      : null;
+  const generatedFiles = stringArraySetting(outcome?.generated_files);
+  return {
+    status: stringOrNull(record.status) ?? stringOrNull(outcome?.status) ?? "unknown",
+    profile: stringOrNull(record.profile) ?? "unknown",
+    reason: stringOrNull(record.reason) ?? stringOrNull(outcome?.reason),
+    eligible_for_apply: record.eligible_for_apply === true,
+    writes_files: false,
+    planned_files: starterDocsFileList(record.planned_files),
+    generated_files: generatedFiles,
+    skipped_files: starterDocsSkippedFiles(record.skipped_files),
+    outcome: outcome
+      ? {
+          status: stringOrNull(outcome.status) ?? "unknown",
+          reason: stringOrNull(outcome.reason),
+          generated_files: generatedFiles,
+          skipped_files: starterDocsSkippedFiles(outcome.skipped_files)
+        }
+      : null,
+    authority: {
+      source: "project_settings",
+      key: "starter_docs",
+      role: "documentation_bootstrap",
+      instruction_grade: false,
+      notes: [
+        "Starter-doc records show the attach bootstrap plan and outcome only.",
+        "Raw source text, template content, and secrets are excluded from this section."
+      ]
+    }
+  };
 }
 
 function parseIsoOrNow(value: string | null | undefined) {
@@ -2434,6 +2678,91 @@ export class RecallantDb {
             max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 3)
           })
         : { hits: [] };
+    const postureSetting = await this.pool.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'documentation_posture'",
+      [context.projectId]
+    );
+    const starterDocsSetting = await this.pool.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'starter_docs'",
+      [context.projectId]
+    );
+    const projectSettings = await this.pool.query<{
+      key: string;
+      value: unknown;
+      updated_at: string;
+    }>(
+      `
+        SELECT key, value, updated_at
+        FROM project_settings
+        WHERE project_id = $1
+          AND key IN (
+            'documentation_posture',
+            'starter_docs',
+            'runtime_profile',
+            'project_profile',
+            'capability_profile'
+          )
+        ORDER BY updated_at DESC, key ASC
+        LIMIT 12
+      `,
+      [context.projectId]
+    );
+    const projectSources = await this.pool.query(
+      `
+        SELECT id, source_kind, label, uri, status, metadata, updated_at
+        FROM project_sources
+        WHERE project_id = $1
+          AND status IN ('active', 'needs_review')
+        ORDER BY is_primary DESC, updated_at DESC, label ASC
+        LIMIT 12
+      `,
+      [context.projectId]
+    );
+    const contextMemories = await this.pool.query(
+      `
+        SELECT id, memory_type, scope_kind, scope_id, title, body, status, metadata, updated_at
+        FROM agent_memories
+        WHERE developer_id = $1
+          AND (project_id = $2 OR scope = 'developer')
+          AND status = 'accepted'
+          AND use_policy <> 'do_not_use'
+          AND (
+            scope_kind IN ('environment', 'domain', 'capability')
+            OR memory_type IN ('environment_fact', 'domain_fact', 'capability_fact')
+          )
+        ORDER BY updated_at DESC
+        LIMIT 12
+      `,
+      [context.developerId, context.projectId]
+    );
+    const importEvents = await this.pool.query(
+      `
+        SELECT id, payload AS metadata, occurred_at
+        FROM events
+        WHERE project_id = $1
+          AND kind = 'import_batch'
+        ORDER BY occurred_at DESC
+        LIMIT 12
+      `,
+      [context.projectId]
+    );
+    const documentationPosture = documentationPostureSection(postureSetting.rows[0]?.value);
+    const canonCapabilityContext = deriveCanonCapabilityContext({
+      documentation_posture: documentationPosture,
+      starter_docs: starterDocsSetting.rows[0]?.value,
+      project_settings: projectSettings.rows,
+      project_sources: projectSources.rows,
+      memories: contextMemories.rows,
+      imports: importEvents.rows.map((row) => ({
+        id: row.id,
+        metadata: row.metadata,
+        source_path:
+          row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+            ? stringOrNull((row.metadata as Record<string, unknown>).source_path)
+            : null
+      })),
+      max_items_per_category: 8
+    });
     return {
       context_pack_id: randomUUID(),
       project_id: context.projectId,
@@ -2441,6 +2770,8 @@ export class RecallantDb {
       profile: "compact",
       sections: {
         checkpoint,
+        documentation_posture: documentationPosture,
+        canon_capability_context: canonCapabilityContext,
         recovery: input.include_recovery === false ? [] : recovery.rows,
         binding_rules: rules.rows.map((memory) => this.withSourceProvenance(memory)),
         working_memories: working.memories.filter(
@@ -4749,11 +5080,55 @@ export class RecallantDb {
       "SELECT primary_path FROM projects WHERE id = $1",
       [dashboardProjectId]
     );
+    const dashboardContextMemories = await this.pool.query(
+      `
+        SELECT id, memory_type, scope_kind, scope_id, title, body, status, metadata, updated_at
+        FROM agent_memories
+        WHERE developer_id = $1
+          AND (project_id = $2 OR scope = 'developer')
+          AND status = 'accepted'
+          AND use_policy <> 'do_not_use'
+          AND (
+            scope_kind IN ('environment', 'domain', 'capability')
+            OR memory_type IN ('environment_fact', 'domain_fact', 'capability_fact')
+          )
+        ORDER BY updated_at DESC
+        LIMIT 12
+      `,
+      [context.developerId, dashboardProjectId]
+    );
     const localProjectPath = selectedProject.rows[0]?.primary_path ?? null;
+    const documentationPosture = documentationPostureSection(
+      settings.rows.find(
+        (setting) =>
+          setting.key === "documentation_posture" && setting.source === "project_settings"
+      )?.value
+    );
+    const starterDocs = starterDocsSection(
+      settings.rows.find(
+        (setting) => setting.key === "starter_docs" && setting.source === "project_settings"
+      )?.value
+    );
+    const canonCapabilityContext = deriveCanonCapabilityContext({
+      documentation_posture: documentationPosture,
+      starter_docs: starterDocs,
+      project_settings: settings.rows,
+      project_sources: currentSources,
+      memories: dashboardContextMemories.rows,
+      imports: importCandidateRows.map((row) => ({
+        id: row.memory_id,
+        metadata: row.metadata,
+        source_path: row.provenance?.source_path
+      })),
+      max_items_per_category: 8
+    });
     return {
       current_project_id: dashboardProjectId,
       current_project: currentProject,
       projects: projects.rows,
+      documentation_posture: documentationPosture,
+      starter_docs: starterDocs,
+      canon_capability_context: canonCapabilityContext,
       critical: critical.rows[0],
       inbox: inbox.memories,
       import_candidates: importCandidateRows,

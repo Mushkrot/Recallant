@@ -2,6 +2,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createRecallantMcpServer } from "../packages/mcp/dist/index.js";
 
+const originalDatabaseUrl = process.env.RECALLANT_DATABASE_URL;
+delete process.env.RECALLANT_DATABASE_URL;
+
 const expectedTools = [
   "memory_start_session",
   "memory_heartbeat",
@@ -36,6 +39,9 @@ const server = createRecallantMcpServer();
 let completed = false;
 let runError = null;
 let cleanupError = null;
+let contextPosture = null;
+let contextCanon = null;
+let contextSectionKeys = [];
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -76,6 +82,75 @@ try {
   if (heartbeat.tool !== "memory_heartbeat" && heartbeat.ok !== true) {
     throw new Error(`Unexpected tool call response: ${JSON.stringify(call)}`);
   }
+  const contextCall = await client.callTool(
+    {
+      name: "memory_get_context_pack",
+      arguments: {
+        session_id: "00000000-0000-4000-8000-000000000002",
+        project_id: "00000000-0000-4000-8000-000000000003",
+        task_hint: "stub documentation posture"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const contextText = contextCall.content?.[0]?.text ?? "";
+  const contextPack = JSON.parse(contextText);
+  const expectedSectionKeys = [
+    "checkpoint",
+    "documentation_posture",
+    "canon_capability_context",
+    "recovery",
+    "binding_rules",
+    "working_memories",
+    "operational_bindings",
+    "local_spool_status",
+    "evidence_excerpts",
+    "suggested_next_fetches"
+  ];
+  contextSectionKeys = Object.keys(contextPack.sections ?? {});
+  const missingSections = expectedSectionKeys.filter(
+    (section) => !Object.hasOwn(contextPack.sections ?? {}, section)
+  );
+  if (missingSections.length > 0) {
+    throw new Error(
+      `MCP stub context pack missing sections: ${JSON.stringify({
+        missing: missingSections,
+        actual: contextSectionKeys
+      })}`
+    );
+  }
+  contextPosture = contextPack.sections?.documentation_posture ?? null;
+  if (
+    contextPosture?.status !== "not_recorded" ||
+    contextPosture?.authority?.key !== "documentation_posture" ||
+    contextPosture?.authority?.instruction_grade !== false
+  ) {
+    throw new Error(`MCP stub context pack missing safe posture: ${JSON.stringify(contextPack)}`);
+  }
+  contextCanon = contextPack.sections?.canon_capability_context ?? null;
+  const canonCategories = [
+    "environment_facts",
+    "capability_references",
+    "secret_references",
+    "server_canon_links",
+    "documentation_authority_map"
+  ];
+  const missingCanonCategories = canonCategories.filter(
+    (category) => !Array.isArray(contextCanon?.[category])
+  );
+  if (
+    contextCanon?.schema_version !== 1 ||
+    contextCanon?.authority?.instruction_grade !== false ||
+    missingCanonCategories.length > 0
+  ) {
+    throw new Error(
+      `MCP stub context pack missing safe canon/capability section: ${JSON.stringify({
+        missingCanonCategories,
+        contextCanon
+      })}`
+    );
+  }
   completed = true;
 } catch (error) {
   runError = error;
@@ -97,4 +172,35 @@ try {
 if (runError) throw runError;
 if (cleanupError) throw cleanupError;
 
+if (originalDatabaseUrl !== undefined) process.env.RECALLANT_DATABASE_URL = originalDatabaseUrl;
+
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      status: "pass",
+      documentation_posture_stub: {
+        status: contextPosture?.status,
+        authority_key: contextPosture?.authority?.key,
+        instruction_grade: contextPosture?.authority?.instruction_grade
+      },
+      canon_capability_context_stub: {
+        status: contextCanon?.status,
+        categories: {
+          environment_facts: contextCanon?.environment_facts?.length,
+          capability_references: contextCanon?.capability_references?.length,
+          secret_references: contextCanon?.secret_references?.length,
+          server_canon_links: contextCanon?.server_canon_links?.map((item) => item.kind),
+          documentation_authority_map: contextCanon?.documentation_authority_map?.length
+        },
+        instruction_grade: contextCanon?.authority?.instruction_grade
+      },
+      context_section_keys: {
+        has_required_sections: true,
+        count: contextSectionKeys.length
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 process.stdout.write("MCP smoke passed\n");

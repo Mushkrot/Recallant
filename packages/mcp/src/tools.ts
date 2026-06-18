@@ -3,6 +3,7 @@ import { readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import {
   createRecallantDbFromEnv,
+  emptyCanonCapabilityContext,
   type AgentMemorySourceRefInput,
   type ArchiveInput,
   type ContextPackInput,
@@ -301,10 +302,41 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         profile: "compact",
         sections: {
           checkpoint: {},
+          documentation_posture: {
+            status: "not_recorded",
+            profile: "unknown",
+            summary: "No database-backed documentation posture is available in MCP skeleton mode.",
+            missing_recommended_docs: [],
+            review_options: [
+              {
+                option: "discuss_first",
+                recommended: true,
+                reason: "Connect Recallant storage or open Workbench review before changing docs."
+              }
+            ],
+            authority: {
+              source: "mcp_skeleton_stub",
+              key: "documentation_posture",
+              role: "startup_guidance",
+              instruction_grade: false,
+              notes: [
+                "Placeholder only. This stub contains no project docs, secrets, or binding rules."
+              ]
+            },
+            canon_context: {
+              needed: false,
+              reason: null,
+              recommended_reference_kinds: [],
+              configured_references: []
+            },
+            capability_hints: []
+          },
+          canon_capability_context: emptyCanonCapabilityContext(),
           recovery: {},
           binding_rules: [],
           working_memories: [],
           operational_bindings: [],
+          local_spool_status: args.local_spool_status ?? { status: "unknown" },
           evidence_excerpts: [],
           suggested_next_fetches: [],
           warnings: ["MCP skeleton stub: database-backed context pack is not implemented yet."]

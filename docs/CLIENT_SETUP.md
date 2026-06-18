@@ -3,6 +3,12 @@
 Recallant connects to agents through local MCP stdio. The Workbench is for humans; agents normally
 call `recallant mcp-server` locally.
 
+Remote project access is planned but not part of the current default client setup. Today, a protected
+public Workbench URL lets humans review and manage Recallant; it does not by itself make an external
+workstation or server an agent client. Projects outside the Recallant host need a future
+authenticated remote MCP/agent path before they can attach to one central Recallant server without
+local storage bindings.
+
 ## Beginner Flow
 
 For ordinary project setup, use onboarding:
@@ -82,6 +88,22 @@ recallant connect generic --project-dir .
 ```
 
 Use the generated `mcpServers.recallant` block in any MCP client that accepts stdio server config.
+
+## Remote Project Access (Planned)
+
+The near-term remote-client goal is to support projects on another server or workstation while a
+single managed Recallant server remains the memory source of truth. That path should:
+
+- authenticate each remote agent/client before any memory tool call;
+- scope every request to an attached project and developer;
+- avoid direct remote Postgres exposure;
+- keep Workbench/admin, raw artifacts, backups, and provider settings private;
+- provide diagnostics that distinguish auth failure, network failure, project-not-attached, and
+  capture-not-active states;
+- preserve the same startup contract: `memory_start_session`, `memory_get_context_pack`, meaningful
+  evidence/checkpoints, and closeout.
+
+Until that work lands, use the local stdio setup above on the installed host.
 
 ## Optional Local Hooks
 

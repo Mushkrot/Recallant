@@ -122,6 +122,8 @@ Current strengths:
 Known pre-release work:
 
 - external-host release rehearsal beyond the disposable clean-host smokes;
+- authenticated remote project access to one central Recallant server from other servers or
+  workstations;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
 - broader real-world existing-project migration pilots;

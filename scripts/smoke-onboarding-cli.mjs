@@ -57,6 +57,26 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function countOccurrences(text, needle) {
+  return text.split(needle).length - 1;
+}
+
+function excerptFrom(text, marker, lineCount) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.includes(marker));
+  if (start < 0) return [];
+  return lines.slice(start, start + lineCount);
+}
+
+function assertSameStringSet(actual, expected, message) {
+  const actualSorted = [...actual].sort();
+  const expectedSorted = [...expected].sort();
+  assert(
+    JSON.stringify(actualSorted) === JSON.stringify(expectedSorted),
+    `${message}: expected ${JSON.stringify(expectedSorted)}, got ${JSON.stringify(actualSorted)}`
+  );
+}
+
 async function exists(path) {
   try {
     await access(path);
@@ -78,6 +98,51 @@ async function projectRowCount(projectPath) {
   } finally {
     await client.end();
   }
+}
+
+async function projectSettingCount(projectPath, key) {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query(
+      `
+        SELECT count(*)::int AS count
+        FROM project_settings settings
+        JOIN projects project ON project.id = settings.project_id
+        WHERE project.primary_path = $1 AND settings.key = $2
+      `,
+      [projectPath, key]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  } finally {
+    await client.end();
+  }
+}
+
+async function projectSettingValueByPath(projectPath, key) {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query(
+      `
+        SELECT settings.value
+        FROM project_settings settings
+        JOIN projects project ON project.id = settings.project_id
+        WHERE project.primary_path = $1 AND settings.key = $2
+        LIMIT 1
+      `,
+      [projectPath, key]
+    );
+    return result.rows[0]?.value ?? null;
+  } finally {
+    await client.end();
+  }
+}
+
+async function assertFileIncludes(path, marker, message) {
+  const content = await readFile(path, "utf8");
+  assert(content.includes(marker), `${message}: ${content}`);
+  return content;
 }
 
 const prefix = await mkdtemp(join(tmpdir(), "recallant-onboarding-prefix-"));
@@ -231,6 +296,116 @@ assert(
   "explicit env onboard output leaked database credentials"
 );
 
+const emptyStarterProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-empty-starter-"));
+const emptyStarterDryRun = runJson(
+  recallant,
+  ["onboard", emptyStarterProject, "--skip-vcs-safety", "--dry-run", "--format", "json"],
+  { cwd: emptyStarterProject }
+);
+assert(
+  emptyStarterDryRun.documentation_posture?.status === "docs_absent" &&
+    emptyStarterDryRun.attach_details?.starter_docs?.plan?.status === "ready" &&
+    emptyStarterDryRun.attach_details?.starter_docs?.plan?.writes_files === false &&
+    emptyStarterDryRun.attach_details?.starter_docs?.outcome === null,
+  `empty starter dry-run did not expose read-only starter plan: ${JSON.stringify(emptyStarterDryRun)}`
+);
+for (const file of ["README.md", "AGENTS.md", "PROJECT_LOG.md"]) {
+  assert(!(await exists(join(emptyStarterProject, file))), `dry-run wrote ${file}`);
+}
+const emptyStarter = runJson(
+  recallant,
+  ["onboard", emptyStarterProject, "--skip-vcs-safety", "--yes", "--format", "json"],
+  { cwd: emptyStarterProject }
+);
+assert(
+  emptyStarter.attach_details?.starter_docs?.outcome?.status === "generated" &&
+    emptyStarter.attach_details?.starter_docs?.outcome?.generated_files.includes("README.md") &&
+    emptyStarter.attach_details?.starter_docs?.outcome?.generated_files.includes("AGENTS.md") &&
+    emptyStarter.attach_details?.starter_docs?.outcome?.generated_files.includes("PROJECT_LOG.md"),
+  `empty starter onboard did not generate base docs: ${JSON.stringify(
+    emptyStarter.attach_details?.starter_docs
+  )}`
+);
+assertSameStringSet(
+  emptyStarter.attach_details?.starter_docs?.outcome?.generated_files ?? [],
+  ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+  "empty unknown starter should generate exactly base docs"
+);
+await assertFileIncludes(
+  join(emptyStarterProject, "README.md"),
+  "Recallant is attached",
+  "empty starter README missing Recallant guidance"
+);
+await assertFileIncludes(
+  join(emptyStarterProject, "AGENTS.md"),
+  "recallant agent-start",
+  "empty starter AGENTS missing CLI fallback"
+);
+await assertFileIncludes(
+  join(emptyStarterProject, "AGENTS.md"),
+  "memory_start_session",
+  "empty starter AGENTS missing MCP workflow guidance"
+);
+const emptyStarterDocsCombined = [
+  await readFile(join(emptyStarterProject, "README.md"), "utf8"),
+  await readFile(join(emptyStarterProject, "AGENTS.md"), "utf8"),
+  await readFile(join(emptyStarterProject, "PROJECT_LOG.md"), "utf8")
+].join("\n");
+for (const marker of ["old handoff", "super-secret-value", "raw old handoff"]) {
+  assert(
+    !emptyStarterDocsCombined.toLowerCase().includes(marker),
+    `generated starter docs leaked disallowed marker ${marker}`
+  );
+}
+assert(await exists(join(emptyStarterProject, "PROJECT_LOG.md")), "empty starter PROJECT_LOG missing");
+
+async function onboardProfileStarter(name, envText, expectedFiles) {
+  const profileProject = await mkdtemp(join(tmpdir(), `recallant-onboarding-${name}-starter-`));
+  await writeFile(join(profileProject, ".env.example"), envText);
+  const result = runJson(
+    recallant,
+    ["onboard", profileProject, "--skip-vcs-safety", "--yes", "--format", "json"],
+    { cwd: profileProject }
+  );
+  const generated = result.attach_details?.starter_docs?.outcome?.generated_files ?? [];
+  assertSameStringSet(generated, expectedFiles, `${name} starter generated unexpected file set`);
+  for (const file of expectedFiles) {
+    assert(await exists(join(profileProject, file)), `${name} starter did not write ${file}`);
+    assert(generated.includes(file), `${name} starter outcome missing ${file}: ${JSON.stringify(result)}`);
+  }
+  return { project: profileProject, result };
+}
+
+const serviceStarter = await onboardProfileStarter(
+  "service",
+  "SERVICE=\nPORT=\n",
+  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/RUNBOOK.md", "docs/ARCHITECTURE.md"]
+);
+assert(
+  serviceStarter.result.documentation_posture?.profile === "service_app",
+  `service starter profile failed: ${JSON.stringify(serviceStarter.result.documentation_posture)}`
+);
+
+const productStarter = await onboardProfileStarter(
+  "product",
+  "PRODUCT=\nMILESTONE=\n",
+  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/STATUS.md", "docs/DECISIONS.md"]
+);
+assert(
+  productStarter.result.documentation_posture?.profile === "product_roadmap",
+  `product starter profile failed: ${JSON.stringify(productStarter.result.documentation_posture)}`
+);
+
+const libraryStarter = await onboardProfileStarter(
+  "library",
+  "PACKAGE=\nSDK=\n",
+  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/API.md"]
+);
+assert(
+  libraryStarter.result.documentation_posture?.profile === "library_package",
+  `library starter profile failed: ${JSON.stringify(libraryStarter.result.documentation_posture)}`
+);
+
 const vcsChoiceProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-choice-"));
 await writeFile(join(vcsChoiceProject, "README.md"), "# Version-control safety smoke\n");
 const vcsChoice = runRaw(recallant, ["onboard", vcsChoiceProject], {
@@ -280,6 +455,9 @@ const wizard = runRaw(recallant, ["onboard", productionProject], {
 assert(wizard.status === 2, `production wizard should exit 2: ${wizard.stderr}\n${wizard.stdout}`);
 for (const marker of [
   "Production-sensitive onboarding review",
+  "Documentation posture: risky",
+  "Found:",
+  "Workbench:",
   "Project path:",
   "Risk reason:",
   "Planned writes:",
@@ -290,6 +468,11 @@ for (const marker of [
 ]) {
   assert(wizard.stdout.includes(marker), `wizard output missing ${marker}:\n${wizard.stdout}`);
 }
+assert(
+  wizard.stdout.indexOf("Documentation posture:") <
+    wizard.stdout.indexOf("Continue/cancel prompt:"),
+  `wizard posture should appear before confirmation prompt:\n${wizard.stdout}`
+);
 assert(!wizard.stdout.includes("recallant attach"), "wizard leaked attach handoff command");
 assert(!(await exists(join(productionProject, ".recallant", "config"))), "wizard wrote config");
 assert((await projectRowCount(productionProject)) === 0, "wizard wrote database row");
@@ -307,6 +490,14 @@ assert(
 );
 assert(!(await exists(join(productionProject, ".recallant", "config"))), "cancel wrote config");
 assert((await projectRowCount(productionProject)) === 0, "cancel wrote database row");
+assert(
+  (await projectSettingCount(productionProject, "documentation_posture")) === 0,
+  "cancel wrote documentation posture setting"
+);
+assert(
+  (await projectSettingCount(productionProject, "starter_docs")) === 0,
+  "cancel wrote starter docs setting"
+);
 
 const dryRun = runJson(recallant, ["onboard", productionProject, "--dry-run", "--format", "json"], {
   cwd: productionProject
@@ -321,8 +512,20 @@ assert(
     dryRun.attach_details?.migration_summary?.selected_imports >= 1,
   `dry-run did not expose safe attach plan: ${JSON.stringify(dryRun.attach_details)}`
 );
+assert(
+  dryRun.documentation_posture?.status === "needs_review" &&
+    dryRun.documentation_posture?.writes_files === false &&
+    dryRun.documentation_posture?.writes_database === false &&
+    dryRun.attach_details?.documentation_posture?.status === "needs_review",
+  `dry-run did not expose read-only documentation posture: ${JSON.stringify(dryRun)}`
+);
 assert(!(await exists(join(productionProject, ".recallant", "config"))), "dry-run wrote config");
 assert((await projectRowCount(productionProject)) === 0, "dry-run wrote database row");
+assert(
+  (await projectSettingCount(productionProject, "documentation_posture")) === 0,
+  "dry-run wrote documentation posture setting"
+);
+assert((await projectSettingCount(productionProject, "starter_docs")) === 0, "dry-run wrote starter docs setting");
 
 const productionYes = runJson(
   recallant,
@@ -345,8 +548,77 @@ assert(
     !JSON.stringify(productionYes).includes(databaseUrl),
   "--yes onboard output leaked secret-like values"
 );
+assert(
+  productionYes.documentation_posture?.status === "needs_review" &&
+    productionYes.documentation_posture?.review_options?.some(
+      (option) => option.option === "canonicalize_for_recallant"
+    ),
+  `--yes onboard did not preserve documentation posture: ${JSON.stringify(
+    productionYes.documentation_posture
+  )}`
+);
 assert(await exists(join(productionProject, ".recallant", "config")), "--yes did not write config");
 assert((await projectRowCount(productionProject)) === 1, "--yes did not write database row");
+const storedPosture = await projectSettingValueByPath(productionProject, "documentation_posture");
+assert(
+  storedPosture?.status === "needs_review" && storedPosture?.authority?.instruction_grade === false,
+  `documentation posture setting was not stored compactly: ${JSON.stringify(storedPosture)}`
+);
+assert(
+  !JSON.stringify(storedPosture).includes("super-secret-value") &&
+    !JSON.stringify(storedPosture).includes(databaseUrl),
+  "documentation posture setting leaked secret-like values"
+);
+const contextPack = runJson(
+  recallant,
+  ["context", "--project-dir", productionProject, "--task-hint", "documentation posture startup"],
+  { cwd: productionProject }
+);
+const contextPosture = contextPack.sections?.documentation_posture;
+const contextCanon = contextPack.sections?.canon_capability_context;
+assert(
+  contextPosture?.status === "needs_review" &&
+    contextPosture?.profile === "service_app" &&
+    Array.isArray(contextPosture?.missing_recommended_docs) &&
+    contextPosture.missing_recommended_docs.length > 0 &&
+    contextPosture?.authority?.key === "documentation_posture" &&
+    Array.isArray(contextPosture?.capability_hints),
+  `context pack did not include documentation posture: ${JSON.stringify(contextPack.sections)}`
+);
+assert(
+  contextCanon?.schema_version === 1 &&
+    Array.isArray(contextCanon?.environment_facts) &&
+    Array.isArray(contextCanon?.capability_references) &&
+    Array.isArray(contextCanon?.secret_references) &&
+    Array.isArray(contextCanon?.server_canon_links) &&
+    Array.isArray(contextCanon?.documentation_authority_map) &&
+    contextCanon?.authority?.instruction_grade === false,
+  `context pack did not include canon/capability context: ${JSON.stringify(contextPack.sections)}`
+);
+assert(
+  contextCanon.server_canon_links.some((item) => item.status === "needed") &&
+    contextCanon.environment_facts.length > 0 &&
+    contextCanon.capability_references.length > 0 &&
+    contextCanon.secret_references.length > 0 &&
+    contextCanon.documentation_authority_map.length > 0 &&
+    contextCanon.server_canon_links.length <= 8 &&
+    contextCanon.documentation_authority_map.length <= 8,
+  `context pack canon/capability section is not bounded or lacks canon links: ${JSON.stringify(
+    contextCanon
+  )}`
+);
+assert(
+  Array.isArray(contextPack.sections?.binding_rules) &&
+    Array.isArray(contextPack.sections?.working_memories) &&
+    contextPack.sections?.checkpoint !== undefined &&
+    contextPack.sections?.local_spool_status !== undefined,
+  `context pack compatibility sections changed: ${JSON.stringify(contextPack.sections)}`
+);
+assert(
+  !JSON.stringify(contextPack).includes("super-secret-value") &&
+    !JSON.stringify(contextPack).includes(databaseUrl),
+  "context pack documentation/canon context leaked secret-like values"
+);
 
 const oneCommandProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-one-command-"));
 await writeFile(join(oneCommandProject, "README.md"), "# One-command onboarding proof\n");
@@ -400,6 +672,24 @@ assert(
     oneCommand.workbench?.project_visible === true,
   `one-command workbench outcome incomplete: ${JSON.stringify(oneCommand.workbench)}`
 );
+assert(
+  oneCommand.attach_details?.starter_docs?.plan?.status === "not_empty" &&
+    oneCommand.attach_details?.starter_docs?.outcome?.status === "skipped",
+  `one-command README project should not auto-generate starter docs: ${JSON.stringify(
+    oneCommand.attach_details?.starter_docs
+  )}`
+);
+assert(
+  (await readFile(join(oneCommandProject, "README.md"), "utf8")) ===
+    "# One-command onboarding proof\n",
+  "one-command README project was overwritten by starter docs"
+);
+for (const file of ["docs/RUNBOOK.md", "docs/ARCHITECTURE.md", "docs/API.md"]) {
+  assert(
+    !(await exists(join(oneCommandProject, file))),
+    `one-command README project unexpectedly generated ${file}`
+  );
+}
 
 const humanProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-human-success-"));
 await writeFile(join(humanProject, "README.md"), "# Human success onboarding proof\n");
@@ -416,6 +706,12 @@ assert(
 assert(
   humanSuccess.stdout.includes("Embedding recovery:"),
   `human success output did not include embedding recovery state: ${humanSuccess.stdout}`
+);
+assert(
+  countOccurrences(humanSuccess.stdout, "Documentation posture:") === 1 &&
+    humanSuccess.stdout.includes("Found:") &&
+    humanSuccess.stdout.includes("Workbench:"),
+  `human success output did not include exactly one concise posture summary: ${humanSuccess.stdout}`
 );
 assert(
   humanSuccess.stdout.includes("Workbench:") &&
@@ -488,4 +784,83 @@ assert(
   `installed wrapper closeout warned: ${JSON.stringify(closeout)}`
 );
 
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      status: "pass",
+      production_preconfirmation_posture_excerpt: excerptFrom(
+        wizard.stdout,
+        "Documentation posture:",
+        5
+      ),
+      dry_run_posture_json_excerpt: {
+        status: dryRun.documentation_posture?.status,
+        profile: dryRun.documentation_posture?.profile,
+        source: dryRun.documentation_posture?.analysis_source,
+        writes_files: dryRun.documentation_posture?.writes_files,
+        writes_database: dryRun.documentation_posture?.writes_database,
+        workbench_options: dryRun.documentation_posture?.review_options?.map(
+          (option) => option.option
+        ),
+        attach_status: dryRun.attach_details?.documentation_posture?.status
+      },
+      stored_posture_setting_excerpt: {
+        key: "documentation_posture",
+        status: storedPosture?.status,
+        profile: storedPosture?.profile,
+        instruction_grade: storedPosture?.authority?.instruction_grade,
+        raw_secret_leaked: JSON.stringify(storedPosture).includes("super-secret-value")
+      },
+      context_pack_posture_excerpt: {
+        status: contextPosture?.status,
+        profile: contextPosture?.profile,
+        authority_key: contextPosture?.authority?.key,
+        missing_count: contextPosture?.missing_recommended_docs?.length ?? 0,
+        capability_hint_count: contextPosture?.capability_hints?.length ?? 0
+      },
+      context_pack_canon_capability_excerpt: {
+        status: contextCanon?.status,
+        categories: {
+          environment_facts: contextCanon?.environment_facts?.length ?? 0,
+          capability_references: contextCanon?.capability_references?.length ?? 0,
+          secret_references: contextCanon?.secret_references?.length ?? 0,
+          server_canon_links: contextCanon?.server_canon_links?.map((item) => ({
+            kind: item.kind,
+            status: item.status,
+            reference: item.reference
+          })),
+          documentation_authority_map: contextCanon?.documentation_authority_map?.map((item) => ({
+            path: item.path,
+            role: item.role
+          }))
+        },
+        instruction_grade: contextCanon?.authority?.instruction_grade,
+        bounded_max: 8,
+        raw_secret_leaked: JSON.stringify(contextCanon).includes("super-secret-value")
+      },
+      starter_docs_excerpt: {
+        dry_run: {
+          status: emptyStarterDryRun.attach_details?.starter_docs?.plan?.status,
+          writes_files: emptyStarterDryRun.attach_details?.starter_docs?.plan?.writes_files,
+          outcome: emptyStarterDryRun.attach_details?.starter_docs?.outcome
+        },
+        empty_base: emptyStarter.attach_details?.starter_docs?.outcome?.generated_files,
+        service: serviceStarter.result.attach_details?.starter_docs?.outcome?.generated_files,
+        product: productStarter.result.attach_details?.starter_docs?.outcome?.generated_files,
+        library: libraryStarter.result.attach_details?.starter_docs?.outcome?.generated_files,
+        readme_only: oneCommand.attach_details?.starter_docs?.plan?.status,
+        no_overwrite_readme_preserved: true
+      },
+      human_success: {
+        documentation_posture_blocks: countOccurrences(
+          humanSuccess.stdout,
+          "Documentation posture:"
+        ),
+        lower_level_commands_hidden: true
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 process.stdout.write("Onboarding CLI smoke passed\n");

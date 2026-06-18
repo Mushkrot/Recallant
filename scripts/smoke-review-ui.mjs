@@ -8,6 +8,15 @@ const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
+function htmlTextExcerpt(html, marker, length = 520) {
+  const text = html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const index = text.indexOf(marker);
+  return index >= 0 ? text.slice(index, index + length) : text.slice(0, length);
+}
+
 const token = `review-smoke-${randomUUID()}`;
 process.env.RECALLANT_AUTH_TOKEN = token;
 process.env.RECALLANT_SESSION_SECRET = `review-session-${randomUUID()}`;
@@ -51,7 +60,9 @@ try {
 const developerId = randomUUID();
 const projectId = randomUUID();
 const sandboxProjectId = randomUUID();
+const emptyDocsProjectId = randomUUID();
 const sandboxPath = `/ai/recallant-pilots/review-ui-sandbox-${randomUUID()}`;
+const emptyDocsPath = `starter-docs-fixture-${randomUUID()}`;
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
 process.env.RECALLANT_PROJECT_ID = projectId;
@@ -64,8 +75,15 @@ const sandboxDb = new RecallantDb({
   projectId: sandboxProjectId,
   projectPath: sandboxPath
 });
+const emptyDocsDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId: emptyDocsProjectId,
+  projectPath: emptyDocsPath
+});
 await db.ensureProject(process.cwd());
 await sandboxDb.ensureProject(sandboxPath);
+await emptyDocsDb.ensureProject(emptyDocsPath);
 const humanMemorySpace = await db.createMemorySpace({
   name: "Personal Operations UI Smoke",
   developerId,
@@ -80,6 +98,246 @@ if (humanMemorySpace.memory_profile?.profile_key !== "personal_work_operations")
 }
 const rawProviderSecret = `sk-review-ui-${randomUUID()}`;
 const rawDatabaseSecret = `postgres://recallant:${randomUUID()}@db/recallant_agent_work`;
+const expectedDocumentationStrategyOptions = [
+  "keep_current_docs",
+  "canonicalize_for_recallant",
+  "create_starter_docs",
+  "discuss_first"
+];
+const documentationPostureFixture = {
+  schema_version: 1,
+  status: "needs_review",
+  profile: "service_app",
+  analysis_source: "rules",
+  confidence: 0.74,
+  summary: "Review UI fixture documentation posture.",
+  review_needed_reason: "Agent docs do not describe Recallant workflow.",
+  existing_docs: ["README.md", "docs/RUNBOOK.md"],
+  missing_recommended_docs: ["AGENTS.md", "docs/ARCHITECTURE.md"],
+  review_options: [
+    {
+      option: "keep_current_docs",
+      recommended: false,
+      reason: "Preserve current documentation and add only the Recallant working layer."
+    },
+    {
+      option: "canonicalize_for_recallant",
+      recommended: true,
+      reason: "Review and normalize existing docs before changing canonical project guidance."
+    },
+    {
+      option: "create_starter_docs",
+      recommended: false,
+      reason: "Create missing starter surfaces after owner review."
+    },
+    {
+      option: "discuss_first",
+      recommended: true,
+      reason: "Use Workbench discussion for production or conflicting docs."
+    }
+  ],
+  canon_context: {
+    needed: true,
+    reason: "Production/server/capability hints need configured owner/server canon references.",
+    recommended_reference_kinds: ["security_baseline", "ports_inventory"],
+    configured_references: []
+  },
+  signals: [
+    {
+      code: "missing_recallant_workflow",
+      severity: "warning",
+      message: "No Recallant startup/checkpoint/closeout workflow was found in agent docs."
+    },
+    {
+      code: "canon_links_needed",
+      severity: "warning",
+      message: "Server/security and port-inventory canon references are needed for this project."
+    }
+  ],
+  source_summary: { candidate_count: 3, redacted_source_count: 0 },
+  authority: {
+    source: "documentation_posture_analyzer",
+    role: "startup_guidance",
+    instruction_grade: false
+  }
+};
+const healthyDocumentationPostureFixture = {
+  schema_version: 1,
+  status: "recallant_ready",
+  profile: "service_app",
+  analysis_source: "rules",
+  confidence: 0.91,
+  summary: "Review UI fixture healthy documentation posture.",
+  review_needed_reason: null,
+  existing_docs: ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/RUNBOOK.md"],
+  missing_recommended_docs: [],
+  review_options: [
+    {
+      option: "keep_current_docs",
+      recommended: true,
+      reason: "Docs already describe the Recallant workflow; keep them and add memory context."
+    },
+    {
+      option: "canonicalize_for_recallant",
+      recommended: false,
+      reason: "Canonicalization is not needed for this healthy fixture."
+    },
+    {
+      option: "create_starter_docs",
+      recommended: false,
+      reason: "Starter docs already exist."
+    },
+    {
+      option: "discuss_first",
+      recommended: false,
+      reason: "No owner decision is required before routine work."
+    }
+  ],
+  canon_context: {
+    needed: false,
+    reason: null,
+    recommended_reference_kinds: [],
+    configured_references: []
+  },
+  signals: [],
+  source_summary: { candidate_count: 4, redacted_source_count: 0 },
+  authority: {
+    source: "documentation_posture_analyzer",
+    role: "startup_guidance",
+    instruction_grade: false
+  }
+};
+const emptyDocumentationPostureFixture = {
+  schema_version: 1,
+  status: "docs_absent",
+  profile: "unknown",
+  analysis_source: "rules",
+  confidence: 0.88,
+  summary: "No project documentation was found.",
+  review_needed_reason: "Create starter docs before routine agent work.",
+  existing_docs: [],
+  missing_recommended_docs: ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+  review_options: [
+    {
+      option: "keep_current_docs",
+      recommended: false,
+      reason: "There are no docs to keep as the working baseline."
+    },
+    {
+      option: "canonicalize_for_recallant",
+      recommended: false,
+      reason: "Canonicalization needs existing docs."
+    },
+    {
+      option: "create_starter_docs",
+      recommended: true,
+      reason: "Create the minimal starter documentation set for an agent-ready project."
+    },
+    {
+      option: "discuss_first",
+      recommended: false,
+      reason: "The empty-project starter path is clear."
+    }
+  ],
+  canon_context: {
+    needed: false,
+    reason: null,
+    recommended_reference_kinds: [],
+    configured_references: []
+  },
+  signals: [
+    {
+      code: "docs_absent",
+      severity: "warning",
+      message: "No documentation files were found."
+    }
+  ],
+  source_summary: { candidate_count: 0, redacted_source_count: 0 },
+  authority: {
+    source: "documentation_posture_analyzer",
+    role: "startup_guidance",
+    instruction_grade: false
+  }
+};
+const generatedStarterDocsFixture = {
+  schema_version: 1,
+  status: "generated",
+  profile: "service_app",
+  reason: "Starter docs were generated for an empty project.",
+  eligible_for_apply: true,
+  writes_files: false,
+  planned_files: [
+    { path: "README.md", kind: "readme", profile: "base", required: true },
+    { path: "AGENTS.md", kind: "agent_instructions", profile: "base", required: true },
+    { path: "PROJECT_LOG.md", kind: "project_log", profile: "base", required: true },
+    { path: "docs/RUNBOOK.md", kind: "runbook", profile: "service_app", required: false },
+    {
+      path: "docs/ARCHITECTURE.md",
+      kind: "architecture",
+      profile: "service_app",
+      required: false
+    }
+  ],
+  skipped_files: [],
+  outcome: {
+    status: "generated",
+    reason: "Starter docs were generated for an empty project.",
+    generated_files: [
+      "README.md",
+      "AGENTS.md",
+      "PROJECT_LOG.md",
+      "docs/RUNBOOK.md",
+      "docs/ARCHITECTURE.md"
+    ],
+    skipped_files: []
+  },
+  authority: {
+    source: "starter_docs_planner",
+    role: "documentation_bootstrap",
+    instruction_grade: false
+  }
+};
+const skippedStarterDocsFixture = {
+  schema_version: 1,
+  status: "not_empty",
+  profile: "service_app",
+  reason: "Starter docs are only generated for empty projects.",
+  eligible_for_apply: false,
+  writes_files: false,
+  planned_files: [],
+  skipped_files: [],
+  outcome: {
+    status: "skipped",
+    reason: "Starter docs are only generated for empty projects.",
+    generated_files: [],
+    skipped_files: []
+  },
+  authority: {
+    source: "starter_docs_planner",
+    role: "documentation_bootstrap",
+    instruction_grade: false
+  }
+};
+const plannedStarterDocsFixture = {
+  schema_version: 1,
+  status: "ready",
+  profile: "unknown",
+  reason: "Project has no docs and is eligible for starter docs.",
+  eligible_for_apply: true,
+  writes_files: false,
+  planned_files: [
+    { path: "README.md", kind: "readme", profile: "base", required: true },
+    { path: "AGENTS.md", kind: "agent_instructions", profile: "base", required: true },
+    { path: "PROJECT_LOG.md", kind: "project_log", profile: "base", required: true }
+  ],
+  skipped_files: [],
+  outcome: null,
+  authority: {
+    source: "starter_docs_planner",
+    role: "documentation_bootstrap",
+    instruction_grade: false
+  }
+};
 await db.pool.query(
   `
     INSERT INTO system_settings (key, value, is_secret_ref, updated_by)
@@ -99,13 +357,49 @@ await db.pool.query(
     INSERT INTO project_settings (project_id, key, value, updated_by)
     VALUES
       ($1, 'capture_profile', '"detailed"', 'review-ui-smoke'),
-      ($1, 'project_lifecycle', '{"mode":"sandbox","cleanup":"dry-run first"}', 'review-ui-smoke')
+      ($1, 'project_lifecycle', '{"mode":"sandbox","cleanup":"dry-run first"}', 'review-ui-smoke'),
+      ($1, 'documentation_posture', $2, 'review-ui-smoke'),
+      ($1, 'starter_docs', $3, 'review-ui-smoke')
     ON CONFLICT (project_id, key) DO UPDATE
     SET value = EXCLUDED.value,
         updated_by = EXCLUDED.updated_by,
         updated_at = now()
   `,
-  [projectId]
+  [projectId, JSON.stringify(documentationPostureFixture), JSON.stringify(generatedStarterDocsFixture)]
+);
+await db.pool.query(
+  `
+    INSERT INTO project_settings (project_id, key, value, updated_by)
+    VALUES
+      ($1, 'documentation_posture', $2, 'review-ui-smoke'),
+      ($1, 'starter_docs', $3, 'review-ui-smoke')
+    ON CONFLICT (project_id, key) DO UPDATE
+    SET value = EXCLUDED.value,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = now()
+  `,
+  [
+    sandboxProjectId,
+    JSON.stringify(healthyDocumentationPostureFixture),
+    JSON.stringify(skippedStarterDocsFixture)
+  ]
+);
+await db.pool.query(
+  `
+    INSERT INTO project_settings (project_id, key, value, updated_by)
+    VALUES
+      ($1, 'documentation_posture', $2, 'review-ui-smoke'),
+      ($1, 'starter_docs', $3, 'review-ui-smoke')
+    ON CONFLICT (project_id, key) DO UPDATE
+    SET value = EXCLUDED.value,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = now()
+  `,
+  [
+    emptyDocsProjectId,
+    JSON.stringify(emptyDocumentationPostureFixture),
+    JSON.stringify(plannedStarterDocsFixture)
+  ]
 );
 const session = await db.startSession({
   client_kind: "codex",
@@ -453,6 +747,13 @@ await once(server, "listening");
 const address = server.address();
 if (!address || typeof address === "string") throw new Error("Unable to get review UI address");
 const baseUrl = `http://127.0.0.1:${address.port}`;
+let dashboardPostureExcerpt = null;
+let dashboardCanonCapabilityExcerpt = null;
+let defaultPostureExcerpt = null;
+let fallbackPostureExcerpt = "";
+let emptyStarterDocsExcerpt = null;
+let healthyPostureExcerpt = null;
+let workbenchPostureExcerpt = "";
 
 try {
   const unauthorized = await fetch(`${baseUrl}/review`);
@@ -490,9 +791,11 @@ try {
     "Registered only"
   ];
   const chooserMissing = chooserRequired.filter((marker) => !chooserText.includes(marker));
-  const chooserProjectCaptureStatus = ["Interrupted", "Capture active", "Started, not complete"].some(
-    (marker) => chooserText.includes(marker)
-  );
+  const chooserProjectCaptureStatus = [
+    "Interrupted",
+    "Capture active",
+    "Started, not complete"
+  ].some((marker) => chooserText.includes(marker));
   if (
     chooser.status !== 200 ||
     chooserMissing.length > 0 ||
@@ -509,6 +812,7 @@ try {
     headers: { authorization: `Bearer ${token}` }
   });
   const htmlText = await html.text();
+  workbenchPostureExcerpt = htmlTextExcerpt(htmlText, "Documentation posture");
   if (htmlText.includes(rawProviderSecret) || htmlText.includes(rawDatabaseSecret)) {
     throw new Error("Review UI HTML leaked raw secret setting values");
   }
@@ -532,6 +836,31 @@ try {
     "Workbench status snapshot",
     "Needs attention",
     "Memory capture",
+    "Documentation posture",
+    "needs review",
+    "service app",
+    "Top missing / risk signals",
+    "Documentation strategy",
+    "Existing documentation rewrites still require owner review.",
+    "Generated starter docs",
+    "docs/RUNBOOK.md",
+    "Canon and capability context",
+    "References are guidance and provenance for agents.",
+    "They do not activate connectors, grant secret access, or create binding rules.",
+    "Environment facts",
+    "Capabilities",
+    "Secret references",
+    "Server canon",
+    "Documentation authority",
+    "Google Drive planned connector",
+    "provider_api_key",
+    "database_url",
+    "security_baseline",
+    "ports_inventory",
+    "Keep current docs, add Recallant layer",
+    "Canonicalize docs for Recallant-aware workflow",
+    "Create starter docs",
+    "Discuss first",
     "Current memory space",
     "Sources",
     "Source Map",
@@ -647,9 +976,10 @@ try {
     "Semantic search is configured locally"
   ];
   const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
-  if (html.status !== 200 || missingHtml.length > 0) {
+  const recommendedStrategyCount = (htmlText.match(/Recommended strategy/g) ?? []).length;
+  if (html.status !== 200 || missingHtml.length > 0 || recommendedStrategyCount !== 1) {
     throw new Error(
-      `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; ${htmlText.slice(0, 500)}`
+      `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; recommendedStrategyCount=${recommendedStrategyCount}; ${htmlText.slice(0, 500)}`
     );
   }
 
@@ -781,6 +1111,38 @@ try {
     headers: { authorization: `Bearer ${token}` }
   });
   const json = await api.json();
+  dashboardPostureExcerpt = {
+    status: json.documentation_posture?.status,
+    profile: json.documentation_posture?.profile,
+    authority_key: json.documentation_posture?.authority?.key,
+    instruction_grade: json.documentation_posture?.authority?.instruction_grade,
+    starter_docs_status: json.starter_docs?.status,
+    starter_docs_generated_files: json.starter_docs?.generated_files,
+    starter_docs_authority_key: json.starter_docs?.authority?.key,
+    strategy_option_keys: json.documentation_posture?.review_options?.map(
+      (option) => option.option
+    ),
+    recommended_option: json.documentation_posture?.review_options?.find(
+      (option) => option.recommended === true
+    )?.option,
+    signal_codes: json.documentation_posture?.signals?.map((signal) => signal.code)
+  };
+  dashboardCanonCapabilityExcerpt = {
+    status: json.canon_capability_context?.status,
+    environment_facts: json.canon_capability_context?.environment_facts?.length ?? 0,
+    capability_labels: json.canon_capability_context?.capability_references?.map(
+      (item) => item.label
+    ),
+    secret_names: json.canon_capability_context?.secret_references?.map((item) => item.name),
+    server_canon: json.canon_capability_context?.server_canon_links?.map((item) => ({
+      kind: item.kind,
+      status: item.status
+    })),
+    documentation_roles: json.canon_capability_context?.documentation_authority_map?.map(
+      (item) => item.role
+    ),
+    instruction_grade: json.canon_capability_context?.authority?.instruction_grade
+  };
   const serializedDashboard = JSON.stringify(json);
   if (
     api.status !== 200 ||
@@ -792,6 +1154,12 @@ try {
         setting.value?.redacted === true &&
         setting.value?.status === "configured"
     ) ||
+    json.starter_docs?.status !== "generated" ||
+    json.starter_docs?.authority?.key !== "starter_docs" ||
+    json.starter_docs?.authority?.instruction_grade !== false ||
+    !json.starter_docs?.generated_files?.includes("README.md") ||
+    !json.starter_docs?.generated_files?.includes("docs/RUNBOOK.md") ||
+    JSON.stringify(json.starter_docs).includes("Recallant is attached") ||
     !json.import_candidates.some((memory) => memory.memory_id === importMemoryId) ||
     !json.import_candidates.some((memory) => memory.memory_id === envImportMemoryId) ||
     !json.import_candidates.some((memory) => memory.memory_id === handoffImportMemoryId) ||
@@ -813,6 +1181,39 @@ try {
     ) ||
     !json.inbox.some((memory) => memory.memory_id === candidate.memory_id) ||
     !json.rules.some((memory) => memory.memory_id === rule.memory_id) ||
+    json.documentation_posture?.status !== "needs_review" ||
+    json.documentation_posture?.profile !== "service_app" ||
+    json.documentation_posture?.authority?.key !== "documentation_posture" ||
+    json.documentation_posture?.authority?.instruction_grade !== false ||
+    JSON.stringify(json.documentation_posture?.review_options?.map((option) => option.option)) !==
+      JSON.stringify(expectedDocumentationStrategyOptions) ||
+    !json.documentation_posture?.review_options?.some(
+      (option) => option.option === "canonicalize_for_recallant" && option.recommended === true
+    ) ||
+    !json.documentation_posture?.signals?.some((signal) => signal.code === "canon_links_needed") ||
+    json.canon_capability_context?.status !== "ready" ||
+    json.canon_capability_context?.authority?.instruction_grade !== false ||
+    !json.canon_capability_context?.capability_references?.some(
+      (item) =>
+        item.label === "Google Drive planned connector" &&
+        item.kind === "connector" &&
+        item.access === "reference_only"
+    ) ||
+    !json.canon_capability_context?.secret_references?.some(
+      (item) => item.name === "provider_api_key" && item.status === "configured_reference"
+    ) ||
+    !json.canon_capability_context?.secret_references?.some(
+      (item) => item.name === "database_url" && item.status === "configured_reference"
+    ) ||
+    !json.canon_capability_context?.server_canon_links?.some(
+      (item) => item.kind === "security_baseline" && item.status === "needed"
+    ) ||
+    !json.canon_capability_context?.server_canon_links?.some(
+      (item) => item.kind === "ports_inventory" && item.status === "needed"
+    ) ||
+    !json.canon_capability_context?.documentation_authority_map?.some(
+      (item) => item.path === "README.md" && item.role === "canonical_doc"
+    ) ||
     json.project_readiness?.project_registered !== true ||
     Number(json.migration_review?.total_imported ?? 0) < 3 ||
     Number(json.migration_review?.review_required ?? 0) < 3 ||
@@ -894,6 +1295,155 @@ try {
     json.rules.some((memory) => memory.memory_id === altDomainRuleId)
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
+  }
+
+  const emptyPostureApi = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${humanMemorySpace.project_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const emptyPostureJson = await emptyPostureApi.json();
+  defaultPostureExcerpt = {
+    status: emptyPostureJson.documentation_posture?.status,
+    authority_key: emptyPostureJson.documentation_posture?.authority?.key,
+    instruction_grade: emptyPostureJson.documentation_posture?.authority?.instruction_grade,
+    recommended_option: emptyPostureJson.documentation_posture?.review_options?.find(
+      (option) => option.recommended === true
+    )?.option
+  };
+  if (
+    emptyPostureApi.status !== 200 ||
+    emptyPostureJson.documentation_posture?.status !== "not_recorded" ||
+    emptyPostureJson.documentation_posture?.authority?.key !== "documentation_posture" ||
+    emptyPostureJson.documentation_posture?.authority?.instruction_grade !== false ||
+    !emptyPostureJson.documentation_posture?.review_options?.some(
+      (option) => option.option === "discuss_first" && option.recommended === true
+    )
+  ) {
+    throw new Error(
+      `Review dashboard default posture failed: ${JSON.stringify(
+        emptyPostureJson.documentation_posture
+      )}`
+    );
+  }
+  const emptyPostureHtml = await fetch(
+    `${baseUrl}/review?project_id=${humanMemorySpace.project_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const emptyPostureHtmlText = await emptyPostureHtml.text();
+  fallbackPostureExcerpt = htmlTextExcerpt(emptyPostureHtmlText, "Documentation strategy");
+  const fallbackRecommendedCount =
+    (emptyPostureHtmlText.match(/Recommended strategy/g) ?? []).length;
+  if (
+    emptyPostureHtml.status !== 200 ||
+    emptyPostureHtmlText.includes(rawProviderSecret) ||
+    emptyPostureHtmlText.includes(rawDatabaseSecret) ||
+    !emptyPostureHtmlText.includes("Documentation strategy") ||
+    !emptyPostureHtmlText.includes("Discuss first") ||
+    fallbackRecommendedCount !== 1
+  ) {
+    throw new Error(
+      `Review UI default posture fallback failed: ${JSON.stringify({
+        status: emptyPostureHtml.status,
+        fallbackRecommendedCount,
+        excerpt: fallbackPostureExcerpt
+      })}`
+    );
+  }
+
+  const emptyDocsApi = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${emptyDocsProjectId}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const emptyDocsJson = await emptyDocsApi.json();
+  emptyStarterDocsExcerpt = {
+    status: emptyDocsJson.documentation_posture?.status,
+    recommended_option: emptyDocsJson.documentation_posture?.review_options?.find(
+      (option) => option.recommended === true
+    )?.option,
+    starter_docs_status: emptyDocsJson.starter_docs?.status,
+    starter_docs_outcome: emptyDocsJson.starter_docs?.outcome,
+    planned_files: emptyDocsJson.starter_docs?.planned_files?.map((file) => file.path)
+  };
+  if (
+    emptyDocsApi.status !== 200 ||
+    emptyDocsJson.documentation_posture?.status !== "docs_absent" ||
+    !emptyDocsJson.documentation_posture?.review_options?.some(
+      (option) => option.option === "create_starter_docs" && option.recommended === true
+    ) ||
+    emptyDocsJson.starter_docs?.status !== "ready" ||
+    emptyDocsJson.starter_docs?.outcome !== null ||
+    !emptyDocsJson.starter_docs?.planned_files?.some((file) => file.path === "README.md")
+  ) {
+    throw new Error(
+      `Review dashboard empty starter-doc plan failed: ${JSON.stringify({
+        posture: emptyDocsJson.documentation_posture,
+        starter_docs: emptyDocsJson.starter_docs
+      })}`
+    );
+  }
+  const emptyDocsHtml = await fetch(`${baseUrl}/review?project_id=${emptyDocsProjectId}`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const emptyDocsHtmlText = await emptyDocsHtml.text();
+  if (
+    emptyDocsHtml.status !== 200 ||
+    !emptyDocsHtmlText.includes("Starter docs plan") ||
+    !emptyDocsHtmlText.includes("README.md") ||
+    !emptyDocsHtmlText.includes("Create starter docs")
+  ) {
+    throw new Error(
+      `Review UI empty starter-doc plan failed: ${JSON.stringify({
+        status: emptyDocsHtml.status,
+        excerpt: htmlTextExcerpt(emptyDocsHtmlText, "Starter docs")
+      })}`
+    );
+  }
+
+  const healthyPostureApi = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${sandboxProjectId}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const healthyPostureJson = await healthyPostureApi.json();
+  healthyPostureExcerpt = {
+    status: healthyPostureJson.documentation_posture?.status,
+    starter_docs_status: healthyPostureJson.starter_docs?.status,
+    starter_docs_generated_count: healthyPostureJson.starter_docs?.generated_files?.length,
+    recommended_option: healthyPostureJson.documentation_posture?.review_options?.find(
+      (option) => option.recommended === true
+    )?.option,
+    rewrite_recommended: healthyPostureJson.documentation_posture?.review_options?.some(
+      (option) =>
+        ["canonicalize_for_recallant", "create_starter_docs"].includes(option.option) &&
+        option.recommended === true
+    )
+  };
+  if (
+    healthyPostureApi.status !== 200 ||
+    healthyPostureJson.documentation_posture?.status !== "recallant_ready" ||
+    !healthyPostureJson.documentation_posture?.review_options?.some(
+      (option) => option.option === "keep_current_docs" && option.recommended === true
+    ) ||
+    healthyPostureJson.starter_docs?.status !== "not_empty" ||
+    (healthyPostureJson.starter_docs?.generated_files?.length ?? 0) !== 0 ||
+    healthyPostureJson.documentation_posture?.review_options?.some(
+      (option) =>
+        ["canonicalize_for_recallant", "create_starter_docs"].includes(option.option) &&
+        option.recommended === true
+    )
+  ) {
+    throw new Error(
+      `Review dashboard healthy posture failed: ${JSON.stringify(
+        healthyPostureJson.documentation_posture
+      )}`
+    );
   }
 
   const provenanceDetailResponse = await fetch(
@@ -1911,12 +2461,12 @@ try {
       staleSanitizeForm.status !== 200 ||
       !staleSanitizeHtml.includes("Target resolution") ||
       !staleSanitizeHtml.includes("project_path_fallback") ||
-    !staleSanitizeHtml.includes(staleUiProjectId) ||
-    !staleSanitizeHtml.includes(liveUiProjectId) ||
-    !staleSanitizeHtml.includes("missing project_id") ||
-    !staleSanitizeHtml.includes('name="confirm_token"') ||
-    staleSanitizeHtml.includes("requested_project_path")
-  ) {
+      !staleSanitizeHtml.includes(staleUiProjectId) ||
+      !staleSanitizeHtml.includes(liveUiProjectId) ||
+      !staleSanitizeHtml.includes("missing project_id") ||
+      !staleSanitizeHtml.includes('name="confirm_token"') ||
+      staleSanitizeHtml.includes("requested_project_path")
+    ) {
       throw new Error(
         `Project sanitize stale-target form failed: ${staleSanitizeForm.status} ${staleSanitizeHtml}`
       );
@@ -2586,8 +3136,25 @@ try {
   delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
   delete process.env.RECALLANT_ADMIN_EMAILS;
   server.close();
+  await emptyDocsDb.close();
   await sandboxDb.close();
   await db.close();
 }
 
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      status: "pass",
+      dashboard_posture_excerpt: dashboardPostureExcerpt,
+      dashboard_canon_capability_excerpt: dashboardCanonCapabilityExcerpt,
+      default_posture_excerpt: defaultPostureExcerpt,
+      fallback_posture_excerpt: fallbackPostureExcerpt,
+      empty_starter_docs_excerpt: emptyStarterDocsExcerpt,
+      healthy_posture_excerpt: healthyPostureExcerpt,
+      workbench_posture_excerpt: workbenchPostureExcerpt
+    },
+    null,
+    2
+  )}\n`
+);
 process.stdout.write("Review UI smoke passed\n");

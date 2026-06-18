@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createRecallantDbFromEnv, type RecallantDb } from "@recallant/db";
 import {
   type DiscoveryCandidate,
@@ -8,6 +8,16 @@ import {
   readImportTextForCandidate,
   redactSecretValues
 } from "./discovery.js";
+import {
+  analyzeProjectDocumentationPosture,
+  compactDocumentationPostureForSetting,
+  compactStarterDocsForSetting,
+  documentationPostureSettingKey,
+  planStarterDocs,
+  starterDocsSettingKey,
+  type StarterDocsOutcome,
+  type StarterDocsPlan
+} from "./documentation-posture.js";
 import { clientTargetConfig, renderClientTargetConfig } from "./client-targets.js";
 
 type AttachMode = "manual" | "guided" | "autopilot";
@@ -427,8 +437,10 @@ function plannedChanges(input: {
   executionAllowed: boolean;
   candidates: readonly DiscoveryCandidate[];
   changedFiles: readonly string[];
+  starterDocFiles: readonly string[];
   productionSensitive: boolean;
 }) {
+  const changedFiles = Array.from(new Set([...input.changedFiles, ...input.starterDocFiles]));
   if (!input.executionAllowed) {
     return [
       {
@@ -440,7 +452,7 @@ function plannedChanges(input: {
             ? "Manual mode preserves explicit lower-level commands."
             : "Guided/dry-run mode waits for confirmation."
       },
-      ...input.changedFiles.map((path) => ({
+      ...changedFiles.map((path) => ({
         action: "would_write_file",
         path,
         writes_files: false,
@@ -462,7 +474,7 @@ function plannedChanges(input: {
     ];
   }
   return [
-    ...input.changedFiles.map((path) => ({ action: "write_file", path })),
+    ...changedFiles.map((path) => ({ action: "write_file", path })),
     ...input.candidates.filter(candidateImportable).map((candidate) => ({
       action: "import_source",
       path: candidate.path,
@@ -479,6 +491,41 @@ function plannedChanges(input: {
       production_sensitive: input.productionSensitive
     }
   ];
+}
+
+async function applyStarterDocs(input: {
+  projectDir: string;
+  plan: StarterDocsPlan;
+}): Promise<StarterDocsOutcome> {
+  if (!input.plan.eligible_for_apply) {
+    return {
+      status: "skipped",
+      reason: input.plan.reason,
+      generated_files: [] as string[],
+      skipped_files: input.plan.skipped_files
+    };
+  }
+  const generatedFiles = [];
+  const skippedFiles = [...input.plan.skipped_files];
+  for (const file of input.plan.files) {
+    const targetPath = join(input.projectDir, file.path);
+    const existing = await readOptional(targetPath);
+    if (existing !== null) {
+      skippedFiles.push({ path: file.path, reason: "Target file already exists." });
+      continue;
+    }
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
+    generatedFiles.push(file.path);
+  }
+  return {
+    status: skippedFiles.length > 0 ? "partial" : "generated",
+    reason: generatedFiles.length
+      ? "Starter docs were generated for an empty project."
+      : "No starter docs were generated.",
+    generated_files: generatedFiles,
+    skipped_files: skippedFiles
+  };
 }
 
 function rawSecretFindings(candidates: readonly DiscoveryCandidate[]) {
@@ -745,6 +792,7 @@ function textReport(result: Record<string, unknown>) {
 export async function runAttach(argv: readonly string[]) {
   const options = parseAttachOptions(argv);
   const candidates = await detectImportCandidates(options.projectDir);
+  const documentationPosture = await analyzeProjectDocumentationPosture(options.projectDir);
   const existingConfigResult = await readExistingConfig(options.projectDir);
   const alreadyAttached = Boolean(existingConfigResult.config?.project_id);
   const importCandidates = await selectAttachImportCandidates({
@@ -800,6 +848,14 @@ export async function runAttach(argv: readonly string[]) {
   const projectLogPath = join(options.projectDir, "PROJECT_LOG.md");
   const existingAgents = await readOptional(agentsPath);
   const existingProjectLog = await readOptional(projectLogPath);
+  const starterDocsPlan = planStarterDocs({
+    projectName: projectName(options.projectDir),
+    posture: documentationPosture,
+    existingTargetPaths: documentationPosture.existing_docs
+  });
+  const starterDocFiles = starterDocsPlan.eligible_for_apply
+    ? starterDocsPlan.files.map((file) => file.path)
+    : [];
   const changedFiles = [
     ".recallant/config",
     targetConfig.config_file,
@@ -819,6 +875,7 @@ export async function runAttach(argv: readonly string[]) {
     executionAllowed,
     candidates: importCandidates,
     changedFiles,
+    starterDocFiles,
     productionSensitive: production.production_sensitive
   });
 
@@ -844,6 +901,19 @@ export async function runAttach(argv: readonly string[]) {
     writes_files: executionAllowed,
     writes_database: executionAllowed && database !== null,
     planned_changes: plan,
+    documentation_posture: documentationPosture,
+    starter_docs: {
+      plan: {
+        ...starterDocsPlan,
+        files: starterDocsPlan.files.map((file) => ({
+          path: file.path,
+          kind: file.kind,
+          profile: file.profile,
+          required: file.required
+        }))
+      },
+      outcome: null
+    },
     discovery_summary: {
       candidates: candidates.length,
       importable: candidates.filter(candidateImportable).length,
@@ -904,6 +974,13 @@ export async function runAttach(argv: readonly string[]) {
       options.explicitSandbox &&
       !production.production_sensitive &&
       (backup?.redacted_file_count ?? 0) > 0;
+    const starterDocsOutcome = await applyStarterDocs({
+      projectDir: options.projectDir,
+      plan: starterDocsPlan
+    });
+    const effectiveChangedFiles = Array.from(
+      new Set([...changedFiles, ...starterDocsOutcome.generated_files])
+    );
     await writeFile(
       join(options.projectDir, ".recallant", "config"),
       configJson(identity.projectId, options.serverUrl)
@@ -930,7 +1007,9 @@ export async function runAttach(argv: readonly string[]) {
       upsertMemorySection(
         maskChangedBootstrapSecrets && existingAgents !== null
           ? redactSecretValues(existingAgents)
-          : existingAgents
+          : starterDocsOutcome.generated_files.includes("AGENTS.md")
+            ? await readOptional(agentsPath)
+            : existingAgents
       )
     );
     await writeFile(
@@ -946,6 +1025,14 @@ export async function runAttach(argv: readonly string[]) {
     let imported: unknown[] = [];
     let starterMemory: unknown = null;
     let structuredMemories: unknown[] = [];
+    let documentationPostureSetting: unknown = {
+      status: "skipped",
+      reason: "RECALLANT_DATABASE_URL is not configured"
+    };
+    let starterDocsSetting: unknown = {
+      status: "skipped",
+      reason: "RECALLANT_DATABASE_URL is not configured"
+    };
     let startupSmoke: unknown = {
       status: "skipped",
       reason: "RECALLANT_DATABASE_URL is not configured"
@@ -961,6 +1048,25 @@ export async function runAttach(argv: readonly string[]) {
         projectPath: options.projectDir,
         captureProfile: options.captureProfile
       });
+      documentationPostureSetting = await database.setProjectSetting({
+        project_id: identity.projectId,
+        key: documentationPostureSettingKey,
+        value: compactDocumentationPostureForSetting(documentationPosture),
+        reason: "recallant attach documentation posture",
+        actor_kind: "system",
+        actor_id: "recallant-cli"
+      });
+      starterDocsSetting = await database.setProjectSetting({
+        project_id: identity.projectId,
+        key: starterDocsSettingKey,
+        value: compactStarterDocsForSetting({
+          plan: starterDocsPlan,
+          outcome: starterDocsOutcome
+        }),
+        reason: "recallant attach starter docs",
+        actor_kind: "system",
+        actor_id: "recallant-cli"
+      });
       imported = await runAttachImports({
         database,
         projectDir: options.projectDir,
@@ -973,7 +1079,7 @@ export async function runAttach(argv: readonly string[]) {
           projectDir: options.projectDir,
           projectId: identity.projectId,
           mode: effectiveMode,
-          changedFiles
+          changedFiles: effectiveChangedFiles
         });
       }
       structuredMemories = await createStructuredSourceMemories({
@@ -1015,10 +1121,24 @@ export async function runAttach(argv: readonly string[]) {
         masked_after_redacted_backup: maskChangedBootstrapSecrets,
         backup_manifest_path: backup?.manifest_path ?? null
       },
-      changed_files: changedFiles,
+      changed_files: effectiveChangedFiles,
+      starter_docs: {
+        plan: {
+          ...starterDocsPlan,
+          files: starterDocsPlan.files.map((file) => ({
+            path: file.path,
+            kind: file.kind,
+            profile: file.profile,
+            required: file.required
+          }))
+        },
+        outcome: starterDocsOutcome
+      },
       imported,
       starter_memory: starterMemory,
       structured_memories: structuredMemories,
+      documentation_posture_setting: documentationPostureSetting,
+      starter_docs_setting: starterDocsSetting,
       startup_smoke: startupSmoke,
       review_visibility: reviewVisibility,
       diagnostics,

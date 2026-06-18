@@ -15,7 +15,7 @@ import { buildManagementChatResponse, type ManagementChatResponse } from "./mana
 
 type ReviewDashboardData = Awaited<
   ReturnType<NonNullable<ReturnType<typeof createRecallantDbFromEnv>>["getReviewDashboard"]>
->;
+> & { starter_docs?: unknown; canon_capability_context?: unknown };
 
 type ChatRenderState = {
   question?: string;
@@ -51,6 +51,39 @@ type SourceRenderState = {
   action?: "create_space" | "attach_source" | "detach_source";
   message?: string;
 };
+
+const documentationStrategyOptions = [
+  {
+    key: "keep_current_docs",
+    label: "Keep current docs, add Recallant layer",
+    summary: "Preserve the current documentation and add only the Recallant working layer.",
+    reason:
+      "Use this when the existing docs remain the canonical source and Recallant should add memory, checkpoint, and context-pack guidance."
+  },
+  {
+    key: "canonicalize_for_recallant",
+    label: "Canonicalize docs for Recallant-aware workflow",
+    summary: "Normalize the documentation so agents and Recallant share one workflow.",
+    reason:
+      "Use this when existing docs, agent instructions, runbooks, or handoffs need owner-reviewed alignment with Recallant."
+  },
+  {
+    key: "create_starter_docs",
+    label: "Create starter docs",
+    summary: "Create the minimum starter documentation surfaces for an agent-ready project.",
+    reason:
+      "Use this when the project is empty or missing the basic README, agent, status, runbook, or architecture surfaces."
+  },
+  {
+    key: "discuss_first",
+    label: "Discuss first",
+    summary: "Review the posture with the owner before changing documentation.",
+    reason:
+      "Use this when the posture is ambiguous, risky, production-sensitive, or needs owner context before a plan is chosen."
+  }
+] as const;
+
+type DocumentationStrategyOptionKey = (typeof documentationStrategyOptions)[number]["key"];
 
 export function describeServerBoundary() {
   return {
@@ -1771,7 +1804,7 @@ function renderCurrentProjectContext(data: ReviewDashboardData) {
       <p>${escapeHtml(projectPathLabel(project))}</p>
     </div>
     <div class="current-project-facts">
-      <span>id ${escapeHtml(shortId(data.current_project_id))}</span>
+      <span>${escapeHtml(publicScreenshotMode() ? "demo workspace" : `id ${shortId(data.current_project_id)}`)}</span>
       <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
       <span>${escapeHtml(activeSources)} active sources</span>
     </div>
@@ -1892,6 +1925,241 @@ function renderFirstScreenSnapshot(data: ReviewDashboardData) {
       <p>${escapeHtml(sourceNote)}</p>
     </article>
   </div>`;
+}
+
+function documentationPostureItems(value: unknown) {
+  return asArray(value)
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function documentationStrategyKey(value: unknown): DocumentationStrategyOptionKey | null {
+  const key = String(value ?? "").trim();
+  return documentationStrategyOptions.some((option) => option.key === key)
+    ? (key as DocumentationStrategyOptionKey)
+    : null;
+}
+
+function documentationStrategyReviewOptions(value: unknown) {
+  const rawOptions: Array<{
+    key: DocumentationStrategyOptionKey;
+    recommended: boolean;
+    reason: string;
+  }> = asArray(value).flatMap((item) => {
+    const record = asRecord(item);
+    const key = documentationStrategyKey(record.option);
+    if (!key) return [];
+    return [
+      {
+        key,
+        recommended: record.recommended === true,
+        reason: String(record.reason ?? "").trim()
+      }
+    ];
+  });
+  const recommendedKey =
+    documentationStrategyOptions.find((option) =>
+      rawOptions.some((item) => item.key === option.key && item.recommended)
+    )?.key ?? "discuss_first";
+  return documentationStrategyOptions.map((option) => {
+    const raw = rawOptions.find((item) => item.key === option.key);
+    return {
+      ...option,
+      recommended: option.key === recommendedKey,
+      reason: raw?.reason || option.reason
+    };
+  });
+}
+
+function starterDocsItems(value: unknown) {
+  return asArray(value)
+    .map((item) => {
+      if (typeof item === "string") return item;
+      const record = asRecord(item);
+      return String(record.path ?? "").trim();
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function renderStarterDocsSummary(value: unknown) {
+  const record = asRecord(value);
+  const status = String(record.status ?? "not_recorded");
+  const generatedFiles = starterDocsItems(record.generated_files);
+  const plannedFiles = starterDocsItems(record.planned_files);
+  const skippedFiles = starterDocsItems(record.skipped_files);
+  const hasGenerated = generatedFiles.length > 0 && ["generated", "partial"].includes(status);
+  const listItems = hasGenerated ? generatedFiles : plannedFiles;
+  const heading = hasGenerated
+    ? "Generated starter docs"
+    : plannedFiles.length
+      ? "Starter docs plan"
+      : "Starter docs";
+  const detail = hasGenerated
+    ? "Recallant generated these starter documentation files during onboarding."
+    : plannedFiles.length
+      ? "Recallant planned these starter documentation files for an empty project."
+      : "No starter-doc action is recorded for this project.";
+  const skippedNote = skippedFiles.length
+    ? `<p class="strategy-note">Skipped: ${escapeHtml(skippedFiles.join(", "))}</p>`
+    : "";
+  return `<div class="starter-docs-summary" data-starter-docs-status="${escapeHtml(status)}">
+    <h4>${escapeHtml(heading)}</h4>
+    <p class="strategy-note">${escapeHtml(detail)}</p>
+    ${
+      listItems.length
+        ? `<ul class="posture-options starter-docs-files">${listItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+        : `<p class="empty">No starter documentation files are listed.</p>`
+    }
+    ${skippedNote}
+  </div>`;
+}
+
+function canonCapabilityList(
+  title: string,
+  items: unknown,
+  renderItem: (item: Record<string, unknown>) => string,
+  emptyText: string
+) {
+  const rows = asArray(items)
+    .map((item) => asRecord(item))
+    .filter((item) => Object.keys(item).length > 0)
+    .slice(0, 6);
+  return `<div class="canon-capability-group">
+    <h4>${escapeHtml(title)}</h4>
+    ${
+      rows.length
+        ? `<ul>${rows.map((item) => `<li>${renderItem(item)}</li>`).join("")}</ul>`
+        : `<p class="empty">${escapeHtml(emptyText)}</p>`
+    }
+  </div>`;
+}
+
+function renderCanonCapabilityContext(value: unknown) {
+  const context = asRecord(value);
+  const status = String(context.status ?? "not_recorded");
+  return `<div class="canon-capability-summary" data-canon-capability-status="${escapeHtml(status)}">
+    <div>
+      <h4>Canon and capability context</h4>
+      <p class="strategy-note">References are guidance and provenance for agents. They do not activate connectors, grant secret access, or create binding rules.</p>
+    </div>
+    <div class="canon-capability-grid">
+      ${canonCapabilityList(
+        "Environment facts",
+        context.environment_facts,
+        (item) =>
+          `${escapeHtml(String(item.label ?? item.key ?? "Environment fact"))}<span>${escapeHtml(
+            String(item.status ?? "review")
+          )}</span>`,
+        "No environment facts are recorded yet."
+      )}
+      ${canonCapabilityList(
+        "Capabilities",
+        context.capability_references,
+        (item) =>
+          `${escapeHtml(String(item.label ?? item.id ?? "Capability reference"))}<span>${escapeHtml(
+            `${String(item.status ?? "review")} / ${String(item.access ?? "reference_only")}`
+          )}</span>`,
+        "No capability references are recorded yet."
+      )}
+      ${canonCapabilityList(
+        "Secret references",
+        context.secret_references,
+        (item) =>
+          `${escapeHtml(String(item.name ?? "SECRET_REFERENCE"))}<span>${escapeHtml(
+            String(item.status ?? "names_only")
+          )}</span>`,
+        "No secret reference names are recorded yet."
+      )}
+      ${canonCapabilityList(
+        "Server canon",
+        context.server_canon_links,
+        (item) =>
+          `${escapeHtml(String(item.kind ?? item.label ?? "canon"))}<span>${escapeHtml(
+            String(item.status ?? "needed")
+          )}</span>`,
+        "No server canon references are recorded yet."
+      )}
+      ${canonCapabilityList(
+        "Documentation authority",
+        context.documentation_authority_map,
+        (item) =>
+          `${escapeHtml(String(item.path ?? "project docs"))}<span>${escapeHtml(
+            String(item.role ?? "review_required")
+          )}</span>`,
+        "No documentation authority map is recorded yet."
+      )}
+    </div>
+  </div>`;
+}
+
+function renderDocumentationPosture(data: ReviewDashboardData) {
+  const posture = asRecord(data.documentation_posture);
+  const starterDocs = asRecord(data.starter_docs);
+  const status = String(posture.status ?? "not_recorded");
+  const profile = String(posture.profile ?? "unknown");
+  const summary =
+    String(posture.summary ?? "").trim() || "No documentation posture has been recorded yet.";
+  const missingDocs = documentationPostureItems(posture.missing_recommended_docs).slice(0, 4);
+  const signals = asArray(posture.signals)
+    .map((item) => asRecord(item))
+    .filter((item) => String(item.code ?? "").trim().length > 0)
+    .slice(0, 4);
+  const reviewOptions = documentationStrategyReviewOptions(posture.review_options);
+  const canonContext = asRecord(posture.canon_context);
+  const canonKinds = documentationPostureItems(canonContext.recommended_reference_kinds);
+  const configuredReferences = documentationPostureItems(canonContext.configured_references);
+  const topSignals = signals.length
+    ? signals.map((signal) => `${signal.code}: ${signal.message ?? "review"}`)
+    : [];
+  const reviewItems = [...missingDocs.map((item) => `Missing: ${item}`), ...topSignals].slice(0, 5);
+  const optionList = reviewOptions
+    .map((option) => {
+      const recommended = option.recommended ? "Recommended strategy" : "Available strategy";
+      return `<li class="strategy-option ${option.recommended ? "recommended" : "available"}" data-strategy-option="${escapeHtml(option.key)}"><div><strong>${escapeHtml(option.label)}</strong><span>${escapeHtml(recommended)}</span></div><p>${escapeHtml(option.summary)}</p><p class="strategy-reason">${escapeHtml(option.reason)}</p></li>`;
+    })
+    .join("");
+  return `<section class="documentation-posture-panel" id="documentation-posture" aria-label="Documentation posture">
+    <div class="documentation-posture-head">
+      <div>
+        <span class="section-kicker">Documentation posture</span>
+        <h3>${escapeHtml(status.replaceAll("_", " "))}</h3>
+      </div>
+      <span class="posture-profile">${escapeHtml(profile.replaceAll("_", " "))}</span>
+    </div>
+    <p>${escapeHtml(summary)}</p>
+    <div class="posture-grid">
+      <div>
+        <h4>Top missing / risk signals</h4>
+        ${
+          reviewItems.length
+            ? `<ul>${reviewItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+            : `<p class="empty">No documentation review signal is recorded.</p>`
+        }
+      </div>
+      <div>
+        <h4>Documentation strategy</h4>
+        <p class="strategy-note">Review these choices in Workbench. Existing documentation rewrites still require owner review.</p>
+        <ul class="posture-options strategy-options">${optionList}</ul>
+      </div>
+      ${renderStarterDocsSummary(starterDocs)}
+      ${renderCanonCapabilityContext(data.canon_capability_context)}
+    </div>
+    ${
+      canonKinds.length || configuredReferences.length
+        ? `<p class="posture-canon">${escapeHtml(
+            [
+              canonKinds.length ? `Canon needed: ${canonKinds.join(", ")}` : "",
+              configuredReferences.length
+                ? `Configured refs: ${configuredReferences.join(", ")}`
+                : ""
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          )}</p>`
+        : ""
+    }
+  </section>`;
 }
 
 function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderState) {
@@ -3255,6 +3523,30 @@ function renderDashboard(
     .setting-result { border: 1px solid #d9dee7; border-radius: 7px; padding: 10px; margin-bottom: 10px; background: #fbfcfe; }
     .setting-result strong { display: block; margin-bottom: 6px; font-size: 14px; }
     .setting-result p { margin: 0 0 8px; color: #4f5867; font-size: 13px; line-height: 1.4; }
+    .documentation-posture-panel { border: 1px solid #d5e1dd; border-radius: 8px; background: #fff; padding: 13px; margin: 0 0 16px; }
+    .documentation-posture-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+    .documentation-posture-head h3 { margin: 2px 0 0; font-size: 17px; line-height: 1.2; }
+    .posture-profile { border: 1px solid #bfd8d0; border-radius: 999px; padding: 4px 8px; color: #145a4d; background: #eef8f5; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .documentation-posture-panel > p { color: #4f5867; font-size: 12.5px; line-height: 1.4; margin: 0 0 10px; }
+    .posture-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    .posture-grid h4 { margin: 0 0 6px; font-size: 12px; color: #303845; }
+    .posture-grid ul { margin: 0; padding-left: 18px; color: #4f5867; font-size: 12px; line-height: 1.45; }
+    .posture-options { display: grid; gap: 7px; padding-left: 0 !important; list-style: none; }
+    .posture-options li { border: 1px solid #e0e7e4; border-radius: 7px; padding: 8px; background: #f8fbfa; }
+    .posture-options .recommended { border-color: #7eb6a9; background: #eef8f5; box-shadow: inset 3px 0 0 #0f6b5a; }
+    .posture-options strong { display: block; color: #20242c; font-size: 12px; }
+    .posture-options span { display: block; margin-top: 2px; color: #166454; font-size: 11px; font-weight: 700; }
+    .posture-options p { margin: 4px 0 0; color: #4f5867; font-size: 11.5px; line-height: 1.35; }
+    .strategy-note { margin: 0 0 7px !important; color: #4f5867; font-size: 11.5px; line-height: 1.35; }
+    .strategy-reason { color: #5d6674 !important; }
+    .posture-canon { border-top: 1px solid #e0e7e4; padding-top: 8px; }
+    .canon-capability-summary { display: grid; gap: 8px; grid-column: 1 / -1; border: 1px solid #d8e5e1; border-radius: 7px; padding: 10px; background: #fbfdfc; }
+    .canon-capability-summary h4 { margin: 0 0 4px; font-size: 12px; color: #303845; }
+    .canon-capability-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .canon-capability-group { min-width: 0; }
+    .canon-capability-group ul { display: grid; gap: 5px; margin: 0; padding-left: 0; list-style: none; }
+    .canon-capability-group li { display: grid; gap: 2px; border: 1px solid #e3eae7; border-radius: 6px; padding: 6px; background: #fff; color: #303845; font-size: 11.5px; line-height: 1.3; overflow-wrap: anywhere; }
+    .canon-capability-group span { color: #166454; font-size: 10.5px; font-weight: 700; }
     .rule-filters { display: grid; gap: 7px; margin-bottom: 12px; color: #4f5867; font-size: 12px; }
     .rule-filters h3 { margin: 0; font-size: 13px; color: #303845; }
     .rule-filters div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -3350,7 +3642,7 @@ function renderDashboard(
     .empty { color: var(--muted); font-size: 13px; line-height: 1.4; border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px; background: var(--surface-soft); }
     a:focus-visible, button:focus-visible, summary:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #7eb6a9; outline-offset: 2px; }
     @media (max-width: 1180px) { .workbench-body { grid-template-columns: minmax(260px, 310px) minmax(0, 1fr); } .ask-layout, .source-filter-panel, .source-workspace-grid, .source-tree { grid-template-columns: 1fr; } .source-tree-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-filter-chips { justify-content: flex-start; } .operation-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); } .operation-panel[open] { grid-column: span 2; } .memory-profile { border-left: 0; border-top: 1px solid #d9e4df; } }
-    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .source-tree-groups, .activity-summary, .source-map-legend, .project-choice-grid, .current-project-context { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .current-project-facts { justify-content: flex-start; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
+    @media (max-width: 760px) { header { align-items: flex-start; flex-direction: column; padding: 16px; } main { padding: 12px; } .workbench-body { grid-template-columns: 1fr; } .workbench-main { order: 1; } .left-rail { order: 2; position: static; } .command-grid, .operation-panels, .source-overview, .review-overview, .review-guide, .signal-strip, .first-screen-snapshot, .posture-grid, .canon-capability-grid, .source-tree-groups, .activity-summary, .source-map-legend, .project-choice-grid, .current-project-context { grid-template-columns: 1fr; } .operation-panel[open] { grid-column: span 1; } .activity-group-head { display: block; } .activity-group-head p { margin-top: 5px; } .activity-item { grid-template-columns: 1fr; } .primary-workspace { grid-template-columns: 1fr; } .source-card { grid-template-columns: 1fr; } .section-head { display: block; } .memory-profile-metrics { grid-template-columns: 1fr; } .current-project-facts { justify-content: flex-start; } .ask-work, .memory-profile { padding: 16px; } .ask-work h2 { font-size: 28px; } .chat-form textarea { min-height: 240px; } }
 
     /* Stage 1 Workbench design architecture corrective pass */
     :root {
@@ -4124,6 +4416,7 @@ function renderDashboard(
           <p class="workbench-promise">Ask what Recallant remembers, whether agents are recording, which sources support an answer, what needs review, or how to act safely.</p>
           ${renderCurrentProjectContext(data)}
           ${renderFirstScreenSnapshot(data)}
+          ${renderDocumentationPosture(data)}
           ${renderManagementChat(data, chat, activeView)}
         </div>
         ${renderCurrentMemoryProfile(data)}

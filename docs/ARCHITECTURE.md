@@ -114,6 +114,17 @@ private-by-default self-hosting:
 - private deployment profiles represented as configuration and capability references;
 - rollback and detach workflows that avoid deleting memory by accident.
 
+Protected public Workbench access is a human management path, not the same thing as remote agent
+access. The current agent path is local stdio MCP on an installed host. A near-term planned
+deployment shape is authenticated remote project access, where a project on another server or
+workstation can use one central Recallant server for MCP memory calls without direct Postgres access
+and without exposing MCP, admin APIs, raw artifacts, backups, or provider settings anonymously.
+
+That remote path should preserve the same project/developer scope, context-pack, capture, review,
+and safety policies as local stdio MCP. The transport and auth details are implementation work, but
+the public contract is narrow: remote project access must be explicit, authenticated, observable, and
+private by default.
+
 ## Why This Is Different From Plain Logs Or RAG
 
 Logs are useful evidence, but they do not know which statements are still valid, which project they

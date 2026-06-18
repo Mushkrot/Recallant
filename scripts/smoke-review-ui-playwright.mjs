@@ -165,7 +165,12 @@ async function assertHumanDefaultLanguage(page, label) {
     "Memory Spaces",
     "Source Map",
     "Activity / Replay",
-    "Technical details"
+    "Command Center",
+    "Documentation strategy",
+    "Keep current docs, add Recallant layer",
+    "Canonicalize docs for Recallant-aware workflow",
+    "Create starter docs",
+    "Discuss first"
   ]) {
     assert(
       visibleText.includes(required),
@@ -712,7 +717,7 @@ async function run() {
       viewport: { width: 1440, height: 1000 },
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
-    await desktop.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await desktop.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
     await noHorizontalScroll(desktop, "desktop initial Workbench");
     await assertResponsiveBounds(desktop, "desktop initial Workbench");
@@ -800,6 +805,12 @@ async function run() {
       "desktop overview",
       forbiddenPublicText
     );
+    const selectedDetailPanel = desktop
+      .locator("details.operation-panel", { hasText: "Selected Detail" })
+      .first();
+    await selectedDetailPanel.locator("summary").first().click();
+    await selectedDetailPanel.locator("summary", { hasText: "Technical details" }).waitFor();
+    await selectedDetailPanel.locator("summary").first().click();
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
       waitUntil: "networkidle"
@@ -1038,7 +1049,7 @@ async function run() {
       viewport: { width: 390, height: 844 },
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
-    await mobile.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
+    await mobile.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await mobile.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
     await noHorizontalScroll(mobile, "mobile initial Workbench");
     await assertResponsiveBounds(mobile, "mobile initial Workbench");
@@ -1104,6 +1115,7 @@ async function run() {
             "desktop_no_horizontal_scroll",
             "central_ask_recallant_panel",
             "first_screen_snapshot_prominent",
+            "documentation_strategy_visible",
             "desktop_focused_ask_view",
             "desktop_focused_sources_view",
             "memory_tree_source_map",

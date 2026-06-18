@@ -31,9 +31,10 @@ recallant onboard /path/to/project
 ```
 
 The one-command flow checks storage readiness, offers local single-user storage setup when needed,
-attaches the project, prepares thin local agent configuration for Codex, installs local hooks when
-supported, proves capture and recall, and prints the private Workbench outcome. Advanced flags can
-opt out of those defaults, but they are not part of the beginner path.
+attaches the project, analyzes documentation posture, prepares thin local agent configuration for
+Codex, installs local hooks when supported, proves capture and recall, and prints the private
+Workbench outcome. Advanced flags can opt out of those defaults, but they are not part of the
+beginner path.
 
 Before changing project files, onboarding also checks version-control safety. If Git is available
 but the project is not a usable Git work tree, onboarding offers to initialize Git first or continue
@@ -45,6 +46,9 @@ Expected success:
 - `Capture active: yes` after context read, memory write, checkpoint, and recall proof are present;
 - `Embedding recovery: current` or a bounded recovery/waiting status when local embeddings are
   catching up;
+- a concise documentation posture summary: `Documentation posture: empty | healthy |
+  needs_attention | risky`, followed by `Found:` and `Workbench:` lines that summarize what was
+  discovered and what to review next;
 - a Workbench link with private/auth-required posture;
 - project visibility and review queue status.
 
@@ -82,7 +86,17 @@ files. Use `--yes` only in automation that already approved the plan.
 
 The onboarding output includes the private Workbench URL when review state is available. The
 Workbench is used to review memories, rules, source context, capture status, migration imports, and
-safety gates.
+safety gates. When documentation posture needs review, the Workbench shows a documentation strategy
+surface with four choices: keep current docs and add a Recallant layer, canonicalize docs for a
+Recallant-aware workflow, create starter docs, or discuss first. This surface helps the owner choose
+the next documentation posture. Empty projects may receive starter docs during the confirmed
+`recallant onboard <project>` write step. Existing-doc canonicalization and broader doc rewriting
+remain confirmed Workbench workflows.
+
+The Workbench and startup context packs also show a minimal canon/capability context layer:
+environment facts, capability references, secret reference names, server canon link status, and a
+documentation authority map. These are guidance and provenance for agents. They do not activate
+connectors, reveal secret values, or turn recalled text into binding rules.
 
 ## 5. Clean Up Or Reset A Test Project
 
@@ -147,9 +161,18 @@ Project attach may create small local pointer/config files such as `.recallant/c
 client-specific MCP config such as `.codex/config.toml`, `AGENTS.md`, and `PROJECT_LOG.md`.
 Durable memory lives in Recallant, not in those bootstrap files.
 
+When onboarding finds no project docs, it may also create starter docs. The base starter set is
+`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`. Service or app projects may also get runbook and
+architecture docs; product or roadmap projects may get status and decision docs; library or package
+projects may get an API or usage surface. Starter docs are not copied old handoffs, and onboarding
+must not overwrite existing target files.
+
 `AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is a compact
 fallback/checkpoint file. Old handoffs, long history, source notes, and runbook details should be
 imported as source-linked evidence or reviewed memories rather than copied into startup context.
+The documentation posture summary is stored in Recallant and appears in later context packs so a
+new agent can see whether the project is already documented well, needs canon links, or should be
+reviewed before docs are rewritten.
 
 ## Next
 

@@ -110,6 +110,11 @@ Cloudflare Access profile is configured. A ready public UI means the private ori
 auth-required Workbench response and edge auth is required at the public access layer; an anonymous
 origin response or disabled edge auth is not public-ready.
 
+Public Workbench readiness does not imply remote project access. The current agent path remains local
+stdio MCP on an installed host. Supporting projects from another server or workstation through one
+central Recallant instance is planned remote-client work and must use authenticated agent access
+without exposing Postgres, backups, raw artifacts, or unauthenticated MCP/admin routes.
+
 `recallant doctor --format json` also reports
 `production_readiness.service_runtime` when production service signals are available from the
 service env profile, explicit runtime overrides, or the local service manager. The runtime readiness

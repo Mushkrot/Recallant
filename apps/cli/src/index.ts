@@ -18,6 +18,11 @@ import {
   formatDiscoveryText,
   readImportTextForCandidate
 } from "./discovery.js";
+import {
+  analyzeProjectDocumentationPosture,
+  summarizeDocumentationPostureForOnboard,
+  type DocumentationPosture
+} from "./documentation-posture.js";
 import { runAttach } from "./attach.js";
 import {
   clientTargetConfig,
@@ -1499,6 +1504,8 @@ function safeAttachDetailsForOnboard(payload: Record<string, unknown> | null) {
     writes_database: payload.writes_database === true,
     production_sensitive: payload.production_sensitive ?? null,
     planned_changes: Array.isArray(payload.planned_changes) ? payload.planned_changes : [],
+    documentation_posture: (payload.documentation_posture ?? null) as DocumentationPosture | null,
+    starter_docs: payload.starter_docs ?? null,
     discovery_summary: payload.discovery_summary ?? null,
     migration_summary: ownerReport.migration_summary ?? null,
     secret_findings: payload.secret_findings ?? null,
@@ -1533,6 +1540,26 @@ function plannedWritePaths(attachDetails: unknown) {
 
 function migrationSummaryObject(attachDetails: unknown) {
   return attachDetailObject(attachDetailObject(attachDetails).migration_summary);
+}
+
+function documentationPostureFromOnboard(result: {
+  documentation_posture?: DocumentationPosture | null;
+  attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
+}) {
+  return (
+    result.documentation_posture ??
+    (attachDetailObject(result.attach_details).documentation_posture as DocumentationPosture | null)
+  );
+}
+
+function documentationPostureHumanLines(posture: DocumentationPosture | null | undefined) {
+  if (!posture) return [];
+  const summary = summarizeDocumentationPostureForOnboard(posture);
+  return [
+    `Documentation posture: ${summary.status}`,
+    `Found: ${summary.found}.`,
+    `Workbench: ${summary.workbench}.`
+  ];
 }
 
 async function checkCaptureReadiness(input: {
@@ -1742,6 +1769,7 @@ function onboardHumanReport(result: {
   project_dir: string;
   storage: OnboardStorageStep;
   version_control?: OnboardVersionControlStep | null;
+  documentation_posture?: DocumentationPosture | null;
   project_already_attached: boolean;
   attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
   embedding_recovery?: OnboardEmbeddingRecoveryPayload | null;
@@ -1775,6 +1803,7 @@ function onboardHumanReport(result: {
     );
     for (const warning of result.version_control.warnings) lines.push(`  - ${warning}`);
   }
+  lines.push(...documentationPostureHumanLines(documentationPostureFromOnboard(result)));
   lines.push(
     `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
     `Attach: ${result.attached.status}`
@@ -5941,6 +5970,7 @@ async function resolveOnboardWorkbenchOutcome(
 async function runOnboard(argv: readonly string[]) {
   const options = parseOnboardOptions(argv);
   const targetClient = inferTargetClient({ client: options.client });
+  const documentationPosture = await analyzeProjectDocumentationPosture(options.projectDir);
   const steps: { attached: OnboardAttachedStep; connected: OnboardConnectedStep } = {
     attached: {
       command: formatCommandHint(["recallant", "attach", "--project-dir", options.projectDir]),
@@ -5968,6 +5998,7 @@ async function runOnboard(argv: readonly string[]) {
       storage,
       version_control: null,
       attach_details: null,
+      documentation_posture: documentationPosture,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
       install_local_hooks: options.installLocalHooks,
@@ -6035,6 +6066,7 @@ async function runOnboard(argv: readonly string[]) {
       storage,
       version_control: versionControl,
       attach_details: null,
+      documentation_posture: documentationPosture,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
       install_local_hooks: options.installLocalHooks,
@@ -6069,6 +6101,7 @@ async function runOnboard(argv: readonly string[]) {
     storage,
     version_control: versionControl,
     attach_details: attachDetails,
+    documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
     project_already_attached: Boolean(existingConfig?.project_id),
     client: options.client ? targetClient : null,
     install_local_hooks: options.installLocalHooks,
@@ -6119,6 +6152,7 @@ async function runOnboard(argv: readonly string[]) {
       storage,
       version_control: versionControl,
       attach_details: attachDetails,
+      documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
       project_already_attached: Boolean(existingConfig?.project_id),
       client: options.client ? targetClient : null,
       install_local_hooks: options.installLocalHooks,
@@ -6407,6 +6441,7 @@ async function runOnboard(argv: readonly string[]) {
     storage,
     version_control: versionControl,
     attach_details: attachDetails,
+    documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
     workbench,
     project_already_attached: Boolean(existingConfig?.project_id),
     client: options.client ? targetClient : null,

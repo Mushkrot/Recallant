@@ -33,6 +33,8 @@ That command should behave like a guided setup program, not a list of commands t
 - create a local backup before changing existing agent files;
 - attach the project, connect the selected client, and keep generated files thin;
 - import old handoffs and project notes as review-only evidence;
+- analyze documentation posture and report whether docs are absent, thin, partial, need review, or
+  Recallant-ready;
 - prove capture with a context read, memory write, checkpoint, and recall check;
 - show the Workbench outcome or a single clear blocker.
 
@@ -53,15 +55,83 @@ They should not be the normal beginner quickstart. The important user-facing res
 `capture active`: Recallant has observed a context read, meaningful memory write, checkpoint, and
 recall proof for the project.
 
+## Documentation Posture And Context Packs
+
+Onboarding also produces a compact documentation posture summary. The summary is generic product
+state, not a private deployment overlay. It can report:
+
+- which documentation surfaces exist;
+- which recommended surfaces are missing;
+- whether agent docs describe the Recallant workflow;
+- whether stale handoffs, oversized logs, production/server hints, or canon/capability references
+  need review;
+- which Workbench documentation strategy choices are available: keep current docs and add a
+  Recallant layer, canonicalize docs for a Recallant-aware workflow, create starter docs, or
+  discuss first.
+
+The human onboard summary compresses this into four owner-facing states:
+
+- `empty`: no project documentation was discovered;
+- `healthy`: recommended documentation and Recallant workflow are already present;
+- `needs_attention`: docs exist but are thin, partial, stale, or missing Recallant workflow;
+- `risky`: production/server/canon or secret-sensitive signals should be reviewed before docs are
+  changed.
+
+The summary should stay short: `Documentation posture: <state>`, then `Found:` and `Workbench:`
+lines. Detailed posture remains available in JSON output and context packs.
+
+Confirmed attach stores this compact posture in Recallant project settings under the stable key
+`documentation_posture`. Later context packs expose it as `sections.documentation_posture` so agents
+receive startup guidance without asking maintainers to repeat the same explanation. The section is
+guidance, not a binding rule: imported old handoffs stay evidence unless review promotes them.
+
+Context packs also include `sections.canon_capability_context`, a compact reference map for
+Recallant-connected projects. It is intentionally names-and-provenance oriented:
+
+- environment facts from accepted project/developer memories or safe project metadata;
+- capability references with readiness and consent status, without activating connectors;
+- secret references by name/reference only, without raw values;
+- server canon link status from configured references or needed-reference hints;
+- documentation authority labels showing canonical docs, generated starter docs, imported
+  evidence, stale handoffs, and review-required surfaces.
+
+This section helps agents start with the right owner/server/capability context without searching for
+secrets or asking maintainers to repeat known rules. It is not a full external resource registry, it
+does not grant live access, and it does not make recalled text instruction-grade. Connector
+activation, remote resource ingestion, and broader registry workflows remain governed future work.
+
+The Workbench now shows this as a dedicated documentation strategy surface with four choices:
+
+- **Keep current docs, add Recallant layer:** preserve the current documentation and add only the
+  Recallant working layer.
+- **Canonicalize docs for Recallant-aware workflow:** align existing docs, agent instructions, and
+  handoffs with Recallant after owner review.
+- **Create starter docs:** create the missing starter documentation surfaces when the project has no
+  useful docs yet.
+- **Discuss first:** review ambiguous, risky, production-sensitive, or conflicting posture before
+  changing docs.
+
+For an empty project, `recallant onboard <project>` can now create starter docs during the confirmed
+onboarding write step. This is intentionally narrow: it applies only when no project documentation
+was discovered and target files do not already exist. Existing-doc canonicalization and broader
+documentation rewrites still require an owner-reviewed Workbench workflow.
+
 ## New Project Bootstrap
 
 For a fresh project, Recallant should create or update only compact local files:
 
 - `.recallant/config` as a local pointer to the Recallant memory space;
+- `README.md` when the project has no docs yet;
 - a thin `AGENTS.md` section that routes agents into Recallant;
 - a compact `PROJECT_LOG.md` fallback with current focus and next step;
 - client-specific MCP configuration when needed;
 - local spool state for offline capture.
+
+Starter docs always include the base `README.md`, `AGENTS.md`, and `PROJECT_LOG.md` surfaces. If
+documentation posture can classify the project, onboarding may also add profile-specific starter
+surfaces: service/app projects get operational and architecture docs; product or roadmap projects
+get status and decision docs; library/package projects get an API or usage surface. These files are
+starter surfaces, not imported old handoffs, and they must not overwrite existing project docs.
 
 Durable history belongs in Recallant, not in a growing prompt file. A later session should start
 from a server-built context pack, not from a long manual prompt.

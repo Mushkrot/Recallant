@@ -22,6 +22,35 @@ function mustInclude(text, markers, label) {
   }
 }
 
+function fixtureStderrExcerpt(stderr) {
+  const trimmed = stderr.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 1000) : "<empty>";
+}
+
+function parseDoctorFixtureJson(stdout, stderr, code, label) {
+  const stdoutLength = stdout.length;
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      `${label} produced empty stdout; exit_code=${code}; stdout_length=${stdoutLength}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}`
+    );
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(
+      `${label} produced malformed JSON stdout; exit_code=${code}; stdout_length=${stdoutLength}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}; parse_error=${error instanceof Error ? error.message : String(error)}; stdout_excerpt=${trimmed.slice(
+        0,
+        1000
+      )}`
+    );
+  }
+}
+
 const publicDocs = [
   "README.md",
   "AGENTS.md",
@@ -90,9 +119,23 @@ mustInclude(
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
     "Capture active: yes",
+    "documentation posture summary",
+    "Documentation posture: empty | healthy |",
+    "needs_attention | risky",
+    "Found:",
+    "Workbench:",
     "storage_blocked",
     "production-sensitive",
     "Workbench link",
+    "documentation strategy",
+    "surface with four choices",
+    "keep current docs and add a Recallant layer",
+    "canonicalize docs for a",
+    "Recallant-aware workflow",
+    "create starter docs",
+    "discuss first",
+    "Empty projects may receive starter docs during the confirmed",
+    "Existing-doc canonicalization and broader doc rewriting",
     "Advanced / Debug CLI",
     "Agent-ready projects"
   ],
@@ -125,6 +168,29 @@ mustInclude(
     "recallant connect codex --project-dir .",
     "recallant doctor --project-dir . --require-capture",
     "recallant agent-start",
+    "Documentation Posture And Context Packs",
+    "`documentation_posture`",
+    "`sections.documentation_posture`",
+    "`sections.canon_capability_context`",
+    "guidance, not a binding rule",
+    "environment facts from accepted project/developer memories or safe project metadata",
+    "secret references by name/reference only, without raw values",
+    "does not grant live access",
+    "full external resource registry",
+    "activation, remote resource ingestion",
+    "broader registry workflows remain governed future work",
+    "`empty`",
+    "`healthy`",
+    "`needs_attention`",
+    "`risky`",
+    "documentation strategy surface",
+    "Keep current docs, add Recallant layer",
+    "Canonicalize docs for Recallant-aware workflow",
+    "Create starter docs",
+    "Discuss first",
+    "`recallant onboard <project>` can now create starter docs",
+    "Starter docs always include the base `README.md`, `AGENTS.md`, and `PROJECT_LOG.md`",
+    "must not overwrite existing project docs",
     "New Project Bootstrap",
     "Existing Project Migration",
     "Agent Session Contract",
@@ -150,6 +216,18 @@ mustInclude(
     "Database not configured",
     "Existing-project migration",
     "Capture-active proof",
+    "Documentation posture + context routing",
+    "Working slice with Workbench strategy surface, empty-project starter docs, and minimal canon/capability context",
+    "compact `starter_docs` plan/outcome",
+    "`sections.canon_capability_context`",
+    "environment facts, capability references, secret reference names, server canon link status, and documentation authority labels",
+    "empty projects can receive base starter docs plus profile-specific service/product/library docs",
+    "`empty`, `healthy`, `needs_attention`, or `risky`",
+    "Workbench shows documentation strategy choices plus environment facts",
+    "full external resource registry",
+    "connector activation",
+    "Workbench-confirmed existing-doc rewriting",
+    "npm run documentation-posture:smoke",
     "Source, capability, and secret references",
     "Cross-project examples",
     "Safety gates",
@@ -213,6 +291,8 @@ mustInclude(
     "Opt-in real-project pilot smoke",
     "Workbench migration review queue",
     "Public quickstart smoke",
+    "Documentation posture analyzer",
+    "Documentation posture follow-through",
     "autonomous browser QA",
     "Security review smoke",
     "One-command beginner onboarding hardening",
@@ -252,6 +332,17 @@ assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run security-review:smoke"),
   "smoke:core must include security-review:smoke"
 );
+assert(
+  packageJson.scripts?.["documentation-posture:smoke"] ===
+    "node scripts/smoke-documentation-posture.mjs",
+  "package.json must expose documentation-posture:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
+    "npm run documentation-posture:smoke"
+  ),
+  "smoke:core must include documentation-posture:smoke"
+);
 
 async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
   const child = spawn(
@@ -284,9 +375,14 @@ async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
   });
   const [code] = await once(child, "close");
   if (code !== 0) {
-    throw new Error(`doctor public readiness fixture failed: ${stderr}\n${stdout}`);
+    throw new Error(
+      `doctor public readiness fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}; stdout_excerpt=${stdout.slice(0, 1000)}`
+    );
   }
-  return JSON.parse(stdout).production_readiness?.public_workbench_readiness;
+  const parsed = parseDoctorFixtureJson(stdout, stderr, code, "doctor public readiness fixture");
+  return parsed.production_readiness?.public_workbench_readiness;
 }
 
 async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
@@ -321,9 +417,14 @@ async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
   });
   const [code] = await once(child, "close");
   if (code !== 0) {
-    throw new Error(`doctor service runtime fixture failed: ${stderr}\n${stdout}`);
+    throw new Error(
+      `doctor service runtime fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}; stdout_excerpt=${stdout.slice(0, 1000)}`
+    );
   }
-  return JSON.parse(stdout).production_readiness?.service_runtime;
+  const parsed = parseDoctorFixtureJson(stdout, stderr, code, "doctor service runtime fixture");
+  return parsed.production_readiness?.service_runtime;
 }
 
 async function closedLocalOriginUrl() {
