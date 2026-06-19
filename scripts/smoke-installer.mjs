@@ -200,6 +200,15 @@ assert(
   "Installer must write selected Postgres/Compose settings"
 );
 assert(
+  installerSource.indexOf("docker info >/dev/null 2>&1") <
+    installerSource.indexOf('cd "$RECALLANT_HOME"') &&
+    installerSource.includes("Docker is installed, but the Docker daemon is not running.") &&
+    bootstrapSource.includes("add_hint docker-running") &&
+    bootstrapSource.indexOf("docker info >/dev/null 2>&1") <
+      bootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+  "Installers must fail early with a human Docker-not-running message"
+);
+assert(
   prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}') &&
     prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}') &&
     prodComposeSource.includes('POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}') &&

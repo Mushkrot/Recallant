@@ -62,6 +62,9 @@ add_hint() {
     docker-compose)
       echo "  - Install Docker with Compose plugin."
       ;;
+    docker-running)
+      echo "  - Start Docker Desktop or Docker Engine, wait until it says it is running, then rerun the same command."
+      ;;
     *)
       echo "  - Install: $1"
       ;;
@@ -131,6 +134,16 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   done
   echo
   echo "After fixing dependencies, rerun the same command."
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is installed, but the Docker daemon is not running."
+  echo
+  echo "Start Docker before retrying:"
+  add_hint docker-running
+  echo
+  echo "After Docker is running, rerun the same command."
   exit 1
 fi
 

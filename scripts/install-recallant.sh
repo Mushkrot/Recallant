@@ -181,6 +181,12 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is installed, but the Docker daemon is not running." >&2
+  echo "Start Docker Desktop or Docker Engine, wait until it says it is running, then rerun the same command." >&2
+  exit 1
+fi
+
 cd "$RECALLANT_HOME"
 
 mkdir -p "$DATA_DIR/postgres" "$DATA_DIR/backups" "$(dirname "$ENV_FILE")"
