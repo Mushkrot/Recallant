@@ -7,6 +7,10 @@ import { join } from "node:path";
 const repoRoot = process.cwd();
 
 const installerSource = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
+const bootstrapSource = readFileSync(
+  join(repoRoot, "scripts", "install-recallant-bootstrap.sh"),
+  "utf8"
+);
 const prodComposeSource = readFileSync(join(repoRoot, "scripts", "recallant-prod-compose.sh"), "utf8");
 const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
 const backupSource = readFileSync(join(repoRoot, "scripts", "recallant-production-backup.sh"), "utf8");
@@ -225,6 +229,15 @@ assert(
     rollbackSource.includes("Refusing to remove unmarked data dir") &&
     rollbackSource.includes("DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."),
   "Installer rollback must be dry-run first, confirmation-gated, and marker-based"
+);
+assert(
+  bootstrapSource.includes("--onboard <project-dir>") &&
+    bootstrapSource.includes('ONBOARD_PROJECT="${2:-}"') &&
+    bootstrapSource.includes('INVOKE_DIR="$(pwd -P)"') &&
+    bootstrapSource.includes('onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"') &&
+    bootstrapSource.includes('"$recallant_cmd" onboard "$onboard_target"') &&
+    bootstrapSource.includes('curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .'),
+  "Bootstrap installer must support one-command install plus current-project onboarding"
 );
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

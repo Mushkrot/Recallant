@@ -38,13 +38,14 @@ is active, and let future agents continue from governed context instead of a lon
 Recallant is pre-release, but the first coding-agent memory slice is working: onboard a project,
 prove capture, and get a private Workbench review link from one command.
 
-Install:
+From the project folder you want to connect:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
 ```
 
-Onboard a project for Codex:
+That one command installs the Recallant CLI, prepares private local storage, and onboards the
+current project for Codex. After install, you can onboard another project from anywhere:
 
 ```bash
 recallant onboard /path/to/project

@@ -1,14 +1,25 @@
 # Quickstart
 
-Install Recallant and make one project agent-ready with one onboarding command.
+Install Recallant and make one project agent-ready with one command.
 
-## 1. Install
+## 1. Make This Project Agent-Ready
+
+From the project folder you want to connect:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
 ```
 
-Preview first:
+That command installs the Recallant CLI if needed, creates private local storage, and then runs
+onboarding for the current folder.
+
+Preview the install plan first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --dry-run --onboard .
+```
+
+Advanced preview from a checkout:
 
 ```bash
 git clone https://github.com/Mushkrot/Recallant.git recallant
@@ -22,7 +33,7 @@ Verify the CLI:
 recallant --version
 ```
 
-## 2. Make A Project Agent-Ready
+## 2. Connect Another Project
 
 From anywhere:
 

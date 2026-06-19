@@ -5,6 +5,8 @@ BOOTSTRAP_PROFILE="${RECALLANT_INSTALL_PROFILE:-single-user}"
 SOURCE_REF="${RECALLANT_INSTALL_REF:-main}"
 REPO_URL="${RECALLANT_INSTALL_REPO_URL:-https://github.com/Mushkrot/Recallant.git}"
 SCRIPT_SHA256="${RECALLANT_INSTALL_SCRIPT_SHA256:-}"
+INVOKE_DIR="$(pwd -P)"
+ONBOARD_PROJECT=""
 FORWARDED_ARGS=()
 
 usage() {
@@ -15,6 +17,7 @@ Installs Recallant from a trusted repository source with one command.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --profile managed-server
 
 Options:
@@ -26,6 +29,9 @@ Options:
       Repository URL for bootstrap. Default: https://github.com/Mushkrot/Recallant.git
   --script-sha256 <sha256>
       Optional SHA-256 checksum for scripts/install-recallant.sh.
+  --onboard <project-dir>
+      After installing the CLI, run `recallant onboard <project-dir>`.
+      Relative paths are resolved from the directory where this bootstrap command was started.
   --help
       Show this help.
 
@@ -78,6 +84,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --script-sha256)
       SCRIPT_SHA256="${2:-}";
+      shift 2
+      ;;
+    --onboard)
+      ONBOARD_PROJECT="${2:-}";
       shift 2
       ;;
     --help|-h)
@@ -171,6 +181,13 @@ fi
 
 "$install_script" --profile "$BOOTSTRAP_PROFILE" "${FORWARDED_ARGS[@]}"
 
+install_was_dry_run=false
+for forwarded_arg in "${FORWARDED_ARGS[@]}"; do
+  if [[ "$forwarded_arg" == "--dry-run" ]]; then
+    install_was_dry_run=true
+  fi
+done
+
 if command -v recallant >/dev/null 2>&1; then
   actual_version="$(recallant --version 2>/dev/null || true)"
   if [[ -n "$actual_version" ]]; then
@@ -202,5 +219,29 @@ echo "- Source ref: $SOURCE_REF"
 echo "- Installer entry: scripts/install-recallant.sh"
 echo "- CLI prefix: $expected_cli_prefix"
 echo
-echo "Next command:"
-echo "  recallant --version"
+if [[ -n "$ONBOARD_PROJECT" ]]; then
+  case "$ONBOARD_PROJECT" in
+    /*)
+      onboard_target="$ONBOARD_PROJECT"
+      ;;
+    *)
+      onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"
+      ;;
+  esac
+
+  if [[ "$install_was_dry_run" == "true" ]]; then
+    echo "Next command after preview:"
+    echo "  recallant onboard \"$onboard_target\""
+  else
+    recallant_cmd="recallant"
+    if ! command -v recallant >/dev/null 2>&1 && [[ -x "$expected_cli_prefix/recallant" ]]; then
+      recallant_cmd="$expected_cli_prefix/recallant"
+    fi
+    echo "Onboarding project:"
+    echo "  $onboard_target"
+    "$recallant_cmd" onboard "$onboard_target"
+  fi
+else
+  echo "Next command:"
+  echo "  recallant --version"
+fi
