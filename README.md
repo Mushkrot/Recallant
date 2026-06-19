@@ -71,8 +71,9 @@ capture, and ask remain available for maintainers and automation. They are advan
 the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 Remote project access to an existing central Recallant server is a separate path. It has a first
-authenticated MCP/bridge slice, but the beginner one-command remote bootstrap is not release-ready
-yet; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
+authenticated MCP/bridge slice plus a remote client bootstrap for operator-provided credentials, but
+real separate-machine capture/recall rehearsal is still required before treating it as the beginner
+default; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
 
 ## Product Shape
 

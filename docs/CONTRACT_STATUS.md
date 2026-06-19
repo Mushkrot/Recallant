@@ -120,6 +120,9 @@ security review smoke.
 - The external-workstation beginner path is not release-ready. A user should not be told that the
   local self-host installer connects a project to an existing central Recallant server; that installer
   creates local storage and may require Docker/Postgres.
+- A remote client bootstrap now exists for operator-provided live endpoint/credential/scope. It
+  installs only the remote bridge CLI, writes project-local client config, and runs `remote-doctor`;
+  it is still not the beginner default until real separate-machine capture/recall rehearsal passes.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain
   future expansion after the coding-agent core is stable.
@@ -134,8 +137,8 @@ Before a release-candidate tag, the project should have:
 - remote project access rehearsal from at least one real separate machine with operator-provided
   live endpoint/credential/scope, proving authenticated agent capture and recall against a central
   Recallant server;
-- a remote-client bootstrap that does not install local storage and proves its own `remote-doctor`
-  and capture/recall readiness against the central server before it is documented as a beginner
+- real remote-client bootstrap rehearsal from a separate machine, including `remote-doctor` and
+  capture/recall readiness against the central server, before it is documented as a beginner
   command;
 - existing-project migration proof with backup and review behavior on broader real-world projects;
 - autonomous Workbench browser QA and public screenshots with synthetic data only;

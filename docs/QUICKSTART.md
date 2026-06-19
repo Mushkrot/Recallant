@@ -87,11 +87,23 @@ Do not use the local self-host installer when the goal is to connect a project o
 to an existing Recallant server. That remote path must not require local Docker, Postgres,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
 
-Recallant has a first authenticated remote MCP/bridge slice, but a beginner one-command remote
-bootstrap is not release-ready yet. Use the operator-provided remote client commands in
-[Client Setup](CLIENT_SETUP.md#remote-project-access) only when you already have a live server URL,
-scoped credential, project id, developer id, and client id. The release-candidate bar still requires
-a real separate-machine rehearsal proving capture and recall against a central Recallant server.
+Recallant has a first authenticated remote MCP/bridge slice and a remote client bootstrap that does
+not install local storage. Use it only when the central server/operator has already provided a live
+server URL, scoped credential, project id, developer id, and client id:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
+  --server-url <https-recallant-server> \
+  --credential <scoped-remote-mcp-credential> \
+  --project-id <project-id> \
+  --developer-id <developer-id> \
+  --client-id <client-id> \
+  --project-dir .
+```
+
+That command installs only the remote bridge CLI, writes project-local client config, and runs
+`remote-doctor`. It is still an operator-provided path until the release-candidate bar is met: a
+real separate-machine rehearsal proving capture and recall against a central Recallant server.
 
 If you accidentally started the local self-host installer while testing remote setup, stop and clean
 up the local install artifacts before retrying. A failed install that stopped before onboarding

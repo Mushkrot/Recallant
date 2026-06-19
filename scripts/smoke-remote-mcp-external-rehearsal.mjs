@@ -73,6 +73,16 @@ function assertNoLeak(label, text) {
   }
 }
 
+function assertNoConnectRemoteLeak(label, text) {
+  const normalized = text
+    .replaceAll("requires_recallant_database_url", "requires_local_db_url")
+    .replaceAll("exposes_postgres", "exposes_local_storage")
+    .replaceAll("exposes_workbench_or_admin_auth", "exposes_private_auth")
+    .replaceAll("exposes_raw_artifacts_or_backups", "exposes_private_artifacts")
+    .replaceAll("exposes_provider_secrets", "exposes_external_secrets");
+  assertNoLeak(label, normalized);
+}
+
 async function createTemporaryCertificate() {
   const dir = await mkdtemp(join(tmpdir(), "recallant-external-rehearsal-"));
   const keyPath = join(dir, "localhost.key");
@@ -421,6 +431,7 @@ async function runDoctorScenario(fixture, env, label, overrides, expectedExit, s
 }
 
 async function runConnectRemote(env, fixture) {
+  const projectDir = await mkdtemp(join(tmpdir(), "recallant-connect-remote-write-"));
   const result = await runCli(
     [
       "apps/cli/dist/index.js",
@@ -436,6 +447,8 @@ async function runConnectRemote(env, fixture) {
       expectedScope.developerId,
       "--client-id",
       expectedScope.clientId,
+      "--project-dir",
+      projectDir,
       "--session-id",
       expectedScope.sessionId,
       "--trace-id",
@@ -445,7 +458,7 @@ async function runConnectRemote(env, fixture) {
     ],
     env
   );
-  assertNoLeak("connect-remote", result.stdout);
+  assertNoConnectRemoteLeak("connect-remote", result.stdout);
   const parsed = JSON.parse(result.stdout);
   const rendered = JSON.stringify(parsed);
   const renderedConfig = String(parsed.rendered_config ?? "");
@@ -463,6 +476,43 @@ async function runConnectRemote(env, fixture) {
   assert(parsed.safety?.exposes_workbench_or_admin_auth === false);
   assert(parsed.safety?.exposes_raw_artifacts_or_backups === false);
   assert(parsed.safety?.exposes_provider_secrets === false);
+  const writeResult = await runCli(
+    [
+      "apps/cli/dist/index.js",
+      "connect-remote",
+      "codex",
+      "--server-url",
+      fixture.serverUrl,
+      "--credential",
+      "<scoped-remote-mcp-credential>",
+      "--project-id",
+      expectedScope.projectId,
+      "--developer-id",
+      expectedScope.developerId,
+      "--client-id",
+      expectedScope.clientId,
+      "--project-dir",
+      projectDir,
+      "--write",
+      "--format",
+      "json"
+    ],
+    env
+  );
+  assertNoConnectRemoteLeak("connect-remote-write", writeResult.stdout);
+  const writeParsed = JSON.parse(writeResult.stdout);
+  assert(writeParsed.writes_files === true, "connect-remote --write did not report file writes");
+  assert(writeParsed.writes_database === false, "connect-remote --write should not write database");
+  assert(
+    writeParsed.uses_local_storage === false,
+    "connect-remote --write should not require local storage"
+  );
+  const codexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
+  assert(codexConfig.includes("remote-bridge"), "connect-remote --write did not write remote bridge");
+  assert(
+    !codexConfig.includes("RECALLANT_DATABASE_URL"),
+    "connect-remote --write wrote local database config"
+  );
   return {
     target: parsed.target,
     config_file: parsed.config_file,

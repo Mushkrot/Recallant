@@ -11,6 +11,10 @@ const bootstrapSource = readFileSync(
   join(repoRoot, "scripts", "install-recallant-bootstrap.sh"),
   "utf8"
 );
+const clientBootstrapSource = readFileSync(
+  join(repoRoot, "scripts", "install-recallant-client-bootstrap.sh"),
+  "utf8"
+);
 const prodComposeSource = readFileSync(join(repoRoot, "scripts", "recallant-prod-compose.sh"), "utf8");
 const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
 const backupSource = readFileSync(join(repoRoot, "scripts", "recallant-production-backup.sh"), "utf8");
@@ -249,6 +253,19 @@ assert(
     bootstrapSource.includes('onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"') &&
     bootstrapSource.includes('"$recallant_cmd" onboard "$onboard_target"'),
   "Bootstrap installer must guard local self-host onboarding from being mistaken for remote setup"
+);
+assert(
+  clientBootstrapSource.includes("connect-remote") &&
+    clientBootstrapSource.includes("remote-doctor") &&
+    clientBootstrapSource.includes("--project-dir") &&
+    clientBootstrapSource.includes("--write") &&
+    clientBootstrapSource.includes("Local storage: not installed") &&
+    clientBootstrapSource.includes("Docker/Postgres: not required") &&
+    clientBootstrapSource.includes("Missing required remote setup inputs") &&
+    !clientBootstrapSource.includes("docker compose") &&
+    !clientBootstrapSource.includes("docker info") &&
+    !clientBootstrapSource.includes("install-recallant.sh"),
+  "Remote client bootstrap must install only the bridge/client path without local storage requirements"
 );
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

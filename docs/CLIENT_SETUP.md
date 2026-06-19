@@ -107,7 +107,23 @@ The first remote client path is `recallant remote-bridge`: a stdio MCP bridge th
 uses a scoped remote MCP credential plus project, developer, and client scope. It does not require
 `RECALLANT_DATABASE_URL` on the remote machine.
 
-Preview a remote client config with placeholders from the operator-provided values:
+With operator-provided values, the external workstation can install only the Recallant remote bridge
+CLI, write the project-local client config, and run `remote-doctor`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
+  --server-url <https-recallant-server> \
+  --credential <scoped-remote-mcp-credential> \
+  --project-id <project-id> \
+  --developer-id <developer-id> \
+  --client-id <client-id> \
+  --project-dir .
+```
+
+That bootstrap does not run the local self-host installer and does not require Docker, Postgres,
+`RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
+
+Maintainers can also preview or write the same config with the installed CLI:
 
 ```bash
 recallant connect-remote codex \
@@ -116,6 +132,8 @@ recallant connect-remote codex \
   --project-id <project-id> \
   --developer-id <developer-id> \
   --client-id <client-id> \
+  --project-dir . \
+  --write \
   --format json
 ```
 
@@ -133,10 +151,8 @@ The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, i
 Workbench/admin auth, raw artifacts, backups, or provider secrets. Local stdio MCP remains the
 default simple path for installed-host projects.
 
-There is not yet a release-ready beginner bootstrap that installs only the remote bridge, provisions
-or accepts scoped credentials, writes local client config, runs `remote-doctor`, and proves capture
-and recall against a real central server from a physical second machine. Until that exists, remote
-setup is operator-provided and advanced.
+This is still operator-provided and advanced until it has passed a real separate-machine rehearsal
+with live endpoint/credential/scope and capture/recall proof against the central server.
 
 ### Provision Scoped Remote Credentials
 

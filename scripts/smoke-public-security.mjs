@@ -67,6 +67,7 @@ const publicCode = [
   "scripts/install-recallant.sh",
   "scripts/install-recallant-cli.sh",
   "scripts/install-recallant-bootstrap.sh",
+  "scripts/install-recallant-client-bootstrap.sh",
   "scripts/recallant-prod-compose.sh",
   "scripts/recallant-production-backup.sh",
   "scripts/rollback-recallant-install.sh",

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
@@ -5838,6 +5838,8 @@ function requiredFlag(argv: readonly string[], name: string) {
 function remoteConnectHumanReport(result: {
   target: string;
   config_file: string;
+  target_file?: string;
+  writes_files?: boolean;
   setup_hint: string;
   rendered_config: string;
 }) {
@@ -5847,9 +5849,13 @@ function remoteConnectHumanReport(result: {
       "",
       `Agent client: ${result.target}`,
       `Config file: ${result.config_file}`,
+      result.target_file ? `Target file: ${result.target_file}` : null,
+      `Writes files: ${result.writes_files === true ? "yes" : "no"}`,
       result.setup_hint,
       "",
-      result.rendered_config.trimEnd(),
+      result.writes_files === true
+        ? "Remote MCP config written. The rendered config is omitted from text output because it may contain a scoped credential; use --format json only for trusted automation."
+        : result.rendered_config.trimEnd(),
       ""
     ].join("\n") + "\n"
   );
@@ -5859,6 +5865,8 @@ async function runConnectRemote(argv: readonly string[]) {
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const writeConfig = argv.includes("--write");
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const config = validateRemoteMcpBridgeConfig({
     serverUrl: requiredFlag(argv, "--server-url"),
     credential: requiredFlag(argv, "--credential"),
@@ -5869,16 +5877,24 @@ async function runConnectRemote(argv: readonly string[]) {
     traceId: parseFlag(argv, "--trace-id")
   });
   const targetConfig = remoteClientTargetConfig(target, config);
-  const rendered = renderRemoteClientTargetConfig(null, targetConfig);
+  const targetFile = resolve(projectDir, targetConfig.config_file);
+  const existing = writeConfig ? await readOptional(targetFile) : null;
+  const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
+  if (writeConfig) {
+    await mkdir(dirname(targetFile), { recursive: true });
+    await writeFile(targetFile, rendered);
+  }
   const result = {
     ok: true,
     action: "connect_remote",
     remote: true,
     target: targetConfig.target,
     config_file: targetConfig.config_file,
+    project_dir: projectDir,
+    target_file: targetFile,
     format: targetConfig.format,
     setup_hint: targetConfig.setup_hint,
-    writes_files: false,
+    writes_files: writeConfig,
     writes_database: false,
     uses_local_storage: false,
     required_scope: {
@@ -7476,9 +7492,10 @@ function usageText(command?: string) {
   }
   if (command === "connect-remote") {
     return [
-      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--format json|text]",
+      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--project-dir <path>] [--write] [--session-id <id>] [--trace-id <id>] [--format json|text]",
       "",
       "Preview a supported agent client config that runs `recallant remote-bridge` against a scoped central /api/mcp endpoint without local database access.",
+      "Add --write --project-dir <path> to merge the remote MCP config into the project-local client config.",
       ""
     ].join("\n");
   }
