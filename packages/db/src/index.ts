@@ -204,14 +204,13 @@ function normalizeRemoteMcpCredentialDate(value: string | Date | null | undefine
 }
 
 function generateRemoteMcpCredentialSecret() {
-  const prefix = randomBytes(remoteMcpCredentialPrefixBytes).toString("base64url");
+  const prefix = randomBytes(remoteMcpCredentialPrefixBytes).toString("hex");
   const secret = randomBytes(remoteMcpCredentialSecretBytes).toString("base64url");
   return `rcl_mcp_${prefix}_${secret}`;
 }
 
 function extractRemoteMcpCredentialPrefix(secret: string) {
-  const parts = secret.trim().split("_");
-  return parts.length === 4 && parts[0] === "rcl" && parts[1] === "mcp" ? parts[2] : null;
+  return secret.trim().match(/^rcl_mcp_([A-Fa-f0-9]+)_/)?.[1] ?? null;
 }
 
 function hashRemoteMcpCredentialSecret(secret: string) {

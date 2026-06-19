@@ -181,7 +181,11 @@ async function startFixture() {
         const tools =
           trace === "capture-missing"
             ? [{ name: "memory_heartbeat" }]
-            : [{ name: "memory_get_context_pack" }, { name: "memory_heartbeat" }];
+            : [
+                { name: "memory_start_session" },
+                { name: "memory_get_context_pack" },
+                { name: "memory_heartbeat" }
+              ];
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools } }));
         return;
@@ -207,6 +211,7 @@ async function startFixture() {
               content: [{ type: "text", text: "capture proof ok" }],
               structuredContent: {
                 ok: true,
+                session_id: "00000000-0000-4000-8000-000000000001",
                 redaction_fixture: "Bearer should-not-appear"
               }
             }
@@ -313,7 +318,7 @@ try {
   assert(stageCode(success, "mcp_initialize") === "pass:initialize_ok", "initialize did not pass");
   assert(stageCode(success, "tools_list") === "pass:tools_list_ok", "tools/list did not pass");
   assert(
-    success.stages.find((stage) => stage.id === "tools_list").metadata.tool_names.length === 2
+    success.stages.find((stage) => stage.id === "tools_list").metadata.tool_names.length === 3
   );
   assertNoLeak("success-json", JSON.stringify(success));
   summary.push({ scenario: "success-json", ok: true });

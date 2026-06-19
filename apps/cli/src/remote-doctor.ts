@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   remoteMcpBridgeEndpointUrl,
   remoteMcpBridgeFlags,
@@ -286,6 +285,28 @@ function toolsFromList(result: JsonRpcResult) {
     .filter(Boolean);
 }
 
+function sessionIdFromToolCall(result: JsonRpcResult) {
+  const payload = result.json?.result as Record<string, unknown> | undefined;
+  const structuredContent =
+    payload?.structuredContent && typeof payload.structuredContent === "object"
+      ? (payload.structuredContent as Record<string, unknown>)
+      : null;
+  if (typeof structuredContent?.session_id === "string") return structuredContent.session_id;
+  const content = Array.isArray(payload?.content) ? payload.content : [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue;
+    const text = (item as Record<string, unknown>).text;
+    if (typeof text !== "string") continue;
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (typeof parsed.session_id === "string") return parsed.session_id;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpDoctorStage[]) {
   const initialize = await postJsonRpc(
     options,
@@ -464,7 +485,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
     return stages;
   }
 
-  if (!toolNames.includes("memory_get_context_pack")) {
+  if (!toolNames.includes("memory_start_session") || !toolNames.includes("memory_get_context_pack")) {
     stages.push(
       stage(
         "capture_recall_proof",
@@ -472,9 +493,42 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
         "capture_recall_proof_unavailable",
         "Capture/recall proof tool is unavailable.",
         {
-          metadata: { required_tool: "memory_get_context_pack" },
+          metadata: { required_tools: ["memory_start_session", "memory_get_context_pack"] },
           remediation:
             "Transport is ready; enable or expose Recallant memory tools before using capture proof."
+        }
+      )
+    );
+    return stages;
+  }
+
+  const startSession = await postJsonRpc(
+    options,
+    "tools/call",
+    {
+      name: "memory_start_session",
+      arguments: {
+        client_kind: "codex",
+        client_version: "0.0.0",
+        project_path: null,
+        session_label: "remote MCP doctor capture proof",
+        resume_policy: "force_new"
+      }
+    },
+    3
+  );
+  const startedSessionId = sessionIdFromToolCall(startSession);
+  if (!startSession.ok || !startedSessionId) {
+    stages.push(
+      stage(
+        "capture_recall_proof",
+        "fail",
+        "capture_recall_proof_failed",
+        "Capture/recall session start failed.",
+        {
+          http_status: startSession.httpStatus,
+          metadata: { error_code: errorCodeFromJson(startSession) },
+          remediation: "Transport is ready; inspect memory_start_session readiness separately."
         }
       )
     );
@@ -487,14 +541,14 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
     {
       name: "memory_get_context_pack",
       arguments: {
-        session_id: options.sessionId ?? randomUUID(),
+        session_id: options.sessionId ?? startedSessionId,
         task_hint: "remote MCP doctor capture proof",
         project_id: null,
         include_raw_evidence: "never",
         include_recovery: false
       }
     },
-    3
+    4
   );
   if (!proof.ok) {
     stages.push(
@@ -520,7 +574,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       "Capture/recall proof call succeeded.",
       {
         http_status: proof.httpStatus,
-        metadata: { tool_name: "memory_get_context_pack" }
+        metadata: { tool_names: ["memory_start_session", "memory_get_context_pack"] }
       }
     )
   );
