@@ -7,6 +7,7 @@ REPO_URL="${RECALLANT_INSTALL_REPO_URL:-https://github.com/Mushkrot/Recallant.gi
 SCRIPT_SHA256="${RECALLANT_INSTALL_SCRIPT_SHA256:-}"
 INVOKE_DIR="$(pwd -P)"
 ONBOARD_PROJECT=""
+CONFIRM_LOCAL_SELF_HOST=false
 FORWARDED_ARGS=()
 
 usage() {
@@ -17,7 +18,7 @@ Installs Recallant from a trusted repository source with one command.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
+  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --confirm-local-self-host --onboard .
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --profile managed-server
 
 Options:
@@ -30,8 +31,13 @@ Options:
   --script-sha256 <sha256>
       Optional SHA-256 checksum for scripts/install-recallant.sh.
   --onboard <project-dir>
-      After installing the CLI, run `recallant onboard <project-dir>`.
+      After installing the local Recallant self-host stack, run `recallant onboard <project-dir>`.
       Relative paths are resolved from the directory where this bootstrap command was started.
+      This is not the remote existing-server client path.
+  --confirm-local-self-host
+      Confirm that this machine should run its own local Recallant storage stack. Local self-host
+      installs may require Docker/Postgres. Do not use this for a workstation that should connect
+      to an existing central Recallant server.
   --help
       Show this help.
 
@@ -93,6 +99,10 @@ while [[ $# -gt 0 ]]; do
       ONBOARD_PROJECT="${2:-}";
       shift 2
       ;;
+    --confirm-local-self-host)
+      CONFIRM_LOCAL_SELF_HOST=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -110,6 +120,22 @@ if [[ "$BOOTSTRAP_PROFILE" != "single-user" && "$EUID" -ne 0 ]]; then
   echo "Suggested safe default command:"
   echo "  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash"
   exit 1
+fi
+
+if [[ -n "$ONBOARD_PROJECT" && "$CONFIRM_LOCAL_SELF_HOST" != "true" ]]; then
+  echo "Refusing to run bootstrap --onboard without local self-host confirmation."
+  echo
+  echo "This bootstrap installer creates a local Recallant storage stack on this machine."
+  echo "It may require Docker/Postgres and is not the path for connecting a project to an existing"
+  echo "central Recallant server."
+  echo
+  echo "If you intentionally want a local self-host evaluation, rerun with:"
+  echo "  --confirm-local-self-host --onboard <project-dir>"
+  echo
+  echo "If you want an external workstation/project to use an existing Recallant server, use the"
+  echo "remote client setup in docs/CLIENT_SETUP.md. A beginner one-command remote bootstrap is not"
+  echo "release-ready yet."
+  exit 2
 fi
 
 missing=()

@@ -35,21 +35,24 @@ is active, and let future agents continue from governed context instead of a lon
 
 ## What You Can Try Today
 
-Recallant is pre-release, but the first coding-agent memory slice is working: onboard a project,
-prove capture, and get a private Workbench review link from one command.
+Recallant is pre-release, but the first installed-host coding-agent memory slice is working:
+onboard a project, prove capture, and get a private Workbench review link.
 
-From the project folder you want to connect:
+For a local self-host evaluation, first install Recallant on the machine that will run the local
+storage stack:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
 ```
 
-That one command installs the Recallant CLI, prepares private local storage, and onboards the
-current project for Codex. After install, you can onboard another project from anywhere:
+Then onboard a project from anywhere:
 
 ```bash
 recallant onboard /path/to/project
 ```
+
+This local self-host path creates local storage and may require Docker/Postgres. It is not the path
+for connecting a workstation project to an existing central Recallant server.
 
 Onboarding defaults to the beginner Codex path: project attach, local client connection, optional
 hooks, capture proof, recall proof, and the Workbench outcome. If storage is missing in an
@@ -66,6 +69,10 @@ project. The success output also includes a private Workbench link for review.
 Lower-level CLI commands such as attach, connect, doctor, project-sanitize, agent capture, demo
 capture, and ask remain available for maintainers and automation. They are advanced/debug APIs, not
 the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
+
+Remote project access to an existing central Recallant server is a separate path. It has a first
+authenticated MCP/bridge slice, but the beginner one-command remote bootstrap is not release-ready
+yet; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
 
 ## Product Shape
 

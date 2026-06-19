@@ -241,12 +241,14 @@ assert(
 );
 assert(
   bootstrapSource.includes("--onboard <project-dir>") &&
+    bootstrapSource.includes("--confirm-local-self-host") &&
     bootstrapSource.includes('ONBOARD_PROJECT="${2:-}"') &&
+    bootstrapSource.includes("Refusing to run bootstrap --onboard without local self-host confirmation.") &&
+    bootstrapSource.includes("This is not the remote existing-server client path.") &&
     bootstrapSource.includes('INVOKE_DIR="$(pwd -P)"') &&
     bootstrapSource.includes('onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"') &&
-    bootstrapSource.includes('"$recallant_cmd" onboard "$onboard_target"') &&
-    bootstrapSource.includes('curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .'),
-  "Bootstrap installer must support one-command install plus current-project onboarding"
+    bootstrapSource.includes('"$recallant_cmd" onboard "$onboard_target"'),
+  "Bootstrap installer must guard local self-host onboarding from being mistaken for remote setup"
 );
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

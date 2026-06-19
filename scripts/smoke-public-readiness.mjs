@@ -94,7 +94,8 @@ mustInclude(
   [
     "Self-hosted governed memory for Codex and MCP AI agents",
     "Why It Matters",
-    "bash -s -- --onboard .",
+    "local self-host evaluation",
+    "existing central Recallant server",
     "recallant onboard /path/to/project",
     "storage_blocked",
     "Workbench link",
@@ -117,8 +118,9 @@ mustInclude(
   quickstart,
   [
     "Install",
-    "Make This Project Agent-Ready",
-    "bash -s -- --onboard .",
+    "Install Local Recallant",
+    "Remote Existing-Server Setup",
+    "not release-ready yet",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
     "Capture active: yes",

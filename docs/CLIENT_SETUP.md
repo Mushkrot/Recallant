@@ -17,7 +17,7 @@ transport, scope, header, and error contracts.
 
 ## Beginner Flow
 
-For ordinary project setup, use onboarding:
+For projects on a machine that already has a local Recallant install and storage, use onboarding:
 
 ```bash
 recallant onboard <project>
@@ -26,6 +26,11 @@ recallant onboard <project>
 Onboarding defaults to the Codex beginner flow: attach, client connection, local hooks when
 supported, capture proof, readiness proof, and recall proof. The project is not capture active until
 context read, memory write, checkpoint, and recall evidence are present.
+
+Do not use the local self-host installer or `recallant onboard <project>` as the first step for an
+external workstation that should connect to an existing central Recallant server. That remote
+existing-server path is separate and must not require local Docker, Postgres, `RECALLANT_DATABASE_URL`,
+or internal server paths.
 
 ## Advanced Client Setup
 
@@ -127,6 +132,11 @@ The generated MCP server uses `recallant remote-bridge` and these remote-only en
 The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,
 Workbench/admin auth, raw artifacts, backups, or provider secrets. Local stdio MCP remains the
 default simple path for installed-host projects.
+
+There is not yet a release-ready beginner bootstrap that installs only the remote bridge, provisions
+or accepts scoped credentials, writes local client config, runs `remote-doctor`, and proves capture
+and recall against a real central server from a physical second machine. Until that exists, remote
+setup is operator-provided and advanced.
 
 ### Provision Scoped Remote Credentials
 

@@ -1,22 +1,24 @@
 # Quickstart
 
-Install Recallant and make one project agent-ready with one command.
+Install Recallant on a local self-hosted machine and make one project agent-ready.
 
-## 1. Make This Project Agent-Ready
+This quickstart is for a machine that should run its own local Recallant storage stack. It may
+require Docker/Postgres. It is not the path for connecting a workstation project to an existing
+central Recallant server.
 
-From the project folder you want to connect:
+## 1. Install Local Recallant
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --onboard .
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
 ```
 
-That command installs the Recallant CLI if needed, creates private local storage, and then runs
-onboarding for the current folder.
+That command installs the Recallant CLI and prepares private local storage for a single-user
+self-host evaluation.
 
 Preview the install plan first:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --dry-run --onboard .
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --dry-run
 ```
 
 Advanced preview from a checkout:
@@ -33,7 +35,7 @@ Verify the CLI:
 recallant --version
 ```
 
-## 2. Connect Another Project
+## 2. Make A Project Agent-Ready
 
 From anywhere:
 
@@ -78,6 +80,24 @@ That smoke prints an `acceptance_report` for the beginner path. A release-ready 
 - `status: "pass_with_warnings"`: no blocking failure occurred, but a recoverable condition such as
   pending local embeddings needs attention;
 - `status: "fail"`: at least one required proof is missing, so the one-command path is not ready.
+
+## Remote Existing-Server Setup
+
+Do not use the local self-host installer when the goal is to connect a project on this workstation
+to an existing Recallant server. That remote path must not require local Docker, Postgres,
+`RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
+
+Recallant has a first authenticated remote MCP/bridge slice, but a beginner one-command remote
+bootstrap is not release-ready yet. Use the operator-provided remote client commands in
+[Client Setup](CLIENT_SETUP.md#remote-project-access) only when you already have a live server URL,
+scoped credential, project id, developer id, and client id. The release-candidate bar still requires
+a real separate-machine rehearsal proving capture and recall against a central Recallant server.
+
+If you accidentally started the local self-host installer while testing remote setup, stop and clean
+up the local install artifacts before retrying. A failed install that stopped before onboarding
+usually did not change the target project folder; check for `.recallant`, `.codex/config.toml`,
+`AGENTS.md`, and `PROJECT_LOG.md` before deleting anything. Local install rollback guidance is in
+[Self-Hosting](SELF_HOSTING.md#rollback).
 
 ## 3. If Onboarding Stops
 
