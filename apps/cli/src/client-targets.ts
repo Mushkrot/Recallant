@@ -2,6 +2,7 @@ import { supportedClientKinds } from "@recallant/adapters";
 import {
   remoteMcpBridgeEnv,
   remoteMcpBridgeFlags,
+  remoteMcpClientBootstrapScriptUrl,
   type RemoteMcpBridgeConfigInput
 } from "@recallant/contracts";
 
@@ -76,6 +77,8 @@ export type RemoteMcpProvisioningOutputInput = {
   action: RemoteMcpProvisioningAction;
   target?: string;
   serverUrl: string;
+  bootstrapScriptUrl?: string | null;
+  projectDir?: string | null;
   credential: RemoteMcpProvisioningCredential;
   previousCredential?: RemoteMcpProvisioningCredential | null;
   bridgeClientId: string;
@@ -105,10 +108,23 @@ export type RemoteMcpProvisioningOutput = {
   provisioning: {
     command: string;
     argv: string[];
+    bootstrap_script_url: string;
+    project_dir: string;
+    doctor_command: string;
+    doctor_argv: string[];
+    bridge_command: string;
+    bridge_argv: string[];
     config_file: string;
     format: RemoteClientTargetConfig["format"];
     rendered_config: string;
     mcp_config: RemoteMcpServerConfig;
+    secret_visibility: "one_time_raw_secret" | "redacted_placeholder";
+    local_runtime: {
+      requires_docker: false;
+      requires_postgres: false;
+      requires_local_recallant_server: false;
+      writes_project_client_config: true;
+    };
   };
   safety: {
     local_stdio_default_unchanged: true;
@@ -483,7 +499,7 @@ export function remoteMcpProvisioningOutput(
     sessionId: input.sessionId,
     traceId: input.traceId
   });
-  const argv = [
+  const bridgeArgv = [
     "recallant",
     "connect-remote",
     target,
@@ -498,9 +514,48 @@ export function remoteMcpProvisioningOutput(
     remoteMcpBridgeFlags.clientId,
     input.bridgeClientId
   ];
-  if (input.sessionId) argv.push(remoteMcpBridgeFlags.sessionId, input.sessionId);
-  if (input.traceId) argv.push(remoteMcpBridgeFlags.traceId, input.traceId);
-  argv.push("--format", "json");
+  if (input.sessionId) bridgeArgv.push(remoteMcpBridgeFlags.sessionId, input.sessionId);
+  if (input.traceId) bridgeArgv.push(remoteMcpBridgeFlags.traceId, input.traceId);
+  bridgeArgv.push("--format", "json");
+  const projectDir = input.projectDir?.trim() || ".";
+  const bootstrapScriptUrl = input.bootstrapScriptUrl?.trim() || remoteMcpClientBootstrapScriptUrl;
+  const bootstrapArgs = [
+    remoteMcpBridgeFlags.serverUrl,
+    input.serverUrl,
+    remoteMcpBridgeFlags.credential,
+    bridgeCredential,
+    remoteMcpBridgeFlags.projectId,
+    credential.project_id,
+    remoteMcpBridgeFlags.developerId,
+    credential.developer_id,
+    remoteMcpBridgeFlags.clientId,
+    input.bridgeClientId,
+    "--target",
+    target,
+    "--project-dir",
+    projectDir
+  ];
+  if (input.sessionId) bootstrapArgs.push(remoteMcpBridgeFlags.sessionId, input.sessionId);
+  if (input.traceId) bootstrapArgs.push(remoteMcpBridgeFlags.traceId, input.traceId);
+  const argv = ["bash", "-s", "--", ...bootstrapArgs];
+  const doctorArgv = [
+    "recallant",
+    "remote-doctor",
+    remoteMcpBridgeFlags.serverUrl,
+    input.serverUrl,
+    remoteMcpBridgeFlags.credential,
+    bridgeCredential,
+    remoteMcpBridgeFlags.projectId,
+    credential.project_id,
+    remoteMcpBridgeFlags.developerId,
+    credential.developer_id,
+    remoteMcpBridgeFlags.clientId,
+    input.bridgeClientId,
+    "--format",
+    "json"
+  ];
+  if (input.sessionId) doctorArgv.push(remoteMcpBridgeFlags.sessionId, input.sessionId);
+  if (input.traceId) doctorArgv.push(remoteMcpBridgeFlags.traceId, input.traceId);
   return {
     action: input.action,
     target,
@@ -519,12 +574,27 @@ export function remoteMcpProvisioningOutput(
       client_scoped: Boolean(credential.client_id)
     },
     provisioning: {
-      command: argv.map((value) => shellArg(value)).join(" "),
+      command: `curl -fsSL ${shellArg(bootstrapScriptUrl)} | ${argv
+        .map((value) => shellArg(value))
+        .join(" ")}`,
       argv,
+      bootstrap_script_url: bootstrapScriptUrl,
+      project_dir: projectDir,
+      doctor_command: doctorArgv.map((value) => shellArg(value)).join(" "),
+      doctor_argv: doctorArgv,
+      bridge_command: bridgeArgv.map((value) => shellArg(value)).join(" "),
+      bridge_argv: bridgeArgv,
       config_file: targetConfig.config_file,
       format: targetConfig.format,
       rendered_config: renderRemoteClientTargetConfig(null, targetConfig),
-      mcp_config: targetConfig.mcp_config
+      mcp_config: targetConfig.mcp_config,
+      secret_visibility: input.includeSecret ? "one_time_raw_secret" : "redacted_placeholder",
+      local_runtime: {
+        requires_docker: false,
+        requires_postgres: false,
+        requires_local_recallant_server: false,
+        writes_project_client_config: true
+      }
     },
     safety: {
       local_stdio_default_unchanged: true,

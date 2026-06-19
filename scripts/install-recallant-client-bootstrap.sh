@@ -17,6 +17,27 @@ CAPTURE_PROOF=false
 SKIP_DOCTOR=false
 DRY_RUN=false
 
+fail() {
+  echo "Recallant remote client bootstrap cannot continue." >&2
+  echo "$1" >&2
+  exit "${2:-2}"
+}
+
+redacted_args() {
+  local redact_next=false
+  for value in "$@"; do
+    if [[ "$redact_next" == "true" ]]; then
+      printf ' %q' "<redacted-remote-mcp-credential>"
+      redact_next=false
+      continue
+    fi
+    printf ' %q' "$value"
+    if [[ "$value" == "--credential" ]]; then
+      redact_next=true
+    fi
+  done
+}
+
 usage() {
   cat <<'USAGE'
 Usage: scripts/install-recallant-client-bootstrap.sh [options]
@@ -42,6 +63,7 @@ Options:
   --client-id <id>             Remote client id.
   --project-dir <path>         Project folder to write client config into. Default: current folder.
   --client <name>              codex, cursor, claude-code, or generic. Default: codex.
+  --target <name>              Alias for --client, matching server-generated packages.
   --session-id <id>            Optional remote MCP session id.
   --trace-id <id>              Optional remote MCP trace id.
   --capture-proof              Ask remote-doctor to prove capture/recall through remote MCP.
@@ -103,6 +125,10 @@ while [[ $# -gt 0 ]]; do
       CLIENT="${2:-}"
       shift 2
       ;;
+    --target)
+      CLIENT="${2:-}"
+      shift 2
+      ;;
     --session-id)
       SESSION_ID="${2:-}"
       shift 2
@@ -143,6 +169,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+required=()
+[[ -n "$SERVER_URL" ]] || required+=("--server-url")
+[[ -n "$CREDENTIAL" ]] || required+=("--credential")
+[[ -n "$PROJECT_ID" ]] || required+=("--project-id")
+[[ -n "$DEVELOPER_ID" ]] || required+=("--developer-id")
+[[ -n "$CLIENT_ID" ]] || required+=("--client-id")
+if [[ ${#required[@]} -gt 0 ]]; then
+  {
+    echo "Missing required remote setup inputs:"
+    echo
+    echo "The central Recallant server onboarding package must provide:"
+    echo
+    for option in "${required[@]}"; do
+      echo "- $option"
+    done
+  } >&2
+  exit 2
+fi
+
+if [[ ! "$SERVER_URL" =~ ^https://[^[:space:]/?#]+([^[:space:]]*)?$ ]]; then
+  fail "Remote onboarding requires an HTTPS Recallant server URL from the central server package." 2
+fi
+
 missing=()
 for dependency in node npm curl git; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
@@ -163,22 +212,6 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   exit 1
 fi
 
-required=()
-[[ -n "$SERVER_URL" ]] || required+=("--server-url")
-[[ -n "$CREDENTIAL" ]] || required+=("--credential")
-[[ -n "$PROJECT_ID" ]] || required+=("--project-id")
-[[ -n "$DEVELOPER_ID" ]] || required+=("--developer-id")
-[[ -n "$CLIENT_ID" ]] || required+=("--client-id")
-if [[ ${#required[@]} -gt 0 ]]; then
-  echo "Missing required remote setup inputs:"
-  for option in "${required[@]}"; do
-    echo "- $option"
-  done
-  echo
-  echo "These values must come from the central Recallant server or operator provisioning output."
-  exit 2
-fi
-
 case "$PROJECT_DIR" in
   /*)
     target_project="$PROJECT_DIR"
@@ -188,19 +221,23 @@ case "$PROJECT_DIR" in
     ;;
 esac
 
-clone_dir="$(mktemp -d)"
-cleanup() {
-  rm -rf "$clone_dir"
-}
-trap cleanup EXIT
+if [[ -n "${RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD:-}" ]]; then
+  recallant_cmd="$RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD"
+else
+  clone_dir="$(mktemp -d)"
+  cleanup() {
+    rm -rf "$clone_dir"
+  }
+  trap cleanup EXIT
 
-git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"
+  git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"
 
-"$clone_dir/scripts/install-recallant-cli.sh" --user
+  "$clone_dir/scripts/install-recallant-cli.sh" --user
 
-recallant_cmd="recallant"
-if ! command -v recallant >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/recallant" ]]; then
-  recallant_cmd="$HOME/.local/bin/recallant"
+  recallant_cmd="recallant"
+  if ! command -v recallant >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/recallant" ]]; then
+    recallant_cmd="$HOME/.local/bin/recallant"
+  fi
 fi
 
 connect_args=(
@@ -254,19 +291,33 @@ echo "- Docker/Postgres: not required"
 echo
 
 if [[ "$DRY_RUN" == "true" ]]; then
-  "$recallant_cmd" "${connect_args[@]}" --format text
+  echo "DRY_RUN: remote client config preview"
+  echo "- Target config will be written by connect-remote when --dry-run is removed."
+  echo "- Raw credential is hidden in human output."
   echo "DRY_RUN: no project files were changed."
   if [[ "$SKIP_DOCTOR" != "true" ]]; then
     echo "Doctor command after write:"
-    printf '  %q' "$recallant_cmd" "${doctor_args[@]}" --format text
+    printf '  %q' "$recallant_cmd"
+    redacted_args "${doctor_args[@]}" --format text
     echo
   fi
   exit 0
 fi
 
 "$recallant_cmd" "${connect_args[@]}" --write --format text
+echo "Config written: Recallant remote MCP config is installed for this project."
 
 if [[ "$SKIP_DOCTOR" != "true" ]]; then
-  "$recallant_cmd" "${doctor_args[@]}" --format text
+  if "$recallant_cmd" "${doctor_args[@]}" --format text; then
+    echo "Remote doctor passed: central Recallant server accepted this project/client scope."
+  else
+    status=$?
+    echo "Remote doctor failed: config was written, but the central server check did not pass." >&2
+    echo "Check the server URL, credential status, project/developer/client scope, and edge/access policy." >&2
+    exit "$status"
+  fi
+else
+  echo "Remote doctor skipped: run recallant remote-doctor later to verify central server access."
 fi
 
+echo "Next step: open Codex in this project."

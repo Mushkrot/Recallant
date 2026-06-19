@@ -256,6 +256,7 @@ function errorCodeFromJson(result: JsonRpcResult) {
 
 function classifyCredentialCode(result: JsonRpcResult): RemoteMcpDoctorResultCode {
   const raw = (errorCodeFromJson(result) ?? "").toLowerCase();
+  if (/expired/.test(raw)) return "expired_credential";
   if (/revoked/.test(raw)) return "revoked_credential";
   if (/rotated/.test(raw)) return "rotated_credential";
   return "invalid_credential";

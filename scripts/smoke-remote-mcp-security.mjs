@@ -87,6 +87,7 @@ requireMarkers(doctorOutput, "remote-mcp-doctor:smoke", [
   "success-human",
   "missing-credential",
   "invalid-credential",
+  "expired-credential",
   "revoked-credential",
   "rotated-old-credential",
   "rotated-new-credential",
@@ -123,6 +124,18 @@ const matrix = {
     "generated_config_no_forbidden_surfaces"
   ],
   capture_proof: ["capture_pass", "capture_missing", "capture_failure"],
+  doctor_diagnostics: [
+    "server_unreachable",
+    "edge_denied",
+    "invalid_credential",
+    "expired_credential",
+    "revoked_credential",
+    "rotated_credential",
+    "wrong_project",
+    "wrong_developer",
+    "wrong_client",
+    "tools_list_failure"
+  ],
   workbench_visibility: [
     "unauthenticated_api_rejected",
     "create_secret_shown_once",

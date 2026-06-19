@@ -88,8 +88,10 @@ to an existing Recallant server. That remote path must not require local Docker,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
 
 Recallant has a first authenticated remote MCP/bridge slice and a remote client bootstrap that does
-not install local storage. Use it only when the central server/operator has already provided a live
-server URL, scoped credential, project id, developer id, and client id:
+not install local storage. Use it only when the central server/operator has already generated the
+complete remote onboarding package for a live server URL, scoped credential, project id, developer
+id, and client id. The person on the external workstation should copy the full command, not assemble
+those values by hand:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \

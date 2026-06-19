@@ -1,12 +1,13 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { URL } from "node:url";
 import { promisify } from "node:util";
+import { remoteMcpProvisioningOutput } from "../apps/cli/dist/client-targets.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,6 +46,15 @@ const optionalLiveEnv = [
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function externalClientEnv(extra = {}) {
@@ -422,6 +432,75 @@ function parseDoctorStage(report, id) {
   return `${stage.status}:${stage.code}`;
 }
 
+function flagValue(argv, flag) {
+  const index = argv.indexOf(flag);
+  assert(index >= 0 && argv[index + 1], `generated package missing ${flag}`);
+  return argv[index + 1];
+}
+
+function generatedRemoteOnboardingPackage(fixture, projectDir, includeSecret) {
+  const output = remoteMcpProvisioningOutput({
+    action: "create",
+    target: "codex",
+    serverUrl: fixture.serverUrl,
+    credential: {
+      id: "external-rehearsal-credential",
+      project_id: expectedScope.projectId,
+      developer_id: expectedScope.developerId,
+      client_id: expectedScope.clientId,
+      label: "external rehearsal",
+      status: "active",
+      credential_prefix: "external"
+    },
+    bridgeClientId: expectedScope.clientId,
+    credentialSecret: credentials.valid,
+    includeSecret,
+    sessionId: expectedScope.sessionId,
+    traceId: expectedScope.traceId,
+    projectDir
+  });
+  assert(
+    output.provisioning.command.includes("install-recallant-client-bootstrap.sh"),
+    "generated package command does not use the remote client bootstrap"
+  );
+  assert(
+    output.provisioning.argv[0] === "bash" &&
+      output.provisioning.argv[1] === "-s" &&
+      output.provisioning.argv[2] === "--",
+    "generated package argv is not bash -s -- bootstrap args"
+  );
+  assert(output.provisioning.local_runtime.requires_docker === false, "generated package requires Docker");
+  assert(output.provisioning.local_runtime.requires_postgres === false, "generated package requires Postgres");
+  return output;
+}
+
+function connectRemoteArgsFromGeneratedPackage(output, write, format) {
+  const bootstrapArgv = output.provisioning.argv.slice(3);
+  const args = [
+    "apps/cli/dist/index.js",
+    "connect-remote",
+    flagValue(bootstrapArgv, "--target"),
+    "--server-url",
+    flagValue(bootstrapArgv, "--server-url"),
+    "--credential",
+    flagValue(bootstrapArgv, "--credential"),
+    "--project-id",
+    flagValue(bootstrapArgv, "--project-id"),
+    "--developer-id",
+    flagValue(bootstrapArgv, "--developer-id"),
+    "--client-id",
+    flagValue(bootstrapArgv, "--client-id"),
+    "--project-dir",
+    flagValue(bootstrapArgv, "--project-dir"),
+    "--format",
+    format
+  ];
+  if (bootstrapArgv.includes("--session-id")) args.push("--session-id", flagValue(bootstrapArgv, "--session-id"));
+  if (bootstrapArgv.includes("--trace-id")) args.push("--trace-id", flagValue(bootstrapArgv, "--trace-id"));
+  if (write) args.push("--write");
+  return args;
+}
+
 async function runDoctorScenario(fixture, env, label, overrides, expectedExit, stage, expectedCode) {
   const result = await runCli(doctorArgs(fixture, overrides), env, { expectExit: expectedExit });
   assertNoLeak(label, result.stdout);
@@ -432,32 +511,19 @@ async function runDoctorScenario(fixture, env, label, overrides, expectedExit, s
 
 async function runConnectRemote(env, fixture) {
   const projectDir = await mkdtemp(join(tmpdir(), "recallant-connect-remote-write-"));
-  const result = await runCli(
+  await mkdir(join(projectDir, ".codex"), { recursive: true });
+  await writeFile(
+    join(projectDir, ".codex", "config.toml"),
     [
-      "apps/cli/dist/index.js",
-      "connect-remote",
-      "generic",
-      "--server-url",
-      fixture.serverUrl,
-      "--credential",
-      "<scoped-remote-mcp-credential>",
-      "--project-id",
-      expectedScope.projectId,
-      "--developer-id",
-      expectedScope.developerId,
-      "--client-id",
-      expectedScope.clientId,
-      "--project-dir",
-      projectDir,
-      "--session-id",
-      expectedScope.sessionId,
-      "--trace-id",
-      expectedScope.traceId,
-      "--format",
-      "json"
-    ],
-    env
+      "[mcp_servers.unrelated]",
+      'command = "node"',
+      'args = ["fixture-unrelated-server.js"]',
+      ""
+    ].join("\n")
   );
+  const previewPackage = generatedRemoteOnboardingPackage(fixture, projectDir, false);
+  const writePackage = generatedRemoteOnboardingPackage(fixture, projectDir, true);
+  const result = await runCli(connectRemoteArgsFromGeneratedPackage(previewPackage, false, "json"), env);
   assertNoConnectRemoteLeak("connect-remote", result.stdout);
   const parsed = JSON.parse(result.stdout);
   const rendered = JSON.stringify(parsed);
@@ -476,49 +542,49 @@ async function runConnectRemote(env, fixture) {
   assert(parsed.safety?.exposes_workbench_or_admin_auth === false);
   assert(parsed.safety?.exposes_raw_artifacts_or_backups === false);
   assert(parsed.safety?.exposes_provider_secrets === false);
-  const writeResult = await runCli(
-    [
-      "apps/cli/dist/index.js",
-      "connect-remote",
-      "codex",
-      "--server-url",
-      fixture.serverUrl,
-      "--credential",
-      "<scoped-remote-mcp-credential>",
-      "--project-id",
-      expectedScope.projectId,
-      "--developer-id",
-      expectedScope.developerId,
-      "--client-id",
-      expectedScope.clientId,
-      "--project-dir",
-      projectDir,
-      "--write",
-      "--format",
-      "json"
-    ],
-    env
-  );
+  const writeResult = await runCli(connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"), env);
   assertNoConnectRemoteLeak("connect-remote-write", writeResult.stdout);
-  const writeParsed = JSON.parse(writeResult.stdout);
-  assert(writeParsed.writes_files === true, "connect-remote --write did not report file writes");
-  assert(writeParsed.writes_database === false, "connect-remote --write should not write database");
-  assert(
-    writeParsed.uses_local_storage === false,
-    "connect-remote --write should not require local storage"
-  );
+  assertNoLeak("connect-remote-write", writeResult.stdout);
+  assert(writeResult.stdout.includes("Writes files: yes"), "connect-remote --write did not report file writes");
   const codexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
   assert(codexConfig.includes("remote-bridge"), "connect-remote --write did not write remote bridge");
+  assert(codexConfig.includes("[mcp_servers.unrelated]"), "connect-remote --write removed unrelated MCP server");
   assert(
     !codexConfig.includes("RECALLANT_DATABASE_URL"),
     "connect-remote --write wrote local database config"
   );
+  const secondWriteResult = await runCli(connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"), env);
+  assertNoLeak("connect-remote-second-write", secondWriteResult.stdout);
+  const secondCodexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
+  const recallantServerEntries = secondCodexConfig.match(/\[mcp_servers\.recallant\]/g) ?? [];
+  assert(recallantServerEntries.length === 1, "connect-remote --write duplicated Recallant MCP server entry");
+  assert(
+    secondCodexConfig.includes("[mcp_servers.unrelated]"),
+    "connect-remote second write removed unrelated MCP server"
+  );
+  const projectEntries = await readdir(projectDir, { withFileTypes: true });
+  const artifactNames = projectEntries.map((entry) => entry.name).sort();
+  assert(!(await exists(join(projectDir, ".recallant"))), "remote client path created .recallant local storage");
+  assert(!(await exists(join(projectDir, "docker-compose.yml"))), "remote client path created docker-compose.yml");
+  assert(!(await exists(join(projectDir, "docker-compose.production.yml"))), "remote client path created docker-compose.production.yml");
+  const forbiddenProjectText = `${secondCodexConfig}\n${artifactNames.join("\n")}`;
+  assert(!/RECALLANT_DATABASE_URL|postgres:\/\/|pgvector|recallant-postgres/i.test(forbiddenProjectText));
   return {
     target: parsed.target,
     config_file: parsed.config_file,
+    generated_package_command_shape: writePackage.provisioning.command.includes(
+      "install-recallant-client-bootstrap.sh"
+    ),
+    generated_package_project_dir: writePackage.provisioning.project_dir,
     uses_https_mcp_endpoint: parsed.safety?.uses_https_mcp_endpoint === true,
     bridge_derives_api_mcp_endpoint: true,
-    no_database_url: !rendered.includes("RECALLANT_DATABASE_URL")
+    no_database_url: !rendered.includes("RECALLANT_DATABASE_URL"),
+    idempotent_second_write: recallantServerEntries.length === 1,
+    unrelated_mcp_config_preserved: secondCodexConfig.includes("[mcp_servers.unrelated]"),
+    no_recallant_local_storage_dir: !artifactNames.includes(".recallant"),
+    no_docker_or_postgres_artifacts: !/docker|postgres|pgvector/i.test(artifactNames.join("\n")),
+    project_entries: artifactNames,
+    text_output_redacts_written_credential: !secondWriteResult.stdout.includes(credentials.valid)
   };
 }
 

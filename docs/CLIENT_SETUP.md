@@ -107,8 +107,12 @@ The first remote client path is `recallant remote-bridge`: a stdio MCP bridge th
 uses a scoped remote MCP credential plus project, developer, and client scope. It does not require
 `RECALLANT_DATABASE_URL` on the remote machine.
 
-With operator-provided values, the external workstation can install only the Recallant remote bridge
-CLI, write the project-local client config, and run `remote-doctor`:
+With a server-generated remote onboarding package, the external workstation can install only the
+Recallant remote bridge CLI, write the project-local client config, and run `remote-doctor`. The
+operator should copy the complete command from `recallant remote-credential create|rotate`, the
+protected remote credential API, or the Workbench Remote MCP Credentials panel; the person on the
+external workstation should not assemble `server-url`, credential, project id, developer id, and
+client id by hand:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
@@ -122,6 +126,10 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 
 That bootstrap does not run the local self-host installer and does not require Docker, Postgres,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
+On success it reports that config was written, `remote-doctor` passed, and the next step is to open
+Codex in that project. If `remote-doctor` fails, the script keeps the credential redacted and points
+the operator toward server URL, credential status, project/developer/client scope, or edge/access
+policy instead of local Docker/Postgres setup.
 
 Maintainers can also preview or write the same config with the installed CLI:
 
@@ -157,8 +165,8 @@ with live endpoint/credential/scope and capture/recall proof against the central
 ### Provision Scoped Remote Credentials
 
 Provisioning is CLI-first. An operator creates or rotates a scoped credential on the central
-Recallant server, then gives the external agent only the ready bridge command/config and the raw
-credential shown in that one response.
+Recallant server, then gives the external agent only the ready remote client bootstrap command and
+the raw credential shown in that one response.
 
 ```bash
 recallant remote-credential create \
@@ -169,10 +177,10 @@ recallant remote-credential create \
   --target codex
 ```
 
-Create and rotate output may include the one-time raw credential plus a `recallant connect-remote`
-command and rendered MCP config. Store that raw value in the external agent's local secret store.
-`list`, `revoke`, audit output, docs, and stored rows are redacted and must not include raw
-credential values or hashes.
+Create and rotate output may include the one-time raw credential plus the complete
+`install-recallant-client-bootstrap.sh` command, a `remote-doctor` command, and rendered MCP config.
+Store that raw value in the external agent's local secret store. `list`, `revoke`, audit output,
+docs, and stored rows are redacted and must not include raw credential values or hashes.
 
 ```bash
 recallant remote-credential rotate --credential-id <credential-id> --server-url <https-recallant-server>
@@ -241,6 +249,25 @@ Optional `RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID`,
 `RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID`, and `RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF=1` add
 session/trace headers and capture proof. When live inputs are absent, the smoke exits green with
 `skipped_live_external_rehearsal` so CI does not require real credentials.
+
+For the stricter central-server readiness gate, use the dedicated live smoke. It is intentionally
+not a fixture proof: with no live inputs it reports `skipped_live_remote_mcp_readiness`; with partial
+inputs it fails as incomplete; with full inputs it runs `remote-doctor` and a remote bridge
+`tools/list` roundtrip against HTTPS `/api/mcp`:
+
+```bash
+RECALLANT_LIVE_REMOTE_MCP_SERVER_URL=<https-recallant-server> \
+RECALLANT_LIVE_REMOTE_MCP_CREDENTIAL=<scoped-remote-mcp-credential> \
+RECALLANT_LIVE_REMOTE_MCP_PROJECT_ID=<project-id> \
+RECALLANT_LIVE_REMOTE_MCP_DEVELOPER_ID=<developer-id> \
+RECALLANT_LIVE_REMOTE_MCP_CLIENT_ID=<client-id> \
+npm run remote-mcp-live-readiness:smoke
+```
+
+Optional `RECALLANT_LIVE_REMOTE_MCP_SESSION_ID`,
+`RECALLANT_LIVE_REMOTE_MCP_TRACE_ID`, and `RECALLANT_LIVE_REMOTE_MCP_CAPTURE_PROOF=1` add
+session/trace headers and require capture proof to pass. Output is redacted and does not print the
+credential.
 
 The remote-client goal is to support projects on another server or workstation while a single
 managed Recallant server remains the memory source of truth. That path should:

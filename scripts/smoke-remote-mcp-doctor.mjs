@@ -10,6 +10,7 @@ const forbiddenOutputPattern =
 const credentials = {
   valid: "doctor-fixture-valid-token",
   invalid: "doctor-fixture-invalid-token",
+  expired: "doctor-fixture-expired-token",
   revoked: "doctor-fixture-revoked-token",
   rotatedOld: "doctor-fixture-rotated-old-token",
   rotatedNew: "doctor-fixture-rotated-new-token",
@@ -60,6 +61,11 @@ function authOrScopeError(headers, body) {
   if (authorization === `Bearer ${credentials.invalid}`) {
     return jsonRpcError(body.id, -32001, "credential is invalid", 401, {
       code: "invalid_credential"
+    });
+  }
+  if (authorization === `Bearer ${credentials.expired}`) {
+    return jsonRpcError(body.id, -32001, "credential is expired", 401, {
+      code: "expired_credential"
     });
   }
   if (authorization === `Bearer ${credentials.revoked}`) {
@@ -390,6 +396,7 @@ try {
 
   for (const [scenario, credential, expected] of [
     ["invalid-credential", credentials.invalid, "fail:invalid_credential"],
+    ["expired-credential", credentials.expired, "fail:expired_credential"],
     ["revoked-credential", credentials.revoked, "fail:revoked_credential"],
     ["rotated-old-credential", credentials.rotatedOld, "fail:rotated_credential"]
   ]) {

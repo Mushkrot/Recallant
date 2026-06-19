@@ -327,6 +327,26 @@ function assertError(result, status, code, label) {
   assert(result.body?.jsonrpc === "2.0", `${label} missing JSON-RPC version`);
 }
 
+function assertRemoteMcpAuditRowSafe(row, label) {
+  assert(row.surface === "remote_mcp", `${label} audit row surface mismatch`);
+  assert(row.operation?.startsWith("remote_mcp."), `${label} audit row operation mismatch`);
+  assert(["success", "skipped", "error"].includes(row.status), `${label} audit row status invalid`);
+  assert(typeof row.redacted_metadata === "object", `${label} audit row missing redacted metadata`);
+  const text = JSON.stringify(row);
+  for (const forbiddenValue of [
+    token,
+    wrongToken,
+    forbiddenDbUrl,
+    "Bearer remote-smoke-token",
+    "Bearer wrong-token",
+    "raw_request_body",
+    "forbidden-db-url"
+  ]) {
+    mustNotContain(text, forbiddenValue, `${label} audit row`);
+  }
+  assert(!/postgres:\/\/[^"<\s]+/.test(text), `${label} audit row leaked a database URL`);
+}
+
 const originalAuthToken = process.env.RECALLANT_AUTH_TOKEN;
 delete process.env.RECALLANT_AUTH_TOKEN;
 
@@ -416,6 +436,30 @@ try {
     activityRows.some((row) => row.surface === "remote_mcp" && row.status === "success"),
     "remote_mcp audit success row missing"
   );
+  const successRow = activityRows.find(
+    (row) => row.surface === "remote_mcp" && row.status === "success"
+  );
+  assertRemoteMcpAuditRowSafe(successRow, "success");
+  assert(successRow.related_ids?.credential_id === credential.id, "success audit row missing credential id");
+  assert(
+    successRow.related_ids?.credential_prefix === credential.credential_prefix,
+    "success audit row missing credential prefix"
+  );
+  assert(
+    successRow.redacted_metadata?.http_status === 200,
+    "success audit row missing redacted HTTP status"
+  );
+  const failedRows = activityRows.filter((row) => row.surface === "remote_mcp" && row.status === "skipped");
+  assert(failedRows.length >= 4, "remote_mcp audit failure rows missing");
+  for (const row of failedRows) assertRemoteMcpAuditRowSafe(row, `failed ${row.operation}`);
+  assert(
+    failedRows.some((row) => row.error_code === "INVALID_SCOPE_TOKEN"),
+    "remote_mcp audit missing invalid credential/scope failure"
+  );
+  assert(
+    failedRows.some((row) => row.error_code === "MISSING_PROJECT_OR_DEVELOPER_SCOPE"),
+    "remote_mcp audit missing missing-scope failure"
+  );
   assert(
     activityRows.every((row) => !JSON.stringify(row).includes(forbiddenDbUrl)),
     "remote_mcp audit leaked forbidden DB URL"
@@ -432,7 +476,20 @@ process.stdout.write(
       remote_mcp_endpoint_behavior: {
         cases: endpointCases,
         audit_rows: activityRows.length,
-        surface: "remote_mcp"
+        surface: "remote_mcp",
+        audit_row_fields: [
+          "surface",
+          "operation",
+          "status",
+          "error_code",
+          "related_ids.credential_id",
+          "related_ids.credential_prefix",
+          "redacted_metadata.http_status",
+          "redacted_metadata.audit_policy"
+        ],
+        redacted_audit_failure_rows: activityRows.filter(
+          (row) => row.surface === "remote_mcp" && row.status === "skipped"
+        ).length
       }
     },
     null,

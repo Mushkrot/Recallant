@@ -224,6 +224,57 @@ function assertCopiedSurfaceSafe(output, label) {
   assert(!forbiddenCopiedSurfacePattern.test(copied), `${label} copied command/config leaks a forbidden surface`);
 }
 
+function assertRemoteOnboardingPackage(output, label) {
+  assert(
+    output.provisioning.command.startsWith("curl -fsSL "),
+    `${label} provisioning command is not a curl bootstrap command`
+  );
+  assert(
+    output.provisioning.command.includes("install-recallant-client-bootstrap.sh"),
+    `${label} provisioning command is not the remote client bootstrap`
+  );
+  for (const required of [
+    "--server-url",
+    "--credential",
+    "--project-id",
+    "--developer-id",
+    "--client-id",
+    "--project-dir",
+    "."
+  ]) {
+    assert(output.provisioning.command.includes(required), `${label} command missing ${required}`);
+  }
+  assert(
+    output.provisioning.argv[0] === "bash" &&
+      output.provisioning.argv[1] === "-s" &&
+      output.provisioning.argv[2] === "--",
+    `${label} bootstrap argv does not describe bash -s --`
+  );
+  assert(output.provisioning.project_dir === ".", `${label} project dir should default to .`);
+  assert(
+    output.provisioning.bootstrap_script_url.includes("install-recallant-client-bootstrap.sh"),
+    `${label} missing bootstrap script URL`
+  );
+  assert(
+    output.provisioning.doctor_command.startsWith("recallant remote-doctor"),
+    `${label} missing remote doctor command`
+  );
+  assert(
+    output.provisioning.bridge_command.startsWith("recallant connect-remote"),
+    `${label} missing bridge command`
+  );
+  assert(output.provisioning.local_runtime.requires_docker === false, `${label} requires Docker`);
+  assert(output.provisioning.local_runtime.requires_postgres === false, `${label} requires Postgres`);
+  assert(
+    output.provisioning.local_runtime.requires_local_recallant_server === false,
+    `${label} requires a local Recallant server`
+  );
+  assert(
+    output.provisioning.local_runtime.writes_project_client_config === true,
+    `${label} does not write project client config`
+  );
+}
+
 function assertNoSecretOrHash(value, secret, label) {
   const text = JSON.stringify(value);
   assert(!text.includes(secret), `${label} leaked raw secret`);
@@ -249,6 +300,8 @@ assert(createOutput.one_time_secret.shown, "create output did not show one-time 
 assert(createOutput.one_time_secret.value === created.secret, "create output secret mismatch");
 assert(createOutput.provisioning.command.includes(created.secret), "create command missing one-time secret");
 assert(createOutput.provisioning.rendered_config.includes(created.secret), "create config missing one-time secret");
+assert(createOutput.provisioning.secret_visibility === "one_time_raw_secret");
+assertRemoteOnboardingPackage(createOutput, "create");
 assertCopiedSurfaceSafe(createOutput, "create");
 
 const rotated = harness.rotate(created.credential.id);
@@ -267,6 +320,8 @@ assert(rotated.previous.status === "revoked", "rotate did not revoke old credent
 assert(rotateOutput.one_time_secret.value === rotated.secret, "rotate output secret mismatch");
 assert(!rotateOutput.provisioning.command.includes(created.secret), "rotate command leaked old secret");
 assert(rotateOutput.previous_credential.id === created.credential.id, "rotate output missing previous credential");
+assert(rotateOutput.provisioning.secret_visibility === "one_time_raw_secret");
+assertRemoteOnboardingPackage(rotateOutput, "rotate");
 assertCopiedSurfaceSafe(rotateOutput, "rotate");
 
 const listed = harness.list({ projectId, developerId, includeRevoked: true });
@@ -285,6 +340,8 @@ const listOutputs = listed.map((credential) =>
 for (const [index, output] of listOutputs.entries()) {
   assert(!output.one_time_secret.shown, `list output ${index} showed secret`);
   assert(output.one_time_secret.value === null, `list output ${index} included secret value`);
+  assert(output.provisioning.secret_visibility === "redacted_placeholder");
+  assertRemoteOnboardingPackage(output, `list output ${index}`);
   assertNoSecretOrHash(output, created.secret, `list output ${index}`);
   assertNoSecretOrHash(output, rotated.secret, `list output ${index}`);
   assertCopiedSurfaceSafe(output, `list output ${index}`);
@@ -303,6 +360,8 @@ const revokeOutput = remoteMcpProvisioningOutput({
 
 assert(revoked.status === "revoked", "revoke did not mark credential revoked");
 assert(!revokeOutput.one_time_secret.shown, "revoke output showed secret");
+assert(revokeOutput.provisioning.secret_visibility === "redacted_placeholder");
+assertRemoteOnboardingPackage(revokeOutput, "revoke");
 assertNoSecretOrHash(revokeOutput, rotated.secret, "revoke output");
 assertCopiedSurfaceSafe(revokeOutput, "revoke");
 
@@ -390,6 +449,7 @@ try {
     apiCreate.body.provisioning.provisioning.command.includes(apiCreate.body.one_time_secret),
     "API create provisioning command missing one-time secret"
   );
+  assertRemoteOnboardingPackage(apiCreate.body.provisioning, "API create");
   assert(!apiCreate.text.includes("credential_hash"), "API create exposed credential hash");
 
   const apiListResponse = await fetch(
@@ -405,6 +465,9 @@ try {
     apiList.provisioning_by_credential.every((output) => output.one_time_secret.value === null),
     "API list provisioning was not redacted"
   );
+  for (const [index, output] of apiList.provisioning_by_credential.entries()) {
+    assertRemoteOnboardingPackage(output, `API list output ${index}`);
+  }
 
   const apiRotate = await requestJson(apiBaseUrl, "/api/remote-credential", {
     action: "rotate",
@@ -418,6 +481,7 @@ try {
   });
   assert(apiRotate.status === 200, "API rotate failed");
   assert(apiRotate.body.one_time_secret, "API rotate did not return one-time secret");
+  assertRemoteOnboardingPackage(apiRotate.body.provisioning, "API rotate");
   assert(!apiRotate.text.includes(apiCreate.body.one_time_secret), "API rotate leaked old secret");
 
   const apiRevoke = await requestJson(apiBaseUrl, "/api/remote-credential", {
@@ -433,6 +497,7 @@ try {
   assert(apiRevoke.status === 200, "API revoke failed");
   assert(apiRevoke.body.one_time_secret === undefined, "API revoke returned a raw secret");
   assert(apiRevoke.body.provisioning.one_time_secret.value === null, "API revoke provisioning leaked secret");
+  assertRemoteOnboardingPackage(apiRevoke.body.provisioning, "API revoke");
   assert(!apiRevoke.text.includes(apiRotate.body.one_time_secret), "API revoke leaked rotate secret");
 
   const wrongProject = await requestJson(apiBaseUrl, "/api/remote-credential", {
@@ -474,6 +539,14 @@ try {
   });
   assert(workbenchCreate.status === 200, "Workbench create form failed");
   assert(workbenchCreate.text.includes("One-time credential secret"), "Workbench create did not show one-time result");
+  assert(
+    workbenchCreate.text.includes("Remote onboarding package") &&
+      workbenchCreate.text.includes("Remote client bootstrap command") &&
+      workbenchCreate.text.includes("Remote doctor command") &&
+      workbenchCreate.text.includes("Requires Docker") &&
+      workbenchCreate.text.includes("false"),
+    "Workbench create did not render the remote onboarding package"
+  );
   assert(!workbenchCreate.text.includes("credential_hash"), "Workbench create exposed credential hash");
 
   const workbenchList = await requestForm(apiBaseUrl, "/remote-credential", {
@@ -489,6 +562,11 @@ try {
   assert(workbenchList.status === 200, "Workbench list form failed");
   assert(!workbenchList.text.includes(apiCreate.body.one_time_secret), "Workbench list leaked API create secret");
   assert(!workbenchList.text.includes(apiRotate.body.one_time_secret), "Workbench list leaked API rotate secret");
+  assert(
+    workbenchList.text.includes("Remote onboarding package") &&
+      workbenchList.text.includes("Remote client bootstrap command"),
+    "Workbench list did not render the redacted remote onboarding package"
+  );
   assert(!workbenchList.text.includes("credential_hash"), "Workbench list exposed credential hash");
 } finally {
   await close(server);
@@ -504,6 +582,19 @@ assert(
 );
 const self = await readFile(new URL(import.meta.url), "utf8");
 assert(!self.includes(["preflight", "placeholder"].join("_")), "provisioning smoke still contains placeholder marker");
+const cliSource = await readFile(new URL("../apps/cli/src/index.ts", import.meta.url), "utf8");
+assert(
+  cliSource.includes("Remote client bootstrap command:"),
+  "CLI human output does not name the remote client bootstrap command"
+);
+assert(
+  cliSource.includes("remote_client_bootstrap_command:"),
+  "CLI list output does not expose a copyable remote client bootstrap command"
+);
+assert(
+  cliSource.includes("Remote doctor command:"),
+  "CLI human output does not include the remote doctor command"
+);
 
 process.stdout.write(
   `${JSON.stringify(

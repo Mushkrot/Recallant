@@ -131,6 +131,16 @@ Live output remains redacted and must not include `RECALLANT_DATABASE_URL`, Post
 Workbench/admin auth, internal server paths, raw artifacts, backups, provider secrets, or private
 deployment context.
 
+`remote-mcp-live-readiness:smoke` is the stricter operator gate for a real central Recallant server.
+It uses `RECALLANT_LIVE_REMOTE_MCP_SERVER_URL`,
+`RECALLANT_LIVE_REMOTE_MCP_CREDENTIAL`, `RECALLANT_LIVE_REMOTE_MCP_PROJECT_ID`,
+`RECALLANT_LIVE_REMOTE_MCP_DEVELOPER_ID`, and `RECALLANT_LIVE_REMOTE_MCP_CLIENT_ID`. With complete
+inputs it requires HTTPS, derives `/api/mcp` through the shared contract helper, runs
+`recallant remote-doctor`, and performs a remote bridge `tools/list` roundtrip from a scrubbed
+child-process environment. With no live inputs it reports `skipped_live_remote_mcp_readiness`; with
+partial or invalid inputs it fails explicitly. It must not print raw credentials, DB URLs, provider
+secrets, private paths, raw artifact paths, or backup paths.
+
 ## 4) Scope Validation
 
 Remote access must enforce strict project/developer scope:
@@ -196,7 +206,7 @@ credential lifecycle audit events. `remote-mcp-bridge:smoke` covers the bridge h
 project/developer/client scope, forbidden payload blocking, required remote MCP headers, and no raw
 credential fixture leakage outside the operator-provided Authorization/env boundary.
 `remote-mcp-doctor:smoke` covers remote doctor JSON and human output, non-HTTPS and unreachable
-endpoints, edge/access denial, invalid JSON/wrong endpoint, missing/invalid/revoked/rotated
+endpoints, edge/access denial, invalid JSON/wrong endpoint, missing/invalid/expired/revoked/rotated
 credentials, wrong project/developer/client scope, initialize/tools-list failure, capture proof
 pass/warn/fail states, no DB URL dependency, and no raw fixture leakage in outputs.
 `remote-mcp-security:smoke` aggregates the shipped contract, credential, bridge, provisioning, and
@@ -206,6 +216,8 @@ client-provided DB/internal/provider/raw/backup surfaces, no remote DB URL requi
 states, protected Workbench/API credential visibility, and redacted audit trail assertions.
 `remote-mcp-external-rehearsal:smoke` adds deterministic isolated external-client evidence and an
 opt-in live external rehearsal path with redacted output.
+`remote-mcp-live-readiness:smoke` adds a central-server-only live gate with explicit skip/fail/pass
+semantics.
 
 ## 6) Error Mapping
 

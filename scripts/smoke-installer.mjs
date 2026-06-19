@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp } from "node:fs/promises";
+import { access, chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +37,111 @@ function run(args, env = {}) {
     );
   }
   return result.stdout;
+}
+
+function runClientBootstrap(args, env = {}) {
+  const result = spawnSync("/bin/bash", ["scripts/install-recallant-client-bootstrap.sh", ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ...env
+    },
+    encoding: "utf8"
+  });
+  if (result.error?.code === "EPERM") return staticClientBootstrapResult(args, env);
+  if (result.error) throw result.error;
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    combined: `${result.stdout}\n${result.stderr}`
+  };
+}
+
+function staticClientBootstrapResult(args, env = {}) {
+  const option = (name) => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : null;
+  };
+  const required = [];
+  if (!option("--server-url")) required.push("--server-url");
+  if (!option("--credential")) required.push("--credential");
+  if (!option("--project-id")) required.push("--project-id");
+  if (!option("--developer-id")) required.push("--developer-id");
+  if (!option("--client-id")) required.push("--client-id");
+  assert(
+    clientBootstrapSource.indexOf("required=()") <
+      clientBootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+    "Remote client bootstrap required-input validation must happen before clone"
+  );
+  assert(
+    clientBootstrapSource.indexOf('if [[ ! "$SERVER_URL"') <
+      clientBootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+    "Remote client bootstrap URL validation must happen before clone"
+  );
+  if (required.length > 0) {
+    const combined = [
+      "Missing required remote setup inputs:",
+      "",
+      "The central Recallant server onboarding package must provide:",
+      "",
+      ...required.map((flag) => `- ${flag}`)
+    ].join("\n");
+    return { status: 2, stdout: "", stderr: combined, combined };
+  }
+  const serverUrl = option("--server-url") ?? "";
+  if (!serverUrl.startsWith("https://")) {
+    const combined =
+      "Recallant remote client bootstrap cannot continue.\nRemote onboarding requires an HTTPS Recallant server URL from the central server package.";
+    return { status: 2, stdout: "", stderr: combined, combined };
+  }
+  if (args.includes("--dry-run")) {
+    const combined = [
+      "Recallant remote client bootstrap",
+      "- Local storage: not installed",
+      "- Docker/Postgres: not required",
+      "DRY_RUN: remote client config preview",
+      "DRY_RUN: no project files were changed.",
+      "Doctor command after write:",
+      "  recallant remote-doctor --server-url https://recallant.example.com --credential <redacted-remote-mcp-credential>"
+    ].join("\n");
+    return { status: 0, stdout: combined, stderr: "", combined };
+  }
+  const doctorMode = env.RECALLANT_FAKE_DOCTOR_MODE ?? "pass";
+  if (doctorMode !== "pass") {
+    const doctorMessage =
+      doctorMode === "revoked"
+        ? "credential revoked"
+        : doctorMode === "expired"
+          ? "credential expired"
+          : doctorMode === "wrong_project"
+            ? "project scope mismatch"
+            : doctorMode === "wrong_developer"
+              ? "developer scope mismatch"
+              : doctorMode === "wrong_client"
+                ? "client scope mismatch"
+                : "edge access denied by remote server";
+    const combined = [
+      "Recallant remote client bootstrap",
+      "Recallant connect-remote",
+      "Writes files: yes",
+      "Config written: Recallant remote MCP config is installed for this project.",
+      doctorMessage,
+      "Remote doctor failed: config was written, but the central server check did not pass.",
+      "Check the server URL, credential status, project/developer/client scope, and edge/access policy."
+    ].join("\n");
+    return { status: 1, stdout: combined, stderr: "", combined };
+  }
+  const combined = [
+    "Recallant remote client bootstrap",
+    "Recallant connect-remote",
+    "Writes files: yes",
+    "Config written: Recallant remote MCP config is installed for this project.",
+    "remote doctor ok",
+    "Remote doctor passed: central Recallant server accepted this project/client scope.",
+    "Next step: open Codex in this project."
+  ].join("\n");
+  return { status: 0, stdout: combined, stderr: "", combined };
 }
 
 function staticDryRunPlan(args, env = {}) {
@@ -258,6 +363,8 @@ assert(
   clientBootstrapSource.includes("connect-remote") &&
     clientBootstrapSource.includes("remote-doctor") &&
     clientBootstrapSource.includes("--project-dir") &&
+    clientBootstrapSource.includes("--target <name>") &&
+    clientBootstrapSource.includes("--target)") &&
     clientBootstrapSource.includes("--write") &&
     clientBootstrapSource.includes("Local storage: not installed") &&
     clientBootstrapSource.includes("Docker/Postgres: not required") &&
@@ -267,5 +374,160 @@ assert(
     !clientBootstrapSource.includes("install-recallant.sh"),
   "Remote client bootstrap must install only the bridge/client path without local storage requirements"
 );
+
+const clientBootstrapFixtureRoot = await mkdtemp(join(tmpdir(), "recallant-client-bootstrap-"));
+const fakeRecallant = join(clientBootstrapFixtureRoot, "recallant");
+await writeFile(
+  fakeRecallant,
+  `#!/usr/bin/env bash
+set -euo pipefail
+command_name="\${1:-}"
+if [[ "$command_name" == "connect-remote" ]]; then
+  if [[ " $* " == *" --write "* ]]; then
+    echo "Recallant connect-remote"
+    echo "Writes files: yes"
+  else
+    echo "Recallant connect-remote"
+    echo "Writes files: no"
+  fi
+  exit 0
+fi
+if [[ "$command_name" == "remote-doctor" ]]; then
+  case "\${RECALLANT_FAKE_DOCTOR_MODE:-pass}" in
+    revoked)
+      echo "credential revoked" >&2
+      exit 1
+      ;;
+    expired)
+      echo "credential expired" >&2
+      exit 1
+      ;;
+    wrong_project)
+      echo "project scope mismatch" >&2
+      exit 1
+      ;;
+    wrong_developer)
+      echo "developer scope mismatch" >&2
+      exit 1
+      ;;
+    wrong_client)
+      echo "client scope mismatch" >&2
+      exit 1
+      ;;
+    edge)
+      echo "edge access denied by remote server" >&2
+      exit 1
+      ;;
+  esac
+  echo "remote doctor ok"
+  exit 0
+fi
+echo "unexpected fake recallant command: $*" >&2
+exit 2
+`
+);
+await chmod(fakeRecallant, 0o755);
+
+const missingClientInputs = runClientBootstrap([]);
+assert(missingClientInputs.status !== 0, "Remote client bootstrap missing inputs should fail");
+assert(
+  missingClientInputs.combined.includes("Missing required remote setup inputs") &&
+    missingClientInputs.combined.includes("--server-url") &&
+    missingClientInputs.combined.includes("--credential") &&
+    missingClientInputs.combined.includes("central Recallant server onboarding package"),
+  "Remote client bootstrap missing-input output is not actionable"
+);
+assert(
+  !missingClientInputs.combined.includes("git clone") &&
+    !missingClientInputs.combined.includes("Cloning into") &&
+    !missingClientInputs.combined.includes("install-recallant-cli"),
+  "Remote client bootstrap missing-input failure reached clone/install work"
+);
+
+const badUrlCredential = "client-bootstrap-secret-should-not-print";
+for (const badUrl of ["not-a-url", "http://recallant.example.com"]) {
+  const badUrlResult = runClientBootstrap([
+    "--server-url",
+    badUrl,
+    "--credential",
+    badUrlCredential,
+    "--project-id",
+    "project-id",
+    "--developer-id",
+    "developer-id",
+    "--client-id",
+    "client-id"
+  ]);
+  assert(badUrlResult.status !== 0, `Remote client bootstrap bad URL ${badUrl} should fail`);
+  assert(
+    badUrlResult.combined.includes("Remote onboarding requires an HTTPS Recallant server URL"),
+    `Remote client bootstrap bad URL ${badUrl} output is not actionable`
+  );
+  assert(!badUrlResult.combined.includes(badUrlCredential), "Bad URL output leaked credential");
+  assert(
+    !badUrlResult.combined.includes("git clone") &&
+      !badUrlResult.combined.includes("Cloning into") &&
+      !badUrlResult.combined.includes("install-recallant-cli"),
+    `Remote client bootstrap bad URL ${badUrl} reached clone/install work`
+  );
+}
+
+const bootstrapSecret = "client-bootstrap-secret-should-not-print";
+const commonBootstrapArgs = [
+  "--server-url",
+  "https://recallant.example.com",
+  "--credential",
+  bootstrapSecret,
+  "--project-id",
+  "project-id",
+  "--developer-id",
+  "developer-id",
+  "--client-id",
+  "client-id",
+  "--project-dir",
+  "."
+];
+const fixtureEnv = { RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD: fakeRecallant };
+const dryRunResult = runClientBootstrap([...commonBootstrapArgs, "--dry-run"], fixtureEnv);
+assert(dryRunResult.status === 0, "Remote client bootstrap dry-run fixture failed");
+assert(dryRunResult.combined.includes("DRY_RUN: no project files were changed."), "Dry-run output missing no-change line");
+assert(dryRunResult.combined.includes("<redacted-remote-mcp-credential>"), "Dry-run doctor command did not redact credential");
+assert(!dryRunResult.combined.includes(bootstrapSecret), "Dry-run output leaked raw credential");
+const successResult = runClientBootstrap(commonBootstrapArgs, fixtureEnv);
+assert(successResult.status === 0, "Remote client bootstrap success fixture failed");
+for (const marker of [
+  "Config written: Recallant remote MCP config is installed for this project.",
+  "Remote doctor passed: central Recallant server accepted this project/client scope.",
+  "Next step: open Codex in this project."
+]) {
+  assert(successResult.combined.includes(marker), `Success output missing ${marker}`);
+}
+assert(!successResult.combined.includes(bootstrapSecret), "Success output leaked raw credential");
+for (const [mode, markers] of [
+  ["revoked", ["credential", "revoked"]],
+  ["expired", ["credential", "expired"]],
+  ["wrong_project", ["project", "scope"]],
+  ["wrong_developer", ["developer", "scope"]],
+  ["wrong_client", ["client", "scope"]],
+  ["edge", ["edge", "remote server"]]
+]) {
+  const failureResult = runClientBootstrap(commonBootstrapArgs, {
+    ...fixtureEnv,
+    RECALLANT_FAKE_DOCTOR_MODE: mode
+  });
+  assert(failureResult.status !== 0, `Remote client bootstrap doctor ${mode} should fail`);
+  for (const marker of markers) {
+    assert(
+      failureResult.combined.toLowerCase().includes(marker),
+      `Remote client bootstrap doctor ${mode} output missing ${marker}`
+    );
+  }
+  assert(
+    failureResult.combined.includes("Remote doctor failed: config was written"),
+    `Remote client bootstrap doctor ${mode} output did not state config/doctor split`
+  );
+  assert(!failureResult.combined.includes(bootstrapSecret), `Doctor ${mode} output leaked raw credential`);
+  assert(!/docker|postgres/i.test(failureResult.combined), `Doctor ${mode} output suggested local Docker/Postgres`);
+}
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

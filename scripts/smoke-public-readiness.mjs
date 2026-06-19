@@ -121,6 +121,7 @@ mustInclude(
     "Install Local Recallant",
     "Remote Existing-Server Setup",
     "operator-provided path",
+    "complete remote onboarding package",
     "install-recallant-client-bootstrap.sh",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
