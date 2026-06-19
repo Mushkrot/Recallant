@@ -25,6 +25,12 @@ bounded by design, and conservative about secrets.
 - Remote admin/API access must require authentication.
 - No unauthenticated public route should expose the Workbench, MCP tools, backups, raw artifacts, or
   provider settings.
+- Remote MCP/agent endpoints are private-by-default. The first `POST /api/mcp` slice requires
+  explicit DB-backed scoped credentials plus project/developer/client scope before tool execution.
+  Credentials are project/developer scoped, optionally client scoped, revocable, rotatable,
+  hash-stored, and audited without raw credential values. Remote diagnostics exist for operators,
+  but local stdio MCP remains the default beginner workflow and real separate-machine release
+  rehearsal still requires operator-provided live credentials.
 - Public Workbench readiness requires an auth-protected private origin plus authenticated edge
   access. Do not make the Workbench public by changing the default bind host.
 - Production readiness treats stopped services, disabled restart behavior, missing service env

@@ -19,6 +19,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
   audit reports.
 - [Client setup](CLIENT_SETUP.md): Codex, Cursor, Claude Code, Windsurf, and generic MCP clients.
 - [Security](SECURITY.md): threat model and safe defaults.
+- [Remote MCP contract](MCP_SPEC.md): planned remote client access contract (`/api/mcp`) and
+  auth/redaction model.
 - [Roadmap](ROADMAP.md): current status and next milestones.
 
 ## Documentation Boundary

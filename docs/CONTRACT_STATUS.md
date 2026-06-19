@@ -24,7 +24,7 @@ or release packaging before it should be treated as stable infrastructure.
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
 | Private deployment profiles | Documented and genericized | Self-hosting profiles, `doctor` deployment profile output, `production_readiness.service_runtime` status checks, public route readiness checks, latest backup verification, capability references, private-by-default server posture; public defaults use generic paths and env-provided inventory/security/backup references | Deployment-specific overlays stay private. |
-| Remote project access to a central server | Planned near-term | Current docs and smokes cover protected Workbench access and local stdio MCP for installed-host projects. | Add authenticated remote agent/MCP access, remote project onboarding, connection diagnostics, and external-client rehearsals without exposing Postgres, raw artifacts, backups, or unauthenticated MCP/admin routes. |
+| Remote project access to a central server | Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, and CLI-first remote diagnostics slice plus aggregate security smoke and deterministic isolated external-client rehearsal; local stdio remains the default client workflow | `docs/MCP_SPEC.md` defines the remote MCP contract (`/api/mcp`); `recallant remote-credential <create\|list\|rotate\|revoke>` manages project/developer scoped, optionally client-scoped credentials with hash-only storage and one-time create/rotate secrets; protected Workbench/API provisioning routes expose the same scoped lifecycle without unauthenticated public admin access; `recallant remote-bridge` forwards stdio MCP calls to HTTPS `/api/mcp`; `recallant connect-remote` previews Codex, Cursor, Claude Code, and generic MCP configs without `RECALLANT_DATABASE_URL`; `recallant remote-doctor` distinguishes network reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize/tools-list readiness, and optional capture proof; `remote-mcp-provisioning:smoke` validates create/rotate one-time output, redacted list/revoke, Workbench/API auth and scope failures, generated config leakage checks, and redacted audit events; `remote-mcp-contract:smoke` validates doc-to-contract alignment plus endpoint behavior for unauthorized, missing scope, wrong token, project/developer mismatch, forbidden DB URL, initialize, tools/list, tools/call, and redacted `remote_mcp` audit rows; `remote-mcp-credentials:smoke` validates valid, expired, revoked, rotated, wrong project, wrong developer, wrong client, no-raw-secret, and redacted audit cases; `remote-mcp-bridge:smoke` validates bridge initialize/tools/list/tools/call, required headers, wrong/revoked/rotated credentials, wrong project/developer/client scope, forbidden payload blocking, and no raw fixture leakage; `remote-mcp-doctor:smoke` validates JSON/human diagnostics, non-HTTPS, unreachable/wrong endpoint, edge denial, credential/scope failures, initialize/tools-list failures, capture proof states, no DB URL dependency, and no output leakage; `remote-mcp-security:smoke` aggregates those focused smokes into one security matrix for unauthorized/missing Authorization, wrong token, expired/revoked/rotated credentials, wrong project/developer/client, forbidden surfaces, no DB URL dependency, capture proof states, Workbench visibility, and redacted audit trail; `remote-mcp-external-rehearsal:smoke` validates deterministic isolated child-process external-client rehearsal through HTTPS `/api/mcp`, `connect-remote`, `remote-bridge`, `remote-doctor`, capture proof states, wrong/revoked/rotated/scope failures, no DB/admin/provider/raw/backup leakage, and opt-in live external rehearsal skip/pass behavior. | Real separate-machine rehearsal with operator-provided live endpoint/credential/scope, broader onboarding polish, and broader client transport support without exposing Postgres, internal server paths, raw artifacts, backups, or unauthenticated MCP/admin routes. |
 | Safety gates | Working slice with security smoke | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths, install/auth/Workbench/backups/secrets security smoke, owner-only marker scans across public docs and public runtime/install code; `npm run public-security:smoke`, `npm run security-review:smoke`, `npm run phase10:smoke` | Independent release hardening review. |
 | Public OSS surface | Working slice | Public docs boundary, readiness smoke, forbidden private marker checks across docs and public code; `npm run public-readiness:smoke`, `npm run public-security:smoke` | Public screenshots and final release packaging. |
 
@@ -58,6 +58,13 @@ Recent verification across the current public checkpoint sequence includes:
 - `npm run review-ui:smoke`
 - `npm run review-ui:playwright`
 - `npm run pilot-report:smoke`
+- `npm run remote-mcp-contract:smoke`
+- `npm run remote-mcp-credentials:smoke`
+- `npm run remote-mcp-bridge:smoke`
+- `npm run remote-mcp-provisioning:smoke`
+- `npm run remote-mcp-doctor:smoke`
+- `npm run remote-mcp-security:smoke`
+- `npm run remote-mcp-external-rehearsal:smoke`
 - `git diff --check`
 
 Those checks cover the public docs boundary, attach migration summaries, capture-active proof,
@@ -102,10 +109,14 @@ security review smoke.
 - The system activity ledger is an owner-readable Recallant audit report, not a full SIEM, metrics
   platform, or external monitoring export.
 - Public exposure of Workbench, admin APIs, MCP, backups, or raw artifacts is not a default mode.
-- Protected public Workbench access is not the same as remote project access. The current agent
-  connection path is local stdio MCP on an installed host; projects on another server or workstation
-  need a future authenticated remote agent/MCP path before they can attach to a central Recallant
-  server without local storage bindings.
+- Protected public Workbench access is not the same as remote project access. The default agent
+  connection path is local stdio MCP on an installed host.
+- Remote MCP/agent access now has a first authenticated `POST /api/mcp` endpoint slice, scoped
+  remote MCP credential lifecycle with CLI/Workbench provisioning output, stdio-to-HTTPS remote
+  bridge, CLI-first diagnostics, aggregate security smoke, and deterministic isolated
+  external-client rehearsal. Local stdio MCP remains the default client workflow because real
+  separate-machine rehearsal with operator live credentials and broader onboarding remain
+  unfinished.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain
   future expansion after the coding-agent core is stable.
@@ -117,8 +128,9 @@ security review smoke.
 Before a release-candidate tag, the project should have:
 
 - external-host release rehearsal that repeats the public quickstart and rollback path;
-- remote project access rehearsal from at least one separate machine or isolated external-client
-  environment, proving authenticated agent capture and recall against a central Recallant server;
+- remote project access rehearsal from at least one real separate machine with operator-provided
+  live endpoint/credential/scope, proving authenticated agent capture and recall against a central
+  Recallant server;
 - existing-project migration proof with backup and review behavior on broader real-world projects;
 - autonomous Workbench browser QA and public screenshots with synthetic data only;
 - independent hardening after the install/auth/Workbench/backups/secrets security smoke;

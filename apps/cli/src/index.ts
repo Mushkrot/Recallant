@@ -9,7 +9,7 @@ import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
-import { runRecallantStdioServer } from "@recallant/mcp";
+import { runRecallantRemoteBridge, runRecallantStdioServer } from "@recallant/mcp";
 import pg from "pg";
 import {
   detectImportCandidates,
@@ -28,11 +28,16 @@ import {
   clientTargetConfig,
   codexConfigHasRecallantMcp,
   connectClientTargetConfig,
-  renderClientTargetConfig
+  remoteClientTargetConfig,
+  remoteMcpProvisioningOutput,
+  renderClientTargetConfig,
+  renderRemoteClientTargetConfig
 } from "./client-targets.js";
+import { validateRemoteMcpBridgeConfig } from "@recallant/contracts";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
+import { runRemoteDoctor } from "./remote-doctor.js";
 
 const recallantCliVersion = "0.0.0";
 
@@ -192,6 +197,10 @@ function positionalArgs(argv: readonly string[]) {
     "--memory-domain",
     "--primary-path",
     "--project-id",
+    "--developer-id",
+    "--client-id",
+    "--credential-id",
+    "--expires-at",
     "--source-kind",
     "--source-id",
     "--label",
@@ -786,6 +795,10 @@ type CliAuditContext = {
 
 function shouldAuditCliCommand(command: string | undefined) {
   return Boolean(command && auditedCliCommands.has(command));
+}
+
+function commandUsesRemoteOnlyBootstrap(command: string | undefined) {
+  return command === "remote-bridge" || command === "connect-remote" || command === "remote-doctor";
 }
 
 function createCliAuditDb() {
@@ -5816,6 +5829,135 @@ function connectHumanReport(result: Record<string, unknown>) {
   );
 }
 
+function requiredFlag(argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (!value?.trim()) throw new Error(`VALIDATION_ERROR: ${name} is required`);
+  return value;
+}
+
+function remoteConnectHumanReport(result: {
+  target: string;
+  config_file: string;
+  setup_hint: string;
+  rendered_config: string;
+}) {
+  return (
+    [
+      "Recallant connect-remote",
+      "",
+      `Agent client: ${result.target}`,
+      `Config file: ${result.config_file}`,
+      result.setup_hint,
+      "",
+      result.rendered_config.trimEnd(),
+      ""
+    ].join("\n") + "\n"
+  );
+}
+
+async function runConnectRemote(argv: readonly string[]) {
+  const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const config = validateRemoteMcpBridgeConfig({
+    serverUrl: requiredFlag(argv, "--server-url"),
+    credential: requiredFlag(argv, "--credential"),
+    projectId: requiredFlag(argv, "--project-id"),
+    developerId: requiredFlag(argv, "--developer-id"),
+    clientId: requiredFlag(argv, "--client-id"),
+    sessionId: parseFlag(argv, "--session-id"),
+    traceId: parseFlag(argv, "--trace-id")
+  });
+  const targetConfig = remoteClientTargetConfig(target, config);
+  const rendered = renderRemoteClientTargetConfig(null, targetConfig);
+  const result = {
+    ok: true,
+    action: "connect_remote",
+    remote: true,
+    target: targetConfig.target,
+    config_file: targetConfig.config_file,
+    format: targetConfig.format,
+    setup_hint: targetConfig.setup_hint,
+    writes_files: false,
+    writes_database: false,
+    uses_local_storage: false,
+    required_scope: {
+      project_id: config.projectId,
+      developer_id: config.developerId,
+      client_id: config.clientId,
+      session_id: config.sessionId,
+      trace_id: config.traceId
+    },
+    mcp_config: targetConfig.mcp_config,
+    rendered_config: rendered,
+    safety: {
+      command: "recallant remote-bridge",
+      uses_https_mcp_endpoint: true,
+      requires_recallant_database_url: false,
+      exposes_postgres: false,
+      exposes_workbench_or_admin_auth: false,
+      exposes_raw_artifacts_or_backups: false,
+      exposes_provider_secrets: false
+    }
+  };
+  process.stdout.write(
+    format === "json" ? `${JSON.stringify(result, null, 2)}\n` : remoteConnectHumanReport(result)
+  );
+}
+
+function remoteCredentialProvisioningServerUrl(argv: readonly string[]) {
+  return (
+    parseFlag(argv, "--server-url") ??
+    process.env.RECALLANT_REMOTE_MCP_URL ??
+    "<https-recallant-server>"
+  );
+}
+
+function remoteCredentialProvisioningTarget(argv: readonly string[]) {
+  return parseFlag(argv, "--target") ?? "codex";
+}
+
+function remoteCredentialProvisioningBridgeClientId(
+  argv: readonly string[],
+  clientId?: string | null
+) {
+  return parseFlag(argv, "--bridge-client-id") ?? clientId ?? "remote-agent";
+}
+
+function remoteCredentialProvisioningHumanReport(input: {
+  title: string;
+  provisioning: ReturnType<typeof remoteMcpProvisioningOutput>;
+}) {
+  const { provisioning } = input;
+  return (
+    [
+      input.title,
+      `id: ${provisioning.credential.id}`,
+      `status: ${provisioning.credential.status}`,
+      `project_id: ${provisioning.scope.project_id}`,
+      `developer_id: ${provisioning.scope.developer_id}`,
+      `credential_client_id: ${provisioning.scope.credential_client_id ?? ""}`,
+      `bridge_client_id: ${provisioning.scope.bridge_client_id}`,
+      `credential_prefix: ${provisioning.credential.credential_prefix}`,
+      provisioning.previous_credential
+        ? `previous_id: ${provisioning.previous_credential.id}`
+        : null,
+      provisioning.one_time_secret.shown
+        ? `secret: ${provisioning.one_time_secret.value ?? ""}`
+        : "secret: [redacted]",
+      "",
+      "Remote bridge command:",
+      provisioning.provisioning.command,
+      "",
+      `Config file: ${provisioning.provisioning.config_file}`,
+      provisioning.provisioning.rendered_config.trimEnd(),
+      ""
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n"
+  );
+}
+
 async function runConnect(argv: readonly string[]) {
   const dir = projectDir(argv);
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
@@ -6913,6 +7055,16 @@ function normalizeSourceUri(sourceKind: ProjectSourceKind, rawUri: string | unde
   return rawUri;
 }
 
+function cliOutputFormat(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  return format;
+}
+
+function writeCliPayload(payload: Record<string, unknown>, format: "text" | "json", text: string) {
+  process.stdout.write(format === "json" ? `${JSON.stringify(payload, null, 2)}\n` : text);
+}
+
 async function runMemorySpace(argv: readonly string[]) {
   const subcommand = argv[3] ?? "list";
   const database = createRecallantDbFromEnv();
@@ -7022,6 +7174,205 @@ async function runMemorySpace(argv: readonly string[]) {
   }
 }
 
+async function runRemoteCredential(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const format = cliOutputFormat(argv);
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    throw new Error("RECALLANT_DATABASE_URL is required for remote-credential commands");
+  }
+  try {
+    if (subcommand === "create") {
+      const projectId = parseFlag(argv, "--project-id");
+      const developerId = parseFlag(argv, "--developer-id");
+      if (!projectId || !developerId) {
+        throw new Error(
+          "VALIDATION_ERROR: remote-credential create requires --project-id and --developer-id"
+        );
+      }
+      const result = await database.createRemoteMcpCredential({
+        projectId,
+        developerId,
+        clientId: parseFlag(argv, "--client-id") ?? null,
+        label: parseFlag(argv, "--label") ?? null,
+        expiresAt: parseFlag(argv, "--expires-at") ?? null,
+        createdBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "create",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential: result.credential,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(
+          argv,
+          result.credential.client_id
+        ),
+        credentialSecret: result.secret,
+        includeSecret: true,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_create",
+          credential: result.credential,
+          secret: result.secret,
+          provisioning,
+          secret_print_policy: "shown_once_create_output_only",
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential created.",
+          provisioning
+        })
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const projectId = parseFlag(argv, "--project-id");
+      const developerId = parseFlag(argv, "--developer-id");
+      if (!projectId || !developerId) {
+        throw new Error(
+          "VALIDATION_ERROR: remote-credential list requires --project-id and --developer-id"
+        );
+      }
+      const credentials = await database.listRemoteMcpCredentials({
+        projectId,
+        developerId,
+        clientId: parseFlag(argv, "--client-id") ?? null,
+        includeRevoked: argv.includes("--include-revoked")
+      });
+      const provisioning = credentials.map((credential) =>
+        remoteMcpProvisioningOutput({
+          action: "list",
+          target: remoteCredentialProvisioningTarget(argv),
+          serverUrl: remoteCredentialProvisioningServerUrl(argv),
+          credential,
+          bridgeClientId: remoteCredentialProvisioningBridgeClientId(argv, credential.client_id),
+          includeSecret: false,
+          sessionId: parseFlag(argv, "--session-id"),
+          traceId: parseFlag(argv, "--trace-id")
+        })
+      );
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_list",
+          count: credentials.length,
+          credentials,
+          provisioning
+        },
+        format,
+        [
+          `Remote MCP credentials: ${credentials.length}`,
+          ...credentials.map((credential, index) =>
+            [
+              `- id: ${credential.id}`,
+              `  status: ${credential.status}`,
+              `  project_id: ${credential.project_id}`,
+              `  developer_id: ${credential.developer_id}`,
+              `  client_id: ${credential.client_id ?? ""}`,
+              `  credential_prefix: ${credential.credential_prefix}`,
+              `  bridge_command: ${provisioning[index]?.provisioning.command ?? ""}`,
+              `  created_at: ${credential.created_at.toISOString()}`,
+              `  last_used_at: ${credential.last_used_at?.toISOString() ?? ""}`,
+              `  expires_at: ${credential.expires_at?.toISOString() ?? ""}`,
+              `  revoked_at: ${credential.revoked_at?.toISOString() ?? ""}`,
+              `  rotated_from_credential_id: ${credential.rotated_from_credential_id ?? ""}`
+            ].join("\n")
+          ),
+          ""
+        ].join("\n")
+      );
+      return;
+    }
+    if (subcommand === "rotate") {
+      const credentialId = parseFlag(argv, "--credential-id");
+      if (!credentialId) {
+        throw new Error("VALIDATION_ERROR: remote-credential rotate requires --credential-id");
+      }
+      const result = await database.rotateRemoteMcpCredential({
+        credentialId,
+        expiresAt: parseFlag(argv, "--expires-at") ?? null,
+        rotatedBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "rotate",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential: result.credential,
+        previousCredential: result.previous,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(
+          argv,
+          result.credential.client_id
+        ),
+        credentialSecret: result.secret,
+        includeSecret: true,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_rotate",
+          previous: result.previous,
+          credential: result.credential,
+          secret: result.secret,
+          provisioning,
+          secret_print_policy: "shown_once_rotate_output_only",
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential rotated.",
+          provisioning
+        })
+      );
+      return;
+    }
+    if (subcommand === "revoke") {
+      const credentialId = parseFlag(argv, "--credential-id");
+      if (!credentialId) {
+        throw new Error("VALIDATION_ERROR: remote-credential revoke requires --credential-id");
+      }
+      const credential = await database.revokeRemoteMcpCredential({
+        credentialId,
+        revokedBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "revoke",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(argv, credential.client_id),
+        includeSecret: false,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_revoke",
+          credential,
+          provisioning,
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential revoked.",
+          provisioning
+        })
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: remote-credential supports create|list|rotate|revoke");
+  } finally {
+    await database.close();
+  }
+}
+
 async function runSourceCommand(argv: readonly string[]) {
   const subcommand = argv[3] ?? "list";
   const database = createRecallantDbFromEnv();
@@ -7123,6 +7474,24 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (command === "connect-remote") {
+    return [
+      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--format json|text]",
+      "",
+      "Preview a supported agent client config that runs `recallant remote-bridge` against a scoped central /api/mcp endpoint without local database access.",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-doctor") {
+    return [
+      "Usage: recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--format json|text]",
+      "",
+      "Diagnose HTTPS /api/mcp reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize, tools/list, and optional capture proof without local database access.",
+      "",
+      "Example: recallant remote-doctor --server-url https://recallant.example.com --credential <scoped-token> --project-id <project-id> --developer-id <developer-id> --client-id <client-id> --format json",
+      ""
+    ].join("\n");
+  }
   if (command === "project-sanitize" || command === "sanitize" || command === "project-purge") {
     return [
       "Usage: recallant project-sanitize [--project-id <id>|--project-dir <dir>] [--mode <detach|purge>] [--detach-mode <live|sandbox>] [--dry-run] [--confirm-token <token>] [--no-local] [--format json|text]",
@@ -7149,7 +7518,23 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|doctor|audit|attach|connect|onboard|recover-embeddings|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "remote-credential" || command === "remote-credentials") {
+    return [
+      "Usage: recallant remote-credential <create|list|rotate|revoke> [--project-id <id>] [--developer-id <id>] [--client-id <id>] [--credential-id <id>] [--label <text>] [--expires-at <iso>] [--server-url <https-url>] [--target <codex|cursor|claude-code|generic>] [--bridge-client-id <id>] [--include-revoked] [--format json|text]",
+      "",
+      "Create, list, rotate, or revoke scoped remote MCP credentials. Create and rotate print the credential secret only in that command output and include a remote bridge command/config preview; list and revoke never print raw secrets.",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-bridge") {
+    return [
+      "Usage: recallant remote-bridge --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>]",
+      "",
+      "Run a stdio MCP bridge that forwards scoped memory calls to a central Recallant /api/mcp endpoint without local database access.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -7175,12 +7560,20 @@ async function main(argv: readonly string[]) {
     await runRecallantStdioServer();
     return;
   }
+  if (command === "remote-bridge") {
+    await runRecallantRemoteBridge(argv);
+    return;
+  }
+  if (command === "remote-doctor") return runRemoteDoctor(argv);
   if (command === "doctor") return runDoctor(argv);
   if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
+  if (command === "connect-remote") return runConnectRemote(argv);
   if (command === "onboard") return runOnboard(argv);
   if (command === "recover-embeddings") return runRecoverEmbeddings(argv);
+  if (command === "remote-credential" || command === "remote-credentials")
+    return runRemoteCredential(argv);
   if (command === "project-sanitize" || command === "sanitize" || command === "project-purge")
     return runProjectSanitize(argv);
   if (command === "detach" || command === "project-detach") return runDetach(argv);
@@ -7214,8 +7607,11 @@ async function main(argv: readonly string[]) {
   process.exitCode = 1;
 }
 
-await loadDefaultEnv();
-const cliAudit = await startCliAudit(process.argv);
+const remoteOnlyBootstrap = commandUsesRemoteOnlyBootstrap(process.argv[2]);
+if (!remoteOnlyBootstrap) {
+  await loadDefaultEnv();
+}
+const cliAudit = remoteOnlyBootstrap ? null : await startCliAudit(process.argv);
 try {
   await main(process.argv);
   await finishCliAudit(process.argv, cliAudit);

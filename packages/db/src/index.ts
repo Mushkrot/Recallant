@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { Pool, type PoolClient } from "pg";
@@ -51,6 +51,97 @@ export type RecallantDbConfig = {
 
 export type JsonObject = Record<string, unknown>;
 
+export type RemoteMcpCredentialStatus = "active" | "expired" | "revoked";
+export type RemoteMcpCredentialHashVersion = "sha256-v1";
+export type RemoteMcpCredentialVerifyFailureCode =
+  | "missing_token"
+  | "invalid_token"
+  | "expired"
+  | "revoked"
+  | "rotated"
+  | "wrong_project"
+  | "wrong_developer"
+  | "wrong_client";
+
+export type RemoteMcpCredentialRow = {
+  id: string;
+  project_id: string;
+  developer_id: string;
+  client_id: string | null;
+  label: string | null;
+  credential_prefix: string;
+  credential_hash: string;
+  hash_version: string;
+  created_by: string;
+  rotated_from_credential_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+  last_used_at: Date | null;
+  expires_at: Date | null;
+  revoked_at: Date | null;
+};
+
+export type RemoteMcpCredentialSummary = Omit<RemoteMcpCredentialRow, "credential_hash"> & {
+  status: RemoteMcpCredentialStatus;
+};
+
+export type CreateRemoteMcpCredentialInput = {
+  projectId: string;
+  developerId: string;
+  clientId?: string | null;
+  label?: string | null;
+  expiresAt?: string | Date | null;
+  createdBy?: string | null;
+};
+
+export type VerifyRemoteMcpCredentialInput = {
+  bearerToken: string;
+  projectId: string;
+  developerId: string;
+  clientId?: string | null;
+};
+
+export type ListRemoteMcpCredentialsInput = {
+  projectId: string;
+  developerId: string;
+  clientId?: string | null;
+  includeRevoked?: boolean;
+};
+
+export type CreateRemoteMcpCredentialResult = {
+  secret: string;
+  credential: RemoteMcpCredentialSummary;
+};
+
+export type VerifyRemoteMcpCredentialResult =
+  | {
+      ok: true;
+      credential: RemoteMcpCredentialSummary;
+    }
+  | {
+      ok: false;
+      code: RemoteMcpCredentialVerifyFailureCode;
+      message: string;
+      credential?: RemoteMcpCredentialSummary;
+    };
+
+export type RotateRemoteMcpCredentialInput = {
+  credentialId: string;
+  rotatedBy?: string | null;
+  expiresAt?: string | Date | null;
+};
+
+export type RotateRemoteMcpCredentialResult = {
+  secret: string;
+  credential: RemoteMcpCredentialSummary;
+  previous: RemoteMcpCredentialSummary;
+};
+
+export type RevokeRemoteMcpCredentialInput = {
+  credentialId: string;
+  revokedBy?: string | null;
+};
+
 export type SystemAuditReportInput = {
   project_id?: string | null;
   project_path?: string | null;
@@ -92,6 +183,57 @@ function auditCountBy<T extends Record<string, unknown>>(rows: T[], key: keyof T
 
 function auditRecommendation(severity: string, message: string, evidence: Record<string, unknown>) {
   return { severity, message, evidence };
+}
+
+const remoteMcpCredentialHashVersion: RemoteMcpCredentialHashVersion = "sha256-v1";
+const remoteMcpCredentialPrefixBytes = 9;
+const remoteMcpCredentialSecretBytes = 32;
+
+function normalizeRemoteMcpCredentialString(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRemoteMcpCredentialDate(value: string | Date | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("VALIDATION_ERROR: remote MCP credential date is invalid");
+  }
+  return date;
+}
+
+function generateRemoteMcpCredentialSecret() {
+  const prefix = randomBytes(remoteMcpCredentialPrefixBytes).toString("base64url");
+  const secret = randomBytes(remoteMcpCredentialSecretBytes).toString("base64url");
+  return `rcl_mcp_${prefix}_${secret}`;
+}
+
+function extractRemoteMcpCredentialPrefix(secret: string) {
+  const parts = secret.trim().split("_");
+  return parts.length === 4 && parts[0] === "rcl" && parts[1] === "mcp" ? parts[2] : null;
+}
+
+function hashRemoteMcpCredentialSecret(secret: string) {
+  return createHash("sha256").update(secret).digest("hex");
+}
+
+function constantTimeRemoteMcpHashEquals(left: string, right: string) {
+  const leftBuffer = Buffer.from(left, "hex");
+  const rightBuffer = Buffer.from(right, "hex");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function remoteMcpCredentialStatus(row: RemoteMcpCredentialRow): RemoteMcpCredentialStatus {
+  if (row.revoked_at) return "revoked";
+  if (row.expires_at && row.expires_at.getTime() <= Date.now()) return "expired";
+  return "active";
+}
+
+function summarizeRemoteMcpCredential(row: RemoteMcpCredentialRow): RemoteMcpCredentialSummary {
+  const summary = { ...row };
+  delete (summary as Partial<RemoteMcpCredentialRow>).credential_hash;
+  return { ...summary, status: remoteMcpCredentialStatus(row) };
 }
 
 function rawSecretLikeFindings(value: unknown, path = "value"): string[] {
@@ -2489,6 +2631,361 @@ export class RecallantDb {
       [projectId]
     );
     return result.rows[0] ?? null;
+  }
+
+  private async assertRemoteMcpCredentialScope(projectId: string, developerId: string) {
+    const binding = await this.getProjectBinding(projectId);
+    if (!binding) throw new Error("VALIDATION_ERROR: remote MCP project scope was not found");
+    if (binding.developer_id !== developerId) {
+      throw new Error("VALIDATION_ERROR: remote MCP developer scope does not match project");
+    }
+    return binding;
+  }
+
+  private async recordRemoteMcpCredentialAudit(input: {
+    operation: string;
+    status: "success" | "skipped" | "error";
+    projectId?: string | null;
+    developerId?: string | null;
+    clientId?: string | null;
+    credentialId?: string | null;
+    credentialPrefix?: string | null;
+    actorId?: string | null;
+    errorCode?: string | null;
+    metadata?: JsonObject | null;
+  }) {
+    try {
+      const activity = await this.startSystemActivity({
+        developer_id: input.developerId ?? null,
+        project_id: input.projectId ?? null,
+        surface: "remote_mcp_credentials",
+        operation: `remote_mcp_credential.${input.operation}`,
+        actor_kind: input.actorId ? "user" : "system",
+        actor_id: input.actorId ?? "remote_mcp_credentials",
+        client_kind: "remote_mcp_admin",
+        related_ids: {
+          credential_id: input.credentialId ?? null,
+          credential_prefix: input.credentialPrefix ?? null,
+          client_id: input.clientId ?? null
+        },
+        metadata: {
+          audit_policy: "remote_mcp_credential_redacted_no_raw_secret_no_hash",
+          ...input.metadata
+        }
+      });
+      await this.finishSystemActivity({
+        id: activity.id,
+        status: input.status,
+        error_code: input.errorCode ?? null,
+        error_message: input.errorCode ?? null,
+        metadata: {
+          operation: `remote_mcp_credential.${input.operation}`,
+          credential_id: input.credentialId ?? null,
+          credential_prefix: input.credentialPrefix ?? null,
+          client_id: input.clientId ?? null
+        }
+      });
+    } catch {
+      // Credential lifecycle should not fail because audit storage is unavailable.
+    }
+  }
+
+  async createRemoteMcpCredential(
+    input: CreateRemoteMcpCredentialInput
+  ): Promise<CreateRemoteMcpCredentialResult> {
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    if (!projectId || !developerId) {
+      throw new Error("VALIDATION_ERROR: projectId and developerId are required");
+    }
+    await this.assertRemoteMcpCredentialScope(projectId, developerId);
+
+    const secret = generateRemoteMcpCredentialSecret();
+    const credentialPrefix = extractRemoteMcpCredentialPrefix(secret);
+    if (!credentialPrefix) throw new Error("Failed to generate remote MCP credential prefix");
+    const credentialHash = hashRemoteMcpCredentialSecret(secret);
+    const expiresAt = normalizeRemoteMcpCredentialDate(input.expiresAt);
+    const clientId = normalizeRemoteMcpCredentialString(input.clientId);
+    const createdBy = normalizeRemoteMcpCredentialString(input.createdBy) ?? "cli";
+    const result = await this.pool.query<RemoteMcpCredentialRow>(
+      `
+        INSERT INTO remote_mcp_credentials (
+          project_id, developer_id, client_id, label, credential_prefix, credential_hash,
+          hash_version, created_by, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [
+        projectId,
+        developerId,
+        clientId,
+        normalizeRemoteMcpCredentialString(input.label),
+        credentialPrefix,
+        credentialHash,
+        remoteMcpCredentialHashVersion,
+        createdBy,
+        expiresAt
+      ]
+    );
+    const credential = summarizeRemoteMcpCredential(result.rows[0] as RemoteMcpCredentialRow);
+    await this.recordRemoteMcpCredentialAudit({
+      operation: "create",
+      status: "success",
+      projectId,
+      developerId,
+      clientId,
+      credentialId: credential.id,
+      credentialPrefix: credential.credential_prefix,
+      actorId: createdBy,
+      metadata: {
+        label_present: Boolean(credential.label),
+        expires_at: credential.expires_at?.toISOString() ?? null
+      }
+    });
+    return { secret, credential };
+  }
+
+  async listRemoteMcpCredentials(
+    input: ListRemoteMcpCredentialsInput
+  ): Promise<RemoteMcpCredentialSummary[]> {
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    if (!projectId || !developerId) {
+      throw new Error("VALIDATION_ERROR: projectId and developerId are required");
+    }
+    await this.assertRemoteMcpCredentialScope(projectId, developerId);
+    const clientId = normalizeRemoteMcpCredentialString(input.clientId);
+    const values: unknown[] = [projectId, developerId];
+    const where = ["project_id = $1", "developer_id = $2"];
+    if (clientId) {
+      values.push(clientId);
+      where.push(`client_id = $${values.length}`);
+    }
+    if (!input.includeRevoked) where.push("revoked_at IS NULL");
+    const result = await this.pool.query<RemoteMcpCredentialRow>(
+      `
+        SELECT *
+        FROM remote_mcp_credentials
+        WHERE ${where.join(" AND ")}
+        ORDER BY created_at DESC
+      `,
+      values
+    );
+    return result.rows.map((row) => summarizeRemoteMcpCredential(row));
+  }
+
+  async verifyRemoteMcpCredential(
+    input: VerifyRemoteMcpCredentialInput
+  ): Promise<VerifyRemoteMcpCredentialResult> {
+    const bearerToken = normalizeRemoteMcpCredentialString(input.bearerToken);
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    const clientId = normalizeRemoteMcpCredentialString(input.clientId);
+    if (!bearerToken) {
+      await this.recordRemoteMcpCredentialAudit({
+        operation: "verify",
+        status: "skipped",
+        projectId,
+        developerId,
+        clientId,
+        errorCode: "missing_token",
+        metadata: { result: "missing_token" }
+      });
+      return {
+        ok: false,
+        code: "missing_token",
+        message: "Remote MCP bearer token is required."
+      };
+    }
+    const prefix = extractRemoteMcpCredentialPrefix(bearerToken);
+    const presentedHash = hashRemoteMcpCredentialSecret(bearerToken);
+    const candidates = prefix
+      ? await this.pool.query<RemoteMcpCredentialRow>(
+          "SELECT * FROM remote_mcp_credentials WHERE credential_prefix = $1 ORDER BY created_at DESC",
+          [prefix]
+        )
+      : { rows: [] as RemoteMcpCredentialRow[] };
+
+    const matched = candidates.rows.find(
+      (row) =>
+        row.hash_version === remoteMcpCredentialHashVersion &&
+        constantTimeRemoteMcpHashEquals(row.credential_hash, presentedHash)
+    );
+    if (!matched) {
+      await this.recordRemoteMcpCredentialAudit({
+        operation: "verify",
+        status: "skipped",
+        projectId,
+        developerId,
+        clientId,
+        credentialPrefix: prefix,
+        errorCode: "invalid_token",
+        metadata: { result: "invalid_token" }
+      });
+      return { ok: false, code: "invalid_token", message: "Remote MCP credential is not valid." };
+    }
+
+    const summary = summarizeRemoteMcpCredential(matched);
+    let failureCode: RemoteMcpCredentialVerifyFailureCode | null = null;
+    if (matched.project_id !== projectId) failureCode = "wrong_project";
+    else if (matched.developer_id !== developerId) failureCode = "wrong_developer";
+    else if (matched.client_id && matched.client_id !== clientId) failureCode = "wrong_client";
+    else if (summary.status === "expired") failureCode = "expired";
+    else if (summary.status === "revoked") {
+      const rotated = await this.pool.query<{ id: string }>(
+        "SELECT id FROM remote_mcp_credentials WHERE rotated_from_credential_id = $1 LIMIT 1",
+        [matched.id]
+      );
+      failureCode = rotated.rows[0] ? "rotated" : "revoked";
+    }
+
+    if (failureCode) {
+      await this.recordRemoteMcpCredentialAudit({
+        operation: "verify",
+        status: "skipped",
+        projectId: matched.project_id,
+        developerId: matched.developer_id,
+        clientId: matched.client_id,
+        credentialId: matched.id,
+        credentialPrefix: matched.credential_prefix,
+        errorCode: failureCode,
+        metadata: {
+          result: failureCode,
+          requested_project_id: projectId,
+          requested_developer_id: developerId,
+          requested_client_id: clientId
+        }
+      });
+      return {
+        ok: false,
+        code: failureCode,
+        message: `Remote MCP credential rejected: ${failureCode}.`,
+        credential: summary
+      };
+    }
+
+    const updated = await this.pool.query<RemoteMcpCredentialRow>(
+      `
+        UPDATE remote_mcp_credentials
+        SET last_used_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [matched.id]
+    );
+    const credential = summarizeRemoteMcpCredential(updated.rows[0] as RemoteMcpCredentialRow);
+    await this.recordRemoteMcpCredentialAudit({
+      operation: "verify",
+      status: "success",
+      projectId: credential.project_id,
+      developerId: credential.developer_id,
+      clientId: credential.client_id,
+      credentialId: credential.id,
+      credentialPrefix: credential.credential_prefix,
+      metadata: { result: "success" }
+    });
+    return { ok: true, credential };
+  }
+
+  async rotateRemoteMcpCredential(
+    input: RotateRemoteMcpCredentialInput
+  ): Promise<RotateRemoteMcpCredentialResult> {
+    const rotatedBy = normalizeRemoteMcpCredentialString(input.rotatedBy) ?? "cli";
+    const expiresAt = normalizeRemoteMcpCredentialDate(input.expiresAt);
+    const secret = generateRemoteMcpCredentialSecret();
+    const credentialPrefix = extractRemoteMcpCredentialPrefix(secret);
+    if (!credentialPrefix) throw new Error("Failed to generate remote MCP credential prefix");
+    const credentialHash = hashRemoteMcpCredentialSecret(secret);
+
+    const result = await withTransaction(this.pool, async (client) => {
+      const existing = await client.query<RemoteMcpCredentialRow>(
+        "SELECT * FROM remote_mcp_credentials WHERE id = $1 FOR UPDATE",
+        [input.credentialId]
+      );
+      const previousRow = existing.rows[0];
+      if (!previousRow) throw new Error("VALIDATION_ERROR: remote MCP credential not found");
+      const previous = await client.query<RemoteMcpCredentialRow>(
+        `
+          UPDATE remote_mcp_credentials
+          SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [previousRow.id]
+      );
+      const next = await client.query<RemoteMcpCredentialRow>(
+        `
+          INSERT INTO remote_mcp_credentials (
+            project_id, developer_id, client_id, label, credential_prefix, credential_hash,
+            hash_version, created_by, rotated_from_credential_id, expires_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          RETURNING *
+        `,
+        [
+          previousRow.project_id,
+          previousRow.developer_id,
+          previousRow.client_id,
+          previousRow.label,
+          credentialPrefix,
+          credentialHash,
+          remoteMcpCredentialHashVersion,
+          rotatedBy,
+          previousRow.id,
+          expiresAt ?? previousRow.expires_at
+        ]
+      );
+      return {
+        previous: summarizeRemoteMcpCredential(previous.rows[0] as RemoteMcpCredentialRow),
+        credential: summarizeRemoteMcpCredential(next.rows[0] as RemoteMcpCredentialRow)
+      };
+    });
+    await this.recordRemoteMcpCredentialAudit({
+      operation: "rotate",
+      status: "success",
+      projectId: result.credential.project_id,
+      developerId: result.credential.developer_id,
+      clientId: result.credential.client_id,
+      credentialId: result.credential.id,
+      credentialPrefix: result.credential.credential_prefix,
+      actorId: rotatedBy,
+      metadata: {
+        rotated_from_credential_id: result.previous.id,
+        previous_credential_prefix: result.previous.credential_prefix
+      }
+    });
+    return { secret, ...result };
+  }
+
+  async revokeRemoteMcpCredential(
+    input: RevokeRemoteMcpCredentialInput
+  ): Promise<RemoteMcpCredentialSummary> {
+    const revokedBy = normalizeRemoteMcpCredentialString(input.revokedBy) ?? "cli";
+    const result = await this.pool.query<RemoteMcpCredentialRow>(
+      `
+        UPDATE remote_mcp_credentials
+        SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [input.credentialId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("VALIDATION_ERROR: remote MCP credential not found");
+    const credential = summarizeRemoteMcpCredential(row);
+    await this.recordRemoteMcpCredentialAudit({
+      operation: "revoke",
+      status: "success",
+      projectId: credential.project_id,
+      developerId: credential.developer_id,
+      clientId: credential.client_id,
+      credentialId: credential.id,
+      credentialPrefix: credential.credential_prefix,
+      actorId: revokedBy,
+      metadata: { result: "revoked" }
+    });
+    return credential;
   }
 
   async startSession(input: StartSessionInput) {
@@ -5073,7 +5570,7 @@ export class RecallantDb {
             ) AS rank
           FROM project_usage
         )
-        SELECT id AS project_id, name, primary_path, project_kind, memory_domain, updated_at,
+        SELECT id AS project_id, developer_id, name, primary_path, project_kind, memory_domain, updated_at,
                session_count, active_sessions, interrupted_sessions, event_count, memory_count,
                checkpoint_updated_at, last_context_read_at, last_memory_write_at
         FROM ranked
@@ -6900,4 +7397,8 @@ export function createRecallantDbFromEnv() {
     projectPath: process.env.RECALLANT_PROJECT_PATH
   });
   return cachedDb;
+}
+
+export function createRecallantDbFromConfig(config: RecallantDbConfig) {
+  return new RecallantDb(config);
 }

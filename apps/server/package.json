@@ -9,6 +9,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@recallant/contracts": "file:../../packages/contracts",
     "@recallant/core": "file:../../packages/core",
     "@recallant/db": "file:../../packages/db",
     "@recallant/mcp": "file:../../packages/mcp"

@@ -8,7 +8,7 @@ import {
 } from "@recallant/db";
 import process from "node:process";
 
-import { recallantTools } from "./tools.js";
+import { createRecallantTools, type RecallantToolsRuntimeContext } from "./tools.js";
 
 type RateLimitState = {
   windowStartedAt: number;
@@ -258,13 +258,13 @@ async function finishMcpAudit(
   }
 }
 
-export function createRecallantMcpServer() {
+export function createRecallantMcpServer(context: RecallantToolsRuntimeContext = {}) {
   const server = new McpServer({
     name: "recallant",
     version: "0.0.0"
   });
 
-  for (const tool of recallantTools) {
+  for (const tool of createRecallantTools(context)) {
     server.registerTool(
       tool.name,
       {

@@ -138,15 +138,21 @@ private-by-default self-hosting:
 - rollback and detach workflows that avoid deleting memory by accident.
 
 Protected public Workbench access is a human management path, not the same thing as remote agent
-access. The current agent path is local stdio MCP on an installed host. A near-term planned
-deployment shape is authenticated remote project access, where a project on another server or
-workstation can use one central Recallant server for MCP memory calls without direct Postgres access
-and without exposing MCP, admin APIs, raw artifacts, backups, or provider settings anonymously.
+access. The default agent path remains local stdio MCP on an installed host. Recallant also includes
+a first authenticated remote endpoint slice, where `POST /api/mcp` accepts scoped JSON-RPC
+`initialize`, `tools/list`, and `tools/call` requests through DB-backed remote MCP credentials
+without giving remote clients direct Postgres access and without exposing admin APIs, raw artifacts,
+backups, or provider settings anonymously.
 
-That remote path should preserve the same project/developer scope, context-pack, capture, review,
-and safety policies as local stdio MCP. The transport and auth details are implementation work, but
-the public contract is narrow: remote project access must be explicit, authenticated, observable, and
-private by default.
+That remote path must preserve the same project/developer scope, context-pack, capture, review, and
+safety policies as local stdio MCP. Remote MCP credentials are project/developer scoped, optionally
+client scoped, revocable, rotatable, hash-stored, and audited with credential id/prefix metadata
+only. The endpoint behavior is gated by `remote-mcp-contract:smoke` and
+`remote-mcp-credentials:smoke`; `remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`,
+`remote-mcp-doctor:smoke`, `remote-mcp-security:smoke`, and
+`remote-mcp-external-rehearsal:smoke` cover the bridge, provisioning, diagnostics, security matrix,
+and deterministic isolated external-client rehearsal. Broader onboarding, broader transport/client
+support, and real separate-machine release rehearsal remain near-term work.
 
 ## Why This Is Different From Plain Logs Or RAG
 

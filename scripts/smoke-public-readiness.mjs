@@ -1,8 +1,6 @@
-import { spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { readdir, readFile, mkdtemp } from "node:fs/promises";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -66,6 +64,7 @@ const publicDocs = [
   "docs/REFERENCE_PROJECTS.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
+  "docs/MCP_SPEC.md",
   "docs/CLIENT_SETUP.md",
   "docs/SECURITY.md",
   "docs/ROADMAP.md"
@@ -391,147 +390,92 @@ assert(
   "smoke:core must include documentation-posture:smoke"
 );
 
-async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
-  const child = spawn(
-    process.execPath,
-    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        RECALLANT_DATABASE_URL: "",
-        RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
-        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
-        RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
-        RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
-        RECALLANT_CLOUDFLARE_MODE: "enabled",
-        RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
-        RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
-        ...extraEnv
-      },
-      stdio: ["ignore", "pipe", "pipe"]
-    }
-  );
+function runDoctorFixture(projectDir, doctorEnv, label) {
+  const token = Math.random().toString(36).slice(2);
+  const stdoutPath = join(projectDir, `.smoke-doctor-${token}-stdout.txt`);
+  const stderrPath = join(projectDir, `.smoke-doctor-${token}-stderr.txt`);
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
+
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"], {
+    cwd: repoRoot,
+    env: doctorEnv,
+    stdio: ["ignore", stdoutFd, stderrFd]
+  });
+
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
+
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk.toString();
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
-  const [code] = await once(child, "close");
+  try {
+    stdout = readFileSync(stdoutPath, "utf8");
+    stderr = readFileSync(stderrPath, "utf8");
+  } finally {
+    try {
+      unlinkSync(stdoutPath);
+    } catch {
+      // best effort cleanup
+    }
+    try {
+      unlinkSync(stderrPath);
+    } catch {
+      // best effort cleanup
+    }
+  }
+
+  if (result.error) throw result.error;
+  const code = result.status ?? 0;
   if (code !== 0) {
     throw new Error(
-      `doctor public readiness fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
+      `${label} fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
         stderr
       )}; stdout_excerpt=${stdout.slice(0, 1000)}`
     );
   }
-  const parsed = parseDoctorFixtureJson(stdout, stderr, code, "doctor public readiness fixture");
-  return parsed.production_readiness?.public_workbench_readiness;
+
+  const parsed = parseDoctorFixtureJson(stdout, stderr, code, label);
+  return parsed.production_readiness;
+}
+
+async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
+  const parsed = runDoctorFixture(projectDir, {
+    ...process.env,
+    RECALLANT_DATABASE_URL: "",
+    RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+    RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+    RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
+    RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
+    RECALLANT_CLOUDFLARE_MODE: "enabled",
+    RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+    RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
+    ...extraEnv
+  }, "doctor public readiness fixture");
+
+  return parsed?.public_workbench_readiness;
 }
 
 async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
-  const child = spawn(
-    process.execPath,
-    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        RECALLANT_DATABASE_URL: "",
-        RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
-        RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
-        RECALLANT_SERVICE_ACTIVE_STATUS: "active",
-        RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
-        RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
-        RECALLANT_HOST: "127.0.0.1",
-        RECALLANT_SERVICE_HEALTH_STATUS: "200",
-        RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
-        ...extraEnv
-      },
-      stdio: ["ignore", "pipe", "pipe"]
-    }
-  );
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk.toString();
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
-  const [code] = await once(child, "close");
-  if (code !== 0) {
-    throw new Error(
-      `doctor service runtime fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
-        stderr
-      )}; stdout_excerpt=${stdout.slice(0, 1000)}`
-    );
-  }
-  const parsed = parseDoctorFixtureJson(stdout, stderr, code, "doctor service runtime fixture");
-  return parsed.production_readiness?.service_runtime;
-}
+  const parsed = runDoctorFixture(projectDir, {
+    ...process.env,
+    RECALLANT_DATABASE_URL: "",
+    RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+    RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+    RECALLANT_SERVICE_ACTIVE_STATUS: "active",
+    RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
+    RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
+    RECALLANT_HOST: "127.0.0.1",
+    RECALLANT_SERVICE_HEALTH_STATUS: "200",
+    RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
+    ...extraEnv
+  }, "doctor service runtime fixture");
 
-async function closedLocalOriginUrl() {
-  const server = createServer((_request, response) => {
-    response.writeHead(503);
-    response.end("closing");
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address !== "string", "Unable to allocate closed origin port");
-  await new Promise((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  return `http://127.0.0.1:${address.port}/review`;
-}
-
-async function withAuthRequiredOrigin(callback) {
-  const server = createServer((_request, response) => {
-    response.writeHead(401, {
-      "content-type": "text/plain",
-      "www-authenticate": "Bearer"
-    });
-    response.end("auth required");
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address !== "string", "Unable to allocate auth origin port");
-  try {
-    return await callback(`http://127.0.0.1:${address.port}/review`);
-  } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-async function withAnonymousOrigin(callback) {
-  const server = createServer((_request, response) => {
-    response.writeHead(200, {
-      "content-type": "text/html"
-    });
-    response.end("<h1>Recallant Workbench</h1>");
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address !== "string", "Unable to allocate anonymous origin port");
-  try {
-    return await callback(`http://127.0.0.1:${address.port}/review`);
-  } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
+  return parsed?.service_runtime;
 }
 
 const publicUiFixtureDir = await mkdtemp(join(tmpdir(), "recallant-public-ui-readiness-"));
 const publicBindHost = ["0", "0", "0", "0"].join(".");
+const closedOriginUrl = "http://127.0.0.1:1/review";
 const notConfigured = await runDoctorWithOrigin(publicUiFixtureDir, "", {
   RECALLANT_PUBLIC_WORKBENCH_URL: "",
   RECALLANT_WORKBENCH_ORIGIN_URL: "",
@@ -546,7 +490,7 @@ assert(
   `Unconfigured readiness did not report not_configured: ${JSON.stringify(notConfigured)}`
 );
 
-const downReadiness = await runDoctorWithOrigin(publicUiFixtureDir, await closedLocalOriginUrl());
+const downReadiness = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl);
 assert(
   downReadiness?.status === "origin_unreachable" &&
     downReadiness?.origin?.status === "down" &&
@@ -558,9 +502,9 @@ assert(
   `Down-origin action must not recommend public bind: ${downReadiness.operator_action}`
 );
 
-const authReady = await withAuthRequiredOrigin((originUrl) =>
-  runDoctorWithOrigin(publicUiFixtureDir, originUrl)
-);
+const authReady = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "401"
+});
 assert(
   authReady?.status === "auth_ready" &&
     authReady?.ready === true &&
@@ -574,19 +518,18 @@ assert(
   `Auth-ready operator action is unsafe or unclear: ${authReady.operator_action}`
 );
 
-const missingEdgeAuth = await withAuthRequiredOrigin((originUrl) =>
-  runDoctorWithOrigin(publicUiFixtureDir, originUrl, {
-    RECALLANT_CLOUDFLARE_EDGE_AUTH: "disabled"
-  })
-);
+const missingEdgeAuth = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "401",
+  RECALLANT_CLOUDFLARE_EDGE_AUTH: "disabled"
+});
 assert(
   missingEdgeAuth?.status === "cloudflare_access_not_required" && missingEdgeAuth?.ready === false,
   `Missing edge auth should not be public-ready: ${JSON.stringify(missingEdgeAuth)}`
 );
 
-const anonymousOrigin = await withAnonymousOrigin((originUrl) =>
-  runDoctorWithOrigin(publicUiFixtureDir, originUrl)
-);
+const anonymousOrigin = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "200"
+});
 assert(
   anonymousOrigin?.status === "origin_allows_anonymous_access" &&
     anonymousOrigin?.origin?.status === "anonymous_access" &&

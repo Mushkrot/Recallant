@@ -1,4 +1,9 @@
 import { supportedClientKinds } from "@recallant/adapters";
+import {
+  remoteMcpBridgeEnv,
+  remoteMcpBridgeFlags,
+  type RemoteMcpBridgeConfigInput
+} from "@recallant/contracts";
 
 type ClientKind = (typeof supportedClientKinds)[number];
 
@@ -17,6 +22,24 @@ type McpServerConfig = {
   };
 };
 
+type RemoteMcpServerConfig = {
+  mcpServers: {
+    recallant: {
+      command: "recallant";
+      args: string[];
+      env: {
+        RECALLANT_REMOTE_MCP_URL: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL: string;
+        RECALLANT_PROJECT_ID: string;
+        RECALLANT_DEVELOPER_ID: string;
+        RECALLANT_REMOTE_MCP_CLIENT_ID: string;
+        RECALLANT_REMOTE_MCP_SESSION_ID?: string;
+        RECALLANT_REMOTE_MCP_TRACE_ID?: string;
+      };
+    };
+  };
+};
+
 export type ClientTargetConfig = {
   target: ClientKind;
   config_file: string;
@@ -25,6 +48,77 @@ export type ClientTargetConfig = {
   merge_mcp_servers: boolean;
   setup_hint: string;
   mcp_config: McpServerConfig;
+};
+
+export type RemoteClientTargetConfig = Omit<ClientTargetConfig, "mcp_config"> & {
+  mcp_config: RemoteMcpServerConfig;
+  remote: true;
+};
+
+export type RemoteMcpProvisioningCredential = {
+  id: string;
+  project_id: string;
+  developer_id: string;
+  client_id?: string | null;
+  label?: string | null;
+  status: string;
+  credential_prefix: string;
+  created_at?: string | Date | null;
+  last_used_at?: string | Date | null;
+  expires_at?: string | Date | null;
+  revoked_at?: string | Date | null;
+  rotated_from_credential_id?: string | null;
+};
+
+export type RemoteMcpProvisioningAction = "create" | "rotate" | "list" | "revoke";
+
+export type RemoteMcpProvisioningOutputInput = {
+  action: RemoteMcpProvisioningAction;
+  target?: string;
+  serverUrl: string;
+  credential: RemoteMcpProvisioningCredential;
+  previousCredential?: RemoteMcpProvisioningCredential | null;
+  bridgeClientId: string;
+  credentialSecret?: string | null;
+  includeSecret: boolean;
+  sessionId?: string | null;
+  traceId?: string | null;
+};
+
+export type RemoteMcpProvisioningOutput = {
+  action: RemoteMcpProvisioningAction;
+  target: ClientKind;
+  one_time_secret: {
+    shown: boolean;
+    value: string | null;
+    policy: "create_rotate_only" | "redacted";
+  };
+  credential: RemoteMcpProvisioningCredential;
+  previous_credential: RemoteMcpProvisioningCredential | null;
+  scope: {
+    project_id: string;
+    developer_id: string;
+    credential_client_id: string | null;
+    bridge_client_id: string;
+    client_scoped: boolean;
+  };
+  provisioning: {
+    command: string;
+    argv: string[];
+    config_file: string;
+    format: RemoteClientTargetConfig["format"];
+    rendered_config: string;
+    mcp_config: RemoteMcpServerConfig;
+  };
+  safety: {
+    local_stdio_default_unchanged: true;
+    requires_recallant_database_url: false;
+    exposes_postgres: false;
+    exposes_internal_server_paths: false;
+    exposes_workbench_or_admin_auth: false;
+    exposes_raw_artifacts_or_backups: false;
+    exposes_provider_secrets: false;
+  };
 };
 
 const targetAliases: Record<string, ClientKind> = {
@@ -61,6 +155,27 @@ export function mcpServerConfig(
           RECALLANT_PROJECT_PATH: projectPath,
           RECALLANT_DATABASE_URL: "${RECALLANT_DATABASE_URL}"
         }
+      }
+    }
+  };
+}
+
+export function remoteMcpServerConfig(input: RemoteMcpBridgeConfigInput): RemoteMcpServerConfig {
+  const env: RemoteMcpServerConfig["mcpServers"]["recallant"]["env"] = {
+    RECALLANT_REMOTE_MCP_URL: input.serverUrl ?? "",
+    RECALLANT_REMOTE_MCP_CREDENTIAL: input.credential ?? "",
+    RECALLANT_PROJECT_ID: input.projectId ?? "",
+    RECALLANT_DEVELOPER_ID: input.developerId ?? "",
+    RECALLANT_REMOTE_MCP_CLIENT_ID: input.clientId ?? ""
+  };
+  if (input.sessionId) env.RECALLANT_REMOTE_MCP_SESSION_ID = input.sessionId;
+  if (input.traceId) env.RECALLANT_REMOTE_MCP_TRACE_ID = input.traceId;
+  return {
+    mcpServers: {
+      recallant: {
+        command: "recallant",
+        args: ["remote-bridge"],
+        env
       }
     }
   };
@@ -111,6 +226,34 @@ function tomlInlineStringMap(values: Record<string, string>) {
   return `{ ${entries.join(", ")} }`;
 }
 
+function shellArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function isoOrNull(value: string | Date | null | undefined) {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function normalizedProvisioningCredential(
+  credential: RemoteMcpProvisioningCredential
+): RemoteMcpProvisioningCredential {
+  return {
+    id: credential.id,
+    project_id: credential.project_id,
+    developer_id: credential.developer_id,
+    client_id: credential.client_id ?? null,
+    label: credential.label ?? null,
+    status: credential.status,
+    credential_prefix: credential.credential_prefix,
+    created_at: isoOrNull(credential.created_at),
+    last_used_at: isoOrNull(credential.last_used_at),
+    expires_at: isoOrNull(credential.expires_at),
+    revoked_at: isoOrNull(credential.revoked_at),
+    rotated_from_credential_id: credential.rotated_from_credential_id ?? null
+  };
+}
+
 export function codexConfigHasRecallantMcp(content: string | null) {
   return /^\s*\[mcp_servers\.recallant\]\s*$/m.test(content ?? "");
 }
@@ -128,6 +271,16 @@ export function codexMcpServerToml(config: McpServerConfig) {
     `args = ${tomlStringArray(recallant.args)}`,
     `env = ${tomlInlineStringMap(env)}`,
     'env_vars = ["RECALLANT_DATABASE_URL"]'
+  ].join("\n");
+}
+
+export function codexRemoteMcpServerToml(config: RemoteMcpServerConfig) {
+  const recallant = config.mcpServers.recallant;
+  return [
+    "[mcp_servers.recallant]",
+    `command = ${tomlString(recallant.command)}`,
+    `args = ${tomlStringArray(recallant.args)}`,
+    `env = ${tomlInlineStringMap(recallant.env)}`
   ].join("\n");
 }
 
@@ -151,6 +304,23 @@ export function renderClientTargetConfig(
       existingText,
       "mcp_servers.recallant",
       codexMcpServerToml(targetConfig.mcp_config)
+    );
+  }
+  const desiredConfig = targetConfig.merge_mcp_servers
+    ? mergeMcpServersConfig(existingText, targetConfig.mcp_config)
+    : targetConfig.mcp_config;
+  return `${JSON.stringify(desiredConfig, null, 2)}\n`;
+}
+
+export function renderRemoteClientTargetConfig(
+  existingText: string | null,
+  targetConfig: RemoteClientTargetConfig
+) {
+  if (targetConfig.format === "codex_config_toml") {
+    return upsertTomlTable(
+      existingText,
+      "mcp_servers.recallant",
+      codexRemoteMcpServerToml(targetConfig.mcp_config)
     );
   }
   const desiredConfig = targetConfig.merge_mcp_servers
@@ -226,6 +396,146 @@ export function connectClientTargetConfig(
     };
   }
   return clientTargetConfig(rawTarget, projectId, developerId, projectPath);
+}
+
+export function remoteClientTargetConfig(
+  rawTarget: string | undefined,
+  input: RemoteMcpBridgeConfigInput
+): RemoteClientTargetConfig {
+  const target = normalizeClientTarget(rawTarget);
+  const mcp_config = remoteMcpServerConfig(input);
+  if (target === "codex") {
+    return {
+      target,
+      config_file: ".codex/config.toml",
+      format: "codex_config_toml",
+      client_specific: true,
+      merge_mcp_servers: true,
+      setup_hint:
+        "Codex reads this project-local .codex/config.toml in trusted projects. This remote config runs the Recallant bridge over HTTPS without local storage credentials.",
+      mcp_config,
+      remote: true
+    };
+  }
+  if (target === "cursor") {
+    return {
+      target,
+      config_file: ".cursor/mcp.json",
+      format: "cursor_mcp_json",
+      client_specific: true,
+      merge_mcp_servers: true,
+      setup_hint:
+        "Cursor can read this project-local .cursor/mcp.json. This remote config merges only the Recallant bridge server entry.",
+      mcp_config,
+      remote: true
+    };
+  }
+  if (target === "claude_code") {
+    return {
+      target,
+      config_file: ".mcp.json",
+      format: "claude_code_mcp_json",
+      client_specific: true,
+      merge_mcp_servers: true,
+      setup_hint:
+        "Claude Code can read this project-local .mcp.json. This remote config merges only the Recallant bridge server entry.",
+      mcp_config,
+      remote: true
+    };
+  }
+  return {
+    target,
+    config_file: ".recallant/generic-remote-mcp.json",
+    format: "generic_mcp_json",
+    client_specific: target === "generic",
+    merge_mcp_servers: false,
+    setup_hint:
+      target === "generic"
+        ? "Use this generic remote MCP stdio config with any client that supports custom MCP servers."
+        : `No dedicated ${target} remote writer exists yet; use this generic MCP stdio config as the safe fallback.`,
+    mcp_config,
+    remote: true
+  };
+}
+
+export const remoteBridgeConfigFields = {
+  env: remoteMcpBridgeEnv,
+  flags: remoteMcpBridgeFlags
+} as const;
+
+export function remoteMcpProvisioningOutput(
+  input: RemoteMcpProvisioningOutputInput
+): RemoteMcpProvisioningOutput {
+  const credential = normalizedProvisioningCredential(input.credential);
+  const previousCredential = input.previousCredential
+    ? normalizedProvisioningCredential(input.previousCredential)
+    : null;
+  const target = normalizeClientTarget(input.target);
+  const bridgeCredential = input.includeSecret
+    ? (input.credentialSecret ?? "")
+    : "<scoped-remote-mcp-credential>";
+  const targetConfig = remoteClientTargetConfig(target, {
+    serverUrl: input.serverUrl,
+    credential: bridgeCredential,
+    projectId: credential.project_id,
+    developerId: credential.developer_id,
+    clientId: input.bridgeClientId,
+    sessionId: input.sessionId,
+    traceId: input.traceId
+  });
+  const argv = [
+    "recallant",
+    "connect-remote",
+    target,
+    remoteMcpBridgeFlags.serverUrl,
+    input.serverUrl,
+    remoteMcpBridgeFlags.credential,
+    bridgeCredential,
+    remoteMcpBridgeFlags.projectId,
+    credential.project_id,
+    remoteMcpBridgeFlags.developerId,
+    credential.developer_id,
+    remoteMcpBridgeFlags.clientId,
+    input.bridgeClientId
+  ];
+  if (input.sessionId) argv.push(remoteMcpBridgeFlags.sessionId, input.sessionId);
+  if (input.traceId) argv.push(remoteMcpBridgeFlags.traceId, input.traceId);
+  argv.push("--format", "json");
+  return {
+    action: input.action,
+    target,
+    one_time_secret: {
+      shown: input.includeSecret,
+      value: input.includeSecret ? (input.credentialSecret ?? null) : null,
+      policy: input.includeSecret ? "create_rotate_only" : "redacted"
+    },
+    credential,
+    previous_credential: previousCredential,
+    scope: {
+      project_id: credential.project_id,
+      developer_id: credential.developer_id,
+      credential_client_id: credential.client_id ?? null,
+      bridge_client_id: input.bridgeClientId,
+      client_scoped: Boolean(credential.client_id)
+    },
+    provisioning: {
+      command: argv.map((value) => shellArg(value)).join(" "),
+      argv,
+      config_file: targetConfig.config_file,
+      format: targetConfig.format,
+      rendered_config: renderRemoteClientTargetConfig(null, targetConfig),
+      mcp_config: targetConfig.mcp_config
+    },
+    safety: {
+      local_stdio_default_unchanged: true,
+      requires_recallant_database_url: false,
+      exposes_postgres: false,
+      exposes_internal_server_paths: false,
+      exposes_workbench_or_admin_auth: false,
+      exposes_raw_artifacts_or_backups: false,
+      exposes_provider_secrets: false
+    }
+  };
 }
 
 export const generatedMcpConfigFiles = [

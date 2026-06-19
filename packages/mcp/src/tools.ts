@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { isAbsolute, join, relative } from "node:path";
 import {
   createRecallantDbFromEnv,
@@ -21,6 +22,17 @@ import {
   type StartSessionInput
 } from "@recallant/db";
 import { z } from "zod";
+
+type ToolDb = ReturnType<typeof createRecallantDbFromEnv>;
+
+export type RecallantToolsRuntimeContext = {
+  projectId?: string | null;
+  projectPath?: string | null;
+  developerId?: string | null;
+  getDatabase?: () => ToolDb;
+};
+
+const recallantToolsRuntimeContext = new AsyncLocalStorage<RecallantToolsRuntimeContext>();
 
 const nullableString = z.string().nullable().optional();
 const metadata = z.record(z.string(), z.unknown()).default({});
@@ -75,6 +87,36 @@ export type RecallantToolDefinition = {
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 };
 
+function currentRecallantToolsContext() {
+  return contextAwarePath(recallantToolsRuntimeContext.getStore() ?? {});
+}
+
+export function runWithRecallantToolsContext<T>(
+  context: RecallantToolsRuntimeContext,
+  operation: () => Promise<T> | T
+) {
+  return recallantToolsRuntimeContext.run(contextAwarePath(context), operation);
+}
+
+function db() {
+  const context = currentRecallantToolsContext();
+  return context.getDatabase();
+}
+
+function contextAwarePath(context: RecallantToolsRuntimeContext) {
+  return {
+    projectId: context.projectId ?? null,
+    projectPath: context.projectPath ?? null,
+    developerId: context.developerId ?? null,
+    getDatabase: context.getDatabase ?? (() => createRecallantDbFromEnv())
+  };
+}
+
+function syncProjectLogInContext(payload: JsonObject, database?: ToolDb) {
+  const context = currentRecallantToolsContext();
+  return syncProjectLog(payload, database, context.projectId, context.projectPath);
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -85,10 +127,6 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
     tool,
     ...payload
   };
-}
-
-function db() {
-  return createRecallantDbFromEnv();
 }
 
 function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemorySourceRefInput[] {
@@ -116,21 +154,31 @@ function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemoryS
   ];
 }
 
-async function resolveProjectPath(database?: ReturnType<typeof createRecallantDbFromEnv>) {
+async function resolveProjectPath(
+  database?: ToolDb,
+  contextProjectId?: string | null,
+  contextProjectPath?: string | null
+) {
+  if (contextProjectPath) return { path: contextProjectPath, source: "context" };
+  const databaseProjectPath =
+    database && contextProjectId ? await database.projectPrimaryPath(contextProjectId) : null;
+  if (databaseProjectPath) return { path: databaseProjectPath, source: "database_primary_path" };
   const envProjectPath = process.env.RECALLANT_PROJECT_PATH;
   if (envProjectPath) return { path: envProjectPath, source: "env" };
-  const databaseProjectPath = database
-    ? await database.projectPrimaryPath(process.env.RECALLANT_PROJECT_ID)
-    : null;
-  if (databaseProjectPath) return { path: databaseProjectPath, source: "database_primary_path" };
   return null;
 }
 
 async function syncProjectLog(
   payload: JsonObject,
-  database?: ReturnType<typeof createRecallantDbFromEnv>
+  database?: ToolDb,
+  contextProjectId?: string | null,
+  contextProjectPath?: string | null
 ) {
-  const resolvedProjectPath = await resolveProjectPath(database);
+  const resolvedProjectPath = await resolveProjectPath(
+    database,
+    contextProjectId,
+    contextProjectPath
+  );
   if (!resolvedProjectPath) {
     return {
       status: "skipped",
@@ -214,7 +262,7 @@ ${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).jo
   };
 }
 
-export const recallantTools: readonly RecallantToolDefinition[] = [
+export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_start_session",
     title: "Start Session",
@@ -620,7 +668,7 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
-            repo_sync: await syncProjectLog(args.payload as JsonObject, database)
+            repo_sync: await syncProjectLogInContext(args.payload as JsonObject, database)
           };
         } catch (error) {
           return {
@@ -954,7 +1002,10 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
         }
         let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
         try {
-          projectLogUpdate = await syncProjectLog(args.checkpoint_payload as JsonObject, database);
+          projectLogUpdate = await syncProjectLogInContext(
+            args.checkpoint_payload as JsonObject,
+            database
+          );
         } catch (error) {
           projectLogUpdate = {
             status: "failed",
@@ -994,5 +1045,17 @@ export const recallantTools: readonly RecallantToolDefinition[] = [
     }
   }
 ];
+
+export function createRecallantTools(
+  context: RecallantToolsRuntimeContext = {}
+): readonly RecallantToolDefinition[] {
+  const runtimeContext = contextAwarePath(context);
+  return recallantToolsBase.map((tool) => ({
+    ...tool,
+    handler: (args) => runWithRecallantToolsContext(runtimeContext, () => tool.handler(args))
+  }));
+}
+
+export const recallantTools = createRecallantTools();
 
 export const recallantToolNames = recallantTools.map((tool) => tool.name);

@@ -370,6 +370,27 @@ CREATE TABLE client_adapter_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE remote_mcp_credentials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  client_id TEXT,
+  label TEXT,
+  credential_prefix TEXT NOT NULL,
+  credential_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  created_by TEXT NOT NULL DEFAULT 'cli',
+  rotated_from_credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  CHECK (credential_prefix <> ''),
+  CHECK (credential_hash <> ''),
+  CHECK (hash_version <> '')
+);
+
 CREATE TABLE settings_audit_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scope_kind TEXT NOT NULL CHECK (scope_kind IN ('system', 'developer', 'project', 'session', 'client_adapter')),
@@ -454,6 +475,14 @@ CREATE INDEX idx_paid_api_approval_provider ON paid_api_approval_requests (provi
 CREATE INDEX idx_session_overrides_session_key ON session_overrides (session_id, key, cleared_at);
 CREATE UNIQUE INDEX idx_client_adapter_settings_unique
   ON client_adapter_settings (developer_id, coalesce(project_id, '00000000-0000-0000-0000-000000000000'::uuid), client_kind, key);
+CREATE INDEX idx_remote_mcp_credentials_prefix_active
+  ON remote_mcp_credentials (credential_prefix, credential_hash)
+  WHERE revoked_at IS NULL;
+CREATE INDEX idx_remote_mcp_credentials_scope
+  ON remote_mcp_credentials (project_id, developer_id, client_id, created_at DESC);
+CREATE INDEX idx_remote_mcp_credentials_rotated_from
+  ON remote_mcp_credentials (rotated_from_credential_id)
+  WHERE rotated_from_credential_id IS NOT NULL;
 CREATE INDEX idx_settings_audit_scope ON settings_audit_events (scope_kind, scope_id, created_at DESC);
 CREATE INDEX idx_settings_audit_key ON settings_audit_events (key, created_at DESC);
 

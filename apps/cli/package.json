@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@recallant/adapters": "file:../../packages/adapters",
+    "@recallant/contracts": "file:../../packages/contracts",
     "@recallant/core": "file:../../packages/core",
     "@recallant/mcp": "file:../../packages/mcp",
     "pg": "^8.16.3"

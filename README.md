@@ -96,6 +96,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
 - [Self-hosting](docs/SELF_HOSTING.md): profiles, rollback, verification, and security defaults.
 - [Client setup](docs/CLIENT_SETUP.md): Codex and other MCP clients.
 - [Security](docs/SECURITY.md): public threat model and safe defaults.
+- [Remote MCP contract](docs/MCP_SPEC.md): authenticated `POST /api/mcp` endpoint contract for
+  scoped remote agent clients.
 - [Roadmap](docs/ROADMAP.md): pre-release status and next milestones.
 - [Contributing](CONTRIBUTING.md): how to work on the project.
 
@@ -125,8 +127,11 @@ Current strengths:
 Known pre-release work:
 
 - external-host release rehearsal beyond the disposable clean-host smokes;
-- authenticated remote project access to one central Recallant server from other servers or
-  workstations;
+- remote project access beyond the current smoke-backed slice: authenticated `/api/mcp`, scoped
+  credentials, provisioning output, stdio-to-HTTPS bridge, remote diagnostics, security matrix, and
+  deterministic isolated external-client rehearsal exist, but real separate-machine rehearsal with
+  operator-provided live credentials, broader onboarding, and broader client transport support are
+  still unfinished;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
 - broader real-world existing-project migration pilots;

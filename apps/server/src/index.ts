@@ -3,17 +3,29 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 import { getRecallantCoreInfo } from "@recallant/core";
 import {
+  remoteMcpEndpointPath,
+  remoteMcpErrorCodes,
+  remoteMcpForbiddenSurfaces,
+  remoteMcpProvisioningOutput,
+  remoteMcpPayloadLimits,
+  remoteMcpRequiredHeaders,
+  type RemoteMcpProvisioningAction,
+  type RemoteMcpProvisioningOutput,
+  type RemoteMcpErrorCode
+} from "@recallant/contracts";
+import {
   RecallantDb,
   createRecallantDbFromEnv,
   recallantDatabasePackage,
   type ForgetInput,
   type ProjectSourceKind,
   type ProjectSettingInput,
+  type RemoteMcpCredentialSummary,
   redactSystemActivityValue,
   type ReviewAgentMemoryInput,
   type SystemActivityRecord
 } from "@recallant/db";
-import { recallantMcpServerName } from "@recallant/mcp";
+import { createRecallantTools, recallantMcpServerName } from "@recallant/mcp";
 import { buildManagementChatResponse, type ManagementChatResponse } from "./management-chat.js";
 
 type ReviewDashboardData = Awaited<
@@ -58,6 +70,12 @@ type SourceRenderState = {
   result?: Record<string, unknown> | null;
   action?: "create_space" | "attach_source" | "detach_source";
   message?: string;
+};
+
+type RemoteCredentialRenderState = {
+  action?: RemoteMcpProvisioningAction;
+  result?: RemoteCredentialProvisioningResponse | null;
+  error?: string | null;
 };
 
 const documentationStrategyOptions = [
@@ -260,6 +278,212 @@ function authorize(request: IncomingMessage) {
 
 type WorkbenchAuth = ReturnType<typeof authorize>;
 
+type RemoteMcpJsonRpcId = string | number | null;
+
+type RemoteMcpScope = {
+  projectId: string;
+  developerId: string;
+  clientId: string;
+  sessionId: string | null;
+  traceId: string | null;
+};
+
+type RemoteMcpAuthResult =
+  | {
+      ok: true;
+      mode: "scoped_credential";
+      actorId: string;
+      scope: RemoteMcpScope;
+      credential: {
+        id: string;
+        credential_prefix: string;
+      };
+    }
+  | {
+      ok: false;
+      code: RemoteMcpErrorCode;
+      message: string;
+      httpStatus: number;
+    };
+
+type RemoteMcpProjectBinding = {
+  project_id: string;
+  developer_id: string;
+  primary_path?: string | null;
+};
+
+type RecallantHttpServerOptions = {
+  remoteMcpDatabase?: RecallantDb;
+  workbenchDatabase?: RecallantDb;
+};
+
+export class RemoteMcpRequestError extends Error {
+  constructor(
+    public readonly contractCode: RemoteMcpErrorCode,
+    message: string,
+    public readonly id: RemoteMcpJsonRpcId = null
+  ) {
+    super(message);
+    this.name = "RemoteMcpRequestError";
+  }
+}
+
+function remoteMcpErrorStatus(code: RemoteMcpErrorCode) {
+  return remoteMcpErrorCodes[code].httpStatus;
+}
+
+function remoteMcpJsonRpcCode(code: RemoteMcpErrorCode) {
+  if (code === "VALIDATION_ERROR") return -32600;
+  if (code === "UNAUTHORIZED" || code === "INVALID_SCOPE_TOKEN") return -32001;
+  if (code === "PROJECT_SCOPE_MISMATCH") return -32003;
+  if (code === "PROJECT_NOT_ATTACHED") return -32004;
+  if (code === "PAYLOAD_TOO_LARGE") return -32013;
+  if (code === "RATE_LIMITED") return -32029;
+  if (code === "UNAVAILABLE") return -32053;
+  return -32000;
+}
+
+export function remoteMcpJsonRpcErrorEnvelope(
+  id: RemoteMcpJsonRpcId,
+  code: RemoteMcpErrorCode,
+  message: string
+) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: remoteMcpJsonRpcCode(code),
+      message,
+      data: {
+        code,
+        http_status: remoteMcpErrorStatus(code),
+        retryable: remoteMcpErrorCodes[code].retryable
+      }
+    }
+  };
+}
+
+function remoteMcpHeader(request: IncomingMessage, name: string) {
+  return optionalInput(getHeaderValue(request, name));
+}
+
+export function readRemoteMcpScopeHeaders(request: IncomingMessage): RemoteMcpScope | null {
+  const projectId = remoteMcpHeader(request, "X-Recallant-Project-Id");
+  const developerId = remoteMcpHeader(request, "X-Recallant-Developer-Id");
+  const clientId = remoteMcpHeader(request, "X-Recallant-Client-Id");
+  if (!projectId || !developerId || !clientId) return null;
+  return {
+    projectId,
+    developerId,
+    clientId,
+    sessionId: remoteMcpHeader(request, "X-Recallant-Session-Id"),
+    traceId: remoteMcpHeader(request, "X-Recallant-Trace-Id")
+  };
+}
+
+function extractBearerToken(request: IncomingMessage) {
+  const authorization = remoteMcpHeader(request, "Authorization");
+  if (!authorization?.startsWith("Bearer ")) return null;
+  return authorization.slice("Bearer ".length).trim() || null;
+}
+
+function remoteMcpAuthFailure(code: RemoteMcpErrorCode, message: string): RemoteMcpAuthResult {
+  return { ok: false, code, message, httpStatus: remoteMcpErrorStatus(code) };
+}
+
+function remoteMcpCredentialFailureCode(code: string): RemoteMcpErrorCode {
+  if (code === "missing_token") return "UNAUTHORIZED";
+  return "INVALID_SCOPE_TOKEN";
+}
+
+export async function authorizeRemoteMcpRequest(
+  request: IncomingMessage,
+  database: RecallantDb
+): Promise<RemoteMcpAuthResult> {
+  const scope = readRemoteMcpScopeHeaders(request);
+  if (!scope) {
+    return remoteMcpAuthFailure(
+      "MISSING_PROJECT_OR_DEVELOPER_SCOPE",
+      `Remote MCP requires ${remoteMcpRequiredHeaders.join(", ")}.`
+    );
+  }
+  const bearerToken = extractBearerToken(request);
+  if (!bearerToken) return remoteMcpAuthFailure("UNAUTHORIZED", "Missing remote MCP bearer token.");
+
+  const verification = await database.verifyRemoteMcpCredential({
+    bearerToken,
+    projectId: scope.projectId,
+    developerId: scope.developerId,
+    clientId: scope.clientId
+  });
+  if (!verification.ok) {
+    return remoteMcpAuthFailure(
+      remoteMcpCredentialFailureCode(verification.code),
+      verification.message
+    );
+  }
+  if (
+    verification.credential.project_id !== scope.projectId ||
+    verification.credential.developer_id !== scope.developerId ||
+    (verification.credential.client_id && verification.credential.client_id !== scope.clientId)
+  ) {
+    return remoteMcpAuthFailure("INVALID_SCOPE_TOKEN", "Remote MCP credential scope mismatch.");
+  }
+  return {
+    ok: true,
+    mode: "scoped_credential",
+    actorId: `remote-client:${scope.clientId}`,
+    scope,
+    credential: {
+      id: verification.credential.id,
+      credential_prefix: verification.credential.credential_prefix
+    }
+  };
+}
+
+function containsForbiddenRemoteMcpKey(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const stack = [value as Record<string, unknown>];
+  while (stack.length > 0) {
+    const current = stack.pop() as Record<string, unknown>;
+    for (const [key, nested] of Object.entries(current)) {
+      const normalizedKey = key.toLowerCase();
+      const forbidden = remoteMcpForbiddenSurfaces.find(
+        (surface) => normalizedKey === surface.toLowerCase()
+      );
+      if (forbidden) return forbidden;
+      if (nested && typeof nested === "object") stack.push(nested as Record<string, unknown>);
+    }
+  }
+  return null;
+}
+
+export function assertRemoteMcpBodyIsAllowed(body: unknown, id: RemoteMcpJsonRpcId = null) {
+  const forbidden = containsForbiddenRemoteMcpKey(body);
+  if (forbidden) {
+    throw new RemoteMcpRequestError(
+      "FORBIDDEN_HEADER",
+      `Remote MCP request includes forbidden client surface: ${forbidden}.`,
+      id
+    );
+  }
+}
+
+export function assertRemoteMcpProjectScope(
+  scope: RemoteMcpScope,
+  binding: RemoteMcpProjectBinding | null
+) {
+  if (!binding) {
+    throw new RemoteMcpRequestError("PROJECT_NOT_ATTACHED", "Remote MCP project is not attached.");
+  }
+  if (binding.project_id !== scope.projectId || binding.developer_id !== scope.developerId) {
+    throw new RemoteMcpRequestError(
+      "PROJECT_SCOPE_MISMATCH",
+      "Remote MCP project/developer scope does not match the attached project."
+    );
+  }
+}
+
 type HttpAuditRoute = {
   operation: string;
   group: string;
@@ -298,6 +522,21 @@ function classifyHttpAuditRoute(method: string, pathname: string): HttpAuditRout
       operation: "workbench.api.review_dashboard",
       group: "review",
       route_template: "/api/review-dashboard"
+    };
+  }
+  if (
+    pathname === "/api/remote-credentials" ||
+    pathname === "/api/remote-credential" ||
+    pathname === "/remote-credential"
+  ) {
+    return {
+      operation: "workbench.remote_credential",
+      group: "remote_credential",
+      route_template: pathname.startsWith("/api/")
+        ? pathname === "/api/remote-credentials"
+          ? "/api/remote-credentials"
+          : "/api/remote-credential"
+        : "/remote-credential"
     };
   }
   if (
@@ -518,6 +757,21 @@ async function readJson(request: IncomingMessage) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function readJsonWithLimit(request: IncomingMessage, limitBytes: number) {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > limitBytes) {
+      throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "Remote MCP request body is too large.");
+    }
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
 async function readForm(request: IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -528,6 +782,485 @@ async function readForm(request: IncomingMessage) {
 function optionalInput(value: unknown) {
   const normalized = String(value ?? "").trim();
   return normalized ? normalized : null;
+}
+
+function booleanInput(value: unknown) {
+  return value === true || String(value ?? "").toLowerCase() === "true";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+type RemoteCredentialProvisioningRequest = {
+  action?: unknown;
+  project_id?: unknown;
+  developer_id?: unknown;
+  client_id?: unknown;
+  credential_id?: unknown;
+  label?: unknown;
+  expires_at?: unknown;
+  include_revoked?: unknown;
+  server_url?: unknown;
+  target?: unknown;
+  bridge_client_id?: unknown;
+  session_id?: unknown;
+  trace_id?: unknown;
+};
+
+type RemoteCredentialProvisioningResponse = {
+  ok: boolean;
+  action: RemoteMcpProvisioningAction;
+  credential?: RemoteMcpCredentialSummary;
+  credentials?: RemoteMcpCredentialSummary[];
+  previous_credential?: RemoteMcpCredentialSummary | null;
+  one_time_secret?: string | null;
+  provisioning?: RemoteMcpProvisioningOutput;
+  provisioning_by_credential?: RemoteMcpProvisioningOutput[];
+  secret_print_policy: "create_rotate_only" | "redacted";
+};
+
+function remoteCredentialAction(value: unknown): RemoteMcpProvisioningAction {
+  const action = optionalInput(value) ?? "list";
+  if (action === "create" || action === "rotate" || action === "revoke" || action === "list") {
+    return action;
+  }
+  throw new Error("VALIDATION_ERROR: unsupported remote credential action");
+}
+
+function requireRemoteCredentialScope(input: RemoteCredentialProvisioningRequest) {
+  const projectId = optionalInput(input.project_id);
+  const developerId = optionalInput(input.developer_id);
+  if (!projectId || !developerId) {
+    throw new Error("VALIDATION_ERROR: project_id and developer_id are required");
+  }
+  return {
+    projectId,
+    developerId,
+    clientId: optionalInput(input.client_id)
+  };
+}
+
+function remoteCredentialServerUrl(
+  input: RemoteCredentialProvisioningRequest,
+  request: IncomingMessage
+) {
+  const explicit = optionalInput(input.server_url);
+  if (explicit) {
+    const parsed = new URL(explicit);
+    if (parsed.protocol !== "https:") {
+      throw new Error("VALIDATION_ERROR: remote credential provisioning server_url must use https");
+    }
+    parsed.hash = "";
+    parsed.search = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString().replace(/\/$/, "");
+  }
+  const forwardedProto = optionalInput(getHeaderValue(request, "x-forwarded-proto"));
+  const forwardedHost =
+    optionalInput(getHeaderValue(request, "x-forwarded-host")) ??
+    optionalInput(getHeaderValue(request, "host"));
+  if (forwardedProto === "https" && forwardedHost) return `https://${forwardedHost}`;
+  return "https://recallant.example.com";
+}
+
+function remoteCredentialBridgeClientId(
+  input: RemoteCredentialProvisioningRequest,
+  credential: RemoteMcpCredentialSummary
+) {
+  return optionalInput(input.bridge_client_id) ?? credential.client_id ?? "remote-agent";
+}
+
+function remoteCredentialProvisioning(input: {
+  action: RemoteMcpProvisioningAction;
+  request: RemoteCredentialProvisioningRequest;
+  httpRequest: IncomingMessage;
+  credential: RemoteMcpCredentialSummary;
+  previousCredential?: RemoteMcpCredentialSummary | null;
+  secret?: string | null;
+  includeSecret: boolean;
+}) {
+  return remoteMcpProvisioningOutput({
+    action: input.action,
+    target: optionalInput(input.request.target) ?? "codex",
+    serverUrl: remoteCredentialServerUrl(input.request, input.httpRequest),
+    credential: input.credential,
+    previousCredential: input.previousCredential,
+    bridgeClientId: remoteCredentialBridgeClientId(input.request, input.credential),
+    credentialSecret: input.secret,
+    includeSecret: input.includeSecret,
+    sessionId: optionalInput(input.request.session_id),
+    traceId: optionalInput(input.request.trace_id)
+  });
+}
+
+async function remoteCredentialInScope(
+  database: RecallantDb,
+  input: RemoteCredentialProvisioningRequest
+) {
+  const scope = requireRemoteCredentialScope(input);
+  const credentialId = optionalInput(input.credential_id);
+  if (!credentialId) throw new Error("VALIDATION_ERROR: credential_id is required");
+  const credentials = await database.listRemoteMcpCredentials({
+    projectId: scope.projectId,
+    developerId: scope.developerId,
+    clientId: scope.clientId,
+    includeRevoked: true
+  });
+  const credential = credentials.find((row) => row.id === credentialId);
+  if (!credential) {
+    throw new Error("VALIDATION_ERROR: remote MCP credential does not match requested scope");
+  }
+  return credential;
+}
+
+async function handleRemoteCredentialProvisioning(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteCredentialProvisioningRequest
+): Promise<RemoteCredentialProvisioningResponse> {
+  const action = remoteCredentialAction(input.action);
+  const scope = requireRemoteCredentialScope(input);
+  if (action === "list") {
+    const credentials = await database.listRemoteMcpCredentials({
+      projectId: scope.projectId,
+      developerId: scope.developerId,
+      clientId: scope.clientId,
+      includeRevoked: booleanInput(input.include_revoked)
+    });
+    return {
+      ok: true,
+      action,
+      credentials,
+      provisioning_by_credential: credentials.map((credential) =>
+        remoteCredentialProvisioning({
+          action,
+          request: input,
+          httpRequest: request,
+          credential,
+          includeSecret: false
+        })
+      ),
+      secret_print_policy: "redacted"
+    };
+  }
+  if (action === "create") {
+    const result = await database.createRemoteMcpCredential({
+      projectId: scope.projectId,
+      developerId: scope.developerId,
+      clientId: scope.clientId,
+      label: optionalInput(input.label),
+      expiresAt: optionalInput(input.expires_at),
+      createdBy: "workbench"
+    });
+    return {
+      ok: true,
+      action,
+      credential: result.credential,
+      one_time_secret: result.secret,
+      provisioning: remoteCredentialProvisioning({
+        action,
+        request: input,
+        httpRequest: request,
+        credential: result.credential,
+        secret: result.secret,
+        includeSecret: true
+      }),
+      secret_print_policy: "create_rotate_only"
+    };
+  }
+  const scopedCredential = await remoteCredentialInScope(database, input);
+  if (action === "rotate") {
+    const result = await database.rotateRemoteMcpCredential({
+      credentialId: scopedCredential.id,
+      expiresAt: optionalInput(input.expires_at),
+      rotatedBy: "workbench"
+    });
+    return {
+      ok: true,
+      action,
+      credential: result.credential,
+      previous_credential: result.previous,
+      one_time_secret: result.secret,
+      provisioning: remoteCredentialProvisioning({
+        action,
+        request: input,
+        httpRequest: request,
+        credential: result.credential,
+        previousCredential: result.previous,
+        secret: result.secret,
+        includeSecret: true
+      }),
+      secret_print_policy: "create_rotate_only"
+    };
+  }
+  const credential = await database.revokeRemoteMcpCredential({
+    credentialId: scopedCredential.id,
+    revokedBy: "workbench"
+  });
+  return {
+    ok: true,
+    action,
+    credential,
+    provisioning: remoteCredentialProvisioning({
+      action,
+      request: input,
+      httpRequest: request,
+      credential,
+      includeSecret: false
+    }),
+    secret_print_policy: "redacted"
+  };
+}
+
+function remoteMcpJsonRpcId(value: unknown): RemoteMcpJsonRpcId {
+  if (!isRecord(value)) return null;
+  const id = value.id;
+  return typeof id === "string" || typeof id === "number" || id === null ? id : null;
+}
+
+function remoteMcpJsonRpcResult(id: RemoteMcpJsonRpcId, result: Record<string, unknown>) {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function writeRemoteMcpJson(
+  response: ServerResponse,
+  statusCode: number,
+  payload: Record<string, unknown>
+) {
+  write(response, statusCode, JSON.stringify(payload), "application/json");
+}
+
+function remoteMcpErrorFromUnknown(error: unknown, fallbackId: RemoteMcpJsonRpcId = null) {
+  if (error instanceof RemoteMcpRequestError) {
+    return {
+      statusCode: remoteMcpErrorStatus(error.contractCode),
+      code: error.contractCode,
+      body: remoteMcpJsonRpcErrorEnvelope(error.id ?? fallbackId, error.contractCode, error.message)
+    };
+  }
+  if (error instanceof SyntaxError) {
+    return {
+      statusCode: remoteMcpErrorStatus("VALIDATION_ERROR"),
+      code: "VALIDATION_ERROR" as RemoteMcpErrorCode,
+      body: remoteMcpJsonRpcErrorEnvelope(fallbackId, "VALIDATION_ERROR", "Malformed JSON body.")
+    };
+  }
+  return {
+    statusCode: remoteMcpErrorStatus("UNAVAILABLE"),
+    code: "UNAVAILABLE" as RemoteMcpErrorCode,
+    body: remoteMcpJsonRpcErrorEnvelope(
+      fallbackId,
+      "UNAVAILABLE",
+      "Remote MCP request could not be completed."
+    )
+  };
+}
+
+async function startRemoteMcpAudit(input: {
+  database: RecallantDb;
+  auth: RemoteMcpAuthResult;
+  method: string;
+  request: IncomingMessage;
+}) {
+  const scope = input.auth.ok ? input.auth.scope : readRemoteMcpScopeHeaders(input.request);
+  return input.database.startSystemActivity({
+    trace_id: scope?.traceId,
+    developer_id: scope?.developerId,
+    project_id: uuidOrNull(scope?.projectId) ?? scope?.projectId ?? null,
+    session_id: uuidOrNull(scope?.sessionId) ?? scope?.sessionId ?? null,
+    surface: "remote_mcp",
+    operation: `remote_mcp.${input.method || "unknown"}`,
+    actor_kind: input.auth.ok ? "agent" : "anonymous",
+    actor_id: input.auth.ok ? input.auth.actorId : "unauthorized",
+    client_kind: "remote_mcp",
+    related_ids: {
+      client_id: scope?.clientId ?? null,
+      method: input.method || "unknown",
+      credential_id: input.auth.ok ? input.auth.credential.id : null,
+      credential_prefix: input.auth.ok ? input.auth.credential.credential_prefix : null
+    },
+    metadata: {
+      audit_policy: "remote_mcp_redacted_no_raw_body_no_auth_headers",
+      auth_mode: input.auth.ok ? input.auth.mode : "rejected",
+      authorized: input.auth.ok,
+      credential_id: input.auth.ok ? input.auth.credential.id : null,
+      credential_prefix: input.auth.ok ? input.auth.credential.credential_prefix : null,
+      required_headers_present: Object.fromEntries(
+        remoteMcpRequiredHeaders.map((header) => [
+          header,
+          Boolean(remoteMcpHeader(input.request, header))
+        ])
+      ),
+      optional_headers_present: {
+        "X-Recallant-Session-Id": Boolean(remoteMcpHeader(input.request, "X-Recallant-Session-Id")),
+        "X-Recallant-Trace-Id": Boolean(remoteMcpHeader(input.request, "X-Recallant-Trace-Id"))
+      }
+    }
+  });
+}
+
+async function finishRemoteMcpAudit(input: {
+  database: RecallantDb;
+  activity: SystemActivityRecord | null;
+  statusCode: number;
+  startedAt: number;
+  errorCode?: RemoteMcpErrorCode | null;
+  method: string;
+}) {
+  if (!input.activity) return;
+  await input.database.finishSystemActivity({
+    id: input.activity.id,
+    status: input.statusCode >= 500 ? "error" : input.statusCode >= 400 ? "skipped" : "success",
+    error_code: input.errorCode ?? (input.statusCode >= 400 ? `HTTP_${input.statusCode}` : null),
+    error_message: input.errorCode ? input.errorCode : null,
+    metadata: {
+      operation: `remote_mcp.${input.method || "unknown"}`,
+      http_status: input.statusCode,
+      duration_ms: Date.now() - input.startedAt,
+      error_code: input.errorCode ?? null
+    }
+  });
+}
+
+function remoteMcpToolList() {
+  return createRecallantTools().map((tool) => ({
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    input_schema: {
+      type: "object",
+      properties: Object.fromEntries(
+        Object.keys(tool.inputSchema.shape).map((name) => [name, { title: name }])
+      )
+    }
+  }));
+}
+
+async function dispatchRemoteMcpJsonRpc(input: {
+  database: RecallantDb;
+  body: unknown;
+  auth: Extract<RemoteMcpAuthResult, { ok: true }>;
+  projectPath: string | null;
+}) {
+  if (!isRecord(input.body) || input.body.jsonrpc !== "2.0") {
+    throw new RemoteMcpRequestError(
+      "VALIDATION_ERROR",
+      "Remote MCP requires a JSON-RPC 2.0 object."
+    );
+  }
+  const id = remoteMcpJsonRpcId(input.body);
+  const method = optionalInput(input.body.method);
+  const params = isRecord(input.body.params) ? input.body.params : {};
+  if (method === "initialize") {
+    return remoteMcpJsonRpcResult(id, {
+      protocolVersion: "2025-03-26",
+      serverInfo: { name: recallantMcpServerName, version: "0.0.0" },
+      capabilities: { tools: { listChanged: false } },
+      transport: "json_rpc_http"
+    });
+  }
+  if (method === "tools/list") {
+    return remoteMcpJsonRpcResult(id, { tools: remoteMcpToolList() });
+  }
+  if (method === "tools/call") {
+    const toolName = optionalInput(params.name);
+    if (!toolName) {
+      throw new RemoteMcpRequestError("VALIDATION_ERROR", "tools/call requires params.name.", id);
+    }
+    const tool = createRecallantTools({
+      projectId: input.auth.scope.projectId,
+      developerId: input.auth.scope.developerId,
+      projectPath: input.projectPath,
+      getDatabase: () => input.database
+    }).find((candidate) => candidate.name === toolName);
+    if (!tool) {
+      throw new RemoteMcpRequestError(
+        "VALIDATION_ERROR",
+        `Unknown Recallant tool: ${toolName}.`,
+        id
+      );
+    }
+    const argumentsInput = isRecord(params.arguments) ? params.arguments : {};
+    const parsedArgs = tool.inputSchema.parse(argumentsInput);
+    const payload = await tool.handler(parsedArgs);
+    return remoteMcpJsonRpcResult(id, {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload
+    });
+  }
+  throw new RemoteMcpRequestError(
+    "VALIDATION_ERROR",
+    `Unsupported remote MCP method: ${method}.`,
+    id
+  );
+}
+
+async function handleRemoteMcpRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  databaseOverride?: RecallantDb
+) {
+  const startedAt = Date.now();
+  const database = databaseOverride ?? createRecallantDbFromEnv();
+  if (!database) {
+    writeRemoteMcpJson(
+      response,
+      remoteMcpErrorStatus("UNAVAILABLE"),
+      remoteMcpJsonRpcErrorEnvelope(null, "UNAVAILABLE", "Remote MCP database is unavailable.")
+    );
+    return;
+  }
+  let activity: SystemActivityRecord | null = null;
+  let statusCode = 200;
+  let errorCode: RemoteMcpErrorCode | null = null;
+  let method = "unknown";
+  let id: RemoteMcpJsonRpcId = null;
+  try {
+    const body = await readJsonWithLimit(request, remoteMcpPayloadLimits.requestHardBytes);
+    id = remoteMcpJsonRpcId(body);
+    method = isRecord(body) && typeof body.method === "string" ? body.method : "unknown";
+    assertRemoteMcpBodyIsAllowed(body, id);
+    const auth = await authorizeRemoteMcpRequest(request, database);
+    activity = await startRemoteMcpAudit({ database, auth, method, request });
+    if (!auth.ok) {
+      statusCode = auth.httpStatus;
+      errorCode = auth.code;
+      writeRemoteMcpJson(
+        response,
+        statusCode,
+        remoteMcpJsonRpcErrorEnvelope(id, auth.code, auth.message)
+      );
+      return;
+    }
+    const binding = await database.getProjectBinding(auth.scope.projectId);
+    assertRemoteMcpProjectScope(auth.scope, binding);
+    const projectPath =
+      binding?.primary_path ?? (await database.projectPrimaryPath(auth.scope.projectId));
+    const result = await dispatchRemoteMcpJsonRpc({ database, body, auth, projectPath });
+    writeRemoteMcpJson(response, statusCode, result);
+  } catch (error) {
+    const remoteError = remoteMcpErrorFromUnknown(error, id);
+    statusCode = remoteError.statusCode;
+    errorCode = remoteError.code;
+    if (!activity) {
+      const auth = remoteMcpAuthFailure(
+        remoteError.code,
+        "Remote MCP request failed before authorization completed."
+      );
+      activity = await startRemoteMcpAudit({ database, auth, method, request }).catch(() => null);
+    }
+    writeRemoteMcpJson(response, statusCode, remoteError.body);
+  } finally {
+    await finishRemoteMcpAudit({
+      database,
+      activity,
+      statusCode,
+      startedAt,
+      errorCode,
+      method
+    }).catch(() => undefined);
+  }
 }
 
 function buildForgetInput(body: Record<string, unknown>): ForgetInput {
@@ -1835,7 +2568,7 @@ function renderMemorySpaceForms(data: ReviewDashboardData) {
         <option value="agent_work">Agent work</option>
         <option value="personal_life">Personal / work operations</option>
       </select></label>
-      <label>Optional folder or path<input name="primary_path" placeholder="/ai/example or leave empty" /></label>
+      <label>Optional folder or path<input name="primary_path" placeholder="/path/to/project or leave empty" /></label>
       <button type="submit">Create space</button>
     </form>
   </details>
@@ -1854,7 +2587,7 @@ function renderMemorySpaceForms(data: ReviewDashboardData) {
         <option value="other">Other source</option>
       </select></label>
       <label>Label<input name="label" required placeholder="Docs folder, Google Drive notes, production server" /></label>
-      <label>Location or reference<input name="uri" placeholder="/ai/project, github:owner/repo, gdrive:folder-id" /></label>
+      <label>Location or reference<input name="uri" placeholder="/path/to/project, github:owner/repo, gdrive:folder-id" /></label>
       <label class="checkbox-line"><input type="checkbox" name="primary" value="true" /> Make this the primary source</label>
       <button type="submit">Attach source</button>
     </form>
@@ -2577,6 +3310,140 @@ function renderSettingForm(input: {
     <input type="hidden" name="reason" value="${escapeHtml(input.reason)}" />
     <button${input.danger ? ' class="danger"' : ""} type="submit">Save</button>
   </form>`;
+}
+
+function currentProjectDeveloperId(data: ReviewDashboardData) {
+  return optionalInput(currentProject(data).developer_id);
+}
+
+function renderRemoteCredentialScopeFields(data: ReviewDashboardData, clientId = "") {
+  return `<input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+    <label>Developer scope<input name="developer_id" value="${escapeHtml(currentProjectDeveloperId(data) ?? "")}" required /></label>
+    <label>Client scope<input name="client_id" value="${escapeHtml(clientId)}" placeholder="optional client id" /></label>`;
+}
+
+function renderProvisioningOutput(provisioning: RemoteMcpProvisioningOutput | null | undefined) {
+  if (!provisioning) return "";
+  return `<div class="setting-result">
+    <strong>Remote bridge provisioning output</strong>
+    <dl>
+      <dt>Project</dt><dd>${escapeHtml(provisioning.scope.project_id)}</dd>
+      <dt>Developer</dt><dd>${escapeHtml(provisioning.scope.developer_id)}</dd>
+      <dt>Credential client</dt><dd>${escapeHtml(provisioning.scope.credential_client_id ?? "any client")}</dd>
+      <dt>Bridge client</dt><dd>${escapeHtml(provisioning.scope.bridge_client_id)}</dd>
+      <dt>Secret policy</dt><dd>${escapeHtml(provisioning.one_time_secret.policy)}</dd>
+      <dt>Config file</dt><dd>${escapeHtml(provisioning.provisioning.config_file)}</dd>
+    </dl>
+    ${
+      provisioning.one_time_secret.shown
+        ? `<p class="why">The raw credential is shown only in this create/rotate response. Store it in the external agent secret store now.</p>`
+        : `<p>Credential material is redacted for this action.</p>`
+    }
+    <label>Bridge command<textarea rows="4" readonly>${escapeHtml(provisioning.provisioning.command)}</textarea></label>
+    <label>Client config<textarea rows="8" readonly>${escapeHtml(provisioning.provisioning.rendered_config)}</textarea></label>
+  </div>`;
+}
+
+function renderRemoteCredentialResult(state?: RemoteCredentialRenderState) {
+  if (!state) return "";
+  if (state.error) {
+    return `<article class="setting-result">
+      <strong>Remote credential action failed.</strong>
+      <p>${escapeHtml(state.error)}</p>
+    </article>`;
+  }
+  const result = state.result;
+  if (!result) return "";
+  const credential = result.credential;
+  const list = result.credentials ?? [];
+  return `<article class="setting-result">
+    <strong>${escapeHtml(`Remote credential ${result.action} completed.`)}</strong>
+    ${
+      credential
+        ? `<dl>
+      <dt>ID</dt><dd>${escapeHtml(credential.id)}</dd>
+      <dt>Status</dt><dd>${escapeHtml(credential.status)}</dd>
+      <dt>Project</dt><dd>${escapeHtml(credential.project_id)}</dd>
+      <dt>Developer</dt><dd>${escapeHtml(credential.developer_id)}</dd>
+      <dt>Client</dt><dd>${escapeHtml(credential.client_id ?? "any client")}</dd>
+      <dt>Prefix</dt><dd>${escapeHtml(credential.credential_prefix)}</dd>
+      <dt>Rotated from</dt><dd>${escapeHtml(credential.rotated_from_credential_id ?? "none")}</dd>
+      <dt>Revoked at</dt><dd>${escapeHtml(credential.revoked_at ?? "not revoked")}</dd>
+    </dl>`
+        : ""
+    }
+    ${
+      result.one_time_secret
+        ? `<label>One-time credential secret<textarea rows="3" readonly>${escapeHtml(result.one_time_secret)}</textarea></label>`
+        : ""
+    }
+    ${
+      list.length > 0
+        ? `<div class="item-list">${list
+            .map(
+              (row) => `<article class="item">
+          <h3>${escapeHtml(row.label ?? row.id)}</h3>
+          <p>${escapeHtml(row.status)} · ${escapeHtml(row.client_id ?? "any client")} · prefix ${escapeHtml(row.credential_prefix)}</p>
+          <dl>
+            <dt>ID</dt><dd>${escapeHtml(row.id)}</dd>
+            <dt>Rotated from</dt><dd>${escapeHtml(row.rotated_from_credential_id ?? "none")}</dd>
+            <dt>Revoked</dt><dd>${escapeHtml(row.revoked_at ?? "not revoked")}</dd>
+          </dl>
+        </article>`
+            )
+            .join("")}</div>`
+        : result.action === "list"
+          ? `<p class="empty">No remote MCP credentials matched this scope.</p>`
+          : ""
+    }
+    ${renderProvisioningOutput(result.provisioning)}
+  </article>`;
+}
+
+function renderRemoteCredentials(data: ReviewDashboardData, state?: RemoteCredentialRenderState) {
+  return `${renderRemoteCredentialResult(state)}
+    <div class="settings-grid">
+      <form class="setting-form" method="post" action="/remote-credential">
+        <input type="hidden" name="action" value="create" />
+        <input type="hidden" name="view" value="settings" />
+        ${renderRemoteCredentialScopeFields(data)}
+        <label>Label<input name="label" placeholder="external agent or workstation" /></label>
+        <label>Expires at<input name="expires_at" placeholder="optional ISO timestamp" /></label>
+        <label>HTTPS server URL<input name="server_url" value="https://recallant.example.com" required /></label>
+        <label>Target<select name="target">${optionTags(["codex", "cursor", "claude_code", "generic"], "codex")}</select></label>
+        <label>Bridge client id<input name="bridge_client_id" value="remote-agent" required /></label>
+        <button type="submit">Create credential</button>
+      </form>
+      <form class="setting-form" method="post" action="/remote-credential">
+        <input type="hidden" name="action" value="rotate" />
+        <input type="hidden" name="view" value="settings" />
+        ${renderRemoteCredentialScopeFields(data)}
+        <label>Credential ID<input name="credential_id" required /></label>
+        <label>Expires at<input name="expires_at" placeholder="optional ISO timestamp" /></label>
+        <label>HTTPS server URL<input name="server_url" value="https://recallant.example.com" required /></label>
+        <label>Target<select name="target">${optionTags(["codex", "cursor", "claude_code", "generic"], "codex")}</select></label>
+        <label>Bridge client id<input name="bridge_client_id" value="remote-agent" required /></label>
+        <button type="submit">Rotate credential</button>
+      </form>
+      <form class="setting-form" method="post" action="/remote-credential">
+        <input type="hidden" name="action" value="revoke" />
+        <input type="hidden" name="view" value="settings" />
+        ${renderRemoteCredentialScopeFields(data)}
+        <label>Credential ID<input name="credential_id" required /></label>
+        <label>HTTPS server URL<input name="server_url" value="https://recallant.example.com" required /></label>
+        <button class="danger" type="submit">Revoke credential</button>
+      </form>
+      <form class="setting-form" method="post" action="/remote-credential">
+        <input type="hidden" name="action" value="list" />
+        <input type="hidden" name="view" value="settings" />
+        ${renderRemoteCredentialScopeFields(data)}
+        <label>Include revoked<select name="include_revoked">${optionTags(["false", "true"], "false")}</select></label>
+        <label>HTTPS server URL<input name="server_url" value="https://recallant.example.com" required /></label>
+        <label>Target<select name="target">${optionTags(["codex", "cursor", "claude_code", "generic"], "codex")}</select></label>
+        <label>Bridge client id<input name="bridge_client_id" value="remote-agent" required /></label>
+        <button type="submit">List credentials</button>
+      </form>
+    </div>`;
 }
 
 function renderSettings(data: ReviewDashboardData, state?: SettingRenderState) {
@@ -3671,6 +4538,7 @@ function renderDashboard(
     memoryForget?: MemoryForgetRenderState;
     setting?: SettingRenderState;
     source?: SourceRenderState;
+    remoteCredential?: RemoteCredentialRenderState;
     view?: WorkbenchView;
     projectChooser?: boolean;
   }
@@ -3681,6 +4549,7 @@ function renderDashboard(
   const memoryForget = state?.memoryForget;
   const setting = state?.setting;
   const source = state?.source;
+  const remoteCredential = state?.remoteCredential;
   const activeView = normalizeWorkbenchView(state?.view);
   const projectChooser = state?.projectChooser === true;
   const showAsk = !projectChooser && showWorkbenchView(activeView, "ask");
@@ -4980,6 +5849,10 @@ function renderDashboard(
               <summary><span>Settings</span><small>Project controls and technical values</small></summary>
               ${renderSettings(data, setting)}
             </details>
+            <details class="operation-panel" id="remote-credentials"${remoteCredential ? " open" : ""}>
+              <summary><span>Remote MCP Credentials</span><small>Scoped bridge provisioning for external agents</small></summary>
+              ${renderRemoteCredentials(data, remoteCredential)}
+            </details>
           </div>
         </section>`
             : ""
@@ -4993,7 +5866,7 @@ function renderDashboard(
 </html>`;
 }
 
-export function createRecallantHttpServer() {
+export function createRecallantHttpServer(options: RecallantHttpServerOptions = {}) {
   return createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://localhost");
     if (requestUrl.pathname === "/health") {
@@ -5003,6 +5876,10 @@ export function createRecallantHttpServer() {
         JSON.stringify({ ok: true, ...describeServerBoundary() }),
         "application/json"
       );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === remoteMcpEndpointPath) {
+      await handleRemoteMcpRequest(request, response, options.remoteMcpDatabase);
       return;
     }
     const auth = authorize(request);
@@ -5015,7 +5892,7 @@ export function createRecallantHttpServer() {
       }
       const sessionCookie =
         auth.mode === "cloudflare" && auth.email ? createSessionCookie(auth.email) : "";
-      const database = createRecallantDbFromEnv();
+      const database = options.workbenchDatabase ?? createRecallantDbFromEnv();
       if (!database) {
         write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
         return;
@@ -5055,6 +5932,81 @@ export function createRecallantHttpServer() {
           workbenchView
         );
         write(response, 200, JSON.stringify(dashboard), "application/json");
+        return;
+      }
+      if (request.method === "GET" && requestUrl.pathname === "/api/remote-credentials") {
+        const body: RemoteCredentialProvisioningRequest = {
+          action: "list",
+          project_id: requestUrl.searchParams.get("project_id"),
+          developer_id: requestUrl.searchParams.get("developer_id"),
+          client_id: requestUrl.searchParams.get("client_id"),
+          include_revoked: requestUrl.searchParams.get("include_revoked"),
+          server_url: requestUrl.searchParams.get("server_url"),
+          target: requestUrl.searchParams.get("target"),
+          bridge_client_id: requestUrl.searchParams.get("bridge_client_id"),
+          session_id: requestUrl.searchParams.get("session_id"),
+          trace_id: requestUrl.searchParams.get("trace_id")
+        };
+        try {
+          const result = await handleRemoteCredentialProvisioning(database, request, body);
+          write(response, 200, JSON.stringify(result), "application/json");
+        } catch (error) {
+          write(
+            response,
+            409,
+            JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+            "application/json"
+          );
+        }
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/remote-credential") {
+        const body = (await readJson(request)) as RemoteCredentialProvisioningRequest;
+        try {
+          const result = await handleRemoteCredentialProvisioning(database, request, body);
+          write(response, 200, JSON.stringify(result), "application/json");
+        } catch (error) {
+          write(
+            response,
+            409,
+            JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+            "application/json"
+          );
+        }
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/remote-credential") {
+        const body = (await readForm(request)) as RemoteCredentialProvisioningRequest & {
+          view?: string;
+        };
+        let remoteCredential: RemoteCredentialRenderState;
+        try {
+          remoteCredential = {
+            action: remoteCredentialAction(body.action),
+            result: await handleRemoteCredentialProvisioning(database, request, body)
+          };
+        } catch (error) {
+          remoteCredential = {
+            action: "list",
+            error: safeHttpAuditErrorMessage(error)
+          };
+        }
+        const remoteCredentialDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: optionalInput(body.project_id) ?? dashboardInput.project_id,
+            selected_memory_id: dashboardInput.selected_memory_id
+          })
+        );
+        write(
+          response,
+          remoteCredential.error ? 409 : 200,
+          renderDashboard(remoteCredentialDashboard, {
+            remoteCredential,
+            view: "settings"
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
         return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/management-chat") {
