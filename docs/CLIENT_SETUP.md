@@ -284,7 +284,8 @@ The evidence JSON and summary redact the credential, host name, project path, re
 database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
 gate for deciding whether the remote existing-server path is ready for a beginner-facing command.
 One real external Mac rehearsal passed this gate on 2026-06-20 with evidence run
-`8fa139a4-13f2-419e-8ae7-1611e16c86fa`.
+`c01ae9a7-a60c-4e12-bedf-d4be222c58b0`; the central server trace check confirmed next-session
+recall, Workbench readiness evidence, and redacted audit rows.
 
 The older live-input smoke remains useful for transport/security matrix checks:
 

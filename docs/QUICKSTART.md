@@ -117,8 +117,9 @@ recallant remote-acceptance \
 
 That acceptance command reads the scoped remote connection from the project-local client config
 written by bootstrap, then writes redacted evidence for bootstrap, remote-doctor, remote MCP
-session/context/write/checkpoint/recall, and forbidden local-artifact checks. One real external Mac
-rehearsal passed this gate on 2026-06-20; keep this path operator-led until broader remote-client
+session/context/write/checkpoint/recall, next-session recall, and forbidden local-artifact checks.
+One real external Mac rehearsal passed this gate on 2026-06-20, with central-server verification of
+Workbench readiness and redacted audit rows; keep this path operator-led until broader remote-client
 polish and repeat release rehearsals are complete.
 
 For strict Capture/Recall Acceptance, validate that evidence on the central Recallant server:
