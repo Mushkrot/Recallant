@@ -4294,6 +4294,7 @@ function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: Sanit
   const confirmation = asRecord(result.confirmation);
   const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
   const projectId = String(project.project_id ?? data.current_project_id ?? "");
+  const projectPath = typeof project.primary_path === "string" ? project.primary_path : "";
   const dryRun = result.dry_run !== false;
   const status =
     result.status === "purged"
@@ -4323,6 +4324,7 @@ function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: Sanit
       dryRun && projectId && confirmation.token
         ? `<form class="confirm-form" method="post" action="/project-sanitize">
             <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+            ${projectPath ? `<input type="hidden" name="project_path" value="${escapeHtml(projectPath)}" />` : ""}
             <input type="hidden" name="mode" value="purge" />
             <input type="hidden" name="confirm_token" value="${escapeHtml(String(confirmation.token))}" />
             <button class="danger" type="submit">Confirm purge from Recallant</button>

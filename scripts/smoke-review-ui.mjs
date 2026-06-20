@@ -60,8 +60,10 @@ try {
 const developerId = randomUUID();
 const projectId = randomUUID();
 const sandboxProjectId = randomUUID();
+const purgeProjectId = randomUUID();
 const emptyDocsProjectId = randomUUID();
 const sandboxPath = `/ai/recallant-pilots/review-ui-sandbox-${randomUUID()}`;
+const purgePath = `/tmp/recallant-review-ui-purge-${randomUUID()}`;
 const emptyDocsPath = `starter-docs-fixture-${randomUUID()}`;
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
@@ -75,6 +77,12 @@ const sandboxDb = new RecallantDb({
   projectId: sandboxProjectId,
   projectPath: sandboxPath
 });
+const purgeDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectId: purgeProjectId,
+  projectPath: purgePath
+});
 const emptyDocsDb = new RecallantDb({
   databaseUrl,
   developerId,
@@ -83,6 +91,7 @@ const emptyDocsDb = new RecallantDb({
 });
 await db.ensureProject(process.cwd());
 await sandboxDb.ensureProject(sandboxPath);
+await purgeDb.ensureProject(purgePath);
 await emptyDocsDb.ensureProject(emptyDocsPath);
 const humanMemorySpace = await db.createMemorySpace({
   name: "Personal Operations UI Smoke",
@@ -2524,6 +2533,64 @@ try {
     await staleUiDb.close();
   }
 
+  const purgeDryRunForm = await fetch(`${baseUrl}/project-sanitize`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: purgeProjectId,
+      project_path: purgePath,
+      mode: "purge"
+    })
+  });
+  const purgeDryRunFormHtml = await purgeDryRunForm.text();
+  const purgeConfirmToken = `recallant-purge-project-${purgeProjectId}`;
+  if (
+    purgeDryRunForm.status !== 200 ||
+    !purgeDryRunFormHtml.includes("Purge dry-run complete. Nothing changed yet.") ||
+    !purgeDryRunFormHtml.includes("Confirm purge from Recallant") ||
+    !purgeDryRunFormHtml.includes(`name="project_path" value="${purgePath}"`) ||
+    !purgeDryRunFormHtml.includes(purgeConfirmToken)
+  ) {
+    throw new Error(
+      `Project purge dry-run form failed: ${purgeDryRunForm.status} ${purgeDryRunFormHtml}`
+    );
+  }
+  const purgeConfirmForm = await fetch(`${baseUrl}/project-sanitize`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: purgeProjectId,
+      project_path: purgePath,
+      mode: "purge",
+      confirm_token: purgeConfirmToken
+    })
+  });
+  if (purgeConfirmForm.status !== 303 || purgeConfirmForm.headers.get("location") !== "/review") {
+    const failedBody = await purgeConfirmForm.text();
+    throw new Error(
+      `Project purge confirm form failed: ${purgeConfirmForm.status} ${failedBody.slice(0, 900)}`
+    );
+  }
+  const purgedProject = await db.pool.query("SELECT id FROM projects WHERE id = $1", [
+    purgeProjectId
+  ]);
+  if (purgedProject.rowCount !== 0) {
+    throw new Error(`Project purge confirm left project row behind: ${purgeProjectId}`);
+  }
+  const postPurgeDashboard = await db.getReviewDashboard({ project_id: projectId });
+  if (postPurgeDashboard.projects.some((project) => project.project_id === purgeProjectId)) {
+    throw new Error(
+      `Purged project is still visible: ${JSON.stringify(postPurgeDashboard.projects)}`
+    );
+  }
+
   const detachConfirmForm = await fetch(`${baseUrl}/project-detach`, {
     method: "POST",
     redirect: "manual",
@@ -3184,6 +3251,7 @@ try {
   delete process.env.RECALLANT_ADMIN_EMAILS;
   server.close();
   await emptyDocsDb.close();
+  await purgeDb.close();
   await sandboxDb.close();
   await db.close();
 }
