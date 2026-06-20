@@ -137,6 +137,17 @@ usually did not change the target project folder; check for `.recallant`, `.code
 `AGENTS.md`, and `PROJECT_LOG.md` before deleting anything. Local install rollback guidance is in
 [Self-Hosting](SELF_HOSTING.md#rollback).
 
+If you only need to retry remote bootstrap for this project, remove only the remote client entry:
+
+```bash
+recallant remote-cleanup --project-dir .
+recallant remote-cleanup --project-dir . --confirm
+```
+
+That command preserves source files, `.recallant`, Docker/Postgres, central Recallant records, and
+unrelated client settings. To also remove the local `recallant` CLI wrapper installed for remote
+bootstrap, add `--remove-cli-wrapper` to the confirmed command.
+
 ## 3. If Onboarding Stops
 
 If storage is missing in an interactive terminal, onboarding asks whether to set up local single-user

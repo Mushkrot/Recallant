@@ -280,6 +280,36 @@ recallant remote-acceptance cleanup --project-dir . --confirm
 This cleanup preserves source files, `AGENTS.md`, `PROJECT_LOG.md`, and the remote client config. It
 does not delete central Recallant server records.
 
+To disconnect only the remote client config before retrying bootstrap, use the remote cleanup gate.
+It is a dry-run by default:
+
+```bash
+recallant remote-cleanup --project-dir .
+```
+
+If the plan only removes the generated remote Recallant entry, confirm it:
+
+```bash
+recallant remote-cleanup --project-dir . --confirm
+```
+
+For Codex this removes only the remote `[mcp_servers.recallant]` table from `.codex/config.toml`;
+unrelated Codex settings and other MCP servers are preserved. If that Recallant table points to the
+local `recallant mcp-server` flow instead of `recallant remote-bridge`, the command preserves it and
+prints a warning. It does not touch `.recallant`, source files, Docker/Postgres, Workbench/admin
+auth, or central Recallant records.
+
+If the external workstation should also remove the user-local CLI wrapper installed by the remote
+bootstrap, make that an explicit second opt-in:
+
+```bash
+recallant remote-cleanup --project-dir . --remove-cli-wrapper --confirm
+```
+
+The CLI wrapper removal is conservative: it removes only a wrapper that looks like a Recallant
+launcher and preserves the persistent cloned source directory so a later bootstrap can update or
+reuse it.
+
 The evidence JSON and summary redact the credential, host name, project path, repository root,
 database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
 gate for deciding whether the remote existing-server path is ready for a beginner-facing command.

@@ -39,6 +39,7 @@ import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
 import { runRemoteDoctor } from "./remote-doctor.js";
+import { runRemoteCleanup } from "./remote-cleanup.js";
 
 const recallantCliVersion = "0.0.0";
 
@@ -7599,6 +7600,19 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (command === "remote-cleanup" || command === "disconnect-remote") {
+    return [
+      "Usage: recallant remote-cleanup --project-dir <path> [--target <codex|cursor|claude-code|generic>] [--confirm] [--remove-cli-wrapper] [--cli-path <path>] [--format json|text]",
+      "",
+      "Safely remove only the remote Recallant client config entry from a project. Dry-run is the default; confirmed cleanup never deletes source files, .recallant local storage, Docker/Postgres, or central Recallant server records.",
+      "",
+      "Examples:",
+      "  recallant remote-cleanup --project-dir .",
+      "  recallant remote-cleanup --project-dir . --confirm",
+      "  recallant remote-cleanup --project-dir . --remove-cli-wrapper --confirm",
+      ""
+    ].join("\n");
+  }
   if (command === "project-sanitize" || command === "sanitize" || command === "project-purge") {
     return [
       "Usage: recallant project-sanitize [--project-id <id>|--project-dir <dir>] [--mode <detach|purge>] [--detach-mode <live|sandbox>] [--dry-run] [--confirm-token <token>] [--no-local] [--format json|text]",
@@ -7641,7 +7655,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -7673,6 +7687,8 @@ async function main(argv: readonly string[]) {
   }
   if (command === "remote-doctor") return runRemoteDoctor(argv);
   if (command === "remote-acceptance") return runRemoteAcceptance(argv);
+  if (command === "remote-cleanup" || command === "disconnect-remote")
+    return runRemoteCleanup(argv);
   if (command === "doctor") return runDoctor(argv);
   if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);
