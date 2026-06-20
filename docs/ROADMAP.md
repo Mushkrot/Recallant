@@ -87,8 +87,8 @@ dependable before expanding the product surface.
   of starting from a blank custom UI.
 - Deployment-profile and connector/capability guidance that stays generic in public docs while
   supporting private environments.
-- Release-candidate tag once the external-host rehearsal, screenshot docs, and release packaging are
-  complete.
+- Release-candidate tag once repeat external-host rehearsals, screenshot docs, and release packaging
+  are complete.
 
 ## Codex For OSS Use
 

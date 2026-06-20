@@ -127,8 +127,9 @@ security review smoke.
   creates local storage and may require Docker/Postgres.
 - A remote client bootstrap now exists for server-generated onboarding packages with live
   endpoint/credential/scope. It installs only the remote bridge CLI, writes project-local client
-  config, and runs `remote-doctor`; `recallant remote-acceptance` is now the formal follow-up gate,
-  and one real external-host evidence bundle has passed.
+  config, and runs `remote-doctor`; `recallant remote-acceptance` is now the acceptance follow-up
+  gate, and one real external-host evidence bundle has passed. A separate human-written report file
+  is optional audit context, not a blocker.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain
   future expansion after the coding-agent core is stable.
@@ -141,9 +142,9 @@ Before a release-candidate tag, the project should have:
 
 - external-host release rehearsal that repeats the public quickstart and rollback path;
 - repeat remote project access rehearsal from at least one real separate machine with
-  operator-provided live endpoint/credential/scope, producing a validated
-  `recallant remote-acceptance` evidence bundle that proves authenticated agent capture and recall
-  against a central Recallant server;
+  operator-provided live endpoint/credential/scope, producing either a validated
+  `recallant remote-acceptance` evidence bundle or equivalent server-side trace verification that
+  proves authenticated agent capture and recall against a central Recallant server;
 - broader remote-client bootstrap rehearsal from separate machines and clients, including
   `remote-doctor` and capture/recall readiness against the central server, before it is documented
   as a broad beginner default;

@@ -236,11 +236,11 @@ project/developer/client failures, capture proof pass/missing/failure, and no DB
 artifact/backup leakage. It is deterministic external-like coverage, not a claim that a physical
 second machine has been rehearsed.
 
-For a formal real separate-machine rehearsal, use the CLI acceptance gate from the external host
-with operator-provided live inputs. It bootstraps the remote client config, runs `remote-doctor`,
-opens the remote MCP bridge, starts a memory session, fetches a context pack, writes a governed
-memory marker, checkpoints, recalls that marker, verifies no local `.recallant`/Docker/Postgres
-artifacts were created, and writes a redacted evidence bundle:
+For a real separate-machine rehearsal, use the CLI acceptance gate from the external host with
+operator-provided live inputs. It bootstraps the remote client config, runs `remote-doctor`, opens
+the remote MCP bridge, starts a memory session, fetches a context pack, writes a governed memory
+marker, checkpoints, recalls that marker, verifies no local `.recallant`/Docker/Postgres artifacts
+were created, and writes a redacted evidence bundle:
 
 ```bash
 recallant remote-acceptance \
@@ -253,7 +253,8 @@ If the project already has Recallant remote client config from bootstrap, `remot
 the scoped server URL, credential, project id, developer id, and client id from that local config.
 Operators can still pass those flags explicitly to override the config during diagnostics.
 
-Validate a saved evidence file before sharing or committing an internal rehearsal report:
+Validate a saved evidence file before sharing it or committing an optional internal rehearsal
+report:
 
 ```bash
 recallant remote-acceptance validate --evidence recallant-external-evidence/<run-id>.evidence.json
@@ -269,6 +270,8 @@ recallant remote-acceptance validate-live --evidence recallant-external-evidence
 That server-side gate requires `RECALLANT_DATABASE_URL` and verifies Workbench project/readiness
 evidence plus redacted `system_activity_events` rows for session start, context pack, memory write,
 checkpoint, and recall. It does not grant the external machine Workbench/admin or database access.
+A separate human-written report file is optional audit paperwork, not a product-readiness blocker
+after the evidence bundle or server-side trace verification has passed.
 
 If the gate fails because an old local setup left `.recallant` in the project folder, clean only
 that stale local storage marker and retry:

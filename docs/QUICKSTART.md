@@ -107,7 +107,7 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 
 That command installs only the remote bridge CLI, writes project-local client config, and runs
 `remote-doctor`. It is still an operator-provided path until the release-candidate bar is met. The
-formal proof command after bootstrap is:
+acceptance proof command after bootstrap is:
 
 ```bash
 recallant remote-acceptance \
@@ -129,7 +129,8 @@ recallant remote-acceptance validate-live --evidence recallant-external-evidence
 ```
 
 That second server-side check proves Workbench visibility and redacted audit rows without giving the
-external workstation database or Workbench/admin access.
+external workstation database or Workbench/admin access. A separate written report file is optional,
+not required for continuing development after this proof passes.
 
 If you accidentally started the local self-host installer while testing remote setup, stop and clean
 up the local install artifacts before retrying. A failed install that stopped before onboarding
