@@ -1039,6 +1039,13 @@ function remoteMcpErrorFromUnknown(error: unknown, fallbackId: RemoteMcpJsonRpcI
       body: remoteMcpJsonRpcErrorEnvelope(error.id ?? fallbackId, error.contractCode, error.message)
     };
   }
+  if (error instanceof Error && error.message.startsWith("VALIDATION_ERROR:")) {
+    return {
+      statusCode: remoteMcpErrorStatus("VALIDATION_ERROR"),
+      code: "VALIDATION_ERROR" as RemoteMcpErrorCode,
+      body: remoteMcpJsonRpcErrorEnvelope(fallbackId, "VALIDATION_ERROR", error.message)
+    };
+  }
   if (error instanceof SyntaxError) {
     return {
       statusCode: remoteMcpErrorStatus("VALIDATION_ERROR"),
@@ -1171,6 +1178,9 @@ async function dispatchRemoteMcpJsonRpc(input: {
     const tool = createRecallantTools({
       projectId: input.auth.scope.projectId,
       developerId: input.auth.scope.developerId,
+      clientId: input.auth.scope.clientId,
+      sessionId: input.auth.scope.sessionId,
+      traceId: input.auth.scope.traceId,
       projectPath: input.projectPath,
       getDatabase: () => input.database
     }).find((candidate) => candidate.name === toolName);

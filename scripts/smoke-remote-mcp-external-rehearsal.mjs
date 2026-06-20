@@ -217,7 +217,10 @@ async function startHttpsFixture(cert) {
         body: { method: body.method, params: body.params }
       });
 
-      if (trace === "edge-denied" || request.headers.authorization === `Bearer ${credentials.edge}`) {
+      if (
+        trace === "edge-denied" ||
+        request.headers.authorization === `Bearer ${credentials.edge}`
+      ) {
         response.writeHead(403, { "content-type": "text/html" });
         response.end("<html>Cloudflare Access denied</html>");
         return;
@@ -254,7 +257,11 @@ async function startHttpsFixture(cert) {
         const tools =
           trace === "capture-missing"
             ? [{ name: "memory_heartbeat" }]
-            : [{ name: "memory_get_context_pack" }, { name: "memory_heartbeat" }];
+            : [
+                { name: "memory_start_session" },
+                { name: "memory_get_context_pack" },
+                { name: "memory_heartbeat" }
+              ];
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools } }));
         return;
@@ -271,6 +278,28 @@ async function startHttpsFixture(cert) {
           );
           return;
         }
+        const toolName = body.params?.name;
+        const structuredContent =
+          toolName === "memory_start_session"
+            ? {
+                session_id: expectedScope.sessionId,
+                project_id: expectedScope.projectId,
+                checkpoint: { payload: null, updated_at: null },
+                previous_unclosed_session: null,
+                recommended_next_calls: ["memory_get_context_pack"]
+              }
+            : toolName === "memory_get_context_pack"
+              ? {
+                  context_pack_id: "external-rehearsal-context-pack",
+                  project_id: expectedScope.projectId,
+                  session_id: body.params?.arguments?.session_id ?? expectedScope.sessionId,
+                  sections: { working_memories: [] },
+                  truncated: false
+                }
+              : {
+                  ok: true,
+                  echoed: body.params?.arguments?.message ?? "capture-proof-ok"
+                };
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -278,10 +307,7 @@ async function startHttpsFixture(cert) {
             id: body.id,
             result: {
               content: [{ type: "text", text: "external rehearsal ok" }],
-              structuredContent: {
-                ok: true,
-                echoed: body.params?.arguments?.message ?? "capture-proof-ok"
-              }
+              structuredContent
             }
           })
         );
@@ -469,8 +495,14 @@ function generatedRemoteOnboardingPackage(fixture, projectDir, includeSecret) {
       output.provisioning.argv[2] === "--",
     "generated package argv is not bash -s -- bootstrap args"
   );
-  assert(output.provisioning.local_runtime.requires_docker === false, "generated package requires Docker");
-  assert(output.provisioning.local_runtime.requires_postgres === false, "generated package requires Postgres");
+  assert(
+    output.provisioning.local_runtime.requires_docker === false,
+    "generated package requires Docker"
+  );
+  assert(
+    output.provisioning.local_runtime.requires_postgres === false,
+    "generated package requires Postgres"
+  );
   return output;
 }
 
@@ -495,13 +527,23 @@ function connectRemoteArgsFromGeneratedPackage(output, write, format) {
     "--format",
     format
   ];
-  if (bootstrapArgv.includes("--session-id")) args.push("--session-id", flagValue(bootstrapArgv, "--session-id"));
-  if (bootstrapArgv.includes("--trace-id")) args.push("--trace-id", flagValue(bootstrapArgv, "--trace-id"));
+  if (bootstrapArgv.includes("--session-id"))
+    args.push("--session-id", flagValue(bootstrapArgv, "--session-id"));
+  if (bootstrapArgv.includes("--trace-id"))
+    args.push("--trace-id", flagValue(bootstrapArgv, "--trace-id"));
   if (write) args.push("--write");
   return args;
 }
 
-async function runDoctorScenario(fixture, env, label, overrides, expectedExit, stage, expectedCode) {
+async function runDoctorScenario(
+  fixture,
+  env,
+  label,
+  overrides,
+  expectedExit,
+  stage,
+  expectedCode
+) {
   const result = await runCli(doctorArgs(fixture, overrides), env, { expectExit: expectedExit });
   assertNoLeak(label, result.stdout);
   const report = JSON.parse(result.stdout);
@@ -523,13 +565,22 @@ async function runConnectRemote(env, fixture) {
   );
   const previewPackage = generatedRemoteOnboardingPackage(fixture, projectDir, false);
   const writePackage = generatedRemoteOnboardingPackage(fixture, projectDir, true);
-  const result = await runCli(connectRemoteArgsFromGeneratedPackage(previewPackage, false, "json"), env);
+  const result = await runCli(
+    connectRemoteArgsFromGeneratedPackage(previewPackage, false, "json"),
+    env
+  );
   assertNoConnectRemoteLeak("connect-remote", result.stdout);
   const parsed = JSON.parse(result.stdout);
   const rendered = JSON.stringify(parsed);
   const renderedConfig = String(parsed.rendered_config ?? "");
-  assert(rendered.includes(fixture.serverUrl), "connect-remote output did not include HTTPS server URL");
-  assert(rendered.includes("remote-bridge"), "connect-remote output did not configure remote-bridge");
+  assert(
+    rendered.includes(fixture.serverUrl),
+    "connect-remote output did not include HTTPS server URL"
+  );
+  assert(
+    rendered.includes("remote-bridge"),
+    "connect-remote output did not configure remote-bridge"
+  );
   assert(!rendered.includes("RECALLANT_DATABASE_URL"), "connect-remote output required DB URL");
   assert(
     !/postgres|workbench|admin[_-]?auth|provider[_-]?secret|raw[_-]?artifact|backup/i.test(
@@ -542,33 +593,62 @@ async function runConnectRemote(env, fixture) {
   assert(parsed.safety?.exposes_workbench_or_admin_auth === false);
   assert(parsed.safety?.exposes_raw_artifacts_or_backups === false);
   assert(parsed.safety?.exposes_provider_secrets === false);
-  const writeResult = await runCli(connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"), env);
+  const writeResult = await runCli(
+    connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"),
+    env
+  );
   assertNoConnectRemoteLeak("connect-remote-write", writeResult.stdout);
   assertNoLeak("connect-remote-write", writeResult.stdout);
-  assert(writeResult.stdout.includes("Writes files: yes"), "connect-remote --write did not report file writes");
+  assert(
+    writeResult.stdout.includes("Writes files: yes"),
+    "connect-remote --write did not report file writes"
+  );
   const codexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
-  assert(codexConfig.includes("remote-bridge"), "connect-remote --write did not write remote bridge");
-  assert(codexConfig.includes("[mcp_servers.unrelated]"), "connect-remote --write removed unrelated MCP server");
+  assert(
+    codexConfig.includes("remote-bridge"),
+    "connect-remote --write did not write remote bridge"
+  );
+  assert(
+    codexConfig.includes("[mcp_servers.unrelated]"),
+    "connect-remote --write removed unrelated MCP server"
+  );
   assert(
     !codexConfig.includes("RECALLANT_DATABASE_URL"),
     "connect-remote --write wrote local database config"
   );
-  const secondWriteResult = await runCli(connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"), env);
+  const secondWriteResult = await runCli(
+    connectRemoteArgsFromGeneratedPackage(writePackage, true, "text"),
+    env
+  );
   assertNoLeak("connect-remote-second-write", secondWriteResult.stdout);
   const secondCodexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
   const recallantServerEntries = secondCodexConfig.match(/\[mcp_servers\.recallant\]/g) ?? [];
-  assert(recallantServerEntries.length === 1, "connect-remote --write duplicated Recallant MCP server entry");
+  assert(
+    recallantServerEntries.length === 1,
+    "connect-remote --write duplicated Recallant MCP server entry"
+  );
   assert(
     secondCodexConfig.includes("[mcp_servers.unrelated]"),
     "connect-remote second write removed unrelated MCP server"
   );
   const projectEntries = await readdir(projectDir, { withFileTypes: true });
   const artifactNames = projectEntries.map((entry) => entry.name).sort();
-  assert(!(await exists(join(projectDir, ".recallant"))), "remote client path created .recallant local storage");
-  assert(!(await exists(join(projectDir, "docker-compose.yml"))), "remote client path created docker-compose.yml");
-  assert(!(await exists(join(projectDir, "docker-compose.production.yml"))), "remote client path created docker-compose.production.yml");
+  assert(
+    !(await exists(join(projectDir, ".recallant"))),
+    "remote client path created .recallant local storage"
+  );
+  assert(
+    !(await exists(join(projectDir, "docker-compose.yml"))),
+    "remote client path created docker-compose.yml"
+  );
+  assert(
+    !(await exists(join(projectDir, "docker-compose.production.yml"))),
+    "remote client path created docker-compose.production.yml"
+  );
   const forbiddenProjectText = `${secondCodexConfig}\n${artifactNames.join("\n")}`;
-  assert(!/RECALLANT_DATABASE_URL|postgres:\/\/|pgvector|recallant-postgres/i.test(forbiddenProjectText));
+  assert(
+    !/RECALLANT_DATABASE_URL|postgres:\/\/|pgvector|recallant-postgres/i.test(forbiddenProjectText)
+  );
   return {
     target: parsed.target,
     config_file: parsed.config_file,
@@ -685,19 +765,15 @@ try {
     await expectBridgeFailure(fixture, externalEnv, "revoked_credential", {
       credential: credentials.revoked
     }),
-    await expectBridgeFailure(
-      fixture,
-      externalEnv,
-      "rotated_old_credential",
-      { credential: credentials.rotatedOld }
-    ),
-    await expectBridgeFailure(fixture, externalEnv, "wrong_project", { projectId: "wrong-project" }),
-    await expectBridgeFailure(
-      fixture,
-      externalEnv,
-      "wrong_developer",
-      { developerId: "wrong-developer" }
-    ),
+    await expectBridgeFailure(fixture, externalEnv, "rotated_old_credential", {
+      credential: credentials.rotatedOld
+    }),
+    await expectBridgeFailure(fixture, externalEnv, "wrong_project", {
+      projectId: "wrong-project"
+    }),
+    await expectBridgeFailure(fixture, externalEnv, "wrong_developer", {
+      developerId: "wrong-developer"
+    }),
     await expectBridgeFailure(fixture, externalEnv, "wrong_client", { clientId: "wrong-client" })
   ];
   const rotatedNewRoundtrip = await runBridgeRoundtrip(fixture, externalEnv, {
@@ -803,7 +879,9 @@ try {
       isolated_client_environment: {
         child_process: true,
         no_database_url_env: !externalEnv.RECALLANT_DATABASE_URL,
-        no_postgres_env: !Object.keys(externalEnv).some((key) => /^PG|POSTGRES|DATABASE_URL/.test(key)),
+        no_postgres_env: !Object.keys(externalEnv).some((key) =>
+          /^PG|POSTGRES|DATABASE_URL/.test(key)
+        ),
         no_workbench_or_admin_auth: !Object.keys(externalEnv).some((key) =>
           /WORKBENCH|ADMIN/.test(key)
         ),

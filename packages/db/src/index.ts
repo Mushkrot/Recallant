@@ -450,6 +450,7 @@ function connectorConsentPolicy(metadata: Record<string, unknown>) {
 export type StartSessionInput = {
   client_kind: string;
   client_version?: string | null;
+  project_id?: string | null;
   project_path?: string | null;
   session_label?: string | null;
   resume_policy?: string;
@@ -2988,7 +2989,9 @@ export class RecallantDb {
   }
 
   async startSession(input: StartSessionInput) {
-    const project = await this.ensureProject(input.project_path);
+    const project = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
     return withTransaction(this.pool, async (client) => {
       const previous = await client.query(
         `

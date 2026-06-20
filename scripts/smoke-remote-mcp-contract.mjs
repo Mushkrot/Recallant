@@ -97,11 +97,7 @@ mustInclude(
   String(remoteMcpRateLimits.startupPerMinute),
   "docs/MCP_SPEC.md startup rate limit"
 );
-mustInclude(
-  mcpSpec,
-  String(remoteMcpRateLimits.toolPerMinute),
-  "docs/MCP_SPEC.md tool rate limit"
-);
+mustInclude(mcpSpec, String(remoteMcpRateLimits.toolPerMinute), "docs/MCP_SPEC.md tool rate limit");
 mustInclude(
   mcpSpec,
   String(remoteMcpPayloadLimits.requestHardBytes),
@@ -111,9 +107,15 @@ mustInclude(
 for (const scheme of remoteMcpAuthSchemes) {
   mustInclude(mcpSpec, scheme, "docs/MCP_SPEC.md auth scheme");
 }
-mustInclude(mcpSpec, "No unauthenticated public route should expose", "docs/MCP_SPEC.md auth policy");
+mustInclude(
+  mcpSpec,
+  "No unauthenticated public route should expose",
+  "docs/MCP_SPEC.md auth policy"
+);
 
-const forbidden = remoteMcpForbiddenSurfaces.find((value) => typeof value === "string" && value.includes("RECALLANT_DATABASE_URL"));
+const forbidden = remoteMcpForbiddenSurfaces.find(
+  (value) => typeof value === "string" && value.includes("RECALLANT_DATABASE_URL")
+);
 if (forbidden) {
   mustInclude(mcpSpec, "RECALLANT_DATABASE_URL", "docs/MCP_SPEC.md database-url boundary");
   mustNotContain(mcpSpec, "Remote clients require RECALLANT_DATABASE_URL", "docs/MCP_SPEC.md");
@@ -167,6 +169,7 @@ const credential = {
 };
 let bindingDeveloperId = developerId;
 const activityRows = [];
+const agentMemories = [];
 
 const fakeDb = {
   async verifyRemoteMcpCredential(input) {
@@ -253,6 +256,73 @@ const fakeDb = {
     row.finished_at = new Date();
     row.duration_ms = 1;
     return row;
+  },
+  async startSession(input) {
+    assert(
+      input.project_id === projectId,
+      "remote memory_start_session did not use scoped project_id"
+    );
+    return {
+      session_id: sessionId,
+      project_id: projectId,
+      checkpoint: { payload: null, updated_at: null },
+      previous_unclosed_session: null,
+      recommended_next_calls: ["memory_get_context_pack"]
+    };
+  },
+  async getContextPack(input) {
+    assert(
+      input.project_id === projectId,
+      "remote memory_get_context_pack did not use scoped project_id"
+    );
+    return {
+      context_pack_id: "remote-context-pack",
+      project_id: projectId,
+      session_id: input.session_id,
+      sections: { working_memories: [] },
+      truncated: false
+    };
+  },
+  async createAgentMemory(input) {
+    assert(
+      input.project_id === projectId,
+      "remote memory_create_agent_memory did not use scoped project_id"
+    );
+    assert(
+      Array.isArray(input.source_refs) && input.source_refs.length > 0,
+      "remote memory_create_agent_memory did not add a governed source ref"
+    );
+    assert(
+      input.source_refs[0]?.source_kind === "external",
+      "remote memory_create_agent_memory fallback source ref should be external"
+    );
+    const memory = {
+      memory_id: `memory-${agentMemories.length + 1}`,
+      memory_type: input.memory_type,
+      title: input.title,
+      body: input.body,
+      status: "accepted",
+      use_policy: "recall_allowed",
+      source_refs: input.source_refs
+    };
+    agentMemories.push(memory);
+    return {
+      memory_id: memory.memory_id,
+      status: memory.status,
+      use_policy: memory.use_policy,
+      review_reason: "accepted"
+    };
+  },
+  async recallAgentMemories(input) {
+    assert(
+      input.project_id === projectId,
+      "remote memory_recall_agent_memories did not use scoped project_id"
+    );
+    return {
+      trace_id: "remote-recall-trace",
+      memories: agentMemories.filter((memory) => memory.body.includes(input.query)),
+      truncated: false
+    };
   },
   async heartbeat(requestSessionId, status, note, metadata) {
     return {
@@ -432,6 +502,103 @@ try {
   mustNotContain(result.text, "RECALLANT_DATABASE_URL", "tools/call response");
   endpointCases.push("tools_call_memory_heartbeat_happy_path");
 
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "start-session",
+    method: "tools/call",
+    params: {
+      name: "memory_start_session",
+      arguments: {
+        client_kind: "codex",
+        client_version: null,
+        project_path: null,
+        session_label: "remote smoke"
+      }
+    }
+  });
+  assert(result.status === 200, `memory_start_session expected HTTP 200: ${result.text}`);
+  assert(
+    result.body?.result?.structuredContent?.project_id === projectId,
+    "memory_start_session did not return scoped project id"
+  );
+  endpointCases.push("tools_call_memory_start_session_scoped_project");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "context-pack",
+    method: "tools/call",
+    params: {
+      name: "memory_get_context_pack",
+      arguments: {
+        session_id: sessionId,
+        task_hint: "remote smoke context",
+        max_chars_total: 12000
+      }
+    }
+  });
+  assert(result.status === 200, "memory_get_context_pack expected HTTP 200");
+  assert(
+    result.body?.result?.structuredContent?.project_id === projectId,
+    "memory_get_context_pack did not use scoped project id"
+  );
+  endpointCases.push("tools_call_memory_get_context_pack_scoped_project");
+
+  const remoteMemoryFact = "remote onboarding test from Vadim Mac Resume passed on 2026-06-20";
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "create-agent-memory",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "work_log",
+        scope: "project",
+        scope_kind: "project",
+        scope_id: null,
+        audience: [{ kind: "all_agents", id: null }],
+        title: "Remote onboarding Mac test passed",
+        body: remoteMemoryFact,
+        confidence: 1,
+        source_refs: [],
+        created_by: "agent",
+        metadata: { smoke: true }
+      }
+    }
+  });
+  assert(result.status === 200, "memory_create_agent_memory expected HTTP 200");
+  assert(
+    result.body?.result?.structuredContent?.memory_id === "memory-1",
+    "memory_create_agent_memory did not return created memory"
+  );
+  mustNotContain(result.text, "RECALLANT_DATABASE_URL", "memory_create_agent_memory response");
+  endpointCases.push("tools_call_memory_create_agent_memory_scoped_project");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "recall-agent-memory",
+    method: "tools/call",
+    params: {
+      name: "memory_recall_agent_memories",
+      arguments: {
+        query: remoteMemoryFact,
+        scope: "project",
+        memory_types: ["work_log"],
+        include_candidates: true,
+        include_needs_review: true,
+        top_k: 5,
+        max_chars_total: 12000
+      }
+    }
+  });
+  assert(result.status === 200, "memory_recall_agent_memories expected HTTP 200");
+  assert(
+    result.body?.result?.structuredContent?.memories?.some((memory) =>
+      memory.body.includes(remoteMemoryFact)
+    ),
+    "memory_recall_agent_memories did not return the created remote memory"
+  );
+  endpointCases.push("tools_call_memory_recall_agent_memories_readback");
+
   assert(
     activityRows.some((row) => row.surface === "remote_mcp" && row.status === "success"),
     "remote_mcp audit success row missing"
@@ -440,7 +607,10 @@ try {
     (row) => row.surface === "remote_mcp" && row.status === "success"
   );
   assertRemoteMcpAuditRowSafe(successRow, "success");
-  assert(successRow.related_ids?.credential_id === credential.id, "success audit row missing credential id");
+  assert(
+    successRow.related_ids?.credential_id === credential.id,
+    "success audit row missing credential id"
+  );
   assert(
     successRow.related_ids?.credential_prefix === credential.credential_prefix,
     "success audit row missing credential prefix"
@@ -449,7 +619,9 @@ try {
     successRow.redacted_metadata?.http_status === 200,
     "success audit row missing redacted HTTP status"
   );
-  const failedRows = activityRows.filter((row) => row.surface === "remote_mcp" && row.status === "skipped");
+  const failedRows = activityRows.filter(
+    (row) => row.surface === "remote_mcp" && row.status === "skipped"
+  );
   assert(failedRows.length >= 4, "remote_mcp audit failure rows missing");
   for (const row of failedRows) assertRemoteMcpAuditRowSafe(row, `failed ${row.operation}`);
   assert(

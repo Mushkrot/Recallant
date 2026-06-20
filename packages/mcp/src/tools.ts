@@ -29,6 +29,9 @@ export type RecallantToolsRuntimeContext = {
   projectId?: string | null;
   projectPath?: string | null;
   developerId?: string | null;
+  clientId?: string | null;
+  sessionId?: string | null;
+  traceId?: string | null;
   getDatabase?: () => ToolDb;
 };
 
@@ -108,8 +111,54 @@ function contextAwarePath(context: RecallantToolsRuntimeContext) {
     projectId: context.projectId ?? null,
     projectPath: context.projectPath ?? null,
     developerId: context.developerId ?? null,
+    clientId: context.clientId ?? null,
+    sessionId: context.sessionId ?? null,
+    traceId: context.traceId ?? null,
     getDatabase: context.getDatabase ?? (() => createRecallantDbFromEnv())
   };
+}
+
+function scopedProjectInput<T extends Record<string, unknown>>(args: T): T {
+  const context = currentRecallantToolsContext();
+  return {
+    ...args,
+    project_id: args.project_id ?? context.projectId ?? undefined,
+    project_path: args.project_path ?? context.projectPath ?? undefined
+  };
+}
+
+function remoteAgentSourceRef() {
+  const context = currentRecallantToolsContext();
+  const sourceId =
+    context.traceId ??
+    context.sessionId ??
+    (context.clientId ? `remote-client:${context.clientId}` : null) ??
+    (context.projectId ? `remote-project:${context.projectId}` : "remote-mcp");
+  return {
+    source_kind: "external",
+    source_id: sourceId,
+    quote: null,
+    metadata: {
+      source: "remote_mcp",
+      project_id: context.projectId ?? null,
+      developer_id: context.developerId ?? null,
+      client_id: context.clientId ?? null,
+      trace_id: context.traceId ?? null,
+      session_id: context.sessionId ?? null
+    }
+  };
+}
+
+function scopedAgentMemoryInput(args: Record<string, unknown>): CreateAgentMemoryInput {
+  const scoped = scopedProjectInput(args);
+  const sourceRefs = Array.isArray(scoped.source_refs) ? scoped.source_refs : [];
+  return {
+    ...scoped,
+    source_refs:
+      scoped.created_by === "agent" && sourceRefs.length === 0
+        ? [remoteAgentSourceRef()]
+        : sourceRefs
+  } as CreateAgentMemoryInput;
 }
 
 function syncProjectLogInContext(payload: JsonObject, database?: ToolDb) {
@@ -276,10 +325,13 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.startSession(args as StartSessionInput);
+      if (database) return database.startSession(scopedProjectInput(args) as StartSessionInput);
       return stubResponse("memory_start_session", {
         session_id: randomUUID(),
-        project_id: process.env.RECALLANT_PROJECT_ID ?? randomUUID(),
+        project_id:
+          currentRecallantToolsContext().projectId ??
+          process.env.RECALLANT_PROJECT_ID ??
+          randomUUID(),
         checkpoint: { payload: null, updated_at: null },
         previous_unclosed_session: null,
         recommended_next_calls: ["memory_get_context_pack"]
@@ -342,10 +394,14 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.getContextPack(args as ContextPackInput);
+      if (database) return database.getContextPack(scopedProjectInput(args) as ContextPackInput);
       return stubResponse("memory_get_context_pack", {
         context_pack_id: randomUUID(),
-        project_id: args.project_id ?? process.env.RECALLANT_PROJECT_ID ?? randomUUID(),
+        project_id:
+          args.project_id ??
+          currentRecallantToolsContext().projectId ??
+          process.env.RECALLANT_PROJECT_ID ??
+          randomUUID(),
         session_id: args.session_id,
         profile: "compact",
         sections: {
@@ -640,7 +696,11 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     inputSchema: z.object({}),
     handler: async () => {
       const database = db();
-      if (database) return database.getCheckpoint(process.env.RECALLANT_PROJECT_ID);
+      if (database) {
+        return database.getCheckpoint(
+          currentRecallantToolsContext().projectId ?? process.env.RECALLANT_PROJECT_ID
+        );
+      }
       return stubResponse("memory_get_checkpoint", { payload: null, updated_at: null });
     }
   },
@@ -661,7 +721,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       if (database) {
         const checkpoint = await database.setCheckpoint(
-          process.env.RECALLANT_PROJECT_ID,
+          currentRecallantToolsContext().projectId ?? process.env.RECALLANT_PROJECT_ID,
           args.payload as JsonObject
         );
         try {
@@ -727,7 +787,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.createAgentMemory(args as CreateAgentMemoryInput);
+      if (database) return database.createAgentMemory(scopedAgentMemoryInput(args));
       return stubResponse("memory_create_agent_memory", {
         memory_id: randomUUID(),
         status: args.created_by === "agent" ? "accepted" : "candidate",
@@ -799,7 +859,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.listAgentMemories(args as ListAgentMemoriesInput);
+      if (database)
+        return database.listAgentMemories(scopedProjectInput(args) as ListAgentMemoriesInput);
       return stubResponse("memory_list_agent_memories", { memories: [] });
     }
   },
@@ -840,7 +901,9 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.recallAgentMemories(args as RecallAgentMemoriesInput);
+      if (database) {
+        return database.recallAgentMemories(scopedProjectInput(args) as RecallAgentMemoriesInput);
+      }
       return stubResponse("memory_recall_agent_memories", {
         trace_id: randomUUID(),
         memories: [],
