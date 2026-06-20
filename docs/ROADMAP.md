@@ -42,6 +42,25 @@ dependable before expanding the product surface.
   clean hosts, real-project sandbox copies, and more client profiles, with storage readiness,
   production-sensitive confirmation, attach/connect orchestration, capture proof, recall proof,
   Workbench outcome, and cleanup in one public beginner flow.
+- Visible onboarding progress after confirmation: once `recallant onboard <project>` has received
+  user confirmation and starts longer-running work, keep the terminal visibly alive with clear stage
+  labels, bounded progress messages, and current operation status so a new user does not mistake a
+  slow setup step for a hung process.
+- Interactive terminal-first CLI: make plain `recallant` a guided entry point that detects the
+  current directory, explains whether it is inside an attached or unattached project, and offers
+  contextual actions such as onboard, check, repair, connect a client, inspect capture readiness, or
+  open the Workbench. The interactive flow should use a polished modern terminal UI with structured
+  panels, progress indicators, readable status graphics, and accessible fallbacks instead of a
+  plain text-only command list.
+- Active agent feedback reports for Recallant audits: define an explicit contract that lets agents
+  working inside attached projects report Recallant-specific problems, confusing behavior, failed
+  attempts, unexpected outputs, and suggested fixes back to Recallant as structured, redacted
+  diagnostic messages. A dedicated audit mode should read those reports together with the existing
+  system activity ledger and capture evidence, summarize what is happening across connected
+  projects, identify likely Recallant product or integration gaps, and help maintainers prepare
+  repair or improvement plans. This should turn agent participation from passive logging into an
+  active, governed conversation channel without allowing agents to bypass review, expose secrets, or
+  convert unreviewed complaints into binding instructions.
 - Documentation posture follow-through: expand Workbench-confirmed canonicalization plans, harden
   empty-project starter-doc generation across more real-world profiles, and broaden posture pilots
   without turning recalled discussion into binding instructions automatically.
