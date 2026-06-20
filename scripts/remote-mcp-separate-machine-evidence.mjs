@@ -32,8 +32,8 @@ function parseArgs(argv) {
     projectId: process.env.RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID ?? "",
     developerId: process.env.RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID ?? "",
     clientId: process.env.RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID ?? "",
-    sessionId: process.env.RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID ?? randomUUID(),
-    traceId: process.env.RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID ?? `external-${randomUUID()}`,
+    sessionId: process.env.RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID ?? "",
+    traceId: process.env.RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID ?? randomUUID(),
     projectDir: process.env.RECALLANT_EXTERNAL_REHEARSAL_PROJECT_DIR ?? ".",
     target: process.env.RECALLANT_EXTERNAL_REHEARSAL_TARGET ?? "codex",
     outputDir: process.env.RECALLANT_EXTERNAL_REHEARSAL_OUTPUT_DIR ?? "recallant-external-evidence",
@@ -105,9 +105,10 @@ function redact(text, input) {
     [input.credential, "[REDACTED_CREDENTIAL]"],
     [input.projectDir, "[PROJECT_DIR]"],
     [resolve(input.projectDir), "[PROJECT_DIR]"],
-    [process.cwd(), "[REPO_ROOT]"],
-    [hostname(), "[HOSTNAME]"]
+    [process.cwd(), "[REPO_ROOT]"]
   ];
+  const host = hostname();
+  if (host.length >= 4) replacements.push([host, "[HOSTNAME]"]);
   for (const [raw, replacement] of replacements) {
     if (raw) output = output.replaceAll(raw, replacement);
   }
@@ -272,7 +273,7 @@ function clientEnv(extra = {}) {
 }
 
 function remoteArgs(input) {
-  return [
+  const args = [
     "--server-url",
     input.serverUrl,
     "--credential",
@@ -282,12 +283,10 @@ function remoteArgs(input) {
     "--developer-id",
     input.developerId,
     "--client-id",
-    input.clientId,
-    "--session-id",
-    input.sessionId,
-    "--trace-id",
-    input.traceId
+    input.clientId
   ];
+  if (input.traceId) args.push("--trace-id", input.traceId);
+  return args;
 }
 
 async function runBootstrap(input, env) {
@@ -316,13 +315,10 @@ async function runBootstrap(input, env) {
     "--project-dir",
     input.projectDir,
     "--target",
-    input.target,
-    "--session-id",
-    input.sessionId,
-    "--trace-id",
-    input.traceId,
-    ...(input.captureProof ? ["--capture-proof"] : [])
+    input.target
   ];
+  if (input.traceId) args.push("--trace-id", input.traceId);
+  if (input.captureProof) args.push("--capture-proof");
   return runProcess("bash", args, { cwd: process.cwd(), env }, input);
 }
 
@@ -603,12 +599,16 @@ try {
   );
   const remoteDoctor = await runDoctor(input, env);
   const remoteMcp = await runBridgeProbe(input, env);
+  const actualSessionId =
+    typeof remoteMcp.start_session?.session_id === "string"
+      ? remoteMcp.start_session.session_id
+      : input.sessionId || "not-created";
   evidence = {
     schema_version: 1,
     generated_at: new Date().toISOString(),
     run_id: runId,
     trace_id: input.traceId,
-    session_id: input.sessionId,
+    session_id: actualSessionId,
     external_host: {
       hostname_hash: sha256(hostname()),
       platform: platform(),
@@ -675,7 +675,7 @@ try {
     generated_at: new Date().toISOString(),
     run_id: runId,
     trace_id: input.traceId,
-    session_id: input.sessionId,
+    session_id: input.sessionId || "not-created",
     result: {
       status: "fail",
       error: redact(error instanceof Error ? error.message : String(error), input)
