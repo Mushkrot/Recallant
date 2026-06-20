@@ -3505,6 +3505,28 @@ export class RecallantDb {
 
   async getContextPack(input: ContextPackInput) {
     const context = await this.contextForSession(input.session_id);
+    await withTransaction(this.pool, async (client) => {
+      await this.touchSession(client, input.session_id);
+      await this.insertEvent(client, {
+        projectId: context.projectId,
+        sessionId: input.session_id,
+        ingestSource: "mcp_context",
+        kind: "tool_result",
+        occurredAt: new Date(),
+        payload: {
+          schema_version: 1,
+          text: input.task_hint
+            ? `Context pack requested for: ${input.task_hint}`
+            : "Context pack requested.",
+          metadata: {
+            capture_kind: "context_read",
+            include_raw_evidence: input.include_raw_evidence ?? "auto",
+            include_recovery: input.include_recovery ?? true,
+            max_chars_total: input.max_chars_total ?? null
+          }
+        }
+      });
+    });
     const checkpoint = await this.getCheckpoint(context.projectId);
     const recovery = await this.pool.query(
       `
@@ -5549,13 +5571,20 @@ export class RecallantDb {
                 AND e.payload->'metadata'->>'capture_kind' = 'context_read'
             ) AS last_context_read_at,
             (
-              SELECT max(e.created_at)
-              FROM events e
-              WHERE e.project_id = p.id
-                AND (
-                  e.payload->'metadata'->>'capture_kind' LIKE 'agent_%'
-                  OR e.kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
-                )
+              SELECT max(activity_at)
+              FROM (
+                SELECT max(e.created_at) AS activity_at
+                FROM events e
+                WHERE e.project_id = p.id
+                  AND (
+                    e.payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+                    OR e.kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
+                  )
+                UNION ALL
+                SELECT max(m.updated_at) AS activity_at
+                FROM agent_memories m
+                WHERE m.project_id = p.id
+              ) AS memory_activity
             ) AS last_memory_write_at
           FROM projects p
           LEFT JOIN project_settings lifecycle
@@ -5891,13 +5920,20 @@ export class RecallantDb {
           (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
           (SELECT max(created_at) FROM events WHERE project_id = $1 AND payload->'metadata'->>'capture_kind' = 'context_read') AS last_context_read_at,
           (
-            SELECT max(created_at)
-            FROM events
-            WHERE project_id = $1
-              AND (
-                payload->'metadata'->>'capture_kind' LIKE 'agent_%'
-                OR kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
-              )
+            SELECT max(activity_at)
+            FROM (
+              SELECT max(created_at) AS activity_at
+              FROM events
+              WHERE project_id = $1
+                AND (
+                  payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+                  OR kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
+                )
+              UNION ALL
+              SELECT max(updated_at) AS activity_at
+              FROM agent_memories
+              WHERE project_id = $1
+            ) AS memory_activity
           ) AS last_memory_write_at,
           (
             SELECT count(*)::int
