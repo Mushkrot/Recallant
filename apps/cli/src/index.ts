@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
@@ -5884,6 +5885,32 @@ function remoteConnectHumanReport(result: {
   );
 }
 
+function repoRootFromCliModule() {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+function runNodeHelperScript(scriptRelativePath: string, args: readonly string[]) {
+  const script = join(repoRootFromCliModule(), scriptRelativePath);
+  const result = spawnSync(process.execPath, [script, ...args], {
+    stdio: "inherit",
+    env: process.env
+  });
+  if (result.error) throw result.error;
+  process.exit(typeof result.status === "number" ? result.status : 1);
+}
+
+function runRemoteAcceptance(argv: readonly string[]) {
+  const subcommand = argv[3];
+  if (subcommand === "validate" || subcommand === "verify") {
+    return runNodeHelperScript(
+      "scripts/validate-remote-mcp-separate-machine-evidence.mjs",
+      argv.slice(4)
+    );
+  }
+  const args = subcommand === "run" ? argv.slice(4) : argv.slice(3);
+  return runNodeHelperScript("scripts/remote-mcp-separate-machine-evidence.mjs", args);
+}
+
 async function runConnectRemote(argv: readonly string[]) {
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
@@ -7546,6 +7573,17 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (command === "remote-acceptance") {
+    return [
+      "Usage: recallant remote-acceptance --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [--capture-proof] [--output-dir <path>]",
+      "",
+      "Run the external-machine acceptance gate: bootstrap remote client config, remote-doctor, remote MCP session/context/write/checkpoint/recall, and redacted evidence output without local Docker/Postgres.",
+      "",
+      "Validate a saved evidence file:",
+      "  recallant remote-acceptance validate --evidence <path>",
+      ""
+    ].join("\n");
+  }
   if (command === "project-sanitize" || command === "sanitize" || command === "project-purge") {
     return [
       "Usage: recallant project-sanitize [--project-id <id>|--project-dir <dir>] [--mode <detach|purge>] [--detach-mode <live|sandbox>] [--dry-run] [--confirm-token <token>] [--no-local] [--format json|text]",
@@ -7588,7 +7626,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -7619,6 +7657,7 @@ async function main(argv: readonly string[]) {
     return;
   }
   if (command === "remote-doctor") return runRemoteDoctor(argv);
+  if (command === "remote-acceptance") return runRemoteAcceptance(argv);
   if (command === "doctor") return runDoctor(argv);
   if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);

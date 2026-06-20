@@ -106,8 +106,23 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 ```
 
 That command installs only the remote bridge CLI, writes project-local client config, and runs
-`remote-doctor`. It is still an operator-provided path until the release-candidate bar is met: a
-real separate-machine rehearsal proving capture and recall against a central Recallant server.
+`remote-doctor`. It is still an operator-provided path until the release-candidate bar is met. The
+formal proof command after bootstrap is:
+
+```bash
+recallant remote-acceptance \
+  --server-url <https-recallant-server> \
+  --credential <scoped-remote-mcp-credential> \
+  --project-id <project-id> \
+  --developer-id <developer-id> \
+  --client-id <client-id> \
+  --project-dir . \
+  --capture-proof
+```
+
+That acceptance command writes redacted evidence for bootstrap, remote-doctor, remote MCP
+session/context/write/checkpoint/recall, and forbidden local-artifact checks. A real external-host
+evidence pass is required before this path should be presented as a beginner default.
 
 If you accidentally started the local self-host installer while testing remote setup, stop and clean
 up the local install artifacts before retrying. A failed install that stopped before onboarding

@@ -129,8 +129,32 @@ export function validateEvidence(evidence, rawText) {
   const remoteMcp = object(evidence.remote_mcp, "remote_mcp");
   assert(remoteMcp.status === "pass", "remote MCP bridge must pass");
   assert(Array.isArray(remoteMcp.tools) && remoteMcp.tools.length > 0, "remote MCP tools/list must include tools");
+  for (const toolName of [
+    "memory_start_session",
+    "memory_get_context_pack",
+    "memory_create_agent_memory",
+    "memory_set_checkpoint",
+    "memory_recall_agent_memories"
+  ]) {
+    assert(remoteMcp.tools.includes(toolName), `remote MCP tools/list must include ${toolName}`);
+  }
   assert(remoteMcp.call_is_error === false, "remote MCP tools/call must not be an error");
-  stringValue(remoteMcp.call_tool, "remote_mcp.call_tool");
+  assert(
+    remoteMcp.call_tool === "memory_recall_agent_memories",
+    "remote MCP final call must be memory_recall_agent_memories"
+  );
+  const startSession = object(remoteMcp.start_session, "remote_mcp.start_session");
+  assert(startSession.is_error === false, "memory_start_session must pass");
+  stringValue(startSession.session_id, "remote_mcp.start_session.session_id");
+  const contextPack = object(remoteMcp.context_pack, "remote_mcp.context_pack");
+  assert(contextPack.is_error === false, "memory_get_context_pack must pass");
+  const memoryWrite = object(remoteMcp.memory_write, "remote_mcp.memory_write");
+  assert(memoryWrite.is_error === false, "memory_create_agent_memory must pass");
+  const checkpoint = object(remoteMcp.checkpoint, "remote_mcp.checkpoint");
+  assert(checkpoint.is_error === false, "memory_set_checkpoint must pass");
+  const recall = object(remoteMcp.recall, "remote_mcp.recall");
+  assert(recall.is_error === false, "memory_recall_agent_memories must pass");
+  assert(recall.marker_found === true, "memory_recall_agent_memories must find the written marker");
 
   const capture = object(evidence.capture_recall, "capture_recall");
   assert(capture.requested === true, "capture proof must be requested");
@@ -156,7 +180,7 @@ export function validateEvidence(evidence, rawText) {
       "bootstrap_passed",
       "remote_doctor_passed",
       "codex_remote_bridge_configured",
-      "remote_mcp_tools_list_and_call",
+      "remote_mcp_session_context_write_checkpoint_recall",
       "capture_recall_passed",
       "redaction_passed"
     ]

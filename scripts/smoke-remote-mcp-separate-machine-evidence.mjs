@@ -140,13 +140,109 @@ async function startFixture(cert) {
           jsonrpc: "2.0",
           id: body.id,
           result: {
-            tools: [{ name: "memory_get_context_pack" }, { name: "memory_heartbeat" }]
+            tools: [
+              { name: "memory_start_session" },
+              { name: "memory_get_context_pack" },
+              { name: "memory_create_agent_memory" },
+              { name: "memory_set_checkpoint" },
+              { name: "memory_recall_agent_memories" },
+              { name: "memory_heartbeat" }
+            ]
           }
         })
       );
       return;
     }
     if (body.method === "tools/call") {
+      const toolName = body.params?.name;
+      if (toolName === "memory_start_session") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: "started" }],
+              structuredContent: {
+                session_id: expected.sessionId,
+                project_id: expected.projectId,
+                recommended_next_calls: ["memory_get_context_pack"]
+              }
+            }
+          })
+        );
+        return;
+      }
+      if (toolName === "memory_get_context_pack") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: "context" }],
+              structuredContent: {
+                context_pack_id: "fixture-context-pack",
+                session_id: expected.sessionId,
+                project_id: expected.projectId
+              }
+            }
+          })
+        );
+        return;
+      }
+      if (toolName === "memory_create_agent_memory") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: "created" }],
+              structuredContent: {
+                memory_id: "fixture-memory-id",
+                status: "accepted"
+              }
+            }
+          })
+        );
+        return;
+      }
+      if (toolName === "memory_set_checkpoint") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: "checkpoint" }],
+              structuredContent: {
+                ok: true,
+                updated_at: "2026-06-20T00:00:00.000Z"
+              }
+            }
+          })
+        );
+        return;
+      }
+      if (toolName === "memory_recall_agent_memories") {
+        const marker = body.params?.arguments?.query ?? "";
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: `recalled ${marker}` }],
+              structuredContent: {
+                trace_id: "fixture-recall-trace",
+                memories: [{ memory_id: "fixture-memory-id", body: marker }]
+              }
+            }
+          })
+        );
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({

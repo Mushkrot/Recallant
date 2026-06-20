@@ -113,17 +113,18 @@ security review smoke.
   connection path is local stdio MCP on an installed host.
 - Remote MCP/agent access now has a first authenticated `POST /api/mcp` endpoint slice, scoped
   remote MCP credential lifecycle with CLI/Workbench provisioning output, stdio-to-HTTPS remote
-  bridge, CLI-first diagnostics, aggregate security smoke, and deterministic isolated
-  external-client rehearsal. Local stdio MCP remains the default client workflow because real
-  separate-machine rehearsal with operator live credentials and broader onboarding remain
-  unfinished.
+  bridge, CLI-first diagnostics, aggregate security smoke, deterministic isolated external-client
+  rehearsal, and a redacted `recallant remote-acceptance` evidence gate for bootstrap,
+  remote-doctor, remote MCP session/context/write/checkpoint/recall, and forbidden local-artifact
+  checks. Local stdio MCP remains the default client workflow until a real external-host evidence
+  bundle is captured and reviewed.
 - The external-workstation beginner path is not release-ready. A user should not be told that the
   local self-host installer connects a project to an existing central Recallant server; that installer
   creates local storage and may require Docker/Postgres.
 - A remote client bootstrap now exists for server-generated onboarding packages with live
   endpoint/credential/scope. It installs only the remote bridge CLI, writes project-local client
-  config, and runs `remote-doctor`; it is still not the beginner default until real
-  separate-machine capture/recall rehearsal passes.
+  config, and runs `remote-doctor`; `recallant remote-acceptance` is now the formal follow-up gate,
+  but the path is still not the beginner default until a real external-host evidence bundle passes.
 - Private deployment overlays are intentionally not published in this repository.
 - Broader personal-life memory, team/multi-user workflows, and richer connector ecosystems remain
   future expansion after the coding-agent core is stable.
@@ -136,8 +137,8 @@ Before a release-candidate tag, the project should have:
 
 - external-host release rehearsal that repeats the public quickstart and rollback path;
 - remote project access rehearsal from at least one real separate machine with operator-provided
-  live endpoint/credential/scope, proving authenticated agent capture and recall against a central
-  Recallant server;
+  live endpoint/credential/scope, producing a validated `recallant remote-acceptance` evidence
+  bundle that proves authenticated agent capture and recall against a central Recallant server;
 - real remote-client bootstrap rehearsal from a separate machine, including `remote-doctor` and
   capture/recall readiness against the central server, before it is documented as a beginner
   command;

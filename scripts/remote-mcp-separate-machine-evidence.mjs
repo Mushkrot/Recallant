@@ -297,17 +297,101 @@ async function runBridgeProbe(input, env) {
     await client.connect(transport, { timeout: 5_000 });
     const list = await client.listTools({}, { timeout: 5_000 });
     const toolNames = list.tools.map((tool) => tool.name).sort();
-    const callTool = toolNames.includes("memory_heartbeat")
-      ? "memory_heartbeat"
-      : toolNames.includes("memory_get_context_pack")
-        ? "memory_get_context_pack"
-        : toolNames[0];
-    assert(callTool, "remote MCP tools/list returned no tools");
-    const call = await client.callTool(
+    const requiredTools = [
+      "memory_start_session",
+      "memory_get_context_pack",
+      "memory_create_agent_memory",
+      "memory_set_checkpoint",
+      "memory_recall_agent_memories"
+    ];
+    const missingTools = requiredTools.filter((tool) => !toolNames.includes(tool));
+    assert(missingTools.length === 0, `remote MCP missing required tools: ${missingTools.join(", ")}`);
+    const marker = `remote acceptance ${input.traceId}`;
+    const start = await client.callTool(
       {
-        name: callTool,
+        name: "memory_start_session",
         arguments: {
-          message: `external rehearsal ${input.traceId}`
+          client_kind: "codex",
+          client_version: "0.0.0",
+          project_path: null,
+          session_label: `remote acceptance ${input.traceId}`,
+          resume_policy: "force_new"
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const startStructured = start.structuredContent ?? {};
+    const sessionId =
+      typeof startStructured.session_id === "string" ? startStructured.session_id : input.sessionId;
+    const context = await client.callTool(
+      {
+        name: "memory_get_context_pack",
+        arguments: {
+          session_id: sessionId,
+          task_hint: marker,
+          project_id: null,
+          max_chars_total: 4000,
+          include_raw_evidence: "never",
+          include_recovery: false
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const created = await client.callTool(
+      {
+        name: "memory_create_agent_memory",
+        arguments: {
+          memory_type: "work_log",
+          scope: "project",
+          scope_kind: null,
+          scope_id: null,
+          audience: [{ kind: "all_agents", id: null }],
+          title: "Remote acceptance marker",
+          body: marker,
+          confidence: 1,
+          source_refs: [],
+          created_by: "agent",
+          metadata: {
+            trace_id: input.traceId,
+            session_id: sessionId,
+            acceptance: "remote_external"
+          }
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const checkpoint = await client.callTool(
+      {
+        name: "memory_set_checkpoint",
+        arguments: {
+          payload: {
+            current_status: "remote acceptance running",
+            current_focus: marker,
+            next_step: "Verify recall of the remote acceptance marker.",
+            open_questions: []
+          }
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const recall = await client.callTool(
+      {
+        name: "memory_recall_agent_memories",
+        arguments: {
+          query: marker,
+          scope: "project",
+          scope_kind: null,
+          audience_kind: null,
+          memory_types: ["work_log"],
+          include_candidates: true,
+          include_stale: false,
+          include_needs_review: true,
+          top_k: 5,
+          max_chars_total: 4000
         }
       },
       undefined,
@@ -315,13 +399,45 @@ async function runBridgeProbe(input, env) {
     );
     await client.close().catch(() => undefined);
     await transport.close().catch(() => undefined);
+    const recalledText = JSON.stringify(recall.structuredContent ?? recall.content ?? {});
+    const recallFound = recalledText.includes(marker);
     return redactJson(
       {
         status: "pass",
         command: `${basename(invocation.command)} ${invocation.args.join(" ")}`,
         tools: toolNames,
-        call_tool: callTool,
-        call_is_error: call.isError === true,
+        required_tools: requiredTools,
+        marker,
+        start_session: {
+          is_error: start.isError === true,
+          session_id: sessionId
+        },
+        context_pack: {
+          is_error: context.isError === true,
+          context_pack_id: context.structuredContent?.context_pack_id ?? null
+        },
+        memory_write: {
+          is_error: created.isError === true,
+          memory_id: created.structuredContent?.memory_id ?? null,
+          status: created.structuredContent?.status ?? null
+        },
+        checkpoint: {
+          is_error: checkpoint.isError === true,
+          updated_at: checkpoint.structuredContent?.updated_at ?? null
+        },
+        recall: {
+          is_error: recall.isError === true,
+          marker_found: recallFound,
+          trace_id: recall.structuredContent?.trace_id ?? null
+        },
+        call_tool: "memory_recall_agent_memories",
+        call_is_error:
+          start.isError === true ||
+          context.isError === true ||
+          created.isError === true ||
+          checkpoint.isError === true ||
+          recall.isError === true ||
+          !recallFound,
         stderr
       },
       input

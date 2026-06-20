@@ -72,8 +72,45 @@ function baseEvidence(overrides = {}) {
     },
     remote_mcp: {
       status: "pass",
-      tools: ["memory_get_context_pack", "memory_heartbeat"],
-      call_tool: "memory_heartbeat",
+      tools: [
+        "memory_start_session",
+        "memory_get_context_pack",
+        "memory_create_agent_memory",
+        "memory_set_checkpoint",
+        "memory_recall_agent_memories",
+        "memory_heartbeat"
+      ],
+      required_tools: [
+        "memory_start_session",
+        "memory_get_context_pack",
+        "memory_create_agent_memory",
+        "memory_set_checkpoint",
+        "memory_recall_agent_memories"
+      ],
+      marker: "remote acceptance validate-smoke-trace",
+      start_session: {
+        is_error: false,
+        session_id: "validate-smoke-session"
+      },
+      context_pack: {
+        is_error: false,
+        context_pack_id: "validate-context-pack"
+      },
+      memory_write: {
+        is_error: false,
+        memory_id: "validate-memory",
+        status: "accepted"
+      },
+      checkpoint: {
+        is_error: false,
+        updated_at: "2026-06-19T00:00:01.000Z"
+      },
+      recall: {
+        is_error: false,
+        marker_found: true,
+        trace_id: "validate-recall-trace"
+      },
+      call_tool: "memory_recall_agent_memories",
       call_is_error: false,
       stderr: ""
     },

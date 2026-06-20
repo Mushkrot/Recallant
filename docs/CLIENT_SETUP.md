@@ -235,8 +235,35 @@ project/developer/client failures, capture proof pass/missing/failure, and no DB
 artifact/backup leakage. It is deterministic external-like coverage, not a claim that a physical
 second machine has been rehearsed.
 
-For a real separate-machine rehearsal, run the same smoke from the external host with
-operator-provided live inputs:
+For a formal real separate-machine rehearsal, use the CLI acceptance gate from the external host
+with operator-provided live inputs. It bootstraps the remote client config, runs `remote-doctor`,
+opens the remote MCP bridge, starts a memory session, fetches a context pack, writes a governed
+memory marker, checkpoints, recalls that marker, verifies no local `.recallant`/Docker/Postgres
+artifacts were created, and writes a redacted evidence bundle:
+
+```bash
+recallant remote-acceptance \
+  --server-url <https-recallant-server> \
+  --credential <scoped-remote-mcp-credential> \
+  --project-id <project-id> \
+  --developer-id <developer-id> \
+  --client-id <client-id> \
+  --project-dir . \
+  --capture-proof \
+  --output-dir recallant-external-evidence
+```
+
+Validate a saved evidence file before sharing or committing an internal rehearsal report:
+
+```bash
+recallant remote-acceptance validate --evidence recallant-external-evidence/<run-id>.evidence.json
+```
+
+The evidence JSON and summary redact the credential, host name, project path, repository root,
+database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
+gate for deciding whether the remote existing-server path is ready for a beginner-facing command.
+
+The older live-input smoke remains useful for transport/security matrix checks:
 
 ```bash
 RECALLANT_EXTERNAL_REHEARSAL_SERVER_URL=<https-recallant-server> \
@@ -294,10 +321,12 @@ managed Recallant server remains the memory source of truth. That path should:
   `remote-mcp-provisioning:smoke`; keep validating remote diagnostics through
   `remote-mcp-doctor:smoke`; keep validating the end-to-end remote security matrix through
   `remote-mcp-security:smoke`; keep validating deterministic isolated external-client rehearsal
-  through `remote-mcp-external-rehearsal:smoke`.
+  through `remote-mcp-external-rehearsal:smoke`; keep validating the redacted evidence bundle
+  through `remote-mcp-separate-machine-evidence:smoke` and
+  `remote-mcp-separate-machine-evidence-validate:smoke`.
 
-Until real separate-machine rehearsal and broader onboarding polish land, use the local stdio setup
-above on the installed host for the default client path.
+Until a real external-host `remote-acceptance` run is captured and reviewed, use the local stdio
+setup above on the installed host for the default client path.
 
 ## Optional Local Hooks
 

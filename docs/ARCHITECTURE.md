@@ -151,8 +151,10 @@ only. The endpoint behavior is gated by `remote-mcp-contract:smoke` and
 `remote-mcp-credentials:smoke`; `remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`,
 `remote-mcp-doctor:smoke`, `remote-mcp-security:smoke`, and
 `remote-mcp-external-rehearsal:smoke` cover the bridge, provisioning, diagnostics, security matrix,
-and deterministic isolated external-client rehearsal. Broader onboarding, broader transport/client
-support, and real separate-machine release rehearsal remain near-term work.
+deterministic isolated external-client rehearsal, and `remote-mcp-separate-machine-evidence:smoke`
+covers the redacted evidence bundle shape for the real external-host gate. Broader onboarding,
+broader transport/client support, and a captured live external-host evidence run remain near-term
+work.
 
 ## Why This Is Different From Plain Logs Or RAG
 
