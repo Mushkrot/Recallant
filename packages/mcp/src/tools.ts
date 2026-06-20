@@ -54,7 +54,10 @@ const memoryType = z.enum([
   "open_question",
   "artifact_reference",
   "preference",
-  "procedure"
+  "procedure",
+  "environment_fact",
+  "domain_fact",
+  "capability_fact"
 ]);
 
 export type RecallantToolName =

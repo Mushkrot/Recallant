@@ -1023,6 +1023,28 @@ function remoteMcpJsonRpcResult(id: RemoteMcpJsonRpcId, result: Record<string, u
   return { jsonrpc: "2.0", id, result };
 }
 
+function zodValidationIssues(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+  const issues = (error as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? issues : null;
+}
+
+function remoteMcpValidationMessage(error: unknown) {
+  const issues = zodValidationIssues(error);
+  if (!issues) return null;
+  const summarized = issues.slice(0, 5).map((issue) => {
+    const record = isRecord(issue) ? issue : {};
+    const rawPath = Array.isArray(record.path) ? record.path.map(String).join(".") : "";
+    const path = rawPath || "arguments";
+    const message =
+      typeof record.message === "string" ? record.message : "Invalid value for this field.";
+    return `${path}: ${String(redactSystemActivityValue(message, "validation_message"))}`;
+  });
+  const suffix =
+    issues.length > summarized.length ? `; ${issues.length - summarized.length} more` : "";
+  return `VALIDATION_ERROR: invalid remote MCP tool arguments (${summarized.join("; ")}${suffix}). For simple facts use memory_type "work_log" or "environment_fact", not "fact".`;
+}
+
 function writeRemoteMcpJson(
   response: ServerResponse,
   statusCode: number,
@@ -1044,6 +1066,14 @@ function remoteMcpErrorFromUnknown(error: unknown, fallbackId: RemoteMcpJsonRpcI
       statusCode: remoteMcpErrorStatus("VALIDATION_ERROR"),
       code: "VALIDATION_ERROR" as RemoteMcpErrorCode,
       body: remoteMcpJsonRpcErrorEnvelope(fallbackId, "VALIDATION_ERROR", error.message)
+    };
+  }
+  const validationMessage = remoteMcpValidationMessage(error);
+  if (validationMessage) {
+    return {
+      statusCode: remoteMcpErrorStatus("VALIDATION_ERROR"),
+      code: "VALIDATION_ERROR" as RemoteMcpErrorCode,
+      body: remoteMcpJsonRpcErrorEnvelope(fallbackId, "VALIDATION_ERROR", validationMessage)
     };
   }
   if (error instanceof SyntaxError) {

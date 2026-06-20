@@ -575,6 +575,39 @@ try {
 
   result = await rpc(baseUrl, {
     jsonrpc: "2.0",
+    id: "create-agent-memory-invalid-type",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "fact",
+        scope: "project",
+        scope_kind: "project",
+        scope_id: null,
+        audience: [{ kind: "all_agents", id: null }],
+        title: "Invalid remote fact type",
+        body: remoteMemoryFact,
+        confidence: 1,
+        source_refs: [],
+        created_by: "agent",
+        metadata: { smoke: true }
+      }
+    }
+  });
+  assert(result.status === 400, `invalid memory_type should return HTTP 400: ${result.text}`);
+  assert(
+    result.body?.error?.code === -32600 &&
+      result.body?.error?.data?.code === "VALIDATION_ERROR" &&
+      String(result.body?.error?.message ?? "").includes("memory_type") &&
+      String(result.body?.error?.message ?? "").includes("work_log") &&
+      !String(result.body?.error?.message ?? "").includes("-32053"),
+    `invalid memory_type should return actionable validation error: ${result.text}`
+  );
+  mustNotContain(result.text, "RECALLANT_DATABASE_URL", "invalid memory_type response");
+  endpointCases.push("tools_call_memory_create_agent_memory_invalid_type_validation");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
     id: "recall-agent-memory",
     method: "tools/call",
     params: {
