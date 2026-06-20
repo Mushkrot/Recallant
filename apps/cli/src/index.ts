@@ -7581,6 +7581,9 @@ function usageText(command?: string) {
       "",
       "Validate a saved evidence file:",
       "  recallant remote-acceptance validate --evidence <path>",
+      "",
+      "Clean stale local storage artifacts before retrying remote acceptance:",
+      "  recallant remote-acceptance cleanup --project-dir <path> --confirm",
       ""
     ].join("\n");
   }

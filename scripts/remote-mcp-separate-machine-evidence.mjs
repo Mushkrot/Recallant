@@ -9,6 +9,7 @@ import {
   readdir,
   readFile,
   realpath,
+  rm,
   stat,
   writeFile
 } from "node:fs/promises";
@@ -25,6 +26,7 @@ const forbiddenOutputPattern =
 
 function parseArgs(argv) {
   const values = {
+    mode: "run",
     serverUrl: process.env.RECALLANT_EXTERNAL_REHEARSAL_SERVER_URL ?? "",
     credential: process.env.RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL ?? "",
     projectId: process.env.RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID ?? "",
@@ -38,8 +40,13 @@ function parseArgs(argv) {
     bootstrapScript: process.env.RECALLANT_EXTERNAL_REHEARSAL_BOOTSTRAP_SCRIPT ?? "",
     recallantCommand: process.env.RECALLANT_EXTERNAL_REHEARSAL_RECALLANT_CMD ?? "recallant",
     captureProof: process.env.RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF === "1",
-    skipBootstrap: false
+    skipBootstrap: false,
+    confirm: false
   };
+  if (argv[0] === "cleanup") {
+    values.mode = "cleanup";
+    argv = argv.slice(1);
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -57,13 +64,17 @@ function parseArgs(argv) {
     else if (arg === "--recallant-command") values.recallantCommand = next ?? "";
     else if (arg === "--capture-proof") values.captureProof = true;
     else if (arg === "--skip-bootstrap") values.skipBootstrap = true;
+    else if (arg === "--confirm") values.confirm = true;
     else if (arg === "--help" || arg === "-h") {
       usage();
       process.exit(0);
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
-    if (arg.startsWith("--") && !["--capture-proof", "--skip-bootstrap", "--help", "-h"].includes(arg)) {
+    if (
+      arg.startsWith("--") &&
+      !["--capture-proof", "--skip-bootstrap", "--confirm", "--help", "-h"].includes(arg)
+    ) {
       index += 1;
     }
   }
@@ -74,7 +85,10 @@ function usage() {
   process.stdout.write(`Usage: node scripts/remote-mcp-separate-machine-evidence.mjs --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [options]
 
 Runs the external-host Recallant remote onboarding rehearsal and writes redacted evidence.
-This runner does not install Docker, Postgres, or local Recallant storage.\n`);
+This runner does not install Docker, Postgres, or local Recallant storage.
+
+Cleanup stale local storage artifacts before retrying:
+  node scripts/remote-mcp-separate-machine-evidence.mjs cleanup --project-dir <path> --confirm\n`);
 }
 
 function assert(condition, message) {
@@ -136,6 +150,61 @@ async function projectSnapshot(projectDir) {
     recallant_remote_bridge_configured: /remote-bridge/.test(codexConfig),
     forbidden
   };
+}
+
+async function runCleanup(input) {
+  const projectDir = resolve(input.projectDir);
+  const target = join(projectDir, ".recallant");
+  const present = await exists(target);
+  const result = {
+    ok: true,
+    action: "remote_acceptance_cleanup",
+    dry_run: !input.confirm,
+    project_dir: redact(projectDir, { ...input, projectDir }),
+    writes_files: input.confirm && present,
+    planned_changes: present
+      ? [
+          {
+            action: "remove_path",
+            path: ".recallant",
+            reason:
+              "Stale local Recallant storage artifact blocks remote existing-server acceptance."
+          }
+        ]
+      : [],
+    removed_paths: [],
+    preserved: [
+      ".codex/config.toml and other client configs",
+      "source files",
+      "AGENTS.md",
+      "PROJECT_LOG.md",
+      "Docker/Postgres files"
+    ],
+    warnings: [
+      "This cleanup removes only the project-local .recallant directory.",
+      "It does not delete source files or central Recallant server records."
+    ]
+  };
+  if (input.confirm && present) {
+    await rm(target, { recursive: true, force: true });
+    result.removed_paths.push(".recallant");
+  }
+  process.stdout.write(
+    [
+      "Recallant remote-acceptance cleanup",
+      "",
+      `Status: ${present ? (input.confirm ? "cleaned" : "ready_for_confirmation") : "already_clean"}`,
+      `Writes files: ${result.writes_files ? "yes" : "no"}`,
+      `Planned changes: ${result.planned_changes.length}`,
+      result.planned_changes.length ? "- remove .recallant" : "- none",
+      "",
+      "Preserved:",
+      ...result.preserved.map((item) => `- ${item}`),
+      "",
+      `JSON: ${JSON.stringify(result)}`,
+      ""
+    ].join("\n")
+  );
 }
 
 function assertCleanSnapshot(snapshot, label) {
@@ -497,6 +566,10 @@ function summaryText(evidence) {
 }
 
 const input = parseArgs(process.argv.slice(2));
+if (input.mode === "cleanup") {
+  await runCleanup(input);
+  process.exit(0);
+}
 const runId = randomUUID();
 const outputDir = resolve(input.outputDir);
 const projectDir = resolve(input.projectDir);

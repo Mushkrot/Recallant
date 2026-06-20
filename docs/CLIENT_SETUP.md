@@ -259,6 +259,16 @@ Validate a saved evidence file before sharing or committing an internal rehearsa
 recallant remote-acceptance validate --evidence recallant-external-evidence/<run-id>.evidence.json
 ```
 
+If the gate fails because an old local setup left `.recallant` in the project folder, clean only
+that stale local storage marker and retry:
+
+```bash
+recallant remote-acceptance cleanup --project-dir . --confirm
+```
+
+This cleanup preserves source files, `AGENTS.md`, `PROJECT_LOG.md`, and the remote client config. It
+does not delete central Recallant server records.
+
 The evidence JSON and summary redact the credential, host name, project path, repository root,
 database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
 gate for deciding whether the remote existing-server path is ready for a beginner-facing command.

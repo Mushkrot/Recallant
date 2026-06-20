@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,15 @@ const expected = {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function createTemporaryCertificate() {
@@ -354,6 +363,7 @@ try {
   const failingProject = join(temp, "failing-project");
   const failingOutput = join(temp, "failing-evidence");
   await mkdir(join(failingProject, ".recallant"), { recursive: true });
+  await writeFile(join(failingProject, "README.md"), "# Dirty project\n");
   try {
     await execFileAsync(
       process.execPath,
@@ -384,6 +394,20 @@ try {
     assert(Number(error.code ?? 0) !== 0, "dirty project did not exit non-zero");
     assert(!String(error.stdout ?? "").includes(credential), "dirty project output leaked credential");
   }
+  const cleanup = await execFileAsync(
+    process.execPath,
+    [
+      "scripts/remote-mcp-separate-machine-evidence.mjs",
+      "cleanup",
+      "--project-dir",
+      failingProject,
+      "--confirm"
+    ],
+    { cwd: process.cwd(), env, maxBuffer: 1024 * 1024 }
+  );
+  assert(cleanup.stdout.includes("Status: cleaned"), "remote acceptance cleanup did not clean");
+  assert(!(await exists(join(failingProject, ".recallant"))), "cleanup left .recallant behind");
+  assert(await exists(join(failingProject, "README.md")), "cleanup removed source file");
   process.stdout.write(
     JSON.stringify(
       {
