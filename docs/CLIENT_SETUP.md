@@ -161,8 +161,9 @@ The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, i
 Workbench/admin auth, raw artifacts, backups, or provider secrets. Local stdio MCP remains the
 default simple path for installed-host projects.
 
-This is still operator-provided and advanced until it has passed a real separate-machine rehearsal
-with live endpoint/credential/scope and capture/recall proof against the central server.
+This remains operator-provided and advanced while the release-candidate beginner flow is polished,
+but the path has passed a real separate-machine rehearsal with live endpoint/credential/scope and
+capture/recall proof against the central server.
 
 ### Provision Scoped Remote Credentials
 
@@ -271,6 +272,8 @@ does not delete central Recallant server records.
 The evidence JSON and summary redact the credential, host name, project path, repository root,
 database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
 gate for deciding whether the remote existing-server path is ready for a beginner-facing command.
+One real external Mac rehearsal passed this gate on 2026-06-20 with evidence run
+`8fa139a4-13f2-419e-8ae7-1611e16c86fa`.
 
 The older live-input smoke remains useful for transport/security matrix checks:
 
@@ -334,7 +337,7 @@ managed Recallant server remains the memory source of truth. That path should:
   through `remote-mcp-separate-machine-evidence:smoke` and
   `remote-mcp-separate-machine-evidence-validate:smoke`.
 
-Until a real external-host `remote-acceptance` run is captured and reviewed, use the local stdio
+Until broader remote-client polish and repeat release rehearsals are complete, use the local stdio
 setup above on the installed host for the default client path.
 
 ## Optional Local Hooks

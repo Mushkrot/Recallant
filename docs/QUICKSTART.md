@@ -117,8 +117,9 @@ recallant remote-acceptance \
 
 That acceptance command reads the scoped remote connection from the project-local client config
 written by bootstrap, then writes redacted evidence for bootstrap, remote-doctor, remote MCP
-session/context/write/checkpoint/recall, and forbidden local-artifact checks. A real external-host
-evidence pass is required before this path should be presented as a beginner default.
+session/context/write/checkpoint/recall, and forbidden local-artifact checks. One real external Mac
+rehearsal passed this gate on 2026-06-20; keep this path operator-led until broader remote-client
+polish and repeat release rehearsals are complete.
 
 If you accidentally started the local self-host installer while testing remote setup, stop and clean
 up the local install artifacts before retrying. A failed install that stopped before onboarding
