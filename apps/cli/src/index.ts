@@ -1375,6 +1375,29 @@ function runLocalCliSubcommand(args: readonly string[], parseJson = true) {
   };
 }
 
+function summarizeSubcommandFailure(result: ReturnType<typeof runLocalCliSubcommand>) {
+  const combined = `${result.stderr}\n${result.stdout}`;
+  const lines = combined
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter(
+      (line) =>
+        !line.startsWith("at ") &&
+        !line.startsWith("Node.js ") &&
+        !line.startsWith("(") &&
+        !line.includes("node:internal/")
+    );
+  const candidate =
+    lines.find((line) =>
+      /^(error:|Error:|VALIDATION_ERROR|POLICY_BLOCKED|REMOTE_|Failed\b)/i.test(line)
+    ) ??
+    lines.at(-1) ??
+    `exit status ${result.status}`;
+  const redacted = String(redactSystemActivityValue(candidate));
+  return redacted.length > 320 ? `${redacted.slice(0, 317)}...` : redacted;
+}
+
 function formatCommandHint(input: readonly string[]) {
   return input.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
 }
@@ -6756,7 +6779,9 @@ async function runOnboard(argv: readonly string[]) {
     steps.attached.command = formatCommandHint(attachCommand);
     if (attachResult.status !== 0) {
       steps.attached.status = "failed";
-      throw new Error("onboard attach failed. Fix the reported issue and rerun onboard.");
+      const issue = summarizeSubcommandFailure(attachResult);
+      steps.attached.details = issue;
+      throw new Error(`onboard attach failed: ${issue}. Fix the reported issue and rerun onboard.`);
     }
     let attachPayload = attachResult.json;
     let attachStatus = String(attachPayload?.status ?? "unknown");
@@ -6811,8 +6836,10 @@ async function runOnboard(argv: readonly string[]) {
       const confirmedResult = runLocalCliSubcommand(confirmedCommand);
       if (confirmedResult.status !== 0) {
         steps.attached.status = "failed";
+        const issue = summarizeSubcommandFailure(confirmedResult);
+        steps.attached.details = issue;
         throw new Error(
-          "onboard attach confirmation failed. Fix the reported issue and rerun onboard."
+          `onboard attach confirmation failed: ${issue}. Fix the reported issue and rerun onboard.`
         );
       }
       attachPayload = confirmedResult.json;
@@ -6853,8 +6880,10 @@ async function runOnboard(argv: readonly string[]) {
       steps.connected.command = formatCommandHint(connectCommand);
       if (connectResult.status !== 0) {
         steps.connected.status = "failed";
+        const issue = summarizeSubcommandFailure(connectResult);
+        steps.connected.details = issue;
         throw new Error(
-          `onboard connect failed. Run again after fixing: ${steps.connected.command}`
+          `onboard connect failed: ${issue}. Run again after fixing: ${steps.connected.command}`
         );
       }
       const connectPayload = connectResult.json;

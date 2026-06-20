@@ -15,10 +15,23 @@ const clientBootstrapSource = readFileSync(
   join(repoRoot, "scripts", "install-recallant-client-bootstrap.sh"),
   "utf8"
 );
-const prodComposeSource = readFileSync(join(repoRoot, "scripts", "recallant-prod-compose.sh"), "utf8");
+const cliInstallSource = readFileSync(
+  join(repoRoot, "scripts", "install-recallant-cli.sh"),
+  "utf8"
+);
+const prodComposeSource = readFileSync(
+  join(repoRoot, "scripts", "recallant-prod-compose.sh"),
+  "utf8"
+);
 const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
-const backupSource = readFileSync(join(repoRoot, "scripts", "recallant-production-backup.sh"), "utf8");
-const rollbackSource = readFileSync(join(repoRoot, "scripts", "rollback-recallant-install.sh"), "utf8");
+const backupSource = readFileSync(
+  join(repoRoot, "scripts", "recallant-production-backup.sh"),
+  "utf8"
+);
+const rollbackSource = readFileSync(
+  join(repoRoot, "scripts", "rollback-recallant-install.sh"),
+  "utf8"
+);
 
 function run(args, env = {}) {
   const result = spawnSync("/bin/bash", ["scripts/install-recallant.sh", ...args], {
@@ -40,14 +53,18 @@ function run(args, env = {}) {
 }
 
 function runClientBootstrap(args, env = {}) {
-  const result = spawnSync("/bin/bash", ["scripts/install-recallant-client-bootstrap.sh", ...args], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      ...env
-    },
-    encoding: "utf8"
-  });
+  const result = spawnSync(
+    "/bin/bash",
+    ["scripts/install-recallant-client-bootstrap.sh", ...args],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        ...env
+      },
+      encoding: "utf8"
+    }
+  );
   if (result.error?.code === "EPERM") return staticClientBootstrapResult(args, env);
   if (result.error) throw result.error;
   return {
@@ -296,6 +313,7 @@ assert(!(await exists(singlePrefix)), "Single-user installer dry-run created CLI
 
 assert(
   installerSource.includes('RECALLANT_ENV_FILE="$ENV_FILE"') &&
+    installerSource.includes('RECALLANT_CLI_ENV_FILE="$ENV_FILE"') &&
     installerSource.includes('RECALLANT_DATA_DIR="$DATA_DIR"') &&
     installerSource.includes('RECALLANT_POSTGRES_PORT="$POSTGRES_PORT"') &&
     installerSource.includes('RECALLANT_POSTGRES_CONTAINER_NAME="$POSTGRES_CONTAINER_NAME"') &&
@@ -303,7 +321,15 @@ assert(
   "Installer must pass the selected env/data/Postgres/Compose settings into production compose"
 );
 assert(
-  installerSource.includes("RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work") &&
+  cliInstallSource.includes('CLI_ENV_FILE="${RECALLANT_CLI_ENV_FILE:-${RECALLANT_ENV_FILE:-}}"') &&
+    cliInstallSource.includes('export RECALLANT_ENV_FILE="$CLI_ENV_FILE"') &&
+    cliInstallSource.includes("Recallant CLI env file:"),
+  "CLI wrapper installer must bake the selected env file so recallant onboard stays one command"
+);
+assert(
+  installerSource.includes(
+    "RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work"
+  ) &&
     installerSource.includes("RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME") &&
     installerSource.includes("RECALLANT_COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME"),
   "Installer must write selected Postgres/Compose settings"
@@ -314,15 +340,21 @@ assert(
     installerSource.includes("Docker is installed, but the Docker daemon is not running.") &&
     bootstrapSource.includes("add_hint docker-running") &&
     bootstrapSource.indexOf("docker info >/dev/null 2>&1") <
-      bootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+      bootstrapSource.indexOf(
+        'git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'
+      ),
   "Installers must fail early with a human Docker-not-running message"
 );
 assert(
-  prodComposeSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}') &&
-    prodComposeSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}') &&
-    prodComposeSource.includes('POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}') &&
-    prodComposeSource.includes('POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}') &&
-    prodComposeSource.includes('COMPOSE_PROJECT_NAME=${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}') &&
+  prodComposeSource.includes("ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}") &&
+    prodComposeSource.includes("DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}") &&
+    prodComposeSource.includes("POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}") &&
+    prodComposeSource.includes(
+      "POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}"
+    ) &&
+    prodComposeSource.includes(
+      "COMPOSE_PROJECT_NAME=${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}"
+    ) &&
     prodComposeSource.includes('docker compose -p "$COMPOSE_PROJECT_NAME"') &&
     prodComposeSource.includes('export RECALLANT_DATA_DIR="$DATA_DIR"'),
   "Production compose wrapper must honor selected env/data/Postgres/Compose settings"
@@ -330,14 +362,18 @@ assert(
 assert(
   prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/var/lib/recallant}/postgres") &&
     prodComposeYaml.includes("${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}") &&
-    prodComposeYaml.includes("${RECALLANT_POSTGRES_HOST:-127.0.0.1}:${RECALLANT_POSTGRES_PORT:-15432}:5432"),
+    prodComposeYaml.includes(
+      "${RECALLANT_POSTGRES_HOST:-127.0.0.1}:${RECALLANT_POSTGRES_PORT:-15432}:5432"
+    ),
   "Production compose must use profile-driven Postgres data, container, and port settings"
 );
 assert(
-  backupSource.includes('ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}') &&
-    backupSource.includes('DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}') &&
-    backupSource.includes('RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}') &&
-    backupSource.includes('BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}'),
+  backupSource.includes("ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}") &&
+    backupSource.includes("DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}") &&
+    backupSource.includes(
+      'RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}'
+    ) &&
+    backupSource.includes("BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}"),
   "Production backup script must honor profile env/data paths"
 );
 assert(
@@ -345,14 +381,18 @@ assert(
     rollbackSource.includes("--confirm-token rollback-recallant-install") &&
     rollbackSource.includes(".recallant-install-marker") &&
     rollbackSource.includes("Refusing to remove unmarked data dir") &&
-    rollbackSource.includes("DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."),
+    rollbackSource.includes(
+      "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
+    ),
   "Installer rollback must be dry-run first, confirmation-gated, and marker-based"
 );
 assert(
   bootstrapSource.includes("--onboard <project-dir>") &&
     bootstrapSource.includes("--confirm-local-self-host") &&
     bootstrapSource.includes('ONBOARD_PROJECT="${2:-}"') &&
-    bootstrapSource.includes("Refusing to run bootstrap --onboard without local self-host confirmation.") &&
+    bootstrapSource.includes(
+      "Refusing to run bootstrap --onboard without local self-host confirmation."
+    ) &&
     bootstrapSource.includes("This is not the remote existing-server client path.") &&
     bootstrapSource.includes('INVOKE_DIR="$(pwd -P)"') &&
     bootstrapSource.includes('onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"') &&
@@ -370,8 +410,12 @@ assert(
     clientBootstrapSource.includes("Docker/Postgres: not required") &&
     clientBootstrapSource.includes("RECALLANT_CLIENT_BOOTSTRAP_INSTALL_DIR") &&
     clientBootstrapSource.includes('client_install_dir="$INSTALL_DIR"') &&
-    clientBootstrapSource.includes('git -C "$client_install_dir" fetch --depth 1 origin "$SOURCE_REF"') &&
-    clientBootstrapSource.includes('RECALLANT_HOME="$client_install_dir" "$client_install_dir/scripts/install-recallant-cli.sh" --user') &&
+    clientBootstrapSource.includes(
+      'git -C "$client_install_dir" fetch --depth 1 origin "$SOURCE_REF"'
+    ) &&
+    clientBootstrapSource.includes(
+      'RECALLANT_HOME="$client_install_dir" "$client_install_dir/scripts/install-recallant-cli.sh" --user'
+    ) &&
     clientBootstrapSource.includes("Missing required remote setup inputs") &&
     !clientBootstrapSource.includes('clone_dir="$(mktemp -d)"') &&
     !clientBootstrapSource.includes('rm -rf "$clone_dir"') &&
@@ -496,8 +540,14 @@ const commonBootstrapArgs = [
 const fixtureEnv = { RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD: fakeRecallant };
 const dryRunResult = runClientBootstrap([...commonBootstrapArgs, "--dry-run"], fixtureEnv);
 assert(dryRunResult.status === 0, "Remote client bootstrap dry-run fixture failed");
-assert(dryRunResult.combined.includes("DRY_RUN: no project files were changed."), "Dry-run output missing no-change line");
-assert(dryRunResult.combined.includes("<redacted-remote-mcp-credential>"), "Dry-run doctor command did not redact credential");
+assert(
+  dryRunResult.combined.includes("DRY_RUN: no project files were changed."),
+  "Dry-run output missing no-change line"
+);
+assert(
+  dryRunResult.combined.includes("<redacted-remote-mcp-credential>"),
+  "Dry-run doctor command did not redact credential"
+);
 assert(!dryRunResult.combined.includes(bootstrapSecret), "Dry-run output leaked raw credential");
 const successResult = runClientBootstrap(commonBootstrapArgs, fixtureEnv);
 assert(successResult.status === 0, "Remote client bootstrap success fixture failed");
@@ -532,8 +582,14 @@ for (const [mode, markers] of [
     failureResult.combined.includes("Remote doctor failed: config was written"),
     `Remote client bootstrap doctor ${mode} output did not state config/doctor split`
   );
-  assert(!failureResult.combined.includes(bootstrapSecret), `Doctor ${mode} output leaked raw credential`);
-  assert(!/docker|postgres/i.test(failureResult.combined), `Doctor ${mode} output suggested local Docker/Postgres`);
+  assert(
+    !failureResult.combined.includes(bootstrapSecret),
+    `Doctor ${mode} output leaked raw credential`
+  );
+  assert(
+    !/docker|postgres/i.test(failureResult.combined),
+    `Doctor ${mode} output suggested local Docker/Postgres`
+  );
 }
 
 process.stdout.write("Installer dry-run/profile smoke passed\n");

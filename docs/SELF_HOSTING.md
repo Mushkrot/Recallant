@@ -78,7 +78,13 @@ Confirmed install:
 
 `recallant onboard <project>` checks storage before it changes project files. If
 `RECALLANT_DATABASE_URL` is already reachable, onboarding reuses it. If that variable is not set,
-the CLI loads the default single-user env file when it exists.
+the installed CLI wrapper loads its configured env file when the server installer provided one, or
+the default single-user env file when it exists. After a server or single-user install, onboarding a
+project on the same machine should therefore stay one command:
+
+```bash
+recallant onboard /path/to/project
+```
 
 In an interactive terminal, missing storage offers to run the single-user install profile before
 project files are touched. Non-interactive runs, explicit private env-file runs, declined setup, or

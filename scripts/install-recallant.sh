@@ -245,7 +245,7 @@ if [[ ! -d node_modules ]]; then
 fi
 npm run build
 
-PREFIX="$INSTALL_CLI_PREFIX" "$RECALLANT_HOME/scripts/install-recallant-cli.sh"
+PREFIX="$INSTALL_CLI_PREFIX" RECALLANT_CLI_ENV_FILE="$ENV_FILE" "$RECALLANT_HOME/scripts/install-recallant-cli.sh"
 
 prod_compose() {
   RECALLANT_ENV_FILE="$ENV_FILE" \

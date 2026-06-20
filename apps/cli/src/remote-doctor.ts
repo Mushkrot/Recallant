@@ -485,7 +485,10 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
     return stages;
   }
 
-  if (!toolNames.includes("memory_start_session") || !toolNames.includes("memory_get_context_pack")) {
+  if (
+    !toolNames.includes("memory_start_session") ||
+    !toolNames.includes("memory_get_context_pack")
+  ) {
     stages.push(
       stage(
         "capture_recall_proof",

@@ -296,6 +296,46 @@ assert(
   "explicit env onboard output leaked database credentials"
 );
 
+const wrapperEnvRoot = await mkdtemp(join(tmpdir(), "recallant-onboarding-wrapper-env-"));
+const wrapperEnvPrefix = join(wrapperEnvRoot, "bin");
+const wrapperEnvFile = join(wrapperEnvRoot, "recallant.env");
+await writeFile(wrapperEnvFile, `RECALLANT_DATABASE_URL=${databaseUrl}\n`);
+run("bash", ["scripts/install-recallant-cli.sh"], {
+  env: {
+    PREFIX: wrapperEnvPrefix,
+    RECALLANT_CLI_ENV_FILE: wrapperEnvFile
+  }
+});
+const wrapperEnvRecallant = join(wrapperEnvPrefix, "recallant");
+const wrapperEnvProject = join(wrapperEnvRoot, "project");
+await mkdir(wrapperEnvProject, { recursive: true });
+await writeFile(join(wrapperEnvProject, "README.md"), "# Wrapper env onboarding smoke\n");
+const wrapperEnvOnboard = runJson(
+  wrapperEnvRecallant,
+  ["onboard", wrapperEnvProject, "--skip-vcs-safety", "--format", "json"],
+  {
+    cwd: wrapperEnvProject,
+    omitDatabaseUrl: true,
+    omitEnvFile: true
+  }
+);
+assert(
+  wrapperEnvOnboard.storage?.status === "ready" &&
+    wrapperEnvOnboard.storage?.env_file_loaded === true &&
+    wrapperEnvOnboard.storage?.env_source === "explicit_env_file" &&
+    wrapperEnvOnboard.attached?.status === "attached" &&
+    wrapperEnvOnboard.connected?.status === "connected" &&
+    wrapperEnvOnboard.verify?.status === "passed",
+  `installed wrapper env file did not keep onboarding one-command: ${JSON.stringify(
+    wrapperEnvOnboard
+  )}`
+);
+assert(
+  !JSON.stringify(wrapperEnvOnboard).includes("recallant_dev_password") &&
+    !JSON.stringify(wrapperEnvOnboard).includes(databaseUrl),
+  "wrapper env onboard output leaked database credentials"
+);
+
 const emptyStarterProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-empty-starter-"));
 const emptyStarterDryRun = runJson(
   recallant,
@@ -357,7 +397,10 @@ for (const marker of ["old handoff", "super-secret-value", "raw old handoff"]) {
     `generated starter docs leaked disallowed marker ${marker}`
   );
 }
-assert(await exists(join(emptyStarterProject, "PROJECT_LOG.md")), "empty starter PROJECT_LOG missing");
+assert(
+  await exists(join(emptyStarterProject, "PROJECT_LOG.md")),
+  "empty starter PROJECT_LOG missing"
+);
 
 async function onboardProfileStarter(name, envText, expectedFiles) {
   const profileProject = await mkdtemp(join(tmpdir(), `recallant-onboarding-${name}-starter-`));
@@ -371,36 +414,44 @@ async function onboardProfileStarter(name, envText, expectedFiles) {
   assertSameStringSet(generated, expectedFiles, `${name} starter generated unexpected file set`);
   for (const file of expectedFiles) {
     assert(await exists(join(profileProject, file)), `${name} starter did not write ${file}`);
-    assert(generated.includes(file), `${name} starter outcome missing ${file}: ${JSON.stringify(result)}`);
+    assert(
+      generated.includes(file),
+      `${name} starter outcome missing ${file}: ${JSON.stringify(result)}`
+    );
   }
   return { project: profileProject, result };
 }
 
-const serviceStarter = await onboardProfileStarter(
-  "service",
-  "SERVICE=\nPORT=\n",
-  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/RUNBOOK.md", "docs/ARCHITECTURE.md"]
-);
+const serviceStarter = await onboardProfileStarter("service", "SERVICE=\nPORT=\n", [
+  "README.md",
+  "AGENTS.md",
+  "PROJECT_LOG.md",
+  "docs/RUNBOOK.md",
+  "docs/ARCHITECTURE.md"
+]);
 assert(
   serviceStarter.result.documentation_posture?.profile === "service_app",
   `service starter profile failed: ${JSON.stringify(serviceStarter.result.documentation_posture)}`
 );
 
-const productStarter = await onboardProfileStarter(
-  "product",
-  "PRODUCT=\nMILESTONE=\n",
-  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/STATUS.md", "docs/DECISIONS.md"]
-);
+const productStarter = await onboardProfileStarter("product", "PRODUCT=\nMILESTONE=\n", [
+  "README.md",
+  "AGENTS.md",
+  "PROJECT_LOG.md",
+  "docs/STATUS.md",
+  "docs/DECISIONS.md"
+]);
 assert(
   productStarter.result.documentation_posture?.profile === "product_roadmap",
   `product starter profile failed: ${JSON.stringify(productStarter.result.documentation_posture)}`
 );
 
-const libraryStarter = await onboardProfileStarter(
-  "library",
-  "PACKAGE=\nSDK=\n",
-  ["README.md", "AGENTS.md", "PROJECT_LOG.md", "docs/API.md"]
-);
+const libraryStarter = await onboardProfileStarter("library", "PACKAGE=\nSDK=\n", [
+  "README.md",
+  "AGENTS.md",
+  "PROJECT_LOG.md",
+  "docs/API.md"
+]);
 assert(
   libraryStarter.result.documentation_posture?.profile === "library_package",
   `library starter profile failed: ${JSON.stringify(libraryStarter.result.documentation_posture)}`
@@ -525,7 +576,10 @@ assert(
   (await projectSettingCount(productionProject, "documentation_posture")) === 0,
   "dry-run wrote documentation posture setting"
 );
-assert((await projectSettingCount(productionProject, "starter_docs")) === 0, "dry-run wrote starter docs setting");
+assert(
+  (await projectSettingCount(productionProject, "starter_docs")) === 0,
+  "dry-run wrote starter docs setting"
+);
 
 const productionYes = runJson(
   recallant,

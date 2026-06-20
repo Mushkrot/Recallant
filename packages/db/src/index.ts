@@ -5530,6 +5530,7 @@ export class RecallantDb {
         WITH project_usage AS (
           SELECT
             p.id,
+            p.developer_id,
             p.name,
             p.primary_path,
             p.project_kind,

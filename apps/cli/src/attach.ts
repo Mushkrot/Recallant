@@ -723,14 +723,29 @@ async function runStartupSmoke(input: { database: RecallantDb; projectDir: strin
 }
 
 async function runReviewVisibility(input: { database: RecallantDb; projectId: string }) {
-  const dashboard = await input.database.getReviewDashboard({ project_id: input.projectId });
-  return {
-    status: "ok",
-    project_visible: dashboard.projects.some((project) => project.project_id === input.projectId),
-    import_candidate_count: dashboard.import_candidates.length,
-    pending_review: dashboard.critical?.pending_review ?? 0,
-    detach_cleanup_entrypoint: true
-  };
+  try {
+    const dashboard = await input.database.getReviewDashboard({ project_id: input.projectId });
+    return {
+      status: "ok",
+      project_visible: dashboard.projects.some((project) => project.project_id === input.projectId),
+      import_candidate_count: dashboard.import_candidates.length,
+      pending_review: dashboard.critical?.pending_review ?? 0,
+      detach_cleanup_entrypoint: true
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      project_visible: null,
+      import_candidate_count: null,
+      pending_review: null,
+      detach_cleanup_entrypoint: true,
+      message: "Workbench review visibility could not be checked during attach.",
+      error_code:
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : null
+    };
+  }
 }
 
 function textReport(result: Record<string, unknown>) {
