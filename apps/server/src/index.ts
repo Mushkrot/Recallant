@@ -4696,7 +4696,8 @@ function renderDashboard(
     dt { color: #6a7280; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .status { display: flex; gap: 8px; flex-wrap: wrap; }
-    .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: var(--surface-soft); }
+    .pill { border: 1px solid #c9d2df; border-radius: 999px; padding: 5px 8px; font-size: 12px; background: var(--surface-soft); color: inherit; }
+    a.pill:hover { border-color: var(--line-strong); background: #fff; color: #20242c; }
     .left-rail { align-self: start; position: sticky; top: 12px; }
     .secondary-workspace { display: block; }
     .operations-workspace { background: transparent; border: 0; box-shadow: none; padding: 2px 0 0; }
@@ -5077,7 +5078,7 @@ function renderDashboard(
       font-weight: 760;
     }
     header p { color: var(--text-muted); font-size: 12px; }
-    header .status span, header .status strong {
+    header .status .pill {
       border-color: var(--line);
       background: rgba(255, 255, 255, 0.62);
       color: var(--text-muted);
@@ -5783,7 +5784,11 @@ function renderDashboard(
       ${renderWorkbenchNav(data, activeView, { rootChooser: projectChooser })}
     </div>
     <div class="status">
-      <span class="pill">${escapeHtml(projectChooser ? "Choose project" : currentProjectHeaderLabel(data))}</span>
+      ${
+        projectChooser
+          ? `<span class="pill">Choose project</span>`
+          : `<a class="pill" href="${escapeHtml(rootWorkbenchPath(activeView))}">Choose project</a><span class="pill">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
+      }
       <span class="pill">Private UI</span>
     </div>
   </header>

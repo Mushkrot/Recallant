@@ -818,6 +818,7 @@ try {
   }
   const requiredHtml = [
     "Recallant Workbench",
+    'href="/review">Choose project</a>',
     "Command Center",
     "What Needs Attention",
     "Memory Spaces",
