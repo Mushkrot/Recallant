@@ -221,7 +221,10 @@ function copiedProvisioningText(output) {
 
 function assertCopiedSurfaceSafe(output, label) {
   const copied = copiedProvisioningText(output);
-  assert(!forbiddenCopiedSurfacePattern.test(copied), `${label} copied command/config leaks a forbidden surface`);
+  assert(
+    !forbiddenCopiedSurfacePattern.test(copied),
+    `${label} copied command/config leaks a forbidden surface`
+  );
 }
 
 function assertRemoteOnboardingPackage(output, label) {
@@ -264,7 +267,10 @@ function assertRemoteOnboardingPackage(output, label) {
     `${label} missing bridge command`
   );
   assert(output.provisioning.local_runtime.requires_docker === false, `${label} requires Docker`);
-  assert(output.provisioning.local_runtime.requires_postgres === false, `${label} requires Postgres`);
+  assert(
+    output.provisioning.local_runtime.requires_postgres === false,
+    `${label} requires Postgres`
+  );
   assert(
     output.provisioning.local_runtime.requires_local_recallant_server === false,
     `${label} requires a local Recallant server`
@@ -298,8 +304,14 @@ const createOutput = remoteMcpProvisioningOutput({
 
 assert(createOutput.one_time_secret.shown, "create output did not show one-time secret");
 assert(createOutput.one_time_secret.value === created.secret, "create output secret mismatch");
-assert(createOutput.provisioning.command.includes(created.secret), "create command missing one-time secret");
-assert(createOutput.provisioning.rendered_config.includes(created.secret), "create config missing one-time secret");
+assert(
+  createOutput.provisioning.command.includes(created.secret),
+  "create command missing one-time secret"
+);
+assert(
+  createOutput.provisioning.rendered_config.includes(created.secret),
+  "create config missing one-time secret"
+);
 assert(createOutput.provisioning.secret_visibility === "one_time_raw_secret");
 assertRemoteOnboardingPackage(createOutput, "create");
 assertCopiedSurfaceSafe(createOutput, "create");
@@ -318,8 +330,14 @@ const rotateOutput = remoteMcpProvisioningOutput({
 
 assert(rotated.previous.status === "revoked", "rotate did not revoke old credential");
 assert(rotateOutput.one_time_secret.value === rotated.secret, "rotate output secret mismatch");
-assert(!rotateOutput.provisioning.command.includes(created.secret), "rotate command leaked old secret");
-assert(rotateOutput.previous_credential.id === created.credential.id, "rotate output missing previous credential");
+assert(
+  !rotateOutput.provisioning.command.includes(created.secret),
+  "rotate command leaked old secret"
+);
+assert(
+  rotateOutput.previous_credential.id === created.credential.id,
+  "rotate output missing previous credential"
+);
 assert(rotateOutput.provisioning.secret_visibility === "one_time_raw_secret");
 assertRemoteOnboardingPackage(rotateOutput, "rotate");
 assertCopiedSurfaceSafe(rotateOutput, "rotate");
@@ -366,10 +384,22 @@ assertNoSecretOrHash(revokeOutput, rotated.secret, "revoke output");
 assertCopiedSurfaceSafe(revokeOutput, "revoke");
 
 const auditText = JSON.stringify(harness.auditRows);
-assert(harness.auditRows.some((row) => row.operation === "remote_mcp_credential.create"), "missing create audit");
-assert(harness.auditRows.some((row) => row.operation === "remote_mcp_credential.rotate"), "missing rotate audit");
-assert(harness.auditRows.some((row) => row.operation === "remote_mcp_credential.revoke"), "missing revoke audit");
-assert(harness.auditRows.some((row) => row.operation === "remote_mcp_credential.list"), "missing list audit");
+assert(
+  harness.auditRows.some((row) => row.operation === "remote_mcp_credential.create"),
+  "missing create audit"
+);
+assert(
+  harness.auditRows.some((row) => row.operation === "remote_mcp_credential.rotate"),
+  "missing rotate audit"
+);
+assert(
+  harness.auditRows.some((row) => row.operation === "remote_mcp_credential.revoke"),
+  "missing revoke audit"
+);
+assert(
+  harness.auditRows.some((row) => row.operation === "remote_mcp_credential.list"),
+  "missing list audit"
+);
 assert(!auditText.includes(created.secret), "audit leaked create secret");
 assert(!auditText.includes(rotated.secret), "audit leaked rotate secret");
 assert(!auditText.includes("credential_hash"), "audit exposed credential hash field");
@@ -496,9 +526,15 @@ try {
   });
   assert(apiRevoke.status === 200, "API revoke failed");
   assert(apiRevoke.body.one_time_secret === undefined, "API revoke returned a raw secret");
-  assert(apiRevoke.body.provisioning.one_time_secret.value === null, "API revoke provisioning leaked secret");
+  assert(
+    apiRevoke.body.provisioning.one_time_secret.value === null,
+    "API revoke provisioning leaked secret"
+  );
   assertRemoteOnboardingPackage(apiRevoke.body.provisioning, "API revoke");
-  assert(!apiRevoke.text.includes(apiRotate.body.one_time_secret), "API revoke leaked rotate secret");
+  assert(
+    !apiRevoke.text.includes(apiRotate.body.one_time_secret),
+    "API revoke leaked rotate secret"
+  );
 
   const wrongProject = await requestJson(apiBaseUrl, "/api/remote-credential", {
     action: "list",
@@ -538,16 +574,27 @@ try {
     bridge_client_id: clientId
   });
   assert(workbenchCreate.status === 200, "Workbench create form failed");
-  assert(workbenchCreate.text.includes("One-time credential secret"), "Workbench create did not show one-time result");
+  assert(
+    workbenchCreate.text.includes("One-time credential secret"),
+    "Workbench create did not show one-time result"
+  );
   assert(
     workbenchCreate.text.includes("Remote onboarding package") &&
       workbenchCreate.text.includes("Remote client bootstrap command") &&
+      workbenchCreate.text.includes("Copy/paste the full remote client bootstrap command") &&
       workbenchCreate.text.includes("Remote doctor command") &&
       workbenchCreate.text.includes("Requires Docker") &&
       workbenchCreate.text.includes("false"),
     "Workbench create did not render the remote onboarding package"
   );
-  assert(!workbenchCreate.text.includes("credential_hash"), "Workbench create exposed credential hash");
+  assert(
+    !workbenchCreate.text.includes("<dt>Bootstrap script</dt>"),
+    "Workbench create exposed a standalone bootstrap script URL instead of only the full command"
+  );
+  assert(
+    !workbenchCreate.text.includes("credential_hash"),
+    "Workbench create exposed credential hash"
+  );
 
   const workbenchList = await requestForm(apiBaseUrl, "/remote-credential", {
     action: "list",
@@ -560,12 +607,23 @@ try {
     bridge_client_id: clientId
   });
   assert(workbenchList.status === 200, "Workbench list form failed");
-  assert(!workbenchList.text.includes(apiCreate.body.one_time_secret), "Workbench list leaked API create secret");
-  assert(!workbenchList.text.includes(apiRotate.body.one_time_secret), "Workbench list leaked API rotate secret");
+  assert(
+    !workbenchList.text.includes(apiCreate.body.one_time_secret),
+    "Workbench list leaked API create secret"
+  );
+  assert(
+    !workbenchList.text.includes(apiRotate.body.one_time_secret),
+    "Workbench list leaked API rotate secret"
+  );
   assert(
     workbenchList.text.includes("Remote onboarding package") &&
-      workbenchList.text.includes("Remote client bootstrap command"),
+      workbenchList.text.includes("Remote client bootstrap command") &&
+      workbenchList.text.includes("Copy/paste the full remote client bootstrap command"),
     "Workbench list did not render the redacted remote onboarding package"
+  );
+  assert(
+    !workbenchList.text.includes("<dt>Bootstrap script</dt>"),
+    "Workbench list exposed a standalone bootstrap script URL instead of only the full command"
   );
   assert(!workbenchList.text.includes("credential_hash"), "Workbench list exposed credential hash");
 } finally {
@@ -581,11 +639,18 @@ assert(
   "package script remote-mcp-provisioning:smoke is not wired"
 );
 const self = await readFile(new URL(import.meta.url), "utf8");
-assert(!self.includes(["preflight", "placeholder"].join("_")), "provisioning smoke still contains placeholder marker");
+assert(
+  !self.includes(["preflight", "placeholder"].join("_")),
+  "provisioning smoke still contains placeholder marker"
+);
 const cliSource = await readFile(new URL("../apps/cli/src/index.ts", import.meta.url), "utf8");
 assert(
   cliSource.includes("Remote client bootstrap command:"),
   "CLI human output does not name the remote client bootstrap command"
+);
+assert(
+  cliSource.includes("Copy/paste the full remote client bootstrap command"),
+  "CLI human output does not tell users to copy the full bootstrap command"
 );
 assert(
   cliSource.includes("remote_client_bootstrap_command:"),

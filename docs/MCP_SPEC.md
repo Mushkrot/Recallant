@@ -161,12 +161,13 @@ credential only in that command output; list, audit, docs, and stored rows do no
 credential values or hashes.
 
 Provisioning output is intentionally human-facing and copyable. Create and rotate responses may
-show a one-time raw credential, a `recallant connect-remote` command, and a rendered MCP config that
-runs `recallant remote-bridge` against HTTPS `/api/mcp`. List and revoke responses use the
-`<scoped-remote-mcp-credential>` placeholder and remain redacted. Protected Workbench/API
-provisioning routes follow the same rule: no unauthenticated provisioning route is exposed, scope is
-checked before lifecycle actions, and raw credentials are not stored outside the immediate
-create/rotate response.
+show a one-time raw credential, a full remote client bootstrap command, a `recallant connect-remote`
+command, and a rendered MCP config that runs `recallant remote-bridge` against HTTPS `/api/mcp`.
+Human-facing surfaces must point people to the complete bootstrap command, not the raw bootstrap
+script URL by itself. List and revoke responses use the `<scoped-remote-mcp-credential>` placeholder
+and remain redacted. Protected Workbench/API provisioning routes follow the same rule: no
+unauthenticated provisioning route is exposed, scope is checked before lifecycle actions, and raw
+credentials are not stored outside the immediate create/rotate response.
 
 ## 5) Audit and Redaction
 

@@ -5962,6 +5962,8 @@ function remoteCredentialProvisioningHumanReport(input: {
         ? `secret: ${provisioning.one_time_secret.value ?? ""}`
         : "secret: [redacted]",
       "",
+      "Copy/paste the full remote client bootstrap command. The bootstrap URL by itself only prints the script and does not connect the project.",
+      "",
       "Remote client bootstrap command:",
       provisioning.provisioning.command,
       "",

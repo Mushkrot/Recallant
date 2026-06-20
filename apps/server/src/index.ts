@@ -3332,7 +3332,6 @@ function renderProvisioningOutput(provisioning: RemoteMcpProvisioningOutput | nu
       <dt>Credential client</dt><dd>${escapeHtml(provisioning.scope.credential_client_id ?? "any client")}</dd>
       <dt>Bridge client</dt><dd>${escapeHtml(provisioning.scope.bridge_client_id)}</dd>
       <dt>Secret policy</dt><dd>${escapeHtml(provisioning.one_time_secret.policy)}</dd>
-      <dt>Bootstrap script</dt><dd>${escapeHtml(provisioning.provisioning.bootstrap_script_url)}</dd>
       <dt>Project dir</dt><dd>${escapeHtml(provisioning.provisioning.project_dir)}</dd>
       <dt>Config file</dt><dd>${escapeHtml(provisioning.provisioning.config_file)}</dd>
       <dt>Requires Docker</dt><dd>${escapeHtml(String(provisioning.provisioning.local_runtime.requires_docker))}</dd>
@@ -3343,7 +3342,8 @@ function renderProvisioningOutput(provisioning: RemoteMcpProvisioningOutput | nu
         ? `<p class="why">The raw credential is shown only in this create/rotate response. Store it in the external agent secret store now.</p>`
         : `<p>Credential material is redacted for this action.</p>`
     }
-    <label>Remote client bootstrap command<textarea rows="4" readonly>${escapeHtml(provisioning.provisioning.command)}</textarea></label>
+    <p class="why">Copy/paste the full remote client bootstrap command. The bootstrap URL by itself only prints the script and does not connect the project.</p>
+    <label>Remote client bootstrap command<textarea rows="6" readonly>${escapeHtml(provisioning.provisioning.command)}</textarea></label>
     <label>Remote doctor command<textarea rows="3" readonly>${escapeHtml(provisioning.provisioning.doctor_command)}</textarea></label>
     <label>Client config<textarea rows="8" readonly>${escapeHtml(provisioning.provisioning.rendered_config)}</textarea></label>
   </div>`;

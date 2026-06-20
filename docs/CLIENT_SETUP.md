@@ -112,7 +112,9 @@ Recallant remote bridge CLI, write the project-local client config, and run `rem
 operator should copy the complete command from `recallant remote-credential create|rotate`, the
 protected remote credential API, or the Workbench Remote MCP Credentials panel; the person on the
 external workstation should not assemble `server-url`, credential, project id, developer id, and
-client id by hand:
+client id by hand. Copy the field named `Remote client bootstrap command` exactly. Do not copy or
+run the bootstrap script URL by itself; `curl -fsSL <script-url>` only prints the script and does
+not connect the project.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \

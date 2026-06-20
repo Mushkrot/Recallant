@@ -91,7 +91,9 @@ Recallant has a first authenticated remote MCP/bridge slice and a remote client 
 not install local storage. Use it only when the central server/operator has already generated the
 complete remote onboarding package for a live server URL, scoped credential, project id, developer
 id, and client id. The person on the external workstation should copy the full command, not assemble
-those values by hand:
+those values by hand. In Workbench and CLI output, copy the field named `Remote client bootstrap
+command` exactly. Do not copy or run the bootstrap script URL by itself; `curl -fsSL <script-url>`
+only prints the script and does not connect the project.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
