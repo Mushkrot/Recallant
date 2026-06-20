@@ -110,6 +110,15 @@ function baseEvidence(overrides = {}) {
         marker_found: true,
         trace_id: "validate-recall-trace"
       },
+      next_session: {
+        start_is_error: false,
+        session_id: "validate-smoke-next-session",
+        context_pack_is_error: false,
+        context_pack_id: "validate-next-context-pack",
+        recall_is_error: false,
+        marker_found: true,
+        trace_id: "validate-next-recall-trace"
+      },
       call_tool: "memory_recall_agent_memories",
       call_is_error: false,
       stderr: ""

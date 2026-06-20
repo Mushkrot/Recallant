@@ -87,6 +87,7 @@ function readBody(request) {
 
 async function startFixture(cert) {
   const requests = [];
+  let startSessionCount = 0;
   const server = createServer({ key: cert.key, cert: cert.cert }, async (request, response) => {
     const raw = await readBody(request);
     const body = JSON.parse(raw || "{}");
@@ -165,6 +166,9 @@ async function startFixture(cert) {
     if (body.method === "tools/call") {
       const toolName = body.params?.name;
       if (toolName === "memory_start_session") {
+        startSessionCount += 1;
+        const sessionId =
+          startSessionCount === 1 ? expected.sessionId : `${expected.sessionId}-next`;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -173,7 +177,7 @@ async function startFixture(cert) {
             result: {
               content: [{ type: "text", text: "started" }],
               structuredContent: {
-                session_id: expected.sessionId,
+                session_id: sessionId,
                 project_id: expected.projectId,
                 recommended_next_calls: ["memory_get_context_pack"]
               }
@@ -192,7 +196,7 @@ async function startFixture(cert) {
               content: [{ type: "text", text: "context" }],
               structuredContent: {
                 context_pack_id: "fixture-context-pack",
-                session_id: expected.sessionId,
+                session_id: body.params?.arguments?.session_id ?? expected.sessionId,
                 project_id: expected.projectId
               }
             }

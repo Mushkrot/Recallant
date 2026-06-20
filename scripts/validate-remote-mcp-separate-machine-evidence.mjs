@@ -155,6 +155,26 @@ export function validateEvidence(evidence, rawText) {
   const recall = object(remoteMcp.recall, "remote_mcp.recall");
   assert(recall.is_error === false, "memory_recall_agent_memories must pass");
   assert(recall.marker_found === true, "memory_recall_agent_memories must find the written marker");
+  const nextSession = object(remoteMcp.next_session, "remote_mcp.next_session");
+  assert(nextSession.start_is_error === false, "next-session memory_start_session must pass");
+  stringValue(nextSession.session_id, "remote_mcp.next_session.session_id");
+  assert(
+    nextSession.session_id !== startSession.session_id,
+    "next-session recall must use a different session id"
+  );
+  assert(
+    nextSession.context_pack_is_error === false,
+    "next-session memory_get_context_pack must pass"
+  );
+  stringValue(nextSession.context_pack_id, "remote_mcp.next_session.context_pack_id");
+  assert(
+    nextSession.recall_is_error === false,
+    "next-session memory_recall_agent_memories must pass"
+  );
+  assert(
+    nextSession.marker_found === true,
+    "next-session memory_recall_agent_memories must find the written marker"
+  );
 
   const capture = object(evidence.capture_recall, "capture_recall");
   assert(capture.requested === true, "capture proof must be requested");
@@ -181,6 +201,7 @@ export function validateEvidence(evidence, rawText) {
       "remote_doctor_passed",
       "codex_remote_bridge_configured",
       "remote_mcp_session_context_write_checkpoint_recall",
+      "remote_mcp_next_session_recall",
       "capture_recall_passed",
       "redaction_passed"
     ]

@@ -512,10 +512,63 @@ async function runBridgeProbe(input, env) {
       undefined,
       { timeout: 5_000 }
     );
+    const nextStart = await client.callTool(
+      {
+        name: "memory_start_session",
+        arguments: {
+          client_kind: "codex",
+          client_version: "0.0.0",
+          project_path: null,
+          session_label: `remote acceptance follow-up ${input.traceId}`,
+          resume_policy: "force_new"
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const nextStartStructured = nextStart.structuredContent ?? {};
+    const nextSessionId =
+      typeof nextStartStructured.session_id === "string" ? nextStartStructured.session_id : null;
+    const nextContext = await client.callTool(
+      {
+        name: "memory_get_context_pack",
+        arguments: {
+          session_id: nextSessionId,
+          task_hint: `Recall remote acceptance marker ${input.traceId}`,
+          project_id: null,
+          max_chars_total: 4000,
+          include_raw_evidence: "never",
+          include_recovery: false
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const nextRecall = await client.callTool(
+      {
+        name: "memory_recall_agent_memories",
+        arguments: {
+          query: marker,
+          scope: "project",
+          scope_kind: null,
+          audience_kind: null,
+          memory_types: ["work_log"],
+          include_candidates: true,
+          include_stale: false,
+          include_needs_review: true,
+          top_k: 5,
+          max_chars_total: 4000
+        }
+      },
+      undefined,
+      { timeout: 5_000 }
+    );
     await client.close().catch(() => undefined);
     await transport.close().catch(() => undefined);
     const recalledText = JSON.stringify(recall.structuredContent ?? recall.content ?? {});
     const recallFound = recalledText.includes(marker);
+    const nextRecalledText = JSON.stringify(nextRecall.structuredContent ?? nextRecall.content ?? {});
+    const nextRecallFound = nextRecalledText.includes(marker);
     return redactJson(
       {
         status: "pass",
@@ -545,6 +598,15 @@ async function runBridgeProbe(input, env) {
           marker_found: recallFound,
           trace_id: recall.structuredContent?.trace_id ?? null
         },
+        next_session: {
+          start_is_error: nextStart.isError === true,
+          session_id: nextSessionId,
+          context_pack_is_error: nextContext.isError === true,
+          context_pack_id: nextContext.structuredContent?.context_pack_id ?? null,
+          recall_is_error: nextRecall.isError === true,
+          marker_found: nextRecallFound,
+          trace_id: nextRecall.structuredContent?.trace_id ?? null
+        },
         call_tool: "memory_recall_agent_memories",
         call_is_error:
           start.isError === true ||
@@ -552,7 +614,11 @@ async function runBridgeProbe(input, env) {
           created.isError === true ||
           checkpoint.isError === true ||
           recall.isError === true ||
-          !recallFound,
+          nextStart.isError === true ||
+          nextContext.isError === true ||
+          nextRecall.isError === true ||
+          !recallFound ||
+          !nextRecallFound,
         stderr
       },
       input

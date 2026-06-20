@@ -259,6 +259,17 @@ Validate a saved evidence file before sharing or committing an internal rehearsa
 recallant remote-acceptance validate --evidence recallant-external-evidence/<run-id>.evidence.json
 ```
 
+On the central Recallant server, run the stricter Capture/Recall Acceptance validator against the
+same evidence bundle:
+
+```bash
+recallant remote-acceptance validate-live --evidence recallant-external-evidence/<run-id>.evidence.json
+```
+
+That server-side gate requires `RECALLANT_DATABASE_URL` and verifies Workbench project/readiness
+evidence plus redacted `system_activity_events` rows for session start, context pack, memory write,
+checkpoint, and recall. It does not grant the external machine Workbench/admin or database access.
+
 If the gate fails because an old local setup left `.recallant` in the project folder, clean only
 that stale local storage marker and retry:
 

@@ -94,6 +94,7 @@
     "remote-mcp-external-rehearsal:smoke": "node scripts/smoke-remote-mcp-external-rehearsal.mjs",
     "remote-mcp-separate-machine-evidence:smoke": "node scripts/smoke-remote-mcp-separate-machine-evidence.mjs",
     "remote-mcp-separate-machine-evidence-validate:smoke": "node scripts/smoke-remote-mcp-separate-machine-evidence-validate.mjs",
+    "capture-recall-acceptance-live-validate:smoke": "node scripts/smoke-capture-recall-acceptance-live-validate.mjs",
     "service-env-profile:smoke": "node scripts/smoke-service-env-profile.mjs",
     "public-security:smoke": "node scripts/smoke-public-security.mjs",
     "security-review:smoke": "node scripts/smoke-security-review.mjs",

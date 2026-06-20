@@ -5901,6 +5901,12 @@ function runNodeHelperScript(scriptRelativePath: string, args: readonly string[]
 
 function runRemoteAcceptance(argv: readonly string[]) {
   const subcommand = argv[3];
+  if (subcommand === "validate-live" || subcommand === "verify-live") {
+    return runNodeHelperScript(
+      "scripts/validate-capture-recall-acceptance-live.mjs",
+      argv.slice(4)
+    );
+  }
   if (subcommand === "validate" || subcommand === "verify") {
     return runNodeHelperScript(
       "scripts/validate-remote-mcp-separate-machine-evidence.mjs",
@@ -7584,6 +7590,9 @@ function usageText(command?: string) {
       "",
       "Validate a saved evidence file:",
       "  recallant remote-acceptance validate --evidence <path>",
+      "",
+      "Validate strict capture/recall acceptance on the central server:",
+      "  recallant remote-acceptance validate-live --evidence <path>",
       "",
       "Clean stale local storage artifacts before retrying remote acceptance:",
       "  recallant remote-acceptance cleanup --project-dir <path> --confirm",

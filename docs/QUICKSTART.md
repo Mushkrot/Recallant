@@ -121,6 +121,15 @@ session/context/write/checkpoint/recall, and forbidden local-artifact checks. On
 rehearsal passed this gate on 2026-06-20; keep this path operator-led until broader remote-client
 polish and repeat release rehearsals are complete.
 
+For strict Capture/Recall Acceptance, validate that evidence on the central Recallant server:
+
+```bash
+recallant remote-acceptance validate-live --evidence recallant-external-evidence/<run-id>.evidence.json
+```
+
+That second server-side check proves Workbench visibility and redacted audit rows without giving the
+external workstation database or Workbench/admin access.
+
 If you accidentally started the local self-host installer while testing remote setup, stop and clean
 up the local install artifacts before retrying. A failed install that stopped before onboarding
 usually did not change the target project folder; check for `.recallant`, `.codex/config.toml`,
