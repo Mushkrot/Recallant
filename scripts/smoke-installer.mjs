@@ -71,12 +71,12 @@ function staticClientBootstrapResult(args, env = {}) {
   if (!option("--client-id")) required.push("--client-id");
   assert(
     clientBootstrapSource.indexOf("required=()") <
-      clientBootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+      clientBootstrapSource.indexOf('if [[ -n "${RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD:-}" ]]'),
     "Remote client bootstrap required-input validation must happen before clone"
   );
   assert(
     clientBootstrapSource.indexOf('if [[ ! "$SERVER_URL"') <
-      clientBootstrapSource.indexOf('git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"'),
+      clientBootstrapSource.indexOf('if [[ -n "${RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD:-}" ]]'),
     "Remote client bootstrap URL validation must happen before clone"
   );
   if (required.length > 0) {
@@ -368,7 +368,13 @@ assert(
     clientBootstrapSource.includes("--write") &&
     clientBootstrapSource.includes("Local storage: not installed") &&
     clientBootstrapSource.includes("Docker/Postgres: not required") &&
+    clientBootstrapSource.includes("RECALLANT_CLIENT_BOOTSTRAP_INSTALL_DIR") &&
+    clientBootstrapSource.includes('client_install_dir="$INSTALL_DIR"') &&
+    clientBootstrapSource.includes('git -C "$client_install_dir" fetch --depth 1 origin "$SOURCE_REF"') &&
+    clientBootstrapSource.includes('RECALLANT_HOME="$client_install_dir" "$client_install_dir/scripts/install-recallant-cli.sh" --user') &&
     clientBootstrapSource.includes("Missing required remote setup inputs") &&
+    !clientBootstrapSource.includes('clone_dir="$(mktemp -d)"') &&
+    !clientBootstrapSource.includes('rm -rf "$clone_dir"') &&
     !clientBootstrapSource.includes("docker compose") &&
     !clientBootstrapSource.includes("docker info") &&
     !clientBootstrapSource.includes("install-recallant.sh"),

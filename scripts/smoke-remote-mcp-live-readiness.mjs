@@ -72,7 +72,7 @@ function redactedExternalEnv(extra = {}) {
 }
 
 function doctorArgs(input) {
-  return [
+  const args = [
     "apps/cli/dist/index.js",
     "remote-doctor",
     "--server-url",
@@ -85,20 +85,19 @@ function doctorArgs(input) {
     input.developerId,
     "--client-id",
     input.clientId,
-    "--session-id",
-    input.sessionId,
-    "--trace-id",
-    input.traceId,
     "--timeout-ms",
     "5000",
     "--format",
     "json",
     ...(input.captureProof ? ["--capture-proof"] : [])
   ];
+  if (input.sessionId) args.push("--session-id", input.sessionId);
+  if (input.traceId) args.push("--trace-id", input.traceId);
+  return args;
 }
 
 function bridgeArgs(input) {
-  return [
+  const args = [
     "apps/cli/dist/index.js",
     "remote-bridge",
     "--server-url",
@@ -110,12 +109,11 @@ function bridgeArgs(input) {
     "--developer-id",
     input.developerId,
     "--client-id",
-    input.clientId,
-    "--session-id",
-    input.sessionId,
-    "--trace-id",
-    input.traceId
+    input.clientId
   ];
+  if (input.sessionId) args.push("--session-id", input.sessionId);
+  if (input.traceId) args.push("--trace-id", input.traceId);
+  return args;
 }
 
 async function runCli(args, env, expectExit = 0) {
@@ -211,7 +209,7 @@ const input = {
   projectId: valueFor("projectId"),
   developerId: valueFor("developerId"),
   clientId: valueFor("clientId"),
-  sessionId: valueFor("sessionId") || "recallant-live-readiness-session",
+  sessionId: valueFor("sessionId"),
   traceId: valueFor("traceId") || `recallant-live-readiness-${Date.now()}`,
   captureProof: valueFor("captureProof") === "1"
 };

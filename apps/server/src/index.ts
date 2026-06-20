@@ -1065,10 +1065,10 @@ async function startRemoteMcpAudit(input: {
 }) {
   const scope = input.auth.ok ? input.auth.scope : readRemoteMcpScopeHeaders(input.request);
   return input.database.startSystemActivity({
-    trace_id: scope?.traceId,
-    developer_id: scope?.developerId,
-    project_id: uuidOrNull(scope?.projectId) ?? scope?.projectId ?? null,
-    session_id: uuidOrNull(scope?.sessionId) ?? scope?.sessionId ?? null,
+    trace_id: uuidOrNull(scope?.traceId),
+    developer_id: uuidOrNull(scope?.developerId),
+    project_id: uuidOrNull(scope?.projectId),
+    session_id: uuidOrNull(scope?.sessionId),
     surface: "remote_mcp",
     operation: `remote_mcp.${input.method || "unknown"}`,
     actor_kind: input.auth.ok ? "agent" : "anonymous",

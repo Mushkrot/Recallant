@@ -3,6 +3,7 @@ set -euo pipefail
 
 SOURCE_REF="${RECALLANT_INSTALL_REF:-main}"
 REPO_URL="${RECALLANT_INSTALL_REPO_URL:-https://github.com/Mushkrot/Recallant.git}"
+INSTALL_DIR="${RECALLANT_CLIENT_BOOTSTRAP_INSTALL_DIR:-$HOME/.local/share/recallant-client-cli}"
 INVOKE_DIR="$(pwd -P)"
 PROJECT_DIR="."
 CLIENT="codex"
@@ -71,6 +72,7 @@ Options:
   --dry-run                    Install CLI and preview config/doctor command without writing files.
   --ref <git-branch-or-tag>    Git ref to fetch. Default: main.
   --repo-url <git-https-url>   Repository URL. Default: https://github.com/Mushkrot/Recallant.git
+  --install-dir <path>         Persistent client CLI source directory. Default: ~/.local/share/recallant-client-cli
   --help                       Show this help.
 USAGE
 }
@@ -157,6 +159,10 @@ while [[ $# -gt 0 ]]; do
       REPO_URL="${2:-}"
       shift 2
       ;;
+    --install-dir)
+      INSTALL_DIR="${2:-}"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -224,15 +230,29 @@ esac
 if [[ -n "${RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD:-}" ]]; then
   recallant_cmd="$RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD"
 else
-  clone_dir="$(mktemp -d)"
-  cleanup() {
-    rm -rf "$clone_dir"
-  }
-  trap cleanup EXIT
+  case "$INSTALL_DIR" in
+    /*)
+      client_install_dir="$INSTALL_DIR"
+      ;;
+    *)
+      client_install_dir="$INVOKE_DIR/$INSTALL_DIR"
+      ;;
+  esac
 
-  git clone --depth 1 --branch "$SOURCE_REF" "$REPO_URL" "$clone_dir"
+  if [[ -e "$client_install_dir" && ! -d "$client_install_dir/.git" ]]; then
+    fail "Recallant client CLI install directory exists but is not a git checkout: $client_install_dir" 1
+  fi
 
-  "$clone_dir/scripts/install-recallant-cli.sh" --user
+  mkdir -p "$(dirname "$client_install_dir")"
+  if [[ -d "$client_install_dir/.git" ]]; then
+    git -C "$client_install_dir" fetch --depth 1 origin "$SOURCE_REF"
+  else
+    git clone --depth 1 "$REPO_URL" "$client_install_dir"
+    git -C "$client_install_dir" fetch --depth 1 origin "$SOURCE_REF"
+  fi
+  git -C "$client_install_dir" checkout -q --detach FETCH_HEAD
+
+  RECALLANT_HOME="$client_install_dir" "$client_install_dir/scripts/install-recallant-cli.sh" --user
 
   recallant_cmd="recallant"
   if ! command -v recallant >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/recallant" ]]; then
