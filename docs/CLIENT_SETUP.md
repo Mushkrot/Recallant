@@ -243,15 +243,14 @@ artifacts were created, and writes a redacted evidence bundle:
 
 ```bash
 recallant remote-acceptance \
-  --server-url <https-recallant-server> \
-  --credential <scoped-remote-mcp-credential> \
-  --project-id <project-id> \
-  --developer-id <developer-id> \
-  --client-id <client-id> \
   --project-dir . \
   --capture-proof \
   --output-dir recallant-external-evidence
 ```
+
+If the project already has Recallant remote client config from bootstrap, `remote-acceptance` reads
+the scoped server URL, credential, project id, developer id, and client id from that local config.
+Operators can still pass those flags explicitly to override the config during diagnostics.
 
 Validate a saved evidence file before sharing or committing an internal rehearsal report:
 

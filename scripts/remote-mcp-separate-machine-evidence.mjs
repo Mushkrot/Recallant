@@ -23,6 +23,13 @@ const execFileAsync = promisify(execFile);
 const requiredFlags = ["serverUrl", "credential", "projectId", "developerId", "clientId"];
 const forbiddenOutputPattern =
   /"RECALLANT_DATABASE_URL"\s*[:=]|RECALLANT_DATABASE_URL\s*=|DATABASE_URL\s*=|postgres:\/\/|pgvector|recallant-postgres|\/ai\//i;
+const remoteConfigEnvMap = {
+  serverUrl: "RECALLANT_REMOTE_MCP_URL",
+  credential: "RECALLANT_REMOTE_MCP_CREDENTIAL",
+  projectId: "RECALLANT_PROJECT_ID",
+  developerId: "RECALLANT_DEVELOPER_ID",
+  clientId: "RECALLANT_REMOTE_MCP_CLIENT_ID"
+};
 
 function parseArgs(argv) {
   const values = {
@@ -151,6 +158,49 @@ async function projectSnapshot(projectDir) {
     recallant_remote_bridge_configured: /remote-bridge/.test(codexConfig),
     forbidden
   };
+}
+
+function parseTomlStringValue(raw) {
+  const trimmed = String(raw ?? "").trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+async function readRemoteConfigValues(projectDir) {
+  const codexConfigPath = join(projectDir, ".codex", "config.toml");
+  if (!(await exists(codexConfigPath))) return {};
+  const config = await readFile(codexConfigPath, "utf8");
+  const sectionMatch = config.match(
+    /\[mcp_servers\.recallant\]([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/
+  );
+  if (!sectionMatch) return {};
+  const section = sectionMatch[1] ?? "";
+  const envBlockMatch = section.match(/env\s*=\s*\{([\s\S]*?)\}/);
+  if (!envBlockMatch) return {};
+  const envBlock = envBlockMatch[1] ?? "";
+  const found = {};
+  for (const [key, envName] of Object.entries(remoteConfigEnvMap)) {
+    const match = envBlock.match(new RegExp(`${envName}\\s*=\\s*("[^"]*"|'[^']*'|[^,\\n]+)`));
+    if (match?.[1]) found[key] = parseTomlStringValue(match[1]);
+  }
+  return found;
+}
+
+async function hydrateInputFromProjectConfig(input) {
+  const configValues = await readRemoteConfigValues(input.projectDir);
+  const inferred = [];
+  for (const key of requiredFlags) {
+    if (!String(input[key] ?? "").trim() && String(configValues[key] ?? "").trim()) {
+      input[key] = configValues[key];
+      inferred.push(key);
+    }
+  }
+  return inferred;
 }
 
 async function runCleanup(input) {
@@ -575,6 +625,7 @@ let evidence;
 let exitCode = 0;
 
 try {
+  const inferredInputs = await hydrateInputFromProjectConfig(input);
   validateInput(input);
   const projectStat = await stat(projectDir);
   assert(projectStat.isDirectory(), "project-dir must be a directory");
@@ -622,6 +673,7 @@ try {
       basename: basename(projectRealpath),
       hash: sha256(projectRealpath)
     },
+    inferred_inputs: inferredInputs,
     bootstrap,
     client_config: afterBootstrap,
     clean_project_before: before,

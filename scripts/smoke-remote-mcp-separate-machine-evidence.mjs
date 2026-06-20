@@ -360,6 +360,35 @@ try {
     fixture.requests.some((request) => request.method === "tools/call"),
     "evidence runner did not call a remote MCP tool"
   );
+  const inferredOutput = join(temp, "evidence-inferred");
+  const inferredResult = await execFileAsync(
+    process.execPath,
+    [
+      "scripts/remote-mcp-separate-machine-evidence.mjs",
+      "--project-dir",
+      projectDir,
+      "--output-dir",
+      inferredOutput,
+      "--recallant-command",
+      join(process.cwd(), "apps/cli/dist/index.js"),
+      "--skip-bootstrap",
+      "--capture-proof"
+    ],
+    { cwd: process.cwd(), env, maxBuffer: 1024 * 1024 }
+  );
+  assert(!inferredResult.stdout.includes(credential), "inferred-input summary leaked raw credential");
+  const inferredFiles = await (await import("node:fs/promises")).readdir(inferredOutput);
+  const inferredEvidenceFile = inferredFiles.find((file) => file.endsWith(".evidence.json"));
+  assert(inferredEvidenceFile, "inferred-input evidence JSON was not written");
+  const inferredEvidence = JSON.parse(
+    await readFile(join(inferredOutput, inferredEvidenceFile), "utf8")
+  );
+  assert(inferredEvidence.result.status === "pass", "inferred-input evidence did not pass");
+  assert(
+    inferredEvidence.inferred_inputs.includes("developerId") &&
+      inferredEvidence.inferred_inputs.includes("clientId"),
+    "evidence runner did not infer scope from project config"
+  );
   const failingProject = join(temp, "failing-project");
   const failingOutput = join(temp, "failing-evidence");
   await mkdir(join(failingProject, ".recallant"), { recursive: true });

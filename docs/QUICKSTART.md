@@ -111,16 +111,12 @@ formal proof command after bootstrap is:
 
 ```bash
 recallant remote-acceptance \
-  --server-url <https-recallant-server> \
-  --credential <scoped-remote-mcp-credential> \
-  --project-id <project-id> \
-  --developer-id <developer-id> \
-  --client-id <client-id> \
   --project-dir . \
   --capture-proof
 ```
 
-That acceptance command writes redacted evidence for bootstrap, remote-doctor, remote MCP
+That acceptance command reads the scoped remote connection from the project-local client config
+written by bootstrap, then writes redacted evidence for bootstrap, remote-doctor, remote MCP
 session/context/write/checkpoint/recall, and forbidden local-artifact checks. A real external-host
 evidence pass is required before this path should be presented as a beginner default.
 
