@@ -1091,10 +1091,6 @@ function renderRemoteConnectApprovalPage(input: {
     </div>
     <form method="post" action="${remoteConnectApprovePath}">
       <input type="hidden" name="code" value="${htmlEscape(input.code)}" />
-      <label>Recallant project id</label>
-      <input name="project_id" placeholder="Project UUID" ${canApprove ? "required" : "disabled"} />
-      <label>Developer id</label>
-      <input name="developer_id" placeholder="Developer UUID" ${canApprove ? "required" : "disabled"} />
       <label>Remote client id</label>
       <input name="client_id" placeholder="remote-macbook-air" ${canApprove ? "" : "disabled"} />
       <button name="action" value="approve" ${canApprove ? "" : "disabled"}>Approve remote connect</button>
@@ -1233,18 +1229,21 @@ async function handleRemoteConnectApprove(
     };
   }
   if (action !== "approve") throw new Error("VALIDATION_ERROR: unsupported approval action");
-  const projectId = optionalInput(input.project_id);
-  const developerId = optionalInput(input.developer_id);
-  if (!projectId || !developerId) {
-    throw new Error("VALIDATION_ERROR: project_id and developer_id are required for approval");
-  }
+  const pendingRequest = await database.getRemoteConnectRequestForApproval({ deviceCode: code });
+  if (!pendingRequest) throw new Error("VALIDATION_ERROR: remote connect request not found");
+  const projectName = pendingRequest.project_display_name ?? "remote project";
+  const project = await database.createMemorySpace({
+    name: projectName,
+    projectKind: "workspace",
+    memoryDomain: "agent_work"
+  });
   return {
     ok: true,
     action,
     request: await database.approveRemoteConnectRequest({
       deviceCode: code,
-      projectId,
-      developerId,
+      projectId: project.project_id,
+      developerId: project.developer_id,
       clientId: optionalInput(input.client_id),
       approvedBy
     })

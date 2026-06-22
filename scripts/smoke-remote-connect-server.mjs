@@ -108,6 +108,18 @@ class RemoteConnectServerHarness {
     return row ? withoutHashes(row) : null;
   }
 
+  async createMemorySpace(input) {
+    this.counter += 1;
+    return {
+      project_id: `11111111-1111-4111-8111-${String(this.counter).padStart(12, "0")}`,
+      developer_id: "22222222-2222-4222-8222-222222222222",
+      name: input.name,
+      project_kind: input.projectKind ?? "workspace",
+      memory_domain: input.memoryDomain ?? "agent_work",
+      primary_path: input.primaryPath ?? null
+    };
+  }
+
   async approveRemoteConnectRequest({ deviceCode, projectId, developerId, clientId, approvedBy }) {
     const row = this.findByDevice(deviceCode);
     assert(row, "approval request missing");
@@ -238,6 +250,8 @@ try {
   const approvalHtml = await approvalPage.text();
   assert(approvalPage.status === 200, "authenticated approval page failed");
   assert(approvalHtml.includes("New Mac project"), "approval page did not show project metadata");
+  assert(!approvalHtml.includes("Project UUID"), "approval page still asks for project UUID");
+  assert(!approvalHtml.includes("Developer UUID"), "approval page still asks for developer UUID");
 
   const approved = await requestJson(
     baseUrl,
@@ -245,8 +259,6 @@ try {
     {
       action: "approve",
       code: start.body.device_code,
-      project_id: "11111111-1111-4111-8111-111111111111",
-      developer_id: "22222222-2222-4222-8222-222222222222",
       client_id: "macbook-air"
     },
     authHeaders
