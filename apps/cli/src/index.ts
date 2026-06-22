@@ -616,6 +616,29 @@ function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
   };
 }
 
+function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
+  const credentialScope = scope.credential_scope;
+  return `${[
+    "Recallant agent-start",
+    "",
+    "Mode: remote_mcp_ready",
+    `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
+    `Project scope: ${credentialScope.project_id ?? "unknown"}`,
+    `Developer scope: ${credentialScope.developer_id ?? "unknown"}`,
+    `Client scope: ${credentialScope.client_id ?? "unknown"}`,
+    `Credential prefix: ${credentialScope.credential_prefix ?? "unknown"}`,
+    "",
+    "Remote Recallant consent boundary",
+    "Allowed context:",
+    ...scope.allowed_context.map((item) => `  - ${item}`),
+    "Do not send:",
+    ...scope.not_sent.map((item) => `  - ${item}`),
+    "",
+    "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
+    "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
+  ].join("\n")}\n`;
+}
+
 function remoteAgentConfigValue(content: string, key: string) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const quoted = content.match(new RegExp(`${escaped}\\s*[:=]\\s*"([^"]+)"`));
@@ -4879,6 +4902,20 @@ async function runAgentStart(argv: readonly string[]) {
   const consentScope = await readRemoteAgentConsentScope(projectDir(argv));
   const consentOutput = remoteAgentConsentOutput(consentScope);
   const database = createRecallantDbFromEnv();
+  if (!database && consentScope) {
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "remote_mcp_ready",
+      ...consentOutput
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : remoteAgentStartReadyHumanReport(consentScope)
+    );
+    return;
+  }
   if (!database) {
     const state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
     const record = await appendSpoolRecord(argv, "event", {

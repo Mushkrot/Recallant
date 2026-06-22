@@ -335,6 +335,18 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
     { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
   );
   assert(
+    remoteStart.mode === "remote_mcp_ready",
+    `remote agent-start should use remote_mcp_ready, not local fallback: ${JSON.stringify(remoteStart)}`
+  );
+  assert(
+    !remoteStart.spool_path && !remoteStart.local_id,
+    "remote agent-start should not create an offline spool record"
+  );
+  assert(
+    !String(remoteStart.warning ?? "").includes("Server database is unavailable"),
+    "remote agent-start should not warn about local/server database availability"
+  );
+  assert(
     remoteStart.destination?.server_url === "https://recallant.example.com",
     "remote consent missing destination"
   );
