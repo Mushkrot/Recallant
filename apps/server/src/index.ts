@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getRecallantCoreInfo } from "@recallant/core";
 import {
@@ -1032,8 +1034,12 @@ curl -fsSL ${shellSingleQuote(remoteMcpClientBootstrapScriptUrl)} | bash -s -- -
 function remoteConnectBootstrapScript(serverUrl: string) {
   return `#!/usr/bin/env bash
 set -euo pipefail
-curl -fsSL ${shellSingleQuote(remoteMcpClientBootstrapScriptUrl)} | bash -s -- --connect-url ${shellSingleQuote(serverUrl)} "$@"
+curl -fsSL ${shellSingleQuote(`${serverUrl}/connect/client-bootstrap.sh`)} | bash -s -- --connect-url ${shellSingleQuote(serverUrl)} "$@"
 `;
+}
+
+function remoteConnectClientBootstrapScript() {
+  return readFileSync(join(process.cwd(), "scripts", "install-recallant-client-bootstrap.sh"), "utf8");
 }
 
 function htmlEscape(value: unknown) {
@@ -6359,6 +6365,10 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
     if (request.method === "GET" && requestUrl.pathname === remoteConnectBootstrapPath) {
       const serverUrl = remoteInviteServerUrl({}, request);
       write(response, 200, remoteConnectBootstrapScript(serverUrl), "text/x-shellscript");
+      return;
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/connect/client-bootstrap.sh") {
+      write(response, 200, remoteConnectClientBootstrapScript(), "text/x-shellscript");
       return;
     }
     if (request.method === "POST" && requestUrl.pathname === remoteConnectStartPath) {
