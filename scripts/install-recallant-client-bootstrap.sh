@@ -12,6 +12,8 @@ CREDENTIAL=""
 PROJECT_ID=""
 DEVELOPER_ID=""
 CLIENT_ID=""
+INVITE_URL=""
+INVITE_TOKEN=""
 SESSION_ID=""
 TRACE_ID=""
 CAPTURE_PROOF=false
@@ -48,6 +50,10 @@ central Recallant server. It does not install local Recallant storage and does n
 Postgres, RECALLANT_DATABASE_URL, or server-internal paths.
 
 Example:
+  cd /path/to/project
+  curl -fsSL https://recallant.example.com/j/<invite-token> | bash
+
+Advanced/manual package:
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
     --server-url https://recallant.example.com \
     --credential <scoped-remote-mcp-credential> \
@@ -57,6 +63,8 @@ Example:
     --project-dir .
 
 Options:
+  --invite-url <https-url>     Redeem endpoint from a Recallant remote invite.
+  --invite-token <token>       Short-lived one-time remote invite token.
   --server-url <https-url>     Existing Recallant server URL.
   --credential <token>         Scoped remote MCP credential for this project/developer/client.
   --project-id <id>            Recallant project id.
@@ -119,6 +127,14 @@ while [[ $# -gt 0 ]]; do
       CLIENT_ID="${2:-}"
       shift 2
       ;;
+    --invite-url)
+      INVITE_URL="${2:-}"
+      shift 2
+      ;;
+    --invite-token)
+      INVITE_TOKEN="${2:-}"
+      shift 2
+      ;;
     --project-dir)
       PROJECT_DIR="${2:-}"
       shift 2
@@ -175,27 +191,35 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-required=()
-[[ -n "$SERVER_URL" ]] || required+=("--server-url")
-[[ -n "$CREDENTIAL" ]] || required+=("--credential")
-[[ -n "$PROJECT_ID" ]] || required+=("--project-id")
-[[ -n "$DEVELOPER_ID" ]] || required+=("--developer-id")
-[[ -n "$CLIENT_ID" ]] || required+=("--client-id")
-if [[ ${#required[@]} -gt 0 ]]; then
-  {
-    echo "Missing required remote setup inputs:"
-    echo
-    echo "The central Recallant server onboarding package must provide:"
-    echo
-    for option in "${required[@]}"; do
-      echo "- $option"
-    done
-  } >&2
-  exit 2
+INVITE_MODE=false
+if [[ -n "$INVITE_URL" || -n "$INVITE_TOKEN" ]]; then
+  INVITE_MODE=true
 fi
 
-if [[ ! "$SERVER_URL" =~ ^https://[^[:space:]/?#]+([^[:space:]]*)?$ ]]; then
-  fail "Remote onboarding requires an HTTPS Recallant server URL from the central server package." 2
+if [[ "$INVITE_MODE" == "true" ]]; then
+  [[ -n "$INVITE_URL" ]] || fail "Remote invite mode requires --invite-url." 2
+  [[ -n "$INVITE_TOKEN" ]] || fail "Remote invite mode requires --invite-token." 2
+else
+  required=()
+  [[ -n "$SERVER_URL" ]] || required+=("--server-url")
+  [[ -n "$CREDENTIAL" ]] || required+=("--credential")
+  [[ -n "$PROJECT_ID" ]] || required+=("--project-id")
+  [[ -n "$DEVELOPER_ID" ]] || required+=("--developer-id")
+  [[ -n "$CLIENT_ID" ]] || required+=("--client-id")
+  if [[ ${#required[@]} -gt 0 ]]; then
+    {
+      echo "Missing required remote setup inputs:"
+      echo
+      echo "The central Recallant server onboarding package must provide:"
+      echo
+      for option in "${required[@]}"; do
+        echo "- $option"
+      done
+      echo
+      echo "Beginner path: run the one-line invite command from the central Recallant server instead."
+    } >&2
+    exit 2
+  fi
 fi
 
 missing=()
@@ -258,6 +282,35 @@ else
   if ! command -v recallant >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/recallant" ]]; then
     recallant_cmd="$HOME/.local/bin/recallant"
   fi
+fi
+
+if [[ "$INVITE_MODE" == "true" ]]; then
+  echo "Redeeming Recallant remote invite..."
+  redeem_json="$(curl -fsS -X POST -H 'content-type: application/json' --data "{\"invite_token\":\"$INVITE_TOKEN\"}" "$INVITE_URL")"
+  redeemed_fields="$(printf '%s' "$redeem_json" | node -e '
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+if (!payload.ok || !payload.bootstrap) {
+  throw new Error(payload.error || "remote invite redeem did not return bootstrap data");
+}
+const bootstrap = payload.bootstrap;
+for (const key of ["server_url", "credential", "project_id", "developer_id", "client_id", "target"]) {
+  const value = bootstrap[key];
+  if (!value) throw new Error(`remote invite redeem response is missing ${key}`);
+  process.stdout.write(`${String(value)}\n`);
+}
+')"
+  SERVER_URL="$(printf '%s\n' "$redeemed_fields" | sed -n '1p')"
+  CREDENTIAL="$(printf '%s\n' "$redeemed_fields" | sed -n '2p')"
+  PROJECT_ID="$(printf '%s\n' "$redeemed_fields" | sed -n '3p')"
+  DEVELOPER_ID="$(printf '%s\n' "$redeemed_fields" | sed -n '4p')"
+  CLIENT_ID="$(printf '%s\n' "$redeemed_fields" | sed -n '5p')"
+  CLIENT="$(printf '%s\n' "$redeemed_fields" | sed -n '6p')"
+  CAPTURE_PROOF=true
+fi
+
+if [[ ! "$SERVER_URL" =~ ^https://[^[:space:]/?#]+([^[:space:]]*)?$ && ! "$SERVER_URL" =~ ^http://127\.0\.0\.1(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+  fail "Remote onboarding requires an HTTPS Recallant server URL from the central server package." 2
 fi
 
 connect_args=(

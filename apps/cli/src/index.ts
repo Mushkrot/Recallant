@@ -214,7 +214,10 @@ function positionalArgs(argv: readonly string[]) {
     "--slow-ms",
     "--top-k",
     "--marker",
-    "--previewed-global-target"
+    "--previewed-global-target",
+    "--expires-minutes",
+    "--invite-url",
+    "--invite-token"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -4565,6 +4568,7 @@ async function startAgentSession(
   argv: readonly string[]
 ) {
   const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
   const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
   const clientVersion = parseFlag(argv, "--client-version") ?? null;
   const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
@@ -4572,6 +4576,7 @@ async function startAgentSession(
   const started = await database.startSession({
     client_kind: clientKind,
     client_version: clientVersion,
+    project_id: config?.project_id ?? null,
     project_path: dir,
     session_label: parseFlag(argv, "--session-label") ?? "recallant-agent-session",
     resume_policy: "normal"
@@ -4742,6 +4747,7 @@ async function runAgentEvent(argv: readonly string[]) {
       let memory = null;
       if (kind === "decision") {
         memory = await database.createAgentMemory({
+          project_id: state.project_id,
           project_path: dir,
           memory_type: "decision",
           scope: "project",
@@ -4858,13 +4864,44 @@ async function runAgentCheckpoint(argv: readonly string[]) {
           created_at: new Date().toISOString()
         })
       });
+      const checkpointMemory = await database.createAgentMemory({
+        project_id: state.project_id,
+        project_path: dir,
+        memory_type: "checkpoint",
+        scope: "project",
+        scope_kind: "project",
+        title: summarizeText(`Checkpoint: ${String(payload.current_focus)}`, 72),
+        body: [
+          `Status: ${String(payload.status ?? "checkpoint")}`,
+          `Current focus: ${String(payload.current_focus ?? "")}`,
+          `Next step: ${String(payload.next_step ?? "")}`,
+          payload.summary ? `Summary: ${String(payload.summary)}` : null
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        confidence: 0.95,
+        created_by: "agent",
+        source_refs: [
+          {
+            source_kind: "event",
+            source_id: String(event.event_id),
+            quote: summarizeText(
+              `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+              500
+            ),
+            metadata: { capture_kind: "agent_checkpoint" }
+          }
+        ],
+        metadata: { created_from: "recallant_agent_checkpoint" }
+      });
       const now = new Date().toISOString();
       await writeAgentSessionState(dir, {
         ...state,
         updated_at: now,
         last_checkpoint_at: now,
         last_memory_write_at: now,
-        last_event_id: String(event.event_id)
+        last_event_id: String(event.event_id),
+        last_memory_id: String(checkpointMemory.memory_id)
       });
       process.stdout.write(
         `${JSON.stringify(
@@ -4876,6 +4913,7 @@ async function runAgentCheckpoint(argv: readonly string[]) {
             session_id: state.session_id,
             checkpoint_updated_at: checkpoint.updated_at,
             event_id: event.event_id,
+            memory: checkpointMemory,
             project_log_update: projectLogUpdate
           },
           null,
@@ -5995,6 +6033,58 @@ function remoteCredentialProvisioningBridgeClientId(
   clientId?: string | null
 ) {
   return parseFlag(argv, "--bridge-client-id") ?? clientId ?? "remote-agent";
+}
+
+function normalizeInviteServerUrl(raw: string) {
+  const parsed = new URL(raw);
+  if (
+    parsed.protocol !== "https:" &&
+    parsed.hostname !== "127.0.0.1" &&
+    parsed.hostname !== "localhost"
+  ) {
+    throw new Error("VALIDATION_ERROR: invite --server-url must use https");
+  }
+  parsed.hash = "";
+  parsed.search = "";
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function shellCliArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function inviteConnectCommand(serverUrl: string, token: string) {
+  return `curl -fsSL ${shellCliArg(`${serverUrl}/j/${token}`)} | bash`;
+}
+
+function inviteHumanReport(input: {
+  projectDir: string | null;
+  command: string;
+  invite: { target: string; expires_at: Date | string; status: string };
+}) {
+  const expiresAt =
+    input.invite.expires_at instanceof Date
+      ? input.invite.expires_at.toISOString()
+      : input.invite.expires_at;
+  return (
+    [
+      "Recallant remote invite created",
+      "",
+      input.projectDir ? `Server-side project: ${input.projectDir}` : null,
+      `Target: ${input.invite.target}`,
+      `Status: ${input.invite.status}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "Run this from the project folder on the remote computer:",
+      `  ${input.command}`,
+      "",
+      "The invite is a short-lived one-time secret. The remote computer does not need Postgres, Docker, RECALLANT_DATABASE_URL, Workbench admin auth, or server-internal paths.",
+      ""
+    ]
+      .filter(Boolean)
+      .join("\n") + "\n"
+  );
 }
 
 function remoteCredentialProvisioningHumanReport(input: {
@@ -7260,6 +7350,82 @@ async function runMemorySpace(argv: readonly string[]) {
   }
 }
 
+async function runInvite(argv: readonly string[]) {
+  const format = cliOutputFormat(argv);
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for invite commands");
+  const positional = positionalArgs(argv).filter((arg) => arg !== "create");
+  const projectDirInput = parseFlag(argv, "--project-dir") ?? positional[0] ?? null;
+  const projectDir = projectDirInput ? resolve(projectDirInput) : null;
+  const rawServerUrl =
+    parseFlag(argv, "--server-url") ??
+    process.env.RECALLANT_PUBLIC_WORKBENCH_URL ??
+    process.env.RECALLANT_REMOTE_MCP_URL;
+  if (!rawServerUrl) {
+    throw new Error(
+      "VALIDATION_ERROR: invite requires --server-url or RECALLANT_PUBLIC_WORKBENCH_URL"
+    );
+  }
+  const serverUrl = normalizeInviteServerUrl(rawServerUrl);
+  try {
+    const config = projectDir ? await readProjectConfig(projectDir) : null;
+    const projectId = parseFlag(argv, "--project-id") ?? config?.project_id;
+    if (!projectId) {
+      throw new Error(
+        "VALIDATION_ERROR: invite needs --project-id or an attached project with .recallant/config"
+      );
+    }
+    const binding = await database.getProjectBinding(projectId);
+    if (!binding) throw new Error("VALIDATION_ERROR: invite project was not found in Recallant");
+    const developerId = parseFlag(argv, "--developer-id") ?? binding.developer_id;
+    const expiresMinutes = parseFlag(argv, "--expires-minutes");
+    const expiresAt =
+      parseFlag(argv, "--expires-at") ??
+      (expiresMinutes
+        ? new Date(
+            Date.now() + Math.max(1, Number.parseInt(expiresMinutes, 10) || 30) * 60 * 1000
+          ).toISOString()
+        : null);
+    const result = await database.createRemoteOnboardingInvite({
+      projectId,
+      developerId,
+      target: parseFlag(argv, "--target") ?? "codex",
+      label: parseFlag(argv, "--label") ?? null,
+      expiresAt,
+      createdBy: "recallant-cli"
+    });
+    const command = inviteConnectCommand(serverUrl, result.token);
+    writeCliPayload(
+      {
+        ok: true,
+        action: "remote_invite_create",
+        remote: true,
+        invite: result.invite,
+        invite_token: result.token,
+        server_url: serverUrl,
+        redeem_url: `${serverUrl}/api/remote-invite/redeem`,
+        command,
+        secret_print_policy: "shown_once_create_output_only",
+        safety: {
+          remote_computer_requires_recallant_database_url: false,
+          exposes_postgres: false,
+          exposes_workbench_or_admin_auth: false,
+          exposes_internal_server_paths: false,
+          exposes_provider_secrets: false
+        }
+      },
+      format,
+      inviteHumanReport({
+        projectDir,
+        command,
+        invite: result.invite
+      })
+    );
+  } finally {
+    await database.close();
+  }
+}
+
 async function runRemoteCredential(argv: readonly string[]) {
   const subcommand = argv[3] ?? "list";
   const format = cliOutputFormat(argv);
@@ -7647,6 +7813,17 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (command === "invite" || command === "remote-invite") {
+    return [
+      "Usage: recallant invite [create] <project-dir> --server-url <https-url> [--target <codex|cursor|claude-code|generic>] [--label <text>] [--expires-minutes <n>] [--format json|text]",
+      "",
+      "Create a short-lived one-command remote onboarding invite for an already attached project. The output is the only command the remote computer needs to run from its project folder.",
+      "",
+      "Example:",
+      "  recallant invite /path/to/project --server-url https://memory.example.com",
+      ""
+    ].join("\n");
+  }
   if (command === "remote-bridge") {
     return [
       "Usage: recallant remote-bridge --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>]",
@@ -7655,7 +7832,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -7695,6 +7872,7 @@ async function main(argv: readonly string[]) {
   if (command === "connect") return runConnect(argv);
   if (command === "connect-remote") return runConnectRemote(argv);
   if (command === "onboard") return runOnboard(argv);
+  if (command === "invite" || command === "remote-invite") return runInvite(argv);
   if (command === "recover-embeddings") return runRecoverEmbeddings(argv);
   if (command === "remote-credential" || command === "remote-credentials")
     return runRemoteCredential(argv);

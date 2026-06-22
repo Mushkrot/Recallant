@@ -147,16 +147,17 @@ backups, or provider settings anonymously.
 That remote path must preserve the same project/developer scope, context-pack, capture, review, and
 safety policies as local stdio MCP. Remote MCP credentials are project/developer scoped, optionally
 client scoped, revocable, rotatable, hash-stored, and audited with credential id/prefix metadata
-only. The endpoint behavior is gated by `remote-mcp-contract:smoke` and
-`remote-mcp-credentials:smoke`; `remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`,
-`remote-mcp-doctor:smoke`, `remote-mcp-security:smoke`, and
-`remote-mcp-external-rehearsal:smoke` cover the bridge, provisioning, diagnostics, security matrix,
-deterministic isolated external-client rehearsal, and `remote-mcp-separate-machine-evidence:smoke`
-covers the redacted evidence bundle shape for the real external-host gate. A real external Mac
-rehearsal passed on 2026-06-20 with redacted evidence run
-`c01ae9a7-a60c-4e12-bedf-d4be222c58b0` and strict server-side verification of next-session recall,
-Workbench readiness, and redacted audit rows; broader onboarding polish, repeat rehearsals, and
-broader transport/client support remain near-term work.
+only. Remote onboarding invites are also hash-stored and one-time; redeeming an invite creates the
+scoped remote MCP credential and writes the project-local remote bridge config. The endpoint
+behavior is gated by `remote-mcp-contract:smoke` and `remote-mcp-credentials:smoke`;
+`remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`, `remote-mcp-doctor:smoke`,
+`remote-mcp-security:smoke`, and `remote-mcp-external-rehearsal:smoke` cover the bridge,
+provisioning, invite redemption, diagnostics, security matrix, deterministic isolated
+external-client rehearsal, and `remote-mcp-separate-machine-evidence:smoke` covers the redacted
+evidence bundle shape for the real external-host gate. A real external Mac rehearsal passed on
+2026-06-20 with redacted evidence run `c01ae9a7-a60c-4e12-bedf-d4be222c58b0` and strict server-side
+verification of next-session recall, Workbench readiness, and redacted audit rows; repeat
+rehearsals and broader transport/client support remain near-term work.
 
 ## Why This Is Different From Plain Logs Or RAG
 

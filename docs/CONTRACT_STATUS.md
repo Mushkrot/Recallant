@@ -142,12 +142,11 @@ Before a release-candidate tag, the project should have:
 
 - external-host release rehearsal that repeats the public quickstart and rollback path;
 - repeat remote project access rehearsal from at least one real separate machine with
-  operator-provided live endpoint/credential/scope, producing either a validated
-  `recallant remote-acceptance` evidence bundle or equivalent server-side trace verification that
-  proves authenticated agent capture and recall against a central Recallant server;
-- broader remote-client bootstrap rehearsal from separate machines and clients, including
-  `remote-doctor` and capture/recall readiness against the central server, before it is documented
-  as a broad beginner default;
+  a one-command invite, producing either a validated `recallant remote-acceptance` evidence bundle
+  or equivalent server-side trace verification that proves authenticated agent capture and recall
+  against a central Recallant server;
+- broader remote-client invite rehearsal from separate machines and clients, including
+  `remote-doctor` and capture/recall readiness against the central server;
 - existing-project migration proof with backup and review behavior on broader real-world projects;
 - autonomous Workbench browser QA and public screenshots with synthetic data only;
 - independent hardening after the install/auth/Workbench/backups/secrets security smoke;

@@ -85,6 +85,59 @@ export type RemoteMcpCredentialSummary = Omit<RemoteMcpCredentialRow, "credentia
   status: RemoteMcpCredentialStatus;
 };
 
+export type RemoteOnboardingInviteStatus = "active" | "expired" | "redeemed" | "revoked";
+
+export type RemoteOnboardingInviteRow = {
+  id: string;
+  project_id: string;
+  developer_id: string;
+  token_prefix: string;
+  token_hash: string;
+  hash_version: string;
+  target: string;
+  label: string | null;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+  expires_at: Date;
+  redeemed_at: Date | null;
+  revoked_at: Date | null;
+  redeemed_client_id: string | null;
+  redeemed_credential_id: string | null;
+};
+
+export type RemoteOnboardingInviteSummary = Omit<RemoteOnboardingInviteRow, "token_hash"> & {
+  status: RemoteOnboardingInviteStatus;
+};
+
+export type CreateRemoteOnboardingInviteInput = {
+  projectId: string;
+  developerId: string;
+  target?: string | null;
+  label?: string | null;
+  expiresAt?: string | Date | null;
+  createdBy?: string | null;
+};
+
+export type CreateRemoteOnboardingInviteResult = {
+  token: string;
+  invite: RemoteOnboardingInviteSummary;
+};
+
+export type RedeemRemoteOnboardingInviteInput = {
+  token: string;
+  clientId?: string | null;
+  redeemedBy?: string | null;
+};
+
+export type RedeemRemoteOnboardingInviteResult = {
+  invite: RemoteOnboardingInviteSummary;
+  secret: string;
+  credential: RemoteMcpCredentialSummary;
+  client_id: string;
+  target: string;
+};
+
 export type CreateRemoteMcpCredentialInput = {
   projectId: string;
   developerId: string;
@@ -188,6 +241,9 @@ function auditRecommendation(severity: string, message: string, evidence: Record
 const remoteMcpCredentialHashVersion: RemoteMcpCredentialHashVersion = "sha256-v1";
 const remoteMcpCredentialPrefixBytes = 9;
 const remoteMcpCredentialSecretBytes = 32;
+const remoteOnboardingInviteHashVersion = "sha256-v1";
+const remoteOnboardingInvitePrefixBytes = 8;
+const remoteOnboardingInviteSecretBytes = 24;
 
 function normalizeRemoteMcpCredentialString(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -233,6 +289,53 @@ function summarizeRemoteMcpCredential(row: RemoteMcpCredentialRow): RemoteMcpCre
   const summary = { ...row };
   delete (summary as Partial<RemoteMcpCredentialRow>).credential_hash;
   return { ...summary, status: remoteMcpCredentialStatus(row) };
+}
+
+function normalizeRemoteOnboardingTarget(value: string | null | undefined) {
+  const normalized = normalizeRemoteMcpCredentialString(value)?.replaceAll("-", "_") ?? "codex";
+  if (["codex", "cursor", "claude_code", "generic"].includes(normalized)) return normalized;
+  throw new Error("VALIDATION_ERROR: remote onboarding invite target is invalid");
+}
+
+function defaultRemoteOnboardingInviteExpiry() {
+  return new Date(Date.now() + 30 * 60 * 1000);
+}
+
+function generateRemoteOnboardingInviteToken() {
+  const prefix = randomBytes(remoteOnboardingInvitePrefixBytes).toString("hex");
+  const secret = randomBytes(remoteOnboardingInviteSecretBytes).toString("base64url");
+  return `rcl_inv_${prefix}_${secret}`;
+}
+
+function extractRemoteOnboardingInvitePrefix(token: string) {
+  return token.trim().match(/^rcl_inv_([A-Fa-f0-9]+)_/)?.[1] ?? null;
+}
+
+function hashRemoteOnboardingInviteToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function constantTimeRemoteOnboardingHashEquals(left: string, right: string) {
+  const leftBuffer = Buffer.from(left, "hex");
+  const rightBuffer = Buffer.from(right, "hex");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function remoteOnboardingInviteStatus(
+  row: RemoteOnboardingInviteRow
+): RemoteOnboardingInviteStatus {
+  if (row.revoked_at) return "revoked";
+  if (row.redeemed_at) return "redeemed";
+  if (row.expires_at.getTime() <= Date.now()) return "expired";
+  return "active";
+}
+
+function summarizeRemoteOnboardingInvite(
+  row: RemoteOnboardingInviteRow
+): RemoteOnboardingInviteSummary {
+  const summary = { ...row };
+  delete (summary as Partial<RemoteOnboardingInviteRow>).token_hash;
+  return { ...summary, status: remoteOnboardingInviteStatus(row) };
 }
 
 function rawSecretLikeFindings(value: unknown, path = "value"): string[] {
@@ -1567,6 +1670,42 @@ export class RecallantDb {
     await ensureSystemActivitySchema(this.pool);
   }
 
+  async ensureRemoteOnboardingInviteSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS remote_onboarding_invites (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+        token_prefix TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+        target TEXT NOT NULL DEFAULT 'codex',
+        label TEXT,
+        created_by TEXT NOT NULL DEFAULT 'cli',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        redeemed_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        redeemed_client_id TEXT,
+        redeemed_credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL,
+        CHECK (token_prefix <> ''),
+        CHECK (token_hash <> ''),
+        CHECK (hash_version <> ''),
+        CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+      )
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_onboarding_invites_prefix_active
+        ON remote_onboarding_invites (token_prefix, token_hash)
+        WHERE redeemed_at IS NULL AND revoked_at IS NULL
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_onboarding_invites_scope
+        ON remote_onboarding_invites (project_id, developer_id, created_at DESC)
+    `);
+  }
+
   async startSystemActivity(input: SystemActivityInput): Promise<SystemActivityRecord> {
     await this.ensureSystemActivitySchema();
     const activity = normalizeSystemActivityStart(input);
@@ -2688,6 +2827,234 @@ export class RecallantDb {
     } catch {
       // Credential lifecycle should not fail because audit storage is unavailable.
     }
+  }
+
+  private async recordRemoteOnboardingInviteAudit(input: {
+    operation: string;
+    status: "success" | "skipped" | "error";
+    projectId?: string | null;
+    developerId?: string | null;
+    inviteId?: string | null;
+    tokenPrefix?: string | null;
+    clientId?: string | null;
+    credentialId?: string | null;
+    actorId?: string | null;
+    errorCode?: string | null;
+    metadata?: JsonObject | null;
+  }) {
+    try {
+      const activity = await this.startSystemActivity({
+        developer_id: input.developerId ?? null,
+        project_id: input.projectId ?? null,
+        surface: "remote_onboarding_invites",
+        operation: `remote_onboarding_invite.${input.operation}`,
+        actor_kind: input.actorId ? "user" : "system",
+        actor_id: input.actorId ?? "remote_onboarding_invites",
+        client_kind: "remote_onboarding_invite",
+        related_ids: {
+          invite_id: input.inviteId ?? null,
+          token_prefix: input.tokenPrefix ?? null,
+          credential_id: input.credentialId ?? null,
+          client_id: input.clientId ?? null
+        },
+        metadata: {
+          audit_policy: "remote_onboarding_invite_redacted_no_raw_token",
+          ...input.metadata
+        }
+      });
+      await this.finishSystemActivity({
+        id: activity.id,
+        status: input.status,
+        error_code: input.errorCode ?? null,
+        error_message: input.errorCode ?? null,
+        metadata: {
+          operation: `remote_onboarding_invite.${input.operation}`,
+          invite_id: input.inviteId ?? null,
+          token_prefix: input.tokenPrefix ?? null,
+          credential_id: input.credentialId ?? null,
+          client_id: input.clientId ?? null
+        }
+      });
+    } catch {
+      // Invite lifecycle should not fail because audit storage is unavailable.
+    }
+  }
+
+  async createRemoteOnboardingInvite(
+    input: CreateRemoteOnboardingInviteInput
+  ): Promise<CreateRemoteOnboardingInviteResult> {
+    await this.ensureRemoteOnboardingInviteSchema();
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    if (!projectId || !developerId) {
+      throw new Error("VALIDATION_ERROR: projectId and developerId are required");
+    }
+    await this.assertRemoteMcpCredentialScope(projectId, developerId);
+
+    const token = generateRemoteOnboardingInviteToken();
+    const tokenPrefix = extractRemoteOnboardingInvitePrefix(token);
+    if (!tokenPrefix) throw new Error("Failed to generate remote onboarding invite token prefix");
+    const expiresAt =
+      normalizeRemoteMcpCredentialDate(input.expiresAt) ?? defaultRemoteOnboardingInviteExpiry();
+    const target = normalizeRemoteOnboardingTarget(input.target);
+    const createdBy = normalizeRemoteMcpCredentialString(input.createdBy) ?? "cli";
+    const result = await this.pool.query<RemoteOnboardingInviteRow>(
+      `
+        INSERT INTO remote_onboarding_invites (
+          project_id, developer_id, token_prefix, token_hash, hash_version, target, label,
+          created_by, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [
+        projectId,
+        developerId,
+        tokenPrefix,
+        hashRemoteOnboardingInviteToken(token),
+        remoteOnboardingInviteHashVersion,
+        target,
+        normalizeRemoteMcpCredentialString(input.label),
+        createdBy,
+        expiresAt
+      ]
+    );
+    const invite = summarizeRemoteOnboardingInvite(result.rows[0] as RemoteOnboardingInviteRow);
+    await this.recordRemoteOnboardingInviteAudit({
+      operation: "create",
+      status: "success",
+      projectId,
+      developerId,
+      inviteId: invite.id,
+      tokenPrefix: invite.token_prefix,
+      actorId: createdBy,
+      metadata: {
+        target: invite.target,
+        label_present: Boolean(invite.label),
+        expires_at: invite.expires_at.toISOString()
+      }
+    });
+    return { token, invite };
+  }
+
+  async redeemRemoteOnboardingInvite(
+    input: RedeemRemoteOnboardingInviteInput
+  ): Promise<RedeemRemoteOnboardingInviteResult> {
+    await this.ensureRemoteOnboardingInviteSchema();
+    const token = normalizeRemoteMcpCredentialString(input.token);
+    if (!token) throw new Error("VALIDATION_ERROR: remote onboarding invite token is required");
+    const tokenPrefix = extractRemoteOnboardingInvitePrefix(token);
+    const tokenHash = hashRemoteOnboardingInviteToken(token);
+    if (!tokenPrefix) {
+      await this.recordRemoteOnboardingInviteAudit({
+        operation: "redeem",
+        status: "skipped",
+        errorCode: "invalid_token",
+        metadata: { result: "invalid_token" }
+      });
+      throw new Error("VALIDATION_ERROR: remote onboarding invite token is invalid");
+    }
+    const redeemedBy = normalizeRemoteMcpCredentialString(input.redeemedBy) ?? "remote-invite";
+    const result = await withTransaction(this.pool, async (client) => {
+      const candidates = await client.query<RemoteOnboardingInviteRow>(
+        `
+          SELECT *
+          FROM remote_onboarding_invites
+          WHERE token_prefix = $1
+          ORDER BY created_at DESC
+          FOR UPDATE
+        `,
+        [tokenPrefix]
+      );
+      const inviteRow = candidates.rows.find(
+        (row) =>
+          row.hash_version === remoteOnboardingInviteHashVersion &&
+          constantTimeRemoteOnboardingHashEquals(row.token_hash, tokenHash)
+      );
+      if (!inviteRow) throw new Error("VALIDATION_ERROR: remote onboarding invite not found");
+      const inviteStatus = remoteOnboardingInviteStatus(inviteRow);
+      if (inviteStatus !== "active") {
+        throw new Error(`VALIDATION_ERROR: remote onboarding invite is ${inviteStatus}`);
+      }
+
+      const clientId =
+        normalizeRemoteMcpCredentialString(input.clientId) ?? `remote-${randomUUID()}`;
+      const secret = generateRemoteMcpCredentialSecret();
+      const credentialPrefix = extractRemoteMcpCredentialPrefix(secret);
+      if (!credentialPrefix) throw new Error("Failed to generate remote MCP credential prefix");
+      const credential = await client.query<RemoteMcpCredentialRow>(
+        `
+          INSERT INTO remote_mcp_credentials (
+            project_id, developer_id, client_id, label, credential_prefix, credential_hash,
+            hash_version, created_by, expires_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *
+        `,
+        [
+          inviteRow.project_id,
+          inviteRow.developer_id,
+          clientId,
+          inviteRow.label ?? "remote invite",
+          credentialPrefix,
+          hashRemoteMcpCredentialSecret(secret),
+          remoteMcpCredentialHashVersion,
+          redeemedBy,
+          null
+        ]
+      );
+      const updatedInvite = await client.query<RemoteOnboardingInviteRow>(
+        `
+          UPDATE remote_onboarding_invites
+          SET redeemed_at = now(),
+              redeemed_client_id = $2,
+              redeemed_credential_id = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [inviteRow.id, clientId, credential.rows[0]?.id]
+      );
+      return {
+        invite: summarizeRemoteOnboardingInvite(updatedInvite.rows[0] as RemoteOnboardingInviteRow),
+        secret,
+        credential: summarizeRemoteMcpCredential(credential.rows[0] as RemoteMcpCredentialRow),
+        client_id: clientId,
+        target: inviteRow.target
+      };
+    });
+    await this.recordRemoteOnboardingInviteAudit({
+      operation: "redeem",
+      status: "success",
+      projectId: result.invite.project_id,
+      developerId: result.invite.developer_id,
+      inviteId: result.invite.id,
+      tokenPrefix: result.invite.token_prefix,
+      clientId: result.client_id,
+      credentialId: result.credential.id,
+      actorId: redeemedBy,
+      metadata: {
+        target: result.target,
+        result: "redeemed"
+      }
+    });
+    await this.recordRemoteMcpCredentialAudit({
+      operation: "create",
+      status: "success",
+      projectId: result.credential.project_id,
+      developerId: result.credential.developer_id,
+      clientId: result.credential.client_id,
+      credentialId: result.credential.id,
+      credentialPrefix: result.credential.credential_prefix,
+      actorId: redeemedBy,
+      metadata: {
+        created_from: "remote_onboarding_invite",
+        invite_id: result.invite.id,
+        label_present: Boolean(result.credential.label),
+        expires_at: null
+      }
+    });
+    return result;
   }
 
   async createRemoteMcpCredential(

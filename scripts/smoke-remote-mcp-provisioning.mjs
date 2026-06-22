@@ -17,6 +17,11 @@ function extractPrefix(secret) {
   return parts.length === 4 && parts[0] === "rcl" && parts[1] === "mcp" ? parts[2] : null;
 }
 
+function extractInvitePrefix(secret) {
+  const parts = secret.split("_");
+  return parts.length === 4 && parts[0] === "rcl" && parts[1] === "inv" ? parts[2] : null;
+}
+
 function withoutHash(row) {
   const summary = { ...row };
   delete summary.credential_hash;
@@ -24,16 +29,36 @@ function withoutHash(row) {
   return summary;
 }
 
+function withoutInviteHash(row) {
+  const summary = { ...row };
+  delete summary.token_hash;
+  summary.status = row.revoked_at
+    ? "revoked"
+    : row.redeemed_at
+      ? "redeemed"
+      : row.expires_at.getTime() <= Date.now()
+        ? "expired"
+        : "active";
+  return summary;
+}
+
 class ProvisioningHarness {
   constructor() {
     this.rows = [];
+    this.invites = [];
     this.auditRows = [];
     this.counter = 0;
+    this.inviteCounter = 0;
   }
 
   nextSecret() {
     this.counter += 1;
     return ["rcl", "mcp", `provision${this.counter}`, `secret${this.counter}`].join("_");
+  }
+
+  nextInviteToken() {
+    this.inviteCounter += 1;
+    return ["rcl", "inv", `invite${this.inviteCounter}`, `secret${this.inviteCounter}`].join("_");
   }
 
   audit(operation, row, metadata = {}) {
@@ -156,6 +181,84 @@ class ProvisioningHarness {
 
   async revokeRemoteMcpCredential(input) {
     return this.revoke(input.credentialId);
+  }
+
+  async createRemoteOnboardingInvite(input) {
+    this.assertScope(input.projectId, input.developerId);
+    const token = this.nextInviteToken();
+    const now = new Date(`2026-06-19T00:10:${String(this.inviteCounter).padStart(2, "0")}Z`);
+    const row = {
+      id: `invite-${this.inviteCounter}`,
+      project_id: input.projectId,
+      developer_id: input.developerId,
+      token_prefix: extractInvitePrefix(token),
+      token_hash: hashSecret(token),
+      hash_version: "sha256-v1",
+      target: input.target ?? "codex",
+      label: input.label ?? null,
+      created_by: input.createdBy ?? "smoke",
+      created_at: now,
+      updated_at: now,
+      expires_at: input.expiresAt ? new Date(input.expiresAt) : new Date("2099-01-01T00:00:00Z"),
+      redeemed_at: null,
+      revoked_at: null,
+      redeemed_client_id: null,
+      redeemed_credential_id: null
+    };
+    this.invites.push(row);
+    this.auditRows.push({
+      surface: "remote_onboarding_invites",
+      operation: "remote_onboarding_invite.create",
+      status: "success",
+      project_id: row.project_id,
+      developer_id: row.developer_id,
+      invite_id: row.id,
+      token_prefix: row.token_prefix,
+      metadata: { target: row.target }
+    });
+    return { token, invite: withoutInviteHash(row) };
+  }
+
+  async redeemRemoteOnboardingInvite(input) {
+    const prefix = extractInvitePrefix(input.token);
+    const presentedHash = hashSecret(input.token);
+    const row = this.invites.find(
+      (invite) => invite.token_prefix === prefix && invite.token_hash === presentedHash
+    );
+    assert(row, "redeem target missing");
+    assert(!row.redeemed_at, "invite was redeemed twice");
+    assert(!row.revoked_at, "invite was revoked");
+    assert(row.expires_at.getTime() > Date.now(), "invite expired");
+    const clientId = input.clientId ?? `remote-smoke-${this.inviteCounter}`;
+    const credential = this.create({
+      projectId: row.project_id,
+      developerId: row.developer_id,
+      clientId,
+      label: row.label ?? "remote invite"
+    });
+    row.redeemed_at = new Date("2026-06-19T00:11:00Z");
+    row.redeemed_client_id = clientId;
+    row.redeemed_credential_id = credential.credential.id;
+    row.updated_at = row.redeemed_at;
+    this.auditRows.push({
+      surface: "remote_onboarding_invites",
+      operation: "remote_onboarding_invite.redeem",
+      status: "success",
+      project_id: row.project_id,
+      developer_id: row.developer_id,
+      invite_id: row.id,
+      token_prefix: row.token_prefix,
+      credential_id: credential.credential.id,
+      client_id: clientId,
+      metadata: { target: row.target }
+    });
+    return {
+      invite: withoutInviteHash(row),
+      secret: credential.secret,
+      credential: credential.credential,
+      client_id: clientId,
+      target: row.target
+    };
   }
 
   async getReviewDashboard(input = {}) {
@@ -462,6 +565,80 @@ try {
   );
   assert(unauthorized.status === 401, "remote credential API was not protected by Workbench auth");
   apiFailureMatrix.push("unauthenticated_api_rejected");
+
+  const inviteUnauthorized = await fetch(`${apiBaseUrl}/api/remote-invite`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project_id: projectId, developer_id: developerId })
+  });
+  assert(inviteUnauthorized.status === 401, "remote invite create API was not protected");
+  apiFailureMatrix.push("unauthenticated_invite_create_rejected");
+
+  const inviteCreate = await requestJson(apiBaseUrl, "/api/remote-invite", {
+    action: "create",
+    project_id: projectId,
+    developer_id: developerId,
+    label: "invite create smoke",
+    server_url: serverUrl,
+    target: "codex"
+  });
+  assert(inviteCreate.status === 200, "API invite create failed");
+  assert(inviteCreate.body.invite_token?.startsWith("rcl_inv_"), "invite token was not returned");
+  assert(
+    inviteCreate.body.command ===
+      `curl -fsSL '${serverUrl}/j/${inviteCreate.body.invite_token}' | bash` ||
+      inviteCreate.body.command ===
+        `curl -fsSL ${serverUrl}/j/${inviteCreate.body.invite_token} | bash`,
+    `invite command was not one line: ${inviteCreate.body.command}`
+  );
+  assert(!inviteCreate.text.includes("token_hash"), "invite create exposed token hash");
+  assert(
+    !forbiddenCopiedSurfacePattern.test(inviteCreate.text),
+    "invite create leaked forbidden surface"
+  );
+
+  const inviteScript = await fetch(`${apiBaseUrl}/j/${inviteCreate.body.invite_token}`);
+  const inviteScriptText = await inviteScript.text();
+  assert(inviteScript.status === 200, "invite script endpoint failed");
+  assert(
+    inviteScriptText.includes("install-recallant-client-bootstrap.sh"),
+    "invite script did not call bootstrap"
+  );
+  assert(inviteScriptText.includes("--invite-url"), "invite script did not pass invite url");
+  assert(inviteScriptText.includes("--invite-token"), "invite script did not pass invite token");
+  assert(
+    !inviteScriptText.includes("RECALLANT_DATABASE_URL"),
+    "invite script leaked local database config"
+  );
+
+  const inviteRedeem = await requestJson(apiBaseUrl, "/api/remote-invite/redeem", {
+    invite_token: inviteCreate.body.invite_token,
+    client_id: "redeemed-client"
+  });
+  assert(inviteRedeem.status === 200, "invite redeem failed");
+  assert(
+    inviteRedeem.body.one_time_secret?.startsWith("rcl_mcp_"),
+    "invite redeem did not return credential secret"
+  );
+  assert(
+    inviteRedeem.body.bootstrap.client_id === "redeemed-client",
+    "invite redeem client id mismatch"
+  );
+  assert(inviteRedeem.body.bootstrap.project_id === projectId, "invite redeem project mismatch");
+  assert(
+    inviteRedeem.body.bootstrap.developer_id === developerId,
+    "invite redeem developer mismatch"
+  );
+  assertRemoteOnboardingPackage(inviteRedeem.body.provisioning, "invite redeem");
+  assert(!inviteRedeem.text.includes("token_hash"), "invite redeem exposed token hash");
+  assert(!inviteRedeem.text.includes("credential_hash"), "invite redeem exposed credential hash");
+
+  const inviteRedeemAgain = await requestJson(apiBaseUrl, "/api/remote-invite/redeem", {
+    invite_token: inviteCreate.body.invite_token,
+    client_id: "redeemed-client-again"
+  });
+  assert(inviteRedeemAgain.status === 409, "invite token was redeemable more than once");
+  apiFailureMatrix.push("invite_redeem_is_one_time");
 
   const apiCreate = await requestJson(apiBaseUrl, "/api/remote-credential", {
     action: "create",

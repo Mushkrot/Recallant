@@ -120,9 +120,9 @@ mustInclude(
     "Install",
     "Install Local Recallant",
     "Remote Existing-Server Setup",
-    "operator-provided path",
-    "complete remote onboarding package",
-    "install-recallant-client-bootstrap.sh",
+    "recallant invite /path/to/project --server-url https://memory.example.com",
+    "curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash",
+    "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
     "Capture active: yes",
@@ -390,9 +390,7 @@ assert(
   "package.json must expose documentation-posture:smoke"
 );
 assert(
-  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
-    "npm run documentation-posture:smoke"
-  ),
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run documentation-posture:smoke"),
   "smoke:core must include documentation-posture:smoke"
 );
 
@@ -403,11 +401,15 @@ function runDoctorFixture(projectDir, doctorEnv, label) {
   const stdoutFd = openSync(stdoutPath, "w");
   const stderrFd = openSync(stderrPath, "w");
 
-  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"], {
-    cwd: repoRoot,
-    env: doctorEnv,
-    stdio: ["ignore", stdoutFd, stderrFd]
-  });
+  const result = spawnSync(
+    process.execPath,
+    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: repoRoot,
+      env: doctorEnv,
+      stdio: ["ignore", stdoutFd, stderrFd]
+    }
+  );
 
   closeSync(stdoutFd);
   closeSync(stderrFd);
@@ -445,36 +447,44 @@ function runDoctorFixture(projectDir, doctorEnv, label) {
 }
 
 async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
-  const parsed = runDoctorFixture(projectDir, {
-    ...process.env,
-    RECALLANT_DATABASE_URL: "",
-    RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
-    RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
-    RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
-    RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
-    RECALLANT_CLOUDFLARE_MODE: "enabled",
-    RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
-    RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
-    ...extraEnv
-  }, "doctor public readiness fixture");
+  const parsed = runDoctorFixture(
+    projectDir,
+    {
+      ...process.env,
+      RECALLANT_DATABASE_URL: "",
+      RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+      RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
+      RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
+      RECALLANT_CLOUDFLARE_MODE: "enabled",
+      RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+      RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
+      ...extraEnv
+    },
+    "doctor public readiness fixture"
+  );
 
   return parsed?.public_workbench_readiness;
 }
 
 async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
-  const parsed = runDoctorFixture(projectDir, {
-    ...process.env,
-    RECALLANT_DATABASE_URL: "",
-    RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
-    RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
-    RECALLANT_SERVICE_ACTIVE_STATUS: "active",
-    RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
-    RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
-    RECALLANT_HOST: "127.0.0.1",
-    RECALLANT_SERVICE_HEALTH_STATUS: "200",
-    RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
-    ...extraEnv
-  }, "doctor service runtime fixture");
+  const parsed = runDoctorFixture(
+    projectDir,
+    {
+      ...process.env,
+      RECALLANT_DATABASE_URL: "",
+      RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+      RECALLANT_SERVICE_ACTIVE_STATUS: "active",
+      RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
+      RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
+      RECALLANT_HOST: "127.0.0.1",
+      RECALLANT_SERVICE_HEALTH_STATUS: "200",
+      RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
+      ...extraEnv
+    },
+    "doctor service runtime fixture"
+  );
 
   return parsed?.service_runtime;
 }

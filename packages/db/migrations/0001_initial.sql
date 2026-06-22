@@ -391,6 +391,29 @@ CREATE TABLE remote_mcp_credentials (
   CHECK (hash_version <> '')
 );
 
+CREATE TABLE remote_onboarding_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  token_prefix TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  target TEXT NOT NULL DEFAULT 'codex',
+  label TEXT,
+  created_by TEXT NOT NULL DEFAULT 'cli',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  redeemed_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  redeemed_client_id TEXT,
+  redeemed_credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL,
+  CHECK (token_prefix <> ''),
+  CHECK (token_hash <> ''),
+  CHECK (hash_version <> ''),
+  CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+);
+
 CREATE TABLE settings_audit_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scope_kind TEXT NOT NULL CHECK (scope_kind IN ('system', 'developer', 'project', 'session', 'client_adapter')),
@@ -483,6 +506,11 @@ CREATE INDEX idx_remote_mcp_credentials_scope
 CREATE INDEX idx_remote_mcp_credentials_rotated_from
   ON remote_mcp_credentials (rotated_from_credential_id)
   WHERE rotated_from_credential_id IS NOT NULL;
+CREATE INDEX idx_remote_onboarding_invites_prefix_active
+  ON remote_onboarding_invites (token_prefix, token_hash)
+  WHERE redeemed_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX idx_remote_onboarding_invites_scope
+  ON remote_onboarding_invites (project_id, developer_id, created_at DESC);
 CREATE INDEX idx_settings_audit_scope ON settings_audit_events (scope_kind, scope_id, created_at DESC);
 CREATE INDEX idx_settings_audit_key ON settings_audit_events (key, created_at DESC);
 

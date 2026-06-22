@@ -59,6 +59,10 @@ try {
   ]);
   assert(started.mode === "server", `agent-start did not use server mode: ${JSON.stringify(started)}`);
   assert(started.session_id, "agent-start did not return a session id");
+  assert(
+    started.project_id === attach.project_id,
+    `agent-start used a different project id than attach: ${JSON.stringify({ attach, started })}`
+  );
 
   const decisionText = `Owner decision ${marker}: Recallant readiness requires proven agent capture before project readiness can be claimed.`;
   const decision = await cli(onlineProject, [
@@ -71,6 +75,10 @@ try {
     decisionText
   ]);
   assert(decision.event_id, "decision event was not written");
+  assert(
+    decision.project_id === attach.project_id,
+    `decision event used a different project id than attach: ${JSON.stringify(decision)}`
+  );
   assert(decision.memory?.status === "accepted", `decision memory was not accepted: ${JSON.stringify(decision)}`);
 
   const action = await cli(onlineProject, [
@@ -81,6 +89,10 @@ try {
     `Agent action ${marker}: wrote the capture loop smoke decision.`
   ]);
   assert(action.event_id, "action event was not written");
+  assert(
+    action.project_id === attach.project_id,
+    `action event used a different project id than attach: ${JSON.stringify(action)}`
+  );
 
   const verification = await cli(onlineProject, [
     "agent-event",
@@ -103,7 +115,26 @@ try {
     `Checkpoint for ${marker}`
   ]);
   assert(checkpoint.event_id, "checkpoint event was not written");
+  assert(
+    checkpoint.project_id === attach.project_id,
+    `checkpoint used a different project id than attach: ${JSON.stringify(checkpoint)}`
+  );
+  assert(
+    checkpoint.memory?.status === "accepted",
+    `checkpoint memory was not accepted: ${JSON.stringify(checkpoint)}`
+  );
   assert(checkpoint.project_log_update?.status, "PROJECT_LOG checkpoint was not updated");
+
+  const checkpointAsk = await cli(onlineProject, [
+    "ask",
+    `checkpoint ${marker}`,
+    "--format",
+    "json"
+  ]);
+  assert(
+    checkpointAsk.memories?.some((memory) => String(memory.body ?? "").includes(marker)),
+    `ask did not recall checkpoint memory: ${JSON.stringify(checkpointAsk)}`
+  );
 
   const closeout = await cli(onlineProject, [
     "agent-closeout",
@@ -124,6 +155,10 @@ try {
     `${marker} readiness decision`
   ]);
   assert(secondStart.session_id !== started.session_id, "second session reused the first session id");
+  assert(
+    secondStart.project_id === attach.project_id,
+    `second agent-start used a different project id than attach: ${JSON.stringify(secondStart)}`
+  );
 
   const context = await cli(onlineProject, ["context", "--task-hint", `${marker} readiness decision`]);
   const working = context.sections?.working_memories ?? [];

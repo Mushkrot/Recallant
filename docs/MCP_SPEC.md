@@ -155,10 +155,15 @@ Remote access must enforce strict project/developer scope:
 Remote clients must not receive RECALLANT_DATABASE_URL or other raw storage credentials.
 
 Scoped remote MCP credentials are not global Recallant access. They are stored as hash-only rows
-with a non-secret prefix and lifecycle metadata. Operators can create, list, rotate, and revoke them
-with `recallant remote-credential <create|list|rotate|revoke>`. Create and rotate print the raw
-credential only in that command output; list, audit, docs, and stored rows do not include raw
-credential values or hashes.
+with a non-secret prefix and lifecycle metadata. The beginner remote onboarding path is an
+invite-command flow: `recallant invite /path/to/project --server-url https://memory.example.com`
+creates a short-lived one-time invite, and the remote workstation runs the printed
+`curl -fsSL https://memory.example.com/j/<token> | bash` command. The invite token is also stored
+hash-only; redeeming it creates the scoped remote MCP credential and marks the invite used.
+Operators can still create, list, rotate, and revoke credentials directly with
+`recallant remote-credential <create|list|rotate|revoke>` for advanced/debug workflows. Create and
+rotate print the raw credential only in that command output; list, audit, docs, and stored rows do
+not include raw credential values or hashes.
 
 Provisioning output is intentionally human-facing and copyable. Create and rotate responses may
 show a one-time raw credential, a full remote client bootstrap command, a `recallant connect-remote`
@@ -166,8 +171,8 @@ command, and a rendered MCP config that runs `recallant remote-bridge` against H
 Human-facing surfaces must point people to the complete bootstrap command, not the raw bootstrap
 script URL by itself. List and revoke responses use the `<scoped-remote-mcp-credential>` placeholder
 and remain redacted. Protected Workbench/API provisioning routes follow the same rule: no
-unauthenticated provisioning route is exposed, scope is checked before lifecycle actions, and raw
-credentials are not stored outside the immediate create/rotate response.
+credential provisioning route is exposed, scope is checked before lifecycle actions, and raw
+credentials are not stored outside the immediate create/rotate or invite-redeem response.
 
 ## 5) Audit and Redaction
 

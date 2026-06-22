@@ -88,26 +88,25 @@ to an existing Recallant server. That remote path must not require local Docker,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
 
 Recallant has a first authenticated remote MCP/bridge slice and a remote client bootstrap that does
-not install local storage. Use it only when the central server/operator has already generated the
-complete remote onboarding package for a live server URL, scoped credential, project id, developer
-id, and client id. The person on the external workstation should copy the full command, not assemble
-those values by hand. In Workbench and CLI output, copy the field named `Remote client bootstrap
-command` exactly. Do not copy or run the bootstrap script URL by itself; `curl -fsSL <script-url>`
-only prints the script and does not connect the project.
+not install local storage. The beginner remote path is a one-command invite generated on the
+central Recallant server. From the server, create the invite for an already attached project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-client-bootstrap.sh | bash -s -- \
-  --server-url <https-recallant-server> \
-  --credential <scoped-remote-mcp-credential> \
-  --project-id <project-id> \
-  --developer-id <developer-id> \
-  --client-id <client-id> \
-  --project-dir .
+recallant invite /path/to/project --server-url https://memory.example.com
 ```
 
-That command installs only the remote bridge CLI, writes project-local client config, and runs
-`remote-doctor`. It is still an operator-provided path until the release-candidate bar is met. The
-acceptance proof command after bootstrap is:
+The output contains the only command the remote computer needs. Run it from the remote project
+folder:
+
+```bash
+curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash
+```
+
+The invite is short-lived and one-time. The bootstrap redeems it for a scoped remote MCP credential,
+installs only the remote bridge CLI, writes project-local client config, and runs `remote-doctor`
+with capture proof. It does not require local Docker, Postgres, `RECALLANT_DATABASE_URL`, internal
+server paths, raw artifacts, backups, or provider secrets. The acceptance proof command after
+bootstrap is:
 
 ```bash
 recallant remote-acceptance \

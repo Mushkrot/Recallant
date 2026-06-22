@@ -6,6 +6,7 @@ import {
   remoteMcpEndpointPath,
   remoteMcpErrorCodes,
   remoteMcpForbiddenSurfaces,
+  remoteMcpClientBootstrapScriptUrl,
   remoteMcpProvisioningOutput,
   remoteMcpPayloadLimits,
   remoteMcpRequiredHeaders,
@@ -21,6 +22,7 @@ import {
   type ProjectSourceKind,
   type ProjectSettingInput,
   type RemoteMcpCredentialSummary,
+  type RemoteOnboardingInviteSummary,
   redactSystemActivityValue,
   type ReviewAgentMemoryInput,
   type SystemActivityRecord
@@ -820,6 +822,50 @@ type RemoteCredentialProvisioningResponse = {
   secret_print_policy: "create_rotate_only" | "redacted";
 };
 
+type RemoteInviteRequest = {
+  action?: unknown;
+  project_id?: unknown;
+  developer_id?: unknown;
+  label?: unknown;
+  expires_at?: unknown;
+  server_url?: unknown;
+  target?: unknown;
+};
+
+type RemoteInviteResponse = {
+  ok: boolean;
+  action: "create";
+  invite: RemoteOnboardingInviteSummary;
+  invite_token: string;
+  redeem_url: string;
+  command: string;
+  secret_print_policy: "shown_once_create_output_only";
+};
+
+type RemoteInviteRedeemRequest = {
+  invite_token?: unknown;
+  token?: unknown;
+  client_id?: unknown;
+};
+
+type RemoteInviteRedeemResponse = {
+  ok: boolean;
+  action: "redeem";
+  invite: RemoteOnboardingInviteSummary;
+  credential: RemoteMcpCredentialSummary;
+  one_time_secret: string;
+  provisioning: RemoteMcpProvisioningOutput;
+  bootstrap: {
+    server_url: string;
+    credential: string;
+    project_id: string;
+    developer_id: string;
+    client_id: string;
+    target: string;
+  };
+  secret_print_policy: "redeem_only";
+};
+
 function remoteCredentialAction(value: unknown): RemoteMcpProvisioningAction {
   const action = optionalInput(value) ?? "list";
   if (action === "create" || action === "rotate" || action === "revoke" || action === "list") {
@@ -869,6 +915,118 @@ function remoteCredentialBridgeClientId(
   credential: RemoteMcpCredentialSummary
 ) {
   return optionalInput(input.bridge_client_id) ?? credential.client_id ?? "remote-agent";
+}
+
+function shellSingleQuote(value: string) {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function normalizedRemoteServerUrl(raw: string) {
+  const parsed = new URL(raw);
+  parsed.hash = "";
+  parsed.search = "";
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function remoteInviteServerUrl(input: RemoteInviteRequest, request: IncomingMessage) {
+  const explicit = optionalInput(input.server_url);
+  if (explicit) return normalizedRemoteServerUrl(explicit);
+  const forwardedProto = optionalInput(getHeaderValue(request, "x-forwarded-proto"));
+  const forwardedHost =
+    optionalInput(getHeaderValue(request, "x-forwarded-host")) ??
+    optionalInput(getHeaderValue(request, "host"));
+  if (forwardedHost) {
+    return normalizedRemoteServerUrl(
+      `${forwardedProto === "http" ? "http" : "https"}://${forwardedHost}`
+    );
+  }
+  return "https://recallant.example.com";
+}
+
+function remoteInviteRedeemUrl(serverUrl: string) {
+  return `${serverUrl}/api/remote-invite/redeem`;
+}
+
+function remoteInviteCommand(serverUrl: string, token: string) {
+  return `curl -fsSL ${shellSingleQuote(`${serverUrl}/j/${token}`)} | bash`;
+}
+
+function remoteInviteScript(serverUrl: string, token: string) {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+curl -fsSL ${shellSingleQuote(remoteMcpClientBootstrapScriptUrl)} | bash -s -- --invite-url ${shellSingleQuote(remoteInviteRedeemUrl(serverUrl))} --invite-token ${shellSingleQuote(token)} "$@"
+`;
+}
+
+async function handleRemoteInviteCreate(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteInviteRequest
+): Promise<RemoteInviteResponse> {
+  const scope = requireRemoteCredentialScope(input);
+  const serverUrl = remoteInviteServerUrl(input, request);
+  if (!serverUrl.startsWith("https://") && !serverUrl.startsWith("http://127.0.0.1")) {
+    throw new Error("VALIDATION_ERROR: remote invite server_url must use https");
+  }
+  const result = await database.createRemoteOnboardingInvite({
+    projectId: scope.projectId,
+    developerId: scope.developerId,
+    target: optionalInput(input.target) ?? "codex",
+    label: optionalInput(input.label),
+    expiresAt: optionalInput(input.expires_at),
+    createdBy: "workbench"
+  });
+  return {
+    ok: true,
+    action: "create",
+    invite: result.invite,
+    invite_token: result.token,
+    redeem_url: remoteInviteRedeemUrl(serverUrl),
+    command: remoteInviteCommand(serverUrl, result.token),
+    secret_print_policy: "shown_once_create_output_only"
+  };
+}
+
+async function handleRemoteInviteRedeem(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteInviteRedeemRequest
+): Promise<RemoteInviteRedeemResponse> {
+  const token = optionalInput(input.invite_token) ?? optionalInput(input.token);
+  if (!token) throw new Error("VALIDATION_ERROR: remote invite token is required");
+  const serverUrl = remoteInviteServerUrl({}, request);
+  const redeemed = await database.redeemRemoteOnboardingInvite({
+    token,
+    clientId: optionalInput(input.client_id),
+    redeemedBy: "remote-invite"
+  });
+  const provisioning = remoteMcpProvisioningOutput({
+    action: "create",
+    target: redeemed.target,
+    serverUrl,
+    credential: redeemed.credential,
+    bridgeClientId: redeemed.client_id,
+    credentialSecret: redeemed.secret,
+    includeSecret: true
+  });
+  return {
+    ok: true,
+    action: "redeem",
+    invite: redeemed.invite,
+    credential: redeemed.credential,
+    one_time_secret: redeemed.secret,
+    provisioning,
+    bootstrap: {
+      server_url: serverUrl,
+      credential: redeemed.secret,
+      project_id: redeemed.credential.project_id,
+      developer_id: redeemed.credential.developer_id,
+      client_id: redeemed.client_id,
+      target: redeemed.target
+    },
+    secret_print_policy: "redeem_only"
+  };
 }
 
 function remoteCredentialProvisioning(input: {
@@ -5941,6 +6099,35 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       await handleRemoteMcpRequest(request, response, options.remoteMcpDatabase);
       return;
     }
+    if (request.method === "GET" && requestUrl.pathname.startsWith("/j/")) {
+      const token = decodeURIComponent(requestUrl.pathname.slice("/j/".length));
+      const serverUrl = remoteInviteServerUrl({}, request);
+      write(response, 200, remoteInviteScript(serverUrl, token), "text/x-shellscript");
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/remote-invite/redeem") {
+      const database = options.workbenchDatabase ?? createRecallantDbFromEnv();
+      if (!database) {
+        write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
+        return;
+      }
+      try {
+        const result = await handleRemoteInviteRedeem(
+          database,
+          request,
+          (await readJson(request)) as RemoteInviteRedeemRequest
+        );
+        write(response, 200, JSON.stringify(result), "application/json");
+      } catch (error) {
+        write(
+          response,
+          409,
+          JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+          "application/json"
+        );
+      }
+      return;
+    }
     const auth = authorize(request);
     const audit = await startHttpAudit(request, response, requestUrl, auth);
     let routeError: unknown;
@@ -6023,6 +6210,21 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = (await readJson(request)) as RemoteCredentialProvisioningRequest;
         try {
           const result = await handleRemoteCredentialProvisioning(database, request, body);
+          write(response, 200, JSON.stringify(result), "application/json");
+        } catch (error) {
+          write(
+            response,
+            409,
+            JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+            "application/json"
+          );
+        }
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/remote-invite") {
+        const body = (await readJson(request)) as RemoteInviteRequest;
+        try {
+          const result = await handleRemoteInviteCreate(database, request, body);
           write(response, 200, JSON.stringify(result), "application/json");
         } catch (error) {
           write(
