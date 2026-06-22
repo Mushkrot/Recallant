@@ -1742,7 +1742,9 @@ function generateRemoteConnectSecret(kind: "conn" | "poll") {
 
 function extractRemoteConnectPrefix(secret: string, kind: "conn" | "poll") {
   const parts = secret.split("_");
-  return parts.length === 4 && parts[0] === "rcl" && parts[1] === kind ? parts[2] : null;
+  return parts.length >= 4 && parts[0] === "rcl" && parts[1] === kind && parts[3]
+    ? parts[2]
+    : null;
 }
 
 function hashRemoteConnectSecret(secret: string) {
