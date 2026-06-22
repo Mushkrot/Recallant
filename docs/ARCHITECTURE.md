@@ -147,9 +147,14 @@ backups, or provider settings anonymously.
 That remote path must preserve the same project/developer scope, context-pack, capture, review, and
 safety policies as local stdio MCP. Remote MCP credentials are project/developer scoped, optionally
 client scoped, revocable, rotatable, hash-stored, and audited with credential id/prefix metadata
-only. Remote onboarding invites are also hash-stored and one-time; redeeming an invite creates the
-scoped remote MCP credential and writes the project-local remote bridge config. The endpoint
-behavior is gated by `remote-mcp-contract:smoke` and `remote-mcp-credentials:smoke`;
+only. The universal remote-connect architecture is device-style pairing: the external machine starts
+a pending connection from `curl -fsSL https://memory.example.com/connect | bash`, the owner approves
+through the protected central server, and the server creates the project binding plus scoped remote
+MCP credential. Remote onboarding invites are also hash-stored and one-time; redeeming an invite
+creates the scoped remote MCP credential and writes the project-local remote bridge config, but
+invites are the advanced/admin path rather than the universal first-run command. The implementation
+record and operating contract are in `docs/REMOTE_CONNECT_PLAN.md`. The endpoint behavior is gated by
+`remote-mcp-contract:smoke` and `remote-mcp-credentials:smoke`;
 `remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`, `remote-mcp-doctor:smoke`,
 `remote-mcp-security:smoke`, and `remote-mcp-external-rehearsal:smoke` cover the bridge,
 provisioning, invite redemption, diagnostics, security matrix, deterministic isolated

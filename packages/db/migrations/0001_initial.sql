@@ -414,6 +414,41 @@ CREATE TABLE remote_onboarding_invites (
   CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
 );
 
+CREATE TABLE remote_connect_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_code_prefix TEXT NOT NULL,
+  device_code_hash TEXT NOT NULL,
+  poll_token_prefix TEXT NOT NULL,
+  poll_token_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  status TEXT NOT NULL DEFAULT 'pending',
+  target TEXT NOT NULL DEFAULT 'codex',
+  project_display_name TEXT,
+  project_fingerprint TEXT,
+  project_path_hint_redacted TEXT,
+  repo_remote_hash TEXT,
+  requested_by_ip_hash TEXT,
+  created_by TEXT NOT NULL DEFAULT 'remote-connect',
+  approved_by TEXT,
+  approved_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  developer_id UUID REFERENCES developers(id) ON DELETE SET NULL,
+  client_id TEXT,
+  credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  approved_at TIMESTAMPTZ,
+  denied_at TIMESTAMPTZ,
+  redeemed_at TIMESTAMPTZ,
+  CHECK (device_code_prefix <> ''),
+  CHECK (device_code_hash <> ''),
+  CHECK (poll_token_prefix <> ''),
+  CHECK (poll_token_hash <> ''),
+  CHECK (hash_version <> ''),
+  CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'redeemed')),
+  CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+);
+
 CREATE TABLE settings_audit_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scope_kind TEXT NOT NULL CHECK (scope_kind IN ('system', 'developer', 'project', 'session', 'client_adapter')),
@@ -511,6 +546,14 @@ CREATE INDEX idx_remote_onboarding_invites_prefix_active
   WHERE redeemed_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX idx_remote_onboarding_invites_scope
   ON remote_onboarding_invites (project_id, developer_id, created_at DESC);
+CREATE INDEX idx_remote_connect_requests_device_active
+  ON remote_connect_requests (device_code_prefix, device_code_hash)
+  WHERE status IN ('pending', 'approved');
+CREATE INDEX idx_remote_connect_requests_poll_active
+  ON remote_connect_requests (poll_token_prefix, poll_token_hash)
+  WHERE status IN ('pending', 'approved');
+CREATE INDEX idx_remote_connect_requests_status_time
+  ON remote_connect_requests (status, created_at DESC);
 CREATE INDEX idx_settings_audit_scope ON settings_audit_events (scope_kind, scope_id, created_at DESC);
 CREATE INDEX idx_settings_audit_key ON settings_audit_events (key, created_at DESC);
 

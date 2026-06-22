@@ -3,13 +3,23 @@
 Recallant connects to agents through local MCP stdio. The Workbench is for humans; agents normally
 call `recallant mcp-server` locally.
 
-Remote project access uses a separate invite flow when an external workstation or server should
-connect to an existing central Recallant server. A protected public Workbench URL lets humans review
-and manage Recallant; it does not by itself make an external machine an agent client. Recallant now
-has authenticated `POST /api/mcp`, DB-backed scoped remote MCP credentials, one-time remote
-onboarding invites, a local stdio-to-HTTPS bridge command, and CLI-first remote doctor diagnostics.
-Deterministic isolated external-client rehearsal coverage exercises this path against an HTTPS
-`/api/mcp` fixture, while broader real-machine release rehearsal remains part of the release bar.
+Remote project access is a separate flow when an external workstation or server should connect to
+an existing central Recallant server. A protected public Workbench URL lets humans review and manage
+Recallant; it does not by itself make an external machine an agent client. Recallant now has a
+first authenticated `POST /api/mcp`, DB-backed scoped remote MCP credentials, one-time remote onboarding
+invites, a local stdio-to-HTTPS bridge command, and CLI-first remote doctor diagnostics. The
+universal beginner target is a device-pairing command served by the central server:
+
+```bash
+curl -fsSL https://memory.example.com/connect | bash
+```
+
+That command installs or updates only the remote client CLI, starts browser approval through the
+protected central server, receives a scoped provisioning package, writes project-local remote MCP
+config, and runs `remote-doctor`. The detailed implementation record and route contract are in
+[`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md). Server-generated one-time invites remain
+supported for advanced/admin provisioning, automation, pre-known projects, and directed one-time
+access, but they are not the universal first-run command.
 
 The public remote contract surface is documented in [`docs/MCP_SPEC.md`](MCP_SPEC.md) and includes
 transport, scope, header, and error contracts.
@@ -31,7 +41,16 @@ external workstation that should connect to an existing central Recallant server
 existing-server path is separate and must not require local Docker, Postgres, `RECALLANT_DATABASE_URL`,
 or internal server paths.
 
-For a remote workstation, create a short-lived invite on the central Recallant server:
+For a remote workstation, the beginner flow is:
+
+```bash
+curl -fsSL https://memory.example.com/connect | bash
+```
+
+It works even when `recallant` is missing or old on the remote machine. The remote machine
+starts a pending connection request and the owner approves it in the protected browser flow.
+
+Advanced/admin fallback: create a short-lived invite on the central Recallant server:
 
 ```bash
 recallant invite /path/to/project --server-url https://memory.example.com
@@ -43,10 +62,10 @@ Then run the printed one-line command from the project folder on the remote work
 curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash
 ```
 
-That invite command is the beginner remote path. It installs only the remote bridge client, writes
-project-local MCP config, redeems a scoped credential, and runs `remote-doctor` without exposing
-Postgres, local storage credentials, Workbench/admin auth, raw artifacts, backups, or provider
-secrets to the remote machine.
+That invite command installs only the remote bridge client, writes project-local MCP config, redeems
+a scoped credential, and runs `remote-doctor` without exposing Postgres, local storage credentials,
+Workbench/admin auth, raw artifacts, backups, or provider secrets to the remote machine. It remains
+useful for maintainers, automation, pre-known projects, and directed one-time access.
 
 ## Advanced Client Setup
 
@@ -118,27 +137,36 @@ Use the generated `mcpServers.recallant` block in any MCP client that accepts st
 
 ## Remote Project Access
 
-The first remote client path is `recallant remote-bridge`: a stdio MCP bridge that forwards
+The remote client runtime is `recallant remote-bridge`: a stdio MCP bridge that forwards
 `initialize`, `tools/list`, and `tools/call` over HTTPS to a central `POST /api/mcp` endpoint. It
 uses a scoped remote MCP credential plus project, developer, and client scope. It does not require
 `RECALLANT_DATABASE_URL` on the remote machine.
 
-With a server-generated remote invite, the external workstation can install only the Recallant
-remote bridge CLI, write the project-local client config, and run `remote-doctor`. The person on the
-external workstation should not assemble `server-url`, credential, project id, developer id, and
-client id by hand. The central server command is:
+The universal remote connect flow lets the external workstation install only the Recallant remote
+bridge CLI, request approval, write the project-local client config, and run `remote-doctor` with
+one command:
+
+```bash
+curl -fsSL https://memory.example.com/connect | bash
+```
+
+The person on the external workstation should not assemble `server-url`, credential, project id,
+developer id, and client id by hand. The remote workstation also should not need a preinstalled
+current Recallant CLI.
+
+For advanced/admin fallback, maintainers can generate a one-time invite on the central server:
 
 ```bash
 recallant invite /path/to/project --server-url https://memory.example.com
 ```
 
-The remote workstation runs only the printed command:
+The remote workstation then runs only the printed command:
 
 ```bash
 curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash
 ```
 
-That bootstrap does not run the local self-host installer and does not require Docker, Postgres,
+That invite bootstrap does not run the local self-host installer and does not require Docker, Postgres,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets. On
 success it reports that config was written, `remote-doctor` passed, and the next step is to open
 Codex in that project. If `remote-doctor` fails, the script keeps the credential redacted and points
@@ -184,9 +212,10 @@ The generated MCP server uses `recallant remote-bridge` and these remote-only en
 
 The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,
 Workbench/admin auth, raw artifacts, backups, or provider secrets. Local stdio MCP remains the
-default simple path for installed-host projects; the invite command is the simple path for remote
-projects attached to a central server. The path has passed a real separate-machine rehearsal with
-live endpoint/credential/scope and capture/recall proof against the central server.
+default simple path for installed-host projects; `curl -fsSL https://memory.example.com/connect |
+bash` is the simple path for remote projects attached to a central server. Invite provisioning is
+the advanced/admin fallback for maintainers, automation, pre-known projects, and directed one-time
+access.
 
 ### Provision Scoped Remote Credentials
 

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supportedClientKinds } from "@recallant/adapters";
 import { getRecallantCoreInfo } from "@recallant/core";
@@ -217,7 +217,10 @@ function positionalArgs(argv: readonly string[]) {
     "--previewed-global-target",
     "--expires-minutes",
     "--invite-url",
-    "--invite-token"
+    "--invite-token",
+    "--connect-url",
+    "--poll-timeout-ms",
+    "--poll-interval-ms"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -5924,6 +5927,96 @@ function remoteConnectHumanReport(result: {
   );
 }
 
+function remoteConnectCloudHumanReport(result: {
+  projectDir: string;
+  target: string;
+  serverUrl: string;
+  approveUrl: string;
+  configFile?: string | null;
+  targetFile?: string | null;
+  writesFiles: boolean;
+  doctorStatus: string;
+  status: string;
+}) {
+  return (
+    [
+      "Recallant connect-cloud",
+      "",
+      `Status: ${result.status}`,
+      `Project: ${result.projectDir}`,
+      `Agent client: ${result.target}`,
+      `Server: ${result.serverUrl}`,
+      "",
+      "Approve this project in your browser:",
+      `  ${result.approveUrl}`,
+      "",
+      result.configFile ? `Config file: ${result.configFile}` : null,
+      result.targetFile ? `Target file: ${result.targetFile}` : null,
+      `Writes files: ${result.writesFiles ? "yes" : "no"}`,
+      `Remote doctor: ${result.doctorStatus}`,
+      "",
+      "This flow does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, or provider secrets.",
+      ""
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n"
+  );
+}
+
+function remoteConnectHash(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+async function projectPathHint(projectDir: string) {
+  let real = projectDir;
+  try {
+    real = await realpath(projectDir);
+  } catch {
+    real = resolve(projectDir);
+  }
+  return `${basename(real) || "project"}:${remoteConnectHash(real)}`;
+}
+
+async function postJson(url: string, body: Record<string, unknown>) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`Remote connect endpoint returned non-JSON response (${response.status})`);
+  }
+  if (!response.ok) {
+    const message =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String((parsed as Record<string, unknown>).error)
+        : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function requireStringField(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`VALIDATION_ERROR: remote connect response is missing ${key}`);
+  }
+  return value;
+}
+
 function repoRootFromCliModule() {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }
@@ -6013,6 +6106,189 @@ async function runConnectRemote(argv: readonly string[]) {
   };
   process.stdout.write(
     format === "json" ? `${JSON.stringify(result, null, 2)}\n` : remoteConnectHumanReport(result)
+  );
+}
+
+async function runConnectCloud(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const positional = positionalArgs(argv);
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? positional[0] ?? process.cwd());
+  const target = parseFlag(argv, "--target") ?? parseFlag(argv, "--client") ?? "codex";
+  const serverUrl = normalizeInviteServerUrl(requiredFlag(argv, "--server-url"));
+  const skipDoctor = argv.includes("--skip-doctor");
+  const dryRun = argv.includes("--dry-run");
+  const pollTimeoutMs = parsePositiveInt(parseFlag(argv, "--poll-timeout-ms"), 120_000);
+  const pollIntervalMs = parsePositiveInt(parseFlag(argv, "--poll-interval-ms"), 2_000);
+  const pathHint = await projectPathHint(projectDir);
+  const start = await postJson(`${serverUrl}/api/connect/start`, {
+    target,
+    project_display_name: basename(projectDir) || "project",
+    project_fingerprint: remoteConnectHash(`${target}:${pathHint}`),
+    project_path_hint_redacted: pathHint
+  });
+  const approveUrl = requireStringField(start, "approve_url");
+  const pollToken = requireStringField(start, "poll_token");
+  if (format === "text") {
+    process.stdout.write(
+      [
+        "Recallant connect-cloud",
+        "",
+        `Project: ${projectDir}`,
+        `Server: ${serverUrl}`,
+        "",
+        "Approve this project in your browser:",
+        `  ${approveUrl}`,
+        "",
+        `Waiting for approval for up to ${Math.round(pollTimeoutMs / 1000)} seconds...`,
+        ""
+      ].join("\n")
+    );
+  }
+  if (dryRun) {
+    const result = {
+      ok: true,
+      action: "connect_cloud",
+      status: "dry_run",
+      project_dir: projectDir,
+      target,
+      server_url: serverUrl,
+      approve_url: approveUrl,
+      writes_files: false,
+      doctor_status: "not_run_dry_run",
+      safety: {
+        requires_recallant_database_url: false,
+        requires_docker: false,
+        requires_postgres: false,
+        exposes_workbench_or_admin_auth: false,
+        exposes_raw_artifacts_or_backups: false,
+        exposes_provider_secrets: false
+      }
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : remoteConnectCloudHumanReport({
+            projectDir,
+            target,
+            serverUrl,
+            approveUrl,
+            writesFiles: false,
+            doctorStatus: "not_run_dry_run",
+            status: "dry_run"
+          })
+    );
+    return;
+  }
+
+  const deadline = Date.now() + pollTimeoutMs;
+  let approved: Record<string, unknown> | null = null;
+  while (Date.now() <= deadline) {
+    const poll = await postJson(`${serverUrl}/api/connect/poll`, { poll_token: pollToken });
+    const status = String(poll.status ?? "");
+    if (status === "approved") {
+      approved = poll;
+      break;
+    }
+    if (status === "denied" || status === "expired" || status === "redeemed") {
+      throw new Error(`VALIDATION_ERROR: remote connect request is ${status}`);
+    }
+    if (status !== "pending")
+      throw new Error(`VALIDATION_ERROR: unsupported poll status ${status}`);
+    if (format === "text") process.stdout.write(".");
+    await sleep(pollIntervalMs);
+  }
+  if (!approved) throw new Error("VALIDATION_ERROR: remote connect approval timed out");
+  if (format === "text")
+    process.stdout.write("\nApproval received. Writing remote MCP config...\n");
+  const bootstrap = approved.bootstrap;
+  if (!bootstrap || typeof bootstrap !== "object" || Array.isArray(bootstrap)) {
+    throw new Error("VALIDATION_ERROR: approved remote connect response is missing bootstrap data");
+  }
+  const bootstrapRecord = bootstrap as Record<string, unknown>;
+  const config = validateRemoteMcpBridgeConfig({
+    serverUrl: requireStringField(bootstrapRecord, "server_url"),
+    credential: requireStringField(bootstrapRecord, "credential"),
+    projectId: requireStringField(bootstrapRecord, "project_id"),
+    developerId: requireStringField(bootstrapRecord, "developer_id"),
+    clientId: requireStringField(bootstrapRecord, "client_id"),
+    sessionId: parseFlag(argv, "--session-id"),
+    traceId: parseFlag(argv, "--trace-id")
+  });
+  const approvedTarget = String(bootstrapRecord.target ?? target);
+  const targetConfig = remoteClientTargetConfig(approvedTarget, config);
+  const targetFile = resolve(projectDir, targetConfig.config_file);
+  const existing = await readOptional(targetFile);
+  const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
+  await mkdir(dirname(targetFile), { recursive: true });
+  await writeFile(targetFile, rendered);
+
+  let doctorStatus = "skipped";
+  if (!skipDoctor) {
+    doctorStatus = "running";
+    await runRemoteDoctor([
+      argv[0] ?? "recallant",
+      argv[1] ?? "recallant",
+      "remote-doctor",
+      "--server-url",
+      config.serverUrl,
+      "--credential",
+      config.credential,
+      "--project-id",
+      config.projectId,
+      "--developer-id",
+      config.developerId,
+      "--client-id",
+      config.clientId,
+      "--format",
+      format === "json" ? "json" : "text"
+    ]);
+    doctorStatus = "passed";
+  }
+  const result = {
+    ok: true,
+    action: "connect_cloud",
+    status: "connected",
+    project_dir: projectDir,
+    target: targetConfig.target,
+    server_url: config.serverUrl,
+    approve_url: approveUrl,
+    config_file: targetConfig.config_file,
+    target_file: targetFile,
+    writes_files: true,
+    doctor_status: doctorStatus,
+    scope: {
+      project_id: config.projectId,
+      developer_id: config.developerId,
+      client_id: config.clientId,
+      session_id: config.sessionId,
+      trace_id: config.traceId
+    },
+    safety: {
+      command: "recallant remote-bridge",
+      uses_https_mcp_endpoint: true,
+      requires_recallant_database_url: false,
+      requires_docker: false,
+      requires_postgres: false,
+      exposes_workbench_or_admin_auth: false,
+      exposes_raw_artifacts_or_backups: false,
+      exposes_provider_secrets: false
+    }
+  };
+  process.stdout.write(
+    format === "json"
+      ? `${JSON.stringify(result, null, 2)}\n`
+      : remoteConnectCloudHumanReport({
+          projectDir,
+          target: targetConfig.target,
+          serverUrl: config.serverUrl,
+          approveUrl,
+          configFile: targetConfig.config_file,
+          targetFile,
+          writesFiles: true,
+          doctorStatus,
+          status: "connected"
+        })
   );
 }
 
@@ -7736,6 +8012,22 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
+  if (
+    command === "connect-cloud" ||
+    command === "cloud-connect" ||
+    command === "connect-remote-auto"
+  ) {
+    return [
+      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--poll-timeout-ms <ms>] [--skip-doctor] [--format json|text]",
+      "",
+      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, writes project-local remote MCP config after approval, and runs remote-doctor by default.",
+      "",
+      "This command does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, provider secrets, or a current preinstalled Recallant CLI when launched through `curl -fsSL https://memory.example.com/connect | bash`.",
+      "",
+      "Advanced/admin fallback remains: recallant invite <server-project-dir> --server-url <https-url>",
+      ""
+    ].join("\n");
+  }
   if (command === "remote-doctor") {
     return [
       "Usage: recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--format json|text]",
@@ -7832,7 +8124,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -7870,6 +8162,12 @@ async function main(argv: readonly string[]) {
   if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);
+  if (
+    command === "connect-cloud" ||
+    command === "cloud-connect" ||
+    command === "connect-remote-auto"
+  )
+    return runConnectCloud(argv);
   if (command === "connect-remote") return runConnectRemote(argv);
   if (command === "onboard") return runOnboard(argv);
   if (command === "invite" || command === "remote-invite") return runInvite(argv);

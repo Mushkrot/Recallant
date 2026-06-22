@@ -3,6 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 import { getRecallantCoreInfo } from "@recallant/core";
 import {
+  remoteConnectApprovalUrl,
+  remoteConnectApprovePath,
+  remoteConnectBootstrapPath,
+  remoteConnectPollPath,
+  remoteConnectStartPath,
   remoteMcpEndpointPath,
   remoteMcpErrorCodes,
   remoteMcpForbiddenSurfaces,
@@ -22,6 +27,7 @@ import {
   type ProjectSourceKind,
   type ProjectSettingInput,
   type RemoteMcpCredentialSummary,
+  type RemoteConnectRequestSummary,
   type RemoteOnboardingInviteSummary,
   redactSystemActivityValue,
   type ReviewAgentMemoryInput,
@@ -866,6 +872,31 @@ type RemoteInviteRedeemResponse = {
   secret_print_policy: "redeem_only";
 };
 
+type RemoteConnectStartRequest = {
+  target?: unknown;
+  project_display_name?: unknown;
+  project_fingerprint?: unknown;
+  project_path_hint_redacted?: unknown;
+  repo_remote_hash?: unknown;
+  requested_by_ip_hash?: unknown;
+  expires_at?: unknown;
+};
+
+type RemoteConnectPollRequest = {
+  poll_token?: unknown;
+};
+
+type RemoteConnectApprovalRequest = {
+  code?: unknown;
+  action?: unknown;
+  project_id?: unknown;
+  developer_id?: unknown;
+  client_id?: unknown;
+};
+
+const remoteConnectRateLimitWindowMs = 60_000;
+const remoteConnectRateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+
 function remoteCredentialAction(value: unknown): RemoteMcpProvisioningAction {
   const action = optionalInput(value) ?? "list";
   if (action === "create" || action === "rotate" || action === "revoke" || action === "list") {
@@ -944,6 +975,45 @@ function remoteInviteServerUrl(input: RemoteInviteRequest, request: IncomingMess
   return "https://recallant.example.com";
 }
 
+function remoteConnectRateLimitMax() {
+  const parsed = Number.parseInt(process.env.RECALLANT_REMOTE_CONNECT_RATE_LIMIT_MAX ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 120;
+}
+
+function remoteConnectRateLimitKey(request: IncomingMessage, pathname: string) {
+  const forwardedFor = optionalInput(getHeaderValue(request, "x-forwarded-for"));
+  const remoteAddress = request.socket.remoteAddress ?? "unknown";
+  const actor = forwardedFor?.split(",")[0]?.trim() || remoteAddress;
+  return `${pathname}:${actor}`;
+}
+
+function enforceRemoteConnectRateLimit(request: IncomingMessage, pathname: string) {
+  const now = Date.now();
+  const key = remoteConnectRateLimitKey(request, pathname);
+  const existing = remoteConnectRateLimitBuckets.get(key);
+  const bucket =
+    existing && existing.resetAt > now
+      ? existing
+      : { count: 0, resetAt: now + remoteConnectRateLimitWindowMs };
+  bucket.count += 1;
+  remoteConnectRateLimitBuckets.set(key, bucket);
+  if (remoteConnectRateLimitBuckets.size > 10_000) {
+    for (const [bucketKey, value] of remoteConnectRateLimitBuckets.entries()) {
+      if (value.resetAt <= now) remoteConnectRateLimitBuckets.delete(bucketKey);
+    }
+  }
+  if (bucket.count > remoteConnectRateLimitMax()) {
+    throw new Error("RATE_LIMITED: remote connect route rate limit exceeded");
+  }
+}
+
+function assertRemoteConnectPayloadBudget(input: unknown, label: string) {
+  const bytes = Buffer.byteLength(JSON.stringify(input ?? {}), "utf8");
+  if (bytes > 16 * 1024) {
+    throw new Error(`VALIDATION_ERROR: ${label} payload is too large`);
+  }
+}
+
 function remoteInviteRedeemUrl(serverUrl: string) {
   return `${serverUrl}/api/remote-invite/redeem`;
 }
@@ -957,6 +1027,76 @@ function remoteInviteScript(serverUrl: string, token: string) {
 set -euo pipefail
 curl -fsSL ${shellSingleQuote(remoteMcpClientBootstrapScriptUrl)} | bash -s -- --invite-url ${shellSingleQuote(remoteInviteRedeemUrl(serverUrl))} --invite-token ${shellSingleQuote(token)} "$@"
 `;
+}
+
+function remoteConnectBootstrapScript(serverUrl: string) {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+curl -fsSL ${shellSingleQuote(remoteMcpClientBootstrapScriptUrl)} | bash -s -- --connect-url ${shellSingleQuote(serverUrl)} "$@"
+`;
+}
+
+function htmlEscape(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderRemoteConnectApprovalPage(input: {
+  code: string;
+  request: RemoteConnectRequestSummary | null;
+  error?: string | null;
+}) {
+  const request = input.request;
+  const status = request?.status ?? "missing";
+  const canApprove = status === "pending";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Approve Recallant remote connect</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; line-height: 1.5; color: #172033; background: #f6f4ee; }
+    main { max-width: 760px; margin: 0 auto; background: white; border: 1px solid #ded7c7; border-radius: 18px; padding: 2rem; box-shadow: 0 20px 70px rgb(23 32 51 / 10%); }
+    code, input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    label { display: block; font-weight: 650; margin-top: 1rem; }
+    input { box-sizing: border-box; width: 100%; padding: .75rem; border: 1px solid #c9c1b0; border-radius: 10px; }
+    button { margin-top: 1rem; margin-right: .75rem; padding: .8rem 1rem; border: 0; border-radius: 999px; background: #173b2f; color: white; font-weight: 700; cursor: pointer; }
+    button[name="action"][value="deny"] { background: #793a2d; }
+    .meta { background: #f7f1df; padding: 1rem; border-radius: 12px; }
+    .error { color: #8b1d1d; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Approve Recallant remote connect</h1>
+    ${input.error ? `<p class="error">${htmlEscape(input.error)}</p>` : ""}
+    <div class="meta">
+      <p><strong>Status:</strong> ${htmlEscape(status)}</p>
+      <p><strong>Target client:</strong> ${htmlEscape(request?.target ?? "unknown")}</p>
+      <p><strong>Project:</strong> ${htmlEscape(request?.project_display_name ?? "not provided")}</p>
+      <p><strong>Project fingerprint:</strong> ${htmlEscape(request?.project_fingerprint ?? "not provided")}</p>
+      <p><strong>Path hint:</strong> ${htmlEscape(request?.project_path_hint_redacted ?? "not provided")}</p>
+      <p><strong>Expires:</strong> ${htmlEscape(request?.expires_at?.toISOString?.() ?? request?.expires_at ?? "unknown")}</p>
+    </div>
+    <form method="post" action="${remoteConnectApprovePath}">
+      <input type="hidden" name="code" value="${htmlEscape(input.code)}" />
+      <label>Recallant project id</label>
+      <input name="project_id" placeholder="Project UUID" ${canApprove ? "required" : "disabled"} />
+      <label>Developer id</label>
+      <input name="developer_id" placeholder="Developer UUID" ${canApprove ? "required" : "disabled"} />
+      <label>Remote client id</label>
+      <input name="client_id" placeholder="remote-macbook-air" ${canApprove ? "" : "disabled"} />
+      <button name="action" value="approve" ${canApprove ? "" : "disabled"}>Approve remote connect</button>
+      <button name="action" value="deny" ${canApprove ? "" : "disabled"}>Deny</button>
+    </form>
+  </main>
+</body>
+</html>`;
 }
 
 async function handleRemoteInviteCreate(
@@ -985,6 +1125,123 @@ async function handleRemoteInviteCreate(
     redeem_url: remoteInviteRedeemUrl(serverUrl),
     command: remoteInviteCommand(serverUrl, result.token),
     secret_print_policy: "shown_once_create_output_only"
+  };
+}
+
+async function handleRemoteConnectStart(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteConnectStartRequest
+) {
+  assertRemoteConnectPayloadBudget(input, "remote connect start");
+  const serverUrl = remoteInviteServerUrl({}, request);
+  const result = await database.createRemoteConnectRequest({
+    target: optionalInput(input.target) ?? "codex",
+    projectDisplayName: optionalInput(input.project_display_name),
+    projectFingerprint: optionalInput(input.project_fingerprint),
+    projectPathHintRedacted: optionalInput(input.project_path_hint_redacted),
+    repoRemoteHash: optionalInput(input.repo_remote_hash),
+    requestedByIpHash: optionalInput(input.requested_by_ip_hash),
+    expiresAt: optionalInput(input.expires_at),
+    createdBy: "remote-connect"
+  });
+  return {
+    ok: true,
+    action: "start",
+    request_id: result.request.id,
+    request: result.request,
+    device_code: result.device_code,
+    poll_token: result.poll_token,
+    approve_url: remoteConnectApprovalUrl(serverUrl, result.device_code),
+    expires_at: result.request.expires_at,
+    interval_seconds: 2,
+    secret_print_policy: "device_and_poll_tokens_shown_once_start_output_only"
+  };
+}
+
+async function handleRemoteConnectPoll(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteConnectPollRequest
+) {
+  assertRemoteConnectPayloadBudget(input, "remote connect poll");
+  const pollToken = optionalInput(input.poll_token);
+  if (!pollToken) throw new Error("VALIDATION_ERROR: remote connect poll_token is required");
+  const serverUrl = remoteInviteServerUrl({}, request);
+  const result = await database.pollRemoteConnectRequest({
+    pollToken,
+    redeemedBy: "remote-connect"
+  });
+  if (result.status !== "approved") {
+    return {
+      ok: true,
+      action: "poll",
+      status: result.status,
+      request_id: result.request?.id ?? null,
+      retry_after_seconds: result.status === "pending" ? 2 : null,
+      secret_print_policy: "redacted_until_approved"
+    };
+  }
+  const provisioning = remoteMcpProvisioningOutput({
+    action: "create",
+    target: result.target,
+    serverUrl,
+    credential: result.credential,
+    bridgeClientId: result.client_id,
+    credentialSecret: result.secret,
+    includeSecret: true
+  });
+  return {
+    ok: true,
+    action: "poll",
+    status: "approved",
+    request_id: result.request.id,
+    credential: result.credential,
+    one_time_secret: result.secret,
+    provisioning,
+    bootstrap: {
+      server_url: serverUrl,
+      credential: result.secret,
+      project_id: result.project_id,
+      developer_id: result.developer_id,
+      client_id: result.client_id,
+      target: result.target
+    },
+    secret_print_policy: "approved_poll_only"
+  };
+}
+
+async function handleRemoteConnectApprove(
+  database: RecallantDb,
+  input: RemoteConnectApprovalRequest,
+  approvedBy: string
+) {
+  const code = optionalInput(input.code);
+  if (!code) throw new Error("VALIDATION_ERROR: remote connect approval code is required");
+  const action = optionalInput(input.action) ?? "approve";
+  if (action === "deny") {
+    return {
+      ok: true,
+      action,
+      request: await database.denyRemoteConnectRequest({ deviceCode: code, deniedBy: approvedBy })
+    };
+  }
+  if (action !== "approve") throw new Error("VALIDATION_ERROR: unsupported approval action");
+  const projectId = optionalInput(input.project_id);
+  const developerId = optionalInput(input.developer_id);
+  if (!projectId || !developerId) {
+    throw new Error("VALIDATION_ERROR: project_id and developer_id are required for approval");
+  }
+  return {
+    ok: true,
+    action,
+    request: await database.approveRemoteConnectRequest({
+      deviceCode: code,
+      projectId,
+      developerId,
+      clientId: optionalInput(input.client_id),
+      approvedBy
+    })
   };
 }
 
@@ -6099,6 +6356,59 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       await handleRemoteMcpRequest(request, response, options.remoteMcpDatabase);
       return;
     }
+    if (request.method === "GET" && requestUrl.pathname === remoteConnectBootstrapPath) {
+      const serverUrl = remoteInviteServerUrl({}, request);
+      write(response, 200, remoteConnectBootstrapScript(serverUrl), "text/x-shellscript");
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === remoteConnectStartPath) {
+      const database = options.workbenchDatabase ?? createRecallantDbFromEnv();
+      if (!database) {
+        write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
+        return;
+      }
+      try {
+        enforceRemoteConnectRateLimit(request, requestUrl.pathname);
+        const result = await handleRemoteConnectStart(
+          database,
+          request,
+          (await readJson(request)) as RemoteConnectStartRequest
+        );
+        write(response, 200, JSON.stringify(result), "application/json");
+      } catch (error) {
+        write(
+          response,
+          409,
+          JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+          "application/json"
+        );
+      }
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === remoteConnectPollPath) {
+      const database = options.workbenchDatabase ?? createRecallantDbFromEnv();
+      if (!database) {
+        write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
+        return;
+      }
+      try {
+        enforceRemoteConnectRateLimit(request, requestUrl.pathname);
+        const result = await handleRemoteConnectPoll(
+          database,
+          request,
+          (await readJson(request)) as RemoteConnectPollRequest
+        );
+        write(response, 200, JSON.stringify(result), "application/json");
+      } catch (error) {
+        write(
+          response,
+          409,
+          JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+          "application/json"
+        );
+      }
+      return;
+    }
     if (request.method === "GET" && requestUrl.pathname.startsWith("/j/")) {
       const token = decodeURIComponent(requestUrl.pathname.slice("/j/".length));
       const serverUrl = remoteInviteServerUrl({}, request);
@@ -6154,6 +6464,56 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       };
       const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
       const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
+      if (request.method === "GET" && requestUrl.pathname === remoteConnectApprovePath) {
+        const code = optionalInput(requestUrl.searchParams.get("code"));
+        const remoteConnectRequest = code
+          ? await database.getRemoteConnectRequestForApproval({ deviceCode: code })
+          : null;
+        write(
+          response,
+          200,
+          renderRemoteConnectApprovalPage({
+            code: code ?? "",
+            request: remoteConnectRequest,
+            error: code ? null : "Missing remote connect approval code."
+          }),
+          "text/html",
+          sessionCookie ? { "set-cookie": sessionCookie } : {}
+        );
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === remoteConnectApprovePath) {
+        const contentType = optionalInput(getHeaderValue(request, "content-type")) ?? "";
+        const body = contentType.includes("application/json")
+          ? ((await readJson(request)) as RemoteConnectApprovalRequest)
+          : ((await readForm(request)) as RemoteConnectApprovalRequest);
+        try {
+          const result = await handleRemoteConnectApprove(
+            database,
+            body,
+            auth.mode === "cloudflare" && auth.email ? auth.email : "workbench"
+          );
+          if (contentType.includes("application/json")) {
+            write(response, 200, JSON.stringify(result), "application/json");
+          } else {
+            write(
+              response,
+              200,
+              `<p>Remote connect ${htmlEscape(result.action)} recorded for request ${htmlEscape(result.request.id)}.</p>`,
+              "text/html",
+              sessionCookie ? { "set-cookie": sessionCookie } : {}
+            );
+          }
+        } catch (error) {
+          write(
+            response,
+            409,
+            JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+            "application/json"
+          );
+        }
+        return;
+      }
       if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
         const dashboard = await withAuditReport(
           database,

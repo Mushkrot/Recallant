@@ -88,25 +88,37 @@ to an existing Recallant server. That remote path must not require local Docker,
 `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider secrets.
 
 Recallant has a first authenticated remote MCP/bridge slice and a remote client bootstrap that does
-not install local storage. The beginner remote path is a one-command invite generated on the
-central Recallant server. From the server, create the invite for an already attached project:
+not install local storage. The beginner remote existing-server setup is one universal command from
+the external project folder:
+
+```bash
+curl -fsSL https://memory.example.com/connect | bash
+```
+
+That command works even when `recallant` is missing or old on the external machine. It starts a
+device-style pairing request, asks the owner to approve the project through the protected central
+server, then writes only remote MCP client config locally. See
+[`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md).
+
+Advanced/admin fallback: from the central Recallant server, a maintainer can still generate a
+one-time invite for automation, pre-known projects, or directed access:
 
 ```bash
 recallant invite /path/to/project --server-url https://memory.example.com
 ```
 
-The output contains the only command the remote computer needs. Run it from the remote project
+The output contains the one-time command the remote computer needs. Run it from the remote project
 folder:
 
 ```bash
 curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash
 ```
 
-The invite is short-lived and one-time. The bootstrap redeems it for a scoped remote MCP credential,
-installs only the remote bridge CLI, writes project-local client config, and runs `remote-doctor`
-with capture proof. It does not require local Docker, Postgres, `RECALLANT_DATABASE_URL`, internal
-server paths, raw artifacts, backups, or provider secrets. The acceptance proof command after
-bootstrap is:
+The invite is short-lived and one-time. It is not the primary beginner remote UX. The invite
+bootstrap redeems it for a scoped remote MCP credential, installs only the remote bridge CLI, writes
+project-local client config, and runs `remote-doctor` with capture proof. It does not require local
+Docker, Postgres, `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or
+provider secrets. The acceptance proof command after bootstrap is:
 
 ```bash
 recallant remote-acceptance \
@@ -118,8 +130,8 @@ That acceptance command reads the scoped remote connection from the project-loca
 written by bootstrap, then writes redacted evidence for bootstrap, remote-doctor, remote MCP
 session/context/write/checkpoint/recall, next-session recall, and forbidden local-artifact checks.
 One real external Mac rehearsal passed this gate on 2026-06-20, with central-server verification of
-Workbench readiness and redacted audit rows; keep this path operator-led until broader remote-client
-polish and repeat release rehearsals are complete.
+Workbench readiness and redacted audit rows; keep invite provisioning operator-led while universal
+connect remains the beginner remote command.
 
 For strict Capture/Recall Acceptance, validate that evidence on the central Recallant server:
 

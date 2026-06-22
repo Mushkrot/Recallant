@@ -20,6 +20,20 @@ function mustInclude(text, markers, label) {
   }
 }
 
+function mustNotInclude(text, markers, label) {
+  for (const marker of markers) {
+    assert(!text.includes(marker), `${label} contains retired marker: ${marker}`);
+  }
+}
+
+function mustAppearBefore(text, first, second, label) {
+  const firstIndex = text.indexOf(first);
+  const secondIndex = text.indexOf(second);
+  assert(firstIndex >= 0, `${label} is missing required first marker: ${first}`);
+  assert(secondIndex >= 0, `${label} is missing required second marker: ${second}`);
+  assert(firstIndex < secondIndex, `${label} must lead with ${first} before ${second}`);
+}
+
 function fixtureStderrExcerpt(stderr) {
   const trimmed = stderr.trim();
   return trimmed.length > 0 ? trimmed.slice(0, 1000) : "<empty>";
@@ -64,6 +78,7 @@ const publicDocs = [
   "docs/REFERENCE_PROJECTS.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
+  "docs/REMOTE_CONNECT_PLAN.md",
   "docs/MCP_SPEC.md",
   "docs/CLIENT_SETUP.md",
   "docs/SECURITY.md",
@@ -120,8 +135,12 @@ mustInclude(
     "Install",
     "Install Local Recallant",
     "Remote Existing-Server Setup",
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "works even when `recallant` is missing or old",
+    "Advanced/admin fallback",
     "recallant invite /path/to/project --server-url https://memory.example.com",
     "curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash",
+    "It is not the primary beginner remote UX",
     "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
@@ -152,6 +171,65 @@ mustInclude(
   ],
   "docs/QUICKSTART.md"
 );
+mustAppearBefore(
+  quickstart,
+  "curl -fsSL https://memory.example.com/connect | bash",
+  "recallant invite /path/to/project --server-url https://memory.example.com",
+  "docs/QUICKSTART.md"
+);
+
+const clientSetup = await read("docs/CLIENT_SETUP.md");
+mustInclude(
+  clientSetup,
+  [
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "It works even when `recallant` is missing or old",
+    "Advanced/admin fallback",
+    "not the universal first-run command",
+    "The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,",
+    "Workbench/admin auth, raw artifacts, backups, or provider secrets"
+  ],
+  "docs/CLIENT_SETUP.md"
+);
+mustAppearBefore(
+  clientSetup,
+  "curl -fsSL https://memory.example.com/connect | bash",
+  "recallant invite /path/to/project --server-url https://memory.example.com",
+  "docs/CLIENT_SETUP.md"
+);
+
+const remoteConnectPlan = await read("docs/REMOTE_CONNECT_PLAN.md");
+mustInclude(
+  remoteConnectPlan,
+  [
+    "Status: the initial universal connect slice is implemented",
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "does not depend on an already installed or up-to-date local `recallant` CLI",
+    "Server-generated invites remain supported as an advanced/admin path",
+    "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected"
+  ],
+  "docs/REMOTE_CONNECT_PLAN.md"
+);
+
+const remoteBeginnerDocs = [
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/REMOTE_CONNECT_PLAN.md", remoteConnectPlan]
+];
+for (const [label, text] of remoteBeginnerDocs) {
+  mustNotInclude(
+    text,
+    [
+      "Until universal remote connect is implemented",
+      "Until universal connect ships",
+      "still needs implementation",
+      "the planned beginner remote",
+      "planned universal remote connect flow",
+      "invite command is the simple path for remote projects"
+    ],
+    label
+  );
+}
 
 const why = await read("docs/WHY_RECALLANT.md");
 mustInclude(
@@ -263,6 +341,26 @@ mustInclude(
     "npm run phase8:smoke:backup",
     "Workbench migration review queue",
     "Release-Candidate Bar"
+  ],
+  "CONTRACT_STATUS"
+);
+mustInclude(
+  contractStatus,
+  [
+    "universal `curl .../connect \\| bash` device-pairing beginner UX are present",
+    "GET /connect",
+    "/api/connect/start",
+    "/api/connect/poll",
+    "protected `/connect/approve`",
+    "`recallant invite` and `/j/<token>` remain the advanced/admin one-time onboarding fallback"
+  ],
+  "CONTRACT_STATUS remote connect"
+);
+mustNotInclude(
+  contractStatus,
+  [
+    "universal `curl .../connect \\| bash` device-pairing is the planned beginner UX",
+    "which still needs implementation"
   ],
   "CONTRACT_STATUS"
 );

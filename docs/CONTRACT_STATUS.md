@@ -24,7 +24,7 @@ release packaging before it should be treated as stable infrastructure.
 | Source, capability, and secret references | Working slice | `project_sources`, import candidates, secret-reference detection, connector/server source policies; `npm run project-sources:smoke`, `npm run prepilot:smoke:discovery`, `npm run phase10:smoke` | Live connector ingestion remains governed future work. |
 | Cross-project examples | Working slice | Explicit cross-project recall returns source-linked examples and blocks silent rule adoption; `npm run phase10:smoke` | More UI affordances for adopting examples into the current project. |
 | Private deployment profiles | Documented and genericized | Self-hosting profiles, `doctor` deployment profile output, `production_readiness.service_runtime` status checks, public route readiness checks, latest backup verification, capability references, private-by-default server posture; public defaults use generic paths and env-provided inventory/security/backup references | Deployment-specific overlays stay private. |
-| Remote project access to a central server | Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, CLI-first remote diagnostics, external-machine acceptance evidence, strict Capture/Recall Acceptance validator, remote-client cleanup/retry gate, aggregate security smoke, deterministic isolated external-client rehearsal, and an opt-in central-server live readiness gate; local stdio remains the default client workflow until broader remote-client polish | `docs/MCP_SPEC.md` defines the remote MCP contract (`/api/mcp`); `recallant remote-credential <create\|list\|rotate\|revoke>` manages project/developer scoped, optionally client-scoped credentials with hash-only storage and one-time create/rotate secrets; protected Workbench/API provisioning routes expose the same scoped lifecycle without unauthenticated public admin access; `recallant remote-bridge` forwards stdio MCP calls to HTTPS `/api/mcp`; `recallant connect-remote` previews Codex, Cursor, Claude Code, and generic MCP configs without `RECALLANT_DATABASE_URL`; `recallant remote-cleanup` safely removes only generated remote client config entries and optional Recallant CLI wrappers without touching source files, `.recallant`, Docker/Postgres, or central records; `recallant remote-doctor` distinguishes network reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize/tools-list readiness, and optional capture proof; `recallant remote-acceptance` proves external-machine bootstrap, remote-doctor, remote MCP first-session session/context/write/checkpoint/recall, next-session recall, no local `.recallant`/Docker/Postgres artifacts, and redacted evidence; `recallant remote-acceptance validate-live` verifies the same evidence on the central server against Workbench readiness and redacted `system_activity_events` rows without exposing DB/Workbench/admin access to the external machine; a real external Mac rehearsal on 2026-06-20 produced PASS evidence run `c01ae9a7-a60c-4e12-bedf-d4be222c58b0` with strict server-side trace verification for next-session recall, Workbench readiness, and redacted audit rows; `remote-client-cleanup:smoke` validates dry-run/confirm cleanup, preservation of unrelated MCP config, preservation of local `mcp-server` entries, and explicit CLI-wrapper removal; `capture-recall-acceptance-live-validate:smoke` validates the strict server-side gate; `remote-mcp-provisioning:smoke` validates create/rotate one-time output, redacted list/revoke, Workbench/API auth and scope failures, generated config leakage checks, and redacted audit events; `remote-mcp-contract:smoke` validates doc-to-contract alignment plus endpoint behavior for unauthorized, missing scope, wrong token, project/developer mismatch, forbidden DB URL, initialize, tools/list, tools/call, and redacted `remote_mcp` audit rows; `remote-mcp-credentials:smoke` validates valid, expired, revoked, rotated, wrong project, wrong developer, wrong client, no-raw-secret, and redacted audit cases; `remote-mcp-bridge:smoke` validates bridge initialize/tools/list/tools/call, required headers, wrong/revoked/rotated credentials, wrong project/developer/client scope, forbidden payload blocking, and no raw fixture leakage; `remote-mcp-doctor:smoke` validates JSON/human diagnostics, non-HTTPS, unreachable/wrong endpoint, edge denial, credential/scope failures, initialize/tools-list failures, capture proof states, no DB URL dependency, and no output leakage; `remote-mcp-security:smoke` aggregates those focused smokes into one security matrix for unauthorized/missing Authorization, wrong token, expired/revoked/rotated credentials, wrong project/developer/client, forbidden surfaces, no DB URL dependency, capture proof states, Workbench visibility, and redacted audit trail; `remote-mcp-external-rehearsal:smoke` validates deterministic isolated child-process external-client rehearsal through HTTPS `/api/mcp`, `connect-remote`, `remote-bridge`, `remote-doctor`, capture proof states, wrong/revoked/rotated/scope failures, no DB/admin/provider/raw/backup leakage, and opt-in live external rehearsal skip/pass behavior; `remote-mcp-live-readiness:smoke` is a stricter real central-server gate with redacted skip/fail/pass output. | Broader onboarding polish, repeat external-host rehearsal, and broader client transport support without exposing Postgres, internal server paths, raw artifacts, backups, or unauthenticated MCP/admin routes. |
+| Remote project access to a central server | Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, and CLI-first remote diagnostics slice; invite provisioning, external-machine acceptance evidence, strict Capture/Recall Acceptance validator, remote-client cleanup/retry gate, aggregate security smoke, deterministic isolated external-client rehearsal, opt-in central-server live readiness gate, and universal `curl .../connect \| bash` device-pairing beginner UX are present | `docs/MCP_SPEC.md` defines the remote MCP contract (`/api/mcp`); `docs/REMOTE_CONNECT_PLAN.md` defines the universal connect contract; `GET /connect`, `/api/connect/start`, `/api/connect/poll`, `/api/connect/cancel`, protected `/connect/approve`, and `recallant connect-cloud` implement browser-approved pairing; `recallant remote-credential <create\|list\|rotate\|revoke>` manages project/developer scoped, optionally client-scoped credentials with hash-only storage and one-time create/rotate secrets; protected Workbench/API provisioning routes expose the same scoped lifecycle without unauthenticated public admin access; `recallant remote-bridge` forwards stdio MCP calls to HTTPS `/api/mcp`; `recallant connect-remote` previews Codex, Cursor, Claude Code, and generic MCP configs without `RECALLANT_DATABASE_URL`; `recallant invite` and `/j/<token>` remain the advanced/admin one-time onboarding fallback; `recallant remote-cleanup` safely removes only generated remote client config entries and optional Recallant CLI wrappers without touching source files, `.recallant`, Docker/Postgres, or central records; `recallant remote-doctor` distinguishes network reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize/tools-list readiness, and optional capture proof; `recallant remote-acceptance` proves external-machine bootstrap, remote-doctor, remote MCP first-session session/context/write/checkpoint/recall, next-session recall, no local `.recallant`/Docker/Postgres artifacts, and redacted evidence; `recallant remote-acceptance validate-live` verifies the same evidence on the central server against Workbench readiness and redacted `system_activity_events` rows without exposing DB/Workbench/admin access to the external machine; a real external Mac rehearsal on 2026-06-20 produced PASS evidence run `c01ae9a7-a60c-4e12-bedf-d4be222c58b0` with strict server-side trace verification for next-session recall, Workbench readiness, and redacted audit rows; existing remote smokes validate provisioning, bridge, doctor, security, isolated external rehearsal, cleanup, live readiness, connect storage, connect server routes, connect CLI pairing, connect security, and connect external rehearsal. | Repeat external-host rehearsal with universal connect, broaden old-CLI/no-CLI client pilots, and continue release hardening without exposing Postgres, internal server paths, raw artifacts, backups, or unauthenticated admin routes. |
 | Safety gates | Working slice with security smoke | Raw-secret redaction, paid API confirmation posture, public exposure warnings, destructive-operation confirmation paths, install/auth/Workbench/backups/secrets security smoke, owner-only marker scans across public docs and public runtime/install code; `npm run public-security:smoke`, `npm run security-review:smoke`, `npm run phase10:smoke` | Independent release hardening review. |
 | Public OSS surface | Working slice | Public docs boundary, readiness smoke, forbidden private marker checks across docs and public code; `npm run public-readiness:smoke`, `npm run public-security:smoke` | Public screenshots and final release packaging. |
 
@@ -65,6 +65,12 @@ Recent verification across the current public checkpoint sequence includes:
 - `npm run remote-mcp-doctor:smoke`
 - `npm run remote-mcp-security:smoke`
 - `npm run remote-mcp-external-rehearsal:smoke`
+- `npm run remote-connect-storage:smoke`
+- `npm run remote-connect-server:smoke`
+- `npm run remote-connect-cli:smoke`
+- `npm run remote-connect-security:smoke`
+- `npm run remote-connect-external-rehearsal:smoke`
+- `npm run remote-connect-live-readiness:smoke`
 - `git diff --check`
 
 Those checks cover the public docs boundary, attach migration summaries, capture-active proof,
@@ -114,18 +120,22 @@ security review smoke.
 - Remote MCP/agent access now has a first authenticated `POST /api/mcp` endpoint slice, scoped
   remote MCP credential lifecycle with CLI/Workbench provisioning output, stdio-to-HTTPS remote
   bridge, CLI-first diagnostics, aggregate security smoke, deterministic isolated external-client
-  rehearsal, and a redacted `recallant remote-acceptance` evidence gate for bootstrap,
-  remote-doctor, remote MCP session/context/write/checkpoint/recall, and forbidden local-artifact
-  checks. A real external Mac rehearsal passed on 2026-06-20 with evidence run
-  `c01ae9a7-a60c-4e12-bedf-d4be222c58b0`; strict server-side trace verification confirmed
-  next-session recall, Workbench readiness, and redacted audit rows for trace
-  `098493b4-8fa2-4c56-907f-cc318960cc33`. Local stdio MCP remains the default client workflow
-  until broader remote-client polish and repeat release rehearsals are complete.
-- The external-workstation beginner path has a live external-host PASS, but is not yet the broad
-  beginner default. A user should not be told that the
-  local self-host installer connects a project to an existing central Recallant server; that installer
-  creates local storage and may require Docker/Postgres.
-- A remote client bootstrap now exists for server-generated onboarding packages with live
+  rehearsal, universal `curl -fsSL https://memory.example.com/connect | bash` pairing, and a redacted
+  `recallant remote-acceptance` evidence gate for bootstrap, remote-doctor, remote MCP
+  session/context/write/checkpoint/recall, and forbidden local-artifact checks. A real external Mac
+  rehearsal passed on 2026-06-20 with evidence run `c01ae9a7-a60c-4e12-bedf-d4be222c58b0`; strict
+  server-side trace verification confirmed next-session recall, Workbench readiness, and redacted
+  audit rows for trace `098493b4-8fa2-4c56-907f-cc318960cc33`. Local stdio MCP remains the default
+  client workflow for installed-host self-host projects; universal connect is the beginner remote
+  existing-server path, while broader remote-client polish and repeat release rehearsals remain
+  near-term release work.
+- The external-workstation invite path has a live external-host PASS, but it is now an
+  advanced/admin fallback. The broad remote beginner path is
+  `curl -fsSL https://memory.example.com/connect | bash`, implemented through public bootstrap,
+  pending connection storage, protected approval, and `recallant connect-cloud`. A user should not
+  be told that the local self-host installer connects a project to an existing central Recallant
+  server; that installer creates local storage and may require Docker/Postgres.
+- A remote client bootstrap also exists for server-generated invite onboarding packages with live
   endpoint/credential/scope. It installs only the remote bridge CLI, writes project-local client
   config, and runs `remote-doctor`; `recallant remote-acceptance` is now the acceptance follow-up
   gate, and one real external-host evidence bundle has passed. A separate human-written report file
@@ -142,9 +152,9 @@ Before a release-candidate tag, the project should have:
 
 - external-host release rehearsal that repeats the public quickstart and rollback path;
 - repeat remote project access rehearsal from at least one real separate machine with
-  a one-command invite, producing either a validated `recallant remote-acceptance` evidence bundle
-  or equivalent server-side trace verification that proves authenticated agent capture and recall
-  against a central Recallant server;
+  universal `curl .../connect | bash` pairing, producing either a validated
+  `recallant remote-acceptance` evidence bundle or equivalent server-side trace verification that
+  proves authenticated agent capture and recall against a central Recallant server;
 - broader remote-client invite rehearsal from separate machines and clients, including
   `remote-doctor` and capture/recall readiness against the central server;
 - existing-project migration proof with backup and review behavior on broader real-world projects;

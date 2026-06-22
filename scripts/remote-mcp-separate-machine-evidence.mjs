@@ -45,6 +45,7 @@ function parseArgs(argv) {
     target: process.env.RECALLANT_EXTERNAL_REHEARSAL_TARGET ?? "codex",
     outputDir: process.env.RECALLANT_EXTERNAL_REHEARSAL_OUTPUT_DIR ?? "recallant-external-evidence",
     bootstrapScript: process.env.RECALLANT_EXTERNAL_REHEARSAL_BOOTSTRAP_SCRIPT ?? "",
+    bootstrapMode: process.env.RECALLANT_EXTERNAL_REHEARSAL_BOOTSTRAP_MODE ?? "scoped_credential",
     recallantCommand: process.env.RECALLANT_EXTERNAL_REHEARSAL_RECALLANT_CMD ?? "recallant",
     captureProof: process.env.RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF === "1",
     skipBootstrap: false,
@@ -68,6 +69,7 @@ function parseArgs(argv) {
     else if (arg === "--target") values.target = next ?? "";
     else if (arg === "--output-dir") values.outputDir = next ?? "";
     else if (arg === "--bootstrap-script") values.bootstrapScript = next ?? "";
+    else if (arg === "--bootstrap-mode") values.bootstrapMode = next ?? "";
     else if (arg === "--recallant-command") values.recallantCommand = next ?? "";
     else if (arg === "--capture-proof") values.captureProof = true;
     else if (arg === "--skip-bootstrap") values.skipBootstrap = true;
@@ -93,6 +95,7 @@ function usage() {
 
 Runs the external-host Recallant remote onboarding rehearsal and writes redacted evidence.
 This runner does not install Docker, Postgres, or local Recallant storage.
+Use --bootstrap-mode connect_cloud when the project was provisioned through universal browser-approved remote connect.
 
 Cleanup stale local storage artifacts before retrying:
   node scripts/remote-mcp-separate-machine-evidence.mjs cleanup --project-dir <path> --confirm\n`);
@@ -740,6 +743,7 @@ try {
       hash: sha256(projectRealpath)
     },
     inferred_inputs: inferredInputs,
+    bootstrap_mode: input.bootstrapMode === "connect_cloud" ? "connect_cloud" : "scoped_credential",
     bootstrap,
     client_config: afterBootstrap,
     clean_project_before: before,

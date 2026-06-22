@@ -1,5 +1,73 @@
 export const remoteMcpEndpointPath = "/api/mcp" as const;
 
+export const remoteConnectBootstrapPath = "/connect" as const;
+export const remoteConnectApprovePath = "/connect/approve" as const;
+export const remoteConnectStartPath = "/api/connect/start" as const;
+export const remoteConnectPollPath = "/api/connect/poll" as const;
+export const remoteConnectCancelPath = "/api/connect/cancel" as const;
+
+export const remoteConnectStatusValues = [
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+  "redeemed"
+] as const;
+
+export type RemoteConnectStatus = (typeof remoteConnectStatusValues)[number];
+
+export const remoteConnectDefaultExpiresSeconds = 600 as const;
+
+export type RemoteConnectStartRequest = {
+  target?: string | null;
+  project_display_name?: string | null;
+  project_fingerprint?: string | null;
+  project_path_hint_redacted?: string | null;
+  repo_remote_hash?: string | null;
+  requested_by_ip_hash?: string | null;
+};
+
+export type RemoteConnectStartResponse = {
+  ok: true;
+  request_id: string;
+  device_code: string;
+  poll_token: string;
+  approve_url: string;
+  expires_at: string;
+  interval_seconds: number;
+};
+
+export type RemoteConnectPollRequest = {
+  poll_token: string;
+};
+
+export type RemoteConnectPollResponse =
+  | {
+      ok: true;
+      status: "pending" | "denied" | "expired" | "redeemed";
+      request_id: string | null;
+      retry_after_seconds?: number;
+      message?: string;
+    }
+  | {
+      ok: true;
+      status: "approved";
+      request_id: string;
+      bootstrap: {
+        server_url: string;
+        project_id: string;
+        developer_id: string;
+        client_id: string;
+        target: RemoteMcpClientTarget;
+      };
+      one_time_secret: string;
+      provisioning: RemoteMcpProvisioningOutput;
+    };
+
+export type RemoteConnectCancelRequest = {
+  poll_token: string;
+};
+
 export const remoteMcpTransport = "mcp_streamable_http" as const;
 
 export const remoteMcpRequiredHeaders = [
@@ -52,6 +120,12 @@ export const remoteMcpForbiddenSurfaces = [
   "provider_secret",
   "raw_request_body"
 ] as const;
+
+export function remoteConnectApprovalUrl(serverUrl: string, deviceCode: string) {
+  const url = new URL(remoteConnectApprovePath, serverUrl);
+  url.searchParams.set("code", deviceCode);
+  return url.toString();
+}
 
 export type RemoteMcpHeader = (typeof remoteMcpRequiredHeaders)[number];
 export type RemoteMcpBridgeEnvName = (typeof remoteMcpBridgeEnv)[keyof typeof remoteMcpBridgeEnv];

@@ -14,6 +14,7 @@ DEVELOPER_ID=""
 CLIENT_ID=""
 INVITE_URL=""
 INVITE_TOKEN=""
+CONNECT_URL=""
 SESSION_ID=""
 TRACE_ID=""
 CAPTURE_PROOF=false
@@ -51,6 +52,7 @@ Postgres, RECALLANT_DATABASE_URL, or server-internal paths.
 
 Example:
   cd /path/to/project
+  curl -fsSL https://recallant.example.com/connect | bash
   curl -fsSL https://recallant.example.com/j/<invite-token> | bash
 
 Advanced/manual package:
@@ -63,6 +65,7 @@ Advanced/manual package:
     --project-dir .
 
 Options:
+  --connect-url <https-url>    Start universal browser-approved remote connect against this server.
   --invite-url <https-url>     Redeem endpoint from a Recallant remote invite.
   --invite-token <token>       Short-lived one-time remote invite token.
   --server-url <https-url>     Existing Recallant server URL.
@@ -135,6 +138,10 @@ while [[ $# -gt 0 ]]; do
       INVITE_TOKEN="${2:-}"
       shift 2
       ;;
+    --connect-url)
+      CONNECT_URL="${2:-}"
+      shift 2
+      ;;
     --project-dir)
       PROJECT_DIR="${2:-}"
       shift 2
@@ -195,8 +202,18 @@ INVITE_MODE=false
 if [[ -n "$INVITE_URL" || -n "$INVITE_TOKEN" ]]; then
   INVITE_MODE=true
 fi
+CONNECT_MODE=false
+if [[ -n "$CONNECT_URL" ]]; then
+  CONNECT_MODE=true
+fi
 
-if [[ "$INVITE_MODE" == "true" ]]; then
+if [[ "$CONNECT_MODE" == "true" && "$INVITE_MODE" == "true" ]]; then
+  fail "Use either --connect-url or --invite-url/--invite-token, not both." 2
+fi
+
+if [[ "$CONNECT_MODE" == "true" ]]; then
+  [[ -n "$CONNECT_URL" ]] || fail "Remote connect mode requires --connect-url." 2
+elif [[ "$INVITE_MODE" == "true" ]]; then
   [[ -n "$INVITE_URL" ]] || fail "Remote invite mode requires --invite-url." 2
   [[ -n "$INVITE_TOKEN" ]] || fail "Remote invite mode requires --invite-token." 2
 else
@@ -307,6 +324,40 @@ for (const key of ["server_url", "credential", "project_id", "developer_id", "cl
   CLIENT_ID="$(printf '%s\n' "$redeemed_fields" | sed -n '5p')"
   CLIENT="$(printf '%s\n' "$redeemed_fields" | sed -n '6p')"
   CAPTURE_PROOF=true
+fi
+
+if [[ "$CONNECT_MODE" == "true" ]]; then
+  if [[ ! "$CONNECT_URL" =~ ^https://[^[:space:]/?#]+([^[:space:]]*)?$ && ! "$CONNECT_URL" =~ ^http://127\.0\.0\.1(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+    fail "Remote connect requires an HTTPS Recallant server URL." 2
+  fi
+  connect_cloud_args=(
+    "connect-cloud"
+    "$target_project"
+    "--server-url"
+    "$CONNECT_URL"
+    "--client"
+    "$CLIENT"
+  )
+  if [[ "$SKIP_DOCTOR" == "true" ]]; then
+    connect_cloud_args+=("--skip-doctor")
+  fi
+  if [[ "$DRY_RUN" == "true" ]]; then
+    connect_cloud_args+=("--dry-run")
+  fi
+  if [[ -n "$SESSION_ID" ]]; then
+    connect_cloud_args+=("--session-id" "$SESSION_ID")
+  fi
+  if [[ -n "$TRACE_ID" ]]; then
+    connect_cloud_args+=("--trace-id" "$TRACE_ID")
+  fi
+  echo "Recallant universal remote connect bootstrap"
+  echo "- Project: $target_project"
+  echo "- Client: $CLIENT"
+  echo "- Server: $CONNECT_URL"
+  echo "- Local storage: not installed"
+  echo "- Docker/Postgres: not required"
+  echo
+  exec "$recallant_cmd" "${connect_cloud_args[@]}" --format text
 fi
 
 if [[ ! "$SERVER_URL" =~ ^https://[^[:space:]/?#]+([^[:space:]]*)?$ && ! "$SERVER_URL" =~ ^http://127\.0\.0\.1(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then

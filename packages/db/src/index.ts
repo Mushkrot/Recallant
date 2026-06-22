@@ -138,6 +138,98 @@ export type RedeemRemoteOnboardingInviteResult = {
   target: string;
 };
 
+export type RemoteConnectRequestStatus = "pending" | "approved" | "denied" | "expired" | "redeemed";
+
+export type RemoteConnectRequestRow = {
+  id: string;
+  device_code_prefix: string;
+  device_code_hash: string;
+  poll_token_prefix: string;
+  poll_token_hash: string;
+  hash_version: string;
+  status: RemoteConnectRequestStatus;
+  target: string;
+  project_display_name: string | null;
+  project_fingerprint: string | null;
+  project_path_hint_redacted: string | null;
+  repo_remote_hash: string | null;
+  requested_by_ip_hash: string | null;
+  created_by: string;
+  approved_by: string | null;
+  approved_project_id: string | null;
+  developer_id: string | null;
+  client_id: string | null;
+  credential_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+  expires_at: Date;
+  approved_at: Date | null;
+  denied_at: Date | null;
+  redeemed_at: Date | null;
+};
+
+export type RemoteConnectRequestSummary = Omit<
+  RemoteConnectRequestRow,
+  "device_code_hash" | "poll_token_hash"
+> & {
+  status: RemoteConnectRequestStatus;
+};
+
+export type CreateRemoteConnectRequestInput = {
+  target?: string | null;
+  projectDisplayName?: string | null;
+  projectFingerprint?: string | null;
+  projectPathHintRedacted?: string | null;
+  repoRemoteHash?: string | null;
+  requestedByIpHash?: string | null;
+  expiresAt?: string | Date | null;
+  createdBy?: string | null;
+};
+
+export type CreateRemoteConnectRequestResult = {
+  device_code: string;
+  poll_token: string;
+  request: RemoteConnectRequestSummary;
+};
+
+export type ApproveRemoteConnectRequestInput = {
+  deviceCode: string;
+  projectId: string;
+  developerId: string;
+  clientId?: string | null;
+  approvedBy?: string | null;
+};
+
+export type DenyRemoteConnectRequestInput = {
+  deviceCode: string;
+  deniedBy?: string | null;
+};
+
+export type GetRemoteConnectRequestForApprovalInput = {
+  deviceCode: string;
+};
+
+export type PollRemoteConnectRequestInput = {
+  pollToken: string;
+  redeemedBy?: string | null;
+};
+
+export type PollRemoteConnectRequestResult =
+  | {
+      status: "pending" | "denied" | "expired" | "redeemed";
+      request: RemoteConnectRequestSummary | null;
+    }
+  | {
+      status: "approved";
+      request: RemoteConnectRequestSummary;
+      secret: string;
+      credential: RemoteMcpCredentialSummary;
+      project_id: string;
+      developer_id: string;
+      client_id: string;
+      target: string;
+    };
+
 export type CreateRemoteMcpCredentialInput = {
   projectId: string;
   developerId: string;
@@ -1638,6 +1730,55 @@ function chunkText(text: string, maxChars = 4_000) {
   return chunks.length > 0 ? chunks : [""];
 }
 
+const remoteConnectHashVersion = "sha256-v1" as const;
+const remoteConnectPrefixBytes = 8;
+const remoteConnectSecretBytes = 24;
+
+function generateRemoteConnectSecret(kind: "conn" | "poll") {
+  const prefix = randomBytes(remoteConnectPrefixBytes).toString("hex");
+  const secret = randomBytes(remoteConnectSecretBytes).toString("base64url");
+  return ["rcl", kind, prefix, secret].join("_");
+}
+
+function extractRemoteConnectPrefix(secret: string, kind: "conn" | "poll") {
+  const parts = secret.split("_");
+  return parts.length === 4 && parts[0] === "rcl" && parts[1] === kind ? parts[2] : null;
+}
+
+function hashRemoteConnectSecret(secret: string) {
+  return createHash("sha256").update(secret).digest("hex");
+}
+
+function constantTimeRemoteConnectHashEquals(expected: string, actual: string) {
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const actualBuffer = Buffer.from(actual, "hex");
+  return (
+    expectedBuffer.length === actualBuffer.length && timingSafeEqual(expectedBuffer, actualBuffer)
+  );
+}
+
+function defaultRemoteConnectExpiry() {
+  return new Date(Date.now() + 10 * 60_000);
+}
+
+function remoteConnectRequestStatus(row: RemoteConnectRequestRow): RemoteConnectRequestStatus {
+  if (row.status === "pending" || row.status === "approved") {
+    if (row.expires_at.getTime() <= Date.now()) return "expired";
+  }
+  return row.status;
+}
+
+function summarizeRemoteConnectRequest(row: RemoteConnectRequestRow): RemoteConnectRequestSummary {
+  const summary = { ...row } as RemoteConnectRequestSummary & {
+    device_code_hash?: string;
+    poll_token_hash?: string;
+  };
+  delete summary.device_code_hash;
+  delete summary.poll_token_hash;
+  summary.status = remoteConnectRequestStatus(row);
+  return summary;
+}
+
 async function withTransaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>) {
   const client = await pool.connect();
   try {
@@ -1703,6 +1844,59 @@ export class RecallantDb {
     await this.pool.query(`
       CREATE INDEX IF NOT EXISTS idx_remote_onboarding_invites_scope
         ON remote_onboarding_invites (project_id, developer_id, created_at DESC)
+    `);
+  }
+
+  async ensureRemoteConnectRequestSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS remote_connect_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        device_code_prefix TEXT NOT NULL,
+        device_code_hash TEXT NOT NULL,
+        poll_token_prefix TEXT NOT NULL,
+        poll_token_hash TEXT NOT NULL,
+        hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+        status TEXT NOT NULL DEFAULT 'pending',
+        target TEXT NOT NULL DEFAULT 'codex',
+        project_display_name TEXT,
+        project_fingerprint TEXT,
+        project_path_hint_redacted TEXT,
+        repo_remote_hash TEXT,
+        requested_by_ip_hash TEXT,
+        created_by TEXT NOT NULL DEFAULT 'remote-connect',
+        approved_by TEXT,
+        approved_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        developer_id UUID REFERENCES developers(id) ON DELETE SET NULL,
+        client_id TEXT,
+        credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        approved_at TIMESTAMPTZ,
+        denied_at TIMESTAMPTZ,
+        redeemed_at TIMESTAMPTZ,
+        CHECK (device_code_prefix <> ''),
+        CHECK (device_code_hash <> ''),
+        CHECK (poll_token_prefix <> ''),
+        CHECK (poll_token_hash <> ''),
+        CHECK (hash_version <> ''),
+        CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'redeemed')),
+        CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+      )
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_connect_requests_device_active
+        ON remote_connect_requests (device_code_prefix, device_code_hash)
+        WHERE status IN ('pending', 'approved')
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_connect_requests_poll_active
+        ON remote_connect_requests (poll_token_prefix, poll_token_hash)
+        WHERE status IN ('pending', 'approved')
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_connect_requests_status_time
+        ON remote_connect_requests (status, created_at DESC)
     `);
   }
 
@@ -2880,6 +3074,60 @@ export class RecallantDb {
     }
   }
 
+  private async recordRemoteConnectRequestAudit(input: {
+    operation: string;
+    status: "success" | "skipped" | "error";
+    requestId?: string | null;
+    projectId?: string | null;
+    developerId?: string | null;
+    deviceCodePrefix?: string | null;
+    pollTokenPrefix?: string | null;
+    credentialId?: string | null;
+    clientId?: string | null;
+    actorId?: string | null;
+    errorCode?: string | null;
+    metadata?: JsonObject | null;
+  }) {
+    try {
+      const activity = await this.startSystemActivity({
+        developer_id: input.developerId ?? null,
+        project_id: input.projectId ?? null,
+        surface: "remote_connect_requests",
+        operation: `remote_connect_request.${input.operation}`,
+        actor_kind: input.actorId ? "user" : "system",
+        actor_id: input.actorId ?? "remote_connect_requests",
+        client_kind: "remote_connect",
+        related_ids: {
+          request_id: input.requestId ?? null,
+          device_code_prefix: input.deviceCodePrefix ?? null,
+          poll_token_prefix: input.pollTokenPrefix ?? null,
+          credential_id: input.credentialId ?? null,
+          client_id: input.clientId ?? null
+        },
+        metadata: {
+          audit_policy: "remote_connect_redacted_no_raw_device_secret_no_raw_credential",
+          ...input.metadata
+        }
+      });
+      await this.finishSystemActivity({
+        id: activity.id,
+        status: input.status,
+        error_code: input.errorCode ?? null,
+        error_message: input.errorCode ?? null,
+        metadata: {
+          operation: `remote_connect_request.${input.operation}`,
+          request_id: input.requestId ?? null,
+          device_code_prefix: input.deviceCodePrefix ?? null,
+          poll_token_prefix: input.pollTokenPrefix ?? null,
+          credential_id: input.credentialId ?? null,
+          client_id: input.clientId ?? null
+        }
+      });
+    } catch {
+      // Remote connect lifecycle should not fail because audit storage is unavailable.
+    }
+  }
+
   async createRemoteOnboardingInvite(
     input: CreateRemoteOnboardingInviteInput
   ): Promise<CreateRemoteOnboardingInviteResult> {
@@ -3054,6 +3302,366 @@ export class RecallantDb {
         expires_at: null
       }
     });
+    return result;
+  }
+
+  async createRemoteConnectRequest(
+    input: CreateRemoteConnectRequestInput = {}
+  ): Promise<CreateRemoteConnectRequestResult> {
+    await this.ensureRemoteConnectRequestSchema();
+    const deviceCode = generateRemoteConnectSecret("conn");
+    const pollToken = generateRemoteConnectSecret("poll");
+    const deviceCodePrefix = extractRemoteConnectPrefix(deviceCode, "conn");
+    const pollTokenPrefix = extractRemoteConnectPrefix(pollToken, "poll");
+    if (!deviceCodePrefix || !pollTokenPrefix) {
+      throw new Error("Failed to generate remote connect request secrets");
+    }
+    const expiresAt =
+      normalizeRemoteMcpCredentialDate(input.expiresAt) ?? defaultRemoteConnectExpiry();
+    const target = normalizeRemoteOnboardingTarget(input.target);
+    const createdBy = normalizeRemoteMcpCredentialString(input.createdBy) ?? "remote-connect";
+    const result = await this.pool.query<RemoteConnectRequestRow>(
+      `
+        INSERT INTO remote_connect_requests (
+          device_code_prefix, device_code_hash, poll_token_prefix, poll_token_hash, hash_version,
+          status, target, project_display_name, project_fingerprint, project_path_hint_redacted,
+          repo_remote_hash, requested_by_ip_hash, created_by, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *
+      `,
+      [
+        deviceCodePrefix,
+        hashRemoteConnectSecret(deviceCode),
+        pollTokenPrefix,
+        hashRemoteConnectSecret(pollToken),
+        remoteConnectHashVersion,
+        target,
+        normalizeRemoteMcpCredentialString(input.projectDisplayName),
+        normalizeRemoteMcpCredentialString(input.projectFingerprint),
+        normalizeRemoteMcpCredentialString(input.projectPathHintRedacted),
+        normalizeRemoteMcpCredentialString(input.repoRemoteHash),
+        normalizeRemoteMcpCredentialString(input.requestedByIpHash),
+        createdBy,
+        expiresAt
+      ]
+    );
+    const request = summarizeRemoteConnectRequest(result.rows[0] as RemoteConnectRequestRow);
+    await this.recordRemoteConnectRequestAudit({
+      operation: "create",
+      status: "success",
+      requestId: request.id,
+      deviceCodePrefix: request.device_code_prefix,
+      pollTokenPrefix: request.poll_token_prefix,
+      actorId: createdBy,
+      metadata: {
+        target: request.target,
+        project_display_name_present: Boolean(request.project_display_name),
+        project_fingerprint_present: Boolean(request.project_fingerprint),
+        expires_at: request.expires_at.toISOString()
+      }
+    });
+    return { device_code: deviceCode, poll_token: pollToken, request };
+  }
+
+  async approveRemoteConnectRequest(
+    input: ApproveRemoteConnectRequestInput
+  ): Promise<RemoteConnectRequestSummary> {
+    await this.ensureRemoteConnectRequestSchema();
+    const deviceCode = normalizeRemoteMcpCredentialString(input.deviceCode);
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    if (!deviceCode || !projectId || !developerId) {
+      throw new Error("VALIDATION_ERROR: deviceCode, projectId, and developerId are required");
+    }
+    await this.assertRemoteMcpCredentialScope(projectId, developerId);
+    const deviceCodePrefix = extractRemoteConnectPrefix(deviceCode, "conn");
+    const deviceCodeHash = hashRemoteConnectSecret(deviceCode);
+    if (!deviceCodePrefix)
+      throw new Error("VALIDATION_ERROR: remote connect device code is invalid");
+    const approvedBy =
+      normalizeRemoteMcpCredentialString(input.approvedBy) ?? "remote-connect-approval";
+    const result = await withTransaction(this.pool, async (client) => {
+      const candidates = await client.query<RemoteConnectRequestRow>(
+        `
+          SELECT *
+          FROM remote_connect_requests
+          WHERE device_code_prefix = $1
+          ORDER BY created_at DESC
+          FOR UPDATE
+        `,
+        [deviceCodePrefix]
+      );
+      const row = candidates.rows.find(
+        (candidate) =>
+          candidate.hash_version === remoteConnectHashVersion &&
+          constantTimeRemoteConnectHashEquals(candidate.device_code_hash, deviceCodeHash)
+      );
+      if (!row) throw new Error("VALIDATION_ERROR: remote connect request not found");
+      const status = remoteConnectRequestStatus(row);
+      if (status !== "pending") {
+        throw new Error(`VALIDATION_ERROR: remote connect request is ${status}`);
+      }
+      const clientId =
+        normalizeRemoteMcpCredentialString(input.clientId) ?? `remote-${randomUUID()}`;
+      const updated = await client.query<RemoteConnectRequestRow>(
+        `
+          UPDATE remote_connect_requests
+          SET status = 'approved',
+              approved_by = $2,
+              approved_project_id = $3,
+              developer_id = $4,
+              client_id = $5,
+              approved_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [row.id, approvedBy, projectId, developerId, clientId]
+      );
+      return summarizeRemoteConnectRequest(updated.rows[0] as RemoteConnectRequestRow);
+    });
+    await this.recordRemoteConnectRequestAudit({
+      operation: "approve",
+      status: "success",
+      requestId: result.id,
+      projectId,
+      developerId,
+      deviceCodePrefix: result.device_code_prefix,
+      pollTokenPrefix: result.poll_token_prefix,
+      clientId: result.client_id,
+      actorId: approvedBy,
+      metadata: { result: "approved", target: result.target }
+    });
+    return result;
+  }
+
+  async getRemoteConnectRequestForApproval(
+    input: GetRemoteConnectRequestForApprovalInput
+  ): Promise<RemoteConnectRequestSummary | null> {
+    await this.ensureRemoteConnectRequestSchema();
+    const deviceCode = normalizeRemoteMcpCredentialString(input.deviceCode);
+    if (!deviceCode) throw new Error("VALIDATION_ERROR: remote connect device code is required");
+    const deviceCodePrefix = extractRemoteConnectPrefix(deviceCode, "conn");
+    const deviceCodeHash = hashRemoteConnectSecret(deviceCode);
+    if (!deviceCodePrefix)
+      throw new Error("VALIDATION_ERROR: remote connect device code is invalid");
+    const candidates = await this.pool.query<RemoteConnectRequestRow>(
+      `
+        SELECT *
+        FROM remote_connect_requests
+        WHERE device_code_prefix = $1
+        ORDER BY created_at DESC
+      `,
+      [deviceCodePrefix]
+    );
+    const row = candidates.rows.find(
+      (candidate) =>
+        candidate.hash_version === remoteConnectHashVersion &&
+        constantTimeRemoteConnectHashEquals(candidate.device_code_hash, deviceCodeHash)
+    );
+    return row ? summarizeRemoteConnectRequest(row) : null;
+  }
+
+  async denyRemoteConnectRequest(
+    input: DenyRemoteConnectRequestInput
+  ): Promise<RemoteConnectRequestSummary> {
+    await this.ensureRemoteConnectRequestSchema();
+    const deviceCode = normalizeRemoteMcpCredentialString(input.deviceCode);
+    if (!deviceCode) throw new Error("VALIDATION_ERROR: remote connect device code is required");
+    const deviceCodePrefix = extractRemoteConnectPrefix(deviceCode, "conn");
+    const deviceCodeHash = hashRemoteConnectSecret(deviceCode);
+    if (!deviceCodePrefix)
+      throw new Error("VALIDATION_ERROR: remote connect device code is invalid");
+    const deniedBy =
+      normalizeRemoteMcpCredentialString(input.deniedBy) ?? "remote-connect-approval";
+    const result = await withTransaction(this.pool, async (client) => {
+      const candidates = await client.query<RemoteConnectRequestRow>(
+        `
+          SELECT *
+          FROM remote_connect_requests
+          WHERE device_code_prefix = $1
+          ORDER BY created_at DESC
+          FOR UPDATE
+        `,
+        [deviceCodePrefix]
+      );
+      const row = candidates.rows.find(
+        (candidate) =>
+          candidate.hash_version === remoteConnectHashVersion &&
+          constantTimeRemoteConnectHashEquals(candidate.device_code_hash, deviceCodeHash)
+      );
+      if (!row) throw new Error("VALIDATION_ERROR: remote connect request not found");
+      const status = remoteConnectRequestStatus(row);
+      if (status !== "pending") {
+        throw new Error(`VALIDATION_ERROR: remote connect request is ${status}`);
+      }
+      const updated = await client.query<RemoteConnectRequestRow>(
+        `
+          UPDATE remote_connect_requests
+          SET status = 'denied',
+              approved_by = $2,
+              denied_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [row.id, deniedBy]
+      );
+      return summarizeRemoteConnectRequest(updated.rows[0] as RemoteConnectRequestRow);
+    });
+    await this.recordRemoteConnectRequestAudit({
+      operation: "deny",
+      status: "success",
+      requestId: result.id,
+      deviceCodePrefix: result.device_code_prefix,
+      pollTokenPrefix: result.poll_token_prefix,
+      actorId: deniedBy,
+      metadata: { result: "denied", target: result.target }
+    });
+    return result;
+  }
+
+  async pollRemoteConnectRequest(
+    input: PollRemoteConnectRequestInput
+  ): Promise<PollRemoteConnectRequestResult> {
+    await this.ensureRemoteConnectRequestSchema();
+    const pollToken = normalizeRemoteMcpCredentialString(input.pollToken);
+    if (!pollToken) throw new Error("VALIDATION_ERROR: remote connect poll token is required");
+    const pollTokenPrefix = extractRemoteConnectPrefix(pollToken, "poll");
+    const pollTokenHash = hashRemoteConnectSecret(pollToken);
+    if (!pollTokenPrefix) {
+      await this.recordRemoteConnectRequestAudit({
+        operation: "poll",
+        status: "skipped",
+        errorCode: "invalid_poll_token",
+        metadata: { result: "invalid_poll_token" }
+      });
+      throw new Error("VALIDATION_ERROR: remote connect poll token is invalid");
+    }
+    const redeemedBy = normalizeRemoteMcpCredentialString(input.redeemedBy) ?? "remote-connect";
+    const result = await withTransaction(this.pool, async (client) => {
+      const candidates = await client.query<RemoteConnectRequestRow>(
+        `
+          SELECT *
+          FROM remote_connect_requests
+          WHERE poll_token_prefix = $1
+          ORDER BY created_at DESC
+          FOR UPDATE
+        `,
+        [pollTokenPrefix]
+      );
+      const row = candidates.rows.find(
+        (candidate) =>
+          candidate.hash_version === remoteConnectHashVersion &&
+          constantTimeRemoteConnectHashEquals(candidate.poll_token_hash, pollTokenHash)
+      );
+      if (!row) return { status: "expired" as const, request: null };
+      const status = remoteConnectRequestStatus(row);
+      if (status !== "approved") {
+        if (status === "expired" && row.status !== "expired") {
+          const expired = await client.query<RemoteConnectRequestRow>(
+            `
+              UPDATE remote_connect_requests
+              SET status = 'expired', updated_at = now()
+              WHERE id = $1 AND status IN ('pending', 'approved')
+              RETURNING *
+            `,
+            [row.id]
+          );
+          return {
+            status: "expired" as const,
+            request: summarizeRemoteConnectRequest(expired.rows[0] ?? row)
+          };
+        }
+        return {
+          status,
+          request: summarizeRemoteConnectRequest(row)
+        } as PollRemoteConnectRequestResult;
+      }
+      if (!row.approved_project_id || !row.developer_id || !row.client_id) {
+        throw new Error("VALIDATION_ERROR: approved remote connect request is missing scope");
+      }
+      const secret = generateRemoteMcpCredentialSecret();
+      const credentialPrefix = extractRemoteMcpCredentialPrefix(secret);
+      if (!credentialPrefix) throw new Error("Failed to generate remote MCP credential prefix");
+      const credential = await client.query<RemoteMcpCredentialRow>(
+        `
+          INSERT INTO remote_mcp_credentials (
+            project_id, developer_id, client_id, label, credential_prefix, credential_hash,
+            hash_version, created_by, expires_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *
+        `,
+        [
+          row.approved_project_id,
+          row.developer_id,
+          row.client_id,
+          row.project_display_name ?? "remote connect",
+          credentialPrefix,
+          hashRemoteMcpCredentialSecret(secret),
+          remoteMcpCredentialHashVersion,
+          redeemedBy,
+          null
+        ]
+      );
+      const updated = await client.query<RemoteConnectRequestRow>(
+        `
+          UPDATE remote_connect_requests
+          SET status = 'redeemed',
+              credential_id = $2,
+              redeemed_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [row.id, credential.rows[0]?.id]
+      );
+      const request = summarizeRemoteConnectRequest(updated.rows[0] as RemoteConnectRequestRow);
+      return {
+        status: "approved" as const,
+        request,
+        secret,
+        credential: summarizeRemoteMcpCredential(credential.rows[0] as RemoteMcpCredentialRow),
+        project_id: row.approved_project_id,
+        developer_id: row.developer_id,
+        client_id: row.client_id,
+        target: row.target
+      };
+    });
+    await this.recordRemoteConnectRequestAudit({
+      operation: "poll",
+      status: "success",
+      requestId: result.request?.id ?? null,
+      projectId: result.status === "approved" ? result.project_id : null,
+      developerId: result.status === "approved" ? result.developer_id : null,
+      pollTokenPrefix,
+      credentialId: result.status === "approved" ? result.credential.id : null,
+      clientId: result.status === "approved" ? result.client_id : result.request?.client_id,
+      actorId: redeemedBy,
+      metadata: {
+        result: result.status,
+        target: result.request?.target ?? null
+      }
+    });
+    if (result.status === "approved") {
+      await this.recordRemoteMcpCredentialAudit({
+        operation: "create",
+        status: "success",
+        projectId: result.project_id,
+        developerId: result.developer_id,
+        clientId: result.client_id,
+        credentialId: result.credential.id,
+        credentialPrefix: result.credential.credential_prefix,
+        actorId: redeemedBy,
+        metadata: {
+          created_from: "remote_connect_request",
+          request_id: result.request.id,
+          expires_at: null
+        }
+      });
+    }
     return result;
   }
 

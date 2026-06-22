@@ -4,21 +4,21 @@ This is the public contract for authenticated Recallant remote agent access.
 
 Recallant includes a first authenticated `POST /api/mcp` JSON-RPC endpoint slice for scoped remote
 agent calls plus a `recallant remote-bridge` stdio-to-HTTPS bridge for external MCP clients. It is
-not yet the default beginner workflow.
+the remote runtime behind the universal existing-server beginner workflow.
 
 ## 1) Scope and Readiness Posture
 
 Local stdio MCP (`recallant mcp-server`) remains the current production-ready agent path for
 installed projects.
 
-Remote project access is partially implemented: the authenticated endpoint, DB-backed scoped
-credentials, strict scope gate, redacted audit envelope, CLI-first provisioning output, protected
-Workbench/API provisioning routes, `recallant remote-bridge`, `recallant connect-remote`, and
-CLI-first `recallant remote-doctor` diagnostics exist with deterministic
-endpoint/bridge/provisioning/doctor behavior smokes. Deterministic isolated external-client
-rehearsal also exists through `remote-mcp-external-rehearsal:smoke`. Real separate-machine rehearsal
-and broader client onboarding polish remain near-term work before this should be treated as a stable
-default workflow.
+Remote project access includes the authenticated endpoint, DB-backed scoped credentials, strict
+scope gate, redacted audit envelope, CLI-first provisioning output, protected Workbench/API
+provisioning routes, `recallant remote-bridge`, `recallant connect-remote`, CLI-first
+`recallant remote-doctor` diagnostics, and universal device-style pairing from
+`curl -fsSL https://memory.example.com/connect | bash`. Deterministic endpoint, bridge,
+provisioning, doctor, connect-cloud, and isolated external-client smokes cover the shipped slices.
+Local stdio MCP remains the local self-host agent path; universal connect is the beginner path when
+an external machine should attach a project to an existing central Recallant server.
 
 ## 2) Endpoint And Transport
 
@@ -155,8 +155,12 @@ Remote access must enforce strict project/developer scope:
 Remote clients must not receive RECALLANT_DATABASE_URL or other raw storage credentials.
 
 Scoped remote MCP credentials are not global Recallant access. They are stored as hash-only rows
-with a non-secret prefix and lifecycle metadata. The beginner remote onboarding path is an
-invite-command flow: `recallant invite /path/to/project --server-url https://memory.example.com`
+with a non-secret prefix and lifecycle metadata. The beginner remote onboarding path is a
+device-pairing flow: the remote workstation runs
+`curl -fsSL https://memory.example.com/connect | bash`, receives an approval URL, and waits while
+the owner approves through the protected central server. The approved poll response creates and
+returns the scoped remote MCP provisioning package once. The existing invite-command flow remains an
+advanced/admin fallback: `recallant invite /path/to/project --server-url https://memory.example.com`
 creates a short-lived one-time invite, and the remote workstation runs the printed
 `curl -fsSL https://memory.example.com/j/<token> | bash` command. The invite token is also stored
 hash-only; redeeming it creates the scoped remote MCP credential and marks the invite used.

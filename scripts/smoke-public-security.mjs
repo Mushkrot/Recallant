@@ -37,6 +37,8 @@ const publicDocs = [
   "docs/REFERENCE_PROJECTS.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
+  "docs/REMOTE_CONNECT_PLAN.md",
+  "docs/MCP_SPEC.md",
   "docs/CLIENT_SETUP.md",
   "docs/SECURITY.md",
   "docs/ROADMAP.md"
@@ -114,6 +116,36 @@ mustInclude(
     "Backups include the ledger table"
   ],
   "docs/SECURITY.md"
+);
+
+const remoteConnectPlan = await read("docs/REMOTE_CONNECT_PLAN.md");
+mustInclude(
+  remoteConnectPlan,
+  [
+    "GET /connect`: public shell bootstrap script",
+    "POST /api/connect/start`: public, rate-limited pending request creation",
+    "GET /connect/approve?code=<device-code>`: protected browser approval page",
+    "POST /api/connect/approve`: protected approval action",
+    "POST /api/connect/poll`: public, rate-limited polling endpoint",
+    "POST /api/connect/cancel`: optional public cancellation endpoint",
+    "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected",
+    "The central server also keeps a bounded payload check and a per-route abuse guard"
+  ],
+  "docs/REMOTE_CONNECT_PLAN.md route boundary"
+);
+
+const mcpSpec = await read("docs/MCP_SPEC.md");
+mustInclude(
+  mcpSpec,
+  [
+    "universal device-style pairing from",
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "Remote bridge hosts must not receive `RECALLANT_DATABASE_URL`, Postgres access, internal server",
+    "paths, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw deployment overlays",
+    "The existing invite-command flow remains an",
+    "advanced/admin fallback"
+  ],
+  "docs/MCP_SPEC.md remote security boundary"
 );
 
 process.stdout.write("Public security smoke passed\n");
