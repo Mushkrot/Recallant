@@ -150,10 +150,14 @@ client scoped, revocable, rotatable, hash-stored, and audited with credential id
 only. The universal remote-connect architecture is device-style pairing: the external machine starts
 a pending connection from `curl -fsSL https://memory.example.com/connect | bash`, the owner approves
 through the protected central server, and the server creates the project binding plus scoped remote
-MCP credential. Remote onboarding invites are also hash-stored and one-time; redeeming an invite
-creates the scoped remote MCP credential and writes the project-local remote bridge config, but
-invites are the advanced/admin path rather than the universal first-run command. The implementation
-record and operating contract are in `docs/REMOTE_CONNECT_PLAN.md`. The endpoint behavior is gated by
+MCP credential. First approval can register a local trusted-device public key; later projects from
+that workstation use signed nonce challenges instead of another Cloudflare browser approval.
+Headless hosts use short-lived one-time bootstrap tokens. Generated project config points to a
+local credential-store reference instead of embedding the raw scoped credential. Remote onboarding
+invites are also hash-stored and one-time; redeeming an invite creates the scoped remote MCP
+credential and writes the project-local remote bridge config, but invites are the advanced/admin
+path rather than the universal first-run command. The implementation record and operating contract
+are in `docs/REMOTE_CONNECT_PLAN.md`. The endpoint behavior is gated by
 `remote-mcp-contract:smoke` and `remote-mcp-credentials:smoke`;
 `remote-mcp-bridge:smoke`, `remote-mcp-provisioning:smoke`, `remote-mcp-doctor:smoke`,
 `remote-mcp-security:smoke`, and `remote-mcp-external-rehearsal:smoke` cover the bridge,

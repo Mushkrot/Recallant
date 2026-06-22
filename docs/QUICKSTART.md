@@ -100,6 +100,24 @@ device-style pairing request, asks the owner to approve the project through the 
 server, then writes only remote MCP client config locally. See
 [`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md).
 
+On the first approved connect from a workstation, the flow registers a local trusted-device key.
+Later projects from the same workstation can use signed device challenges through the same
+`curl .../connect | bash` / `recallant connect-cloud` path instead of asking for another
+Cloudflare email-code browser approval. The project credential is stored in the user's local
+Recallant credential store; generated project config contains a credential reference, not the raw
+secret.
+
+For headless servers or CI-like hosts, use a short-lived one-time bootstrap token created from a
+protected admin/human surface:
+
+```bash
+recallant connect-cloud . --server-url https://memory.example.com --bootstrap-token <one-time-token>
+```
+
+Bootstrap tokens approve only the remote connect request for scoped MCP access. They do not grant
+Workbench, admin, credential-management, backup, provider, raw-artifact, database, or browser-session
+access.
+
 Advanced/admin fallback: from the central Recallant server, a maintainer can still generate a
 one-time invite for automation, pre-known projects, or directed access:
 

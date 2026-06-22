@@ -1,6 +1,10 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { storeRemoteMcpCredential } from "../packages/contracts/dist/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -292,6 +296,28 @@ function baseArgs(fixture, overrides = {}) {
   ];
 }
 
+function storedCredentialArgs(fixture, credentialStore) {
+  return [
+    "--server-url",
+    fixture.serverUrl,
+    "--credential-ref",
+    credentialStore.key,
+    "--credential-store",
+    credentialStore.display_path,
+    "--project-id",
+    expectedScope.projectId,
+    "--developer-id",
+    expectedScope.developerId,
+    "--client-id",
+    expectedScope.clientId,
+    "--timeout-ms",
+    "1000",
+    "--allow-insecure-localhost",
+    "--format",
+    "json"
+  ];
+}
+
 function parseJsonOutput(result) {
   return JSON.parse(result.stdout);
 }
@@ -311,6 +337,16 @@ function assertNoLeak(name, output) {
 }
 
 const fixture = await startFixture();
+const credentialStoreDir = await mkdtemp(join(tmpdir(), "recallant-doctor-credential-store-"));
+const credentialStore = storeRemoteMcpCredential({
+  credential: credentials.valid,
+  serverUrl: fixture.serverUrl,
+  projectId: expectedScope.projectId,
+  developerId: expectedScope.developerId,
+  clientId: expectedScope.clientId,
+  credentialPrefix: "doctor-fixture",
+  storePath: join(credentialStoreDir, "remote-mcp-credentials.json")
+});
 const summary = [];
 
 try {
@@ -322,6 +358,23 @@ try {
   );
   assertNoLeak("success-json", JSON.stringify(success));
   summary.push({ scenario: "success-json", ok: true });
+
+  const storedSuccess = parseJsonOutput(
+    await runDoctor(storedCredentialArgs(fixture, credentialStore))
+  );
+  assert(
+    stageCode(storedSuccess, "credential_auth") === "pass:credential_ok",
+    "stored credential auth did not pass"
+  );
+  assert(stageCode(storedSuccess, "tools_list") === "pass:tools_list_ok");
+  const storedOutput = JSON.stringify(storedSuccess);
+  assertNoLeak("stored-credential-json", storedOutput);
+  assert(!storedOutput.includes(credentialStore.key), "stored credential output leaked ref key");
+  assert(
+    !storedOutput.includes(credentialStore.display_path),
+    "stored credential output leaked store path"
+  );
+  summary.push({ scenario: "stored-credential-json", ok: true });
 
   const human = await runDoctor(baseArgs(fixture, { format: "text" }));
   assert(human.stdout.includes("Recallant remote-doctor"));

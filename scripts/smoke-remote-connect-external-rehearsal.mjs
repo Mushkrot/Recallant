@@ -158,8 +158,33 @@ try {
   } catch {
     projectEntries = [];
   }
-  assert(!projectEntries.includes(".recallant"), "connect-cloud created local .recallant storage");
-  const combined = `${connectScriptText}\n${result.stdout}\n${result.stderr}\n${codexConfig}`;
+  let remoteConsentReceipt = "";
+  if (projectEntries.includes(".recallant")) {
+    const recallantEntries = await (
+      await import("node:fs/promises")
+    ).readdir(join(projectDir, ".recallant"));
+    assert(
+      recallantEntries.length === 1 && recallantEntries[0] === "remote-consent.json",
+      "connect-cloud created local .recallant storage beyond the non-secret remote consent receipt"
+    );
+    remoteConsentReceipt = await readFile(
+      join(projectDir, ".recallant", "remote-consent.json"),
+      "utf8"
+    );
+    assert(
+      remoteConsentReceipt.includes("recallant_remote_agent_consent"),
+      "remote consent receipt missing expected kind"
+    );
+    assert(
+      !remoteConsentReceipt.includes("rcl_mcp_external_secret"),
+      "remote consent receipt leaked raw scoped credential"
+    );
+    assert(
+      !remoteConsentReceipt.includes("PRIVATE KEY"),
+      "remote consent receipt leaked private key"
+    );
+  }
+  const combined = `${connectScriptText}\n${result.stdout}\n${result.stderr}\n${codexConfig}\n${remoteConsentReceipt}`;
   assert(!forbiddenOutputPattern.test(combined), "external rehearsal leaked forbidden surface");
   assert(!combined.includes(sha256("rcl_conn_external_device")), "device hash leaked");
   assert(!combined.includes(sha256("rcl_poll_external_token")), "poll hash leaked");
@@ -174,6 +199,7 @@ try {
     remote_mcp_capture_recall: "covered_by_remote-mcp-external-rehearsal:smoke",
     no_local_artifacts: {
       recallant_local_storage: false,
+      remote_consent_receipt: remoteConsentReceipt ? "non_secret_allowed" : "absent",
       docker_or_postgres: false,
       database_url: false
     },

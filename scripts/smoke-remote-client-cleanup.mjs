@@ -36,6 +36,29 @@ async function exists(path) {
 const remoteProject = await mkdtemp(join(tmpdir(), "recallant-remote-cleanup-"));
 await mkdir(join(remoteProject, ".codex"), { recursive: true });
 await mkdir(join(remoteProject, ".recallant"), { recursive: true });
+const credentialStorePath = join(remoteProject, "remote-mcp-credentials.json");
+await writeFile(
+  credentialStorePath,
+  JSON.stringify(
+    {
+      version: "remote-mcp-credential-store-v1",
+      credentials: {
+        rclcred_cleanup: {
+          credential: "rcl_mcp_secret",
+          credential_prefix: "cleanup",
+          server_url: "https://recallant.example.com",
+          project_id: "project",
+          developer_id: "developer",
+          client_id: "client",
+          created_at: "2026-06-22T00:00:00.000Z",
+          updated_at: "2026-06-22T00:00:00.000Z"
+        }
+      }
+    },
+    null,
+    2
+  )
+);
 await writeFile(
   join(remoteProject, ".codex", "config.toml"),
   [
@@ -46,7 +69,7 @@ await writeFile(
     "[mcp_servers.recallant]",
     'command = "recallant"',
     'args = ["remote-bridge"]',
-    'env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL = "rcl_mcp_secret", RECALLANT_PROJECT_ID = "project", RECALLANT_DEVELOPER_ID = "developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "client" }',
+    `env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "rclcred_cleanup", RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = "${credentialStorePath}", RECALLANT_PROJECT_ID = "project", RECALLANT_DEVELOPER_ID = "developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "client" }`,
     ""
   ].join("\n")
 );
@@ -81,7 +104,8 @@ if (
   cleanup.updated_paths[0] !== ".codex/config.toml" ||
   afterConfirm.includes("[mcp_servers.recallant]") ||
   !afterConfirm.includes("[mcp_servers.unrelated]") ||
-  !(await exists(join(remoteProject, ".recallant", "config")))
+  !(await exists(join(remoteProject, ".recallant", "config"))) ||
+  !(await exists(credentialStorePath))
 ) {
   throw new Error(`remote-cleanup confirm failed: ${JSON.stringify(cleanup)}`);
 }

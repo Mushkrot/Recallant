@@ -30,7 +30,9 @@ type RemoteMcpServerConfig = {
       args: string[];
       env: {
         RECALLANT_REMOTE_MCP_URL: string;
-        RECALLANT_REMOTE_MCP_CREDENTIAL: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL?: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL_REF?: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL_STORE?: string;
         RECALLANT_PROJECT_ID: string;
         RECALLANT_DEVELOPER_ID: string;
         RECALLANT_REMOTE_MCP_CLIENT_ID: string;
@@ -179,11 +181,15 @@ export function mcpServerConfig(
 export function remoteMcpServerConfig(input: RemoteMcpBridgeConfigInput): RemoteMcpServerConfig {
   const env: RemoteMcpServerConfig["mcpServers"]["recallant"]["env"] = {
     RECALLANT_REMOTE_MCP_URL: input.serverUrl ?? "",
-    RECALLANT_REMOTE_MCP_CREDENTIAL: input.credential ?? "",
     RECALLANT_PROJECT_ID: input.projectId ?? "",
     RECALLANT_DEVELOPER_ID: input.developerId ?? "",
     RECALLANT_REMOTE_MCP_CLIENT_ID: input.clientId ?? ""
   };
+  if (input.credentialRef) env.RECALLANT_REMOTE_MCP_CREDENTIAL_REF = input.credentialRef;
+  else env.RECALLANT_REMOTE_MCP_CREDENTIAL = input.credential ?? "";
+  if (input.credentialStorePath) {
+    env.RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = input.credentialStorePath;
+  }
   if (input.sessionId) env.RECALLANT_REMOTE_MCP_SESSION_ID = input.sessionId;
   if (input.traceId) env.RECALLANT_REMOTE_MCP_TRACE_ID = input.traceId;
   return {

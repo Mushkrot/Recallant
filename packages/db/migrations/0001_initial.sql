@@ -428,6 +428,11 @@ CREATE TABLE remote_connect_requests (
   project_path_hint_redacted TEXT,
   repo_remote_hash TEXT,
   requested_by_ip_hash TEXT,
+  trusted_device_key_prefix TEXT,
+  trusted_device_public_key_fingerprint TEXT,
+  trusted_device_public_key_hash TEXT,
+  trusted_device_public_key_algorithm TEXT,
+  trusted_device_name TEXT,
   created_by TEXT NOT NULL DEFAULT 'remote-connect',
   approved_by TEXT,
   approved_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -446,6 +451,66 @@ CREATE TABLE remote_connect_requests (
   CHECK (poll_token_hash <> ''),
   CHECK (hash_version <> ''),
   CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'redeemed')),
+  CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+);
+
+CREATE TABLE remote_trusted_devices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  device_key_prefix TEXT NOT NULL,
+  device_public_key_fingerprint TEXT NOT NULL,
+  device_public_key_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  public_key_algorithm TEXT NOT NULL DEFAULT 'unknown',
+  device_name TEXT,
+  label TEXT,
+  created_by TEXT NOT NULL DEFAULT 'remote-connect-approval',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  CHECK (device_key_prefix <> ''),
+  CHECK (device_public_key_fingerprint <> ''),
+  CHECK (device_public_key_hash <> ''),
+  CHECK (hash_version <> ''),
+  CHECK (public_key_algorithm <> '')
+);
+
+CREATE TABLE remote_trusted_device_challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES remote_trusted_devices(id) ON DELETE CASCADE,
+  challenge_nonce_prefix TEXT NOT NULL,
+  challenge_nonce_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (challenge_nonce_prefix <> ''),
+  CHECK (challenge_nonce_hash <> ''),
+  CHECK (hash_version <> '')
+);
+
+CREATE TABLE remote_connect_bootstrap_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  token_prefix TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+  target TEXT NOT NULL DEFAULT 'codex',
+  label TEXT,
+  allow_project_create BOOLEAN NOT NULL DEFAULT false,
+  created_by TEXT NOT NULL DEFAULT 'remote-connect-bootstrap',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  redeemed_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  redeemed_client_id TEXT,
+  redeemed_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  CHECK (token_prefix <> ''),
+  CHECK (token_hash <> ''),
+  CHECK (hash_version <> ''),
   CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
 );
 
@@ -554,6 +619,18 @@ CREATE INDEX idx_remote_connect_requests_poll_active
   WHERE status IN ('pending', 'approved');
 CREATE INDEX idx_remote_connect_requests_status_time
   ON remote_connect_requests (status, created_at DESC);
+CREATE INDEX idx_remote_trusted_devices_prefix_active
+  ON remote_trusted_devices (developer_id, device_key_prefix, device_public_key_fingerprint)
+  WHERE revoked_at IS NULL;
+CREATE INDEX idx_remote_trusted_devices_developer_time
+  ON remote_trusted_devices (developer_id, created_at DESC);
+CREATE UNIQUE INDEX idx_remote_trusted_device_challenges_once
+  ON remote_trusted_device_challenges (device_id, challenge_nonce_hash);
+CREATE INDEX idx_remote_connect_bootstrap_tokens_prefix_active
+  ON remote_connect_bootstrap_tokens (token_prefix, token_hash)
+  WHERE redeemed_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX idx_remote_connect_bootstrap_tokens_scope
+  ON remote_connect_bootstrap_tokens (developer_id, project_id, created_at DESC);
 CREATE INDEX idx_settings_audit_scope ON settings_audit_events (scope_kind, scope_id, created_at DESC);
 CREATE INDEX idx_settings_audit_key ON settings_audit_events (key, created_at DESC);
 

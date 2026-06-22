@@ -36,9 +36,12 @@ No unauthenticated public route should expose remote MCP.
 ### Required layers
 
 - HTTPS/TLS in transport.
-- External edge authentication (for example Cloudflare Access or equivalent).
-- DB-backed scoped remote MCP credential.
+- DB-backed scoped machine credential.
 - Project and developer scope checks before any tool execution.
+- Edge policy that keeps Workbench, admin, approval, credential-management, backup, provider, and
+  raw-artifact routes behind Cloudflare Access or an equivalent human/admin gate. Agent runtime must
+  not depend on a Cloudflare browser session; `/api/mcp` is authorized by the scoped Bearer
+  credential plus project/developer/client scope.
 
 ### Required headers
 
@@ -55,28 +58,31 @@ No unauthenticated public route should expose remote MCP.
 
 ### Auth schemes
 
-- `Bearer`
-- `Cloudflare-Access`
+- `Bearer` for agent runtime.
+- `Cloudflare-Access` or equivalent for protected human/admin/approval surfaces.
 
 ## 3a) Remote Bridge Inputs
 
 The bridge is configured from the operator's local client config or environment. It requires:
 
 - `RECALLANT_REMOTE_MCP_URL`
-- `RECALLANT_REMOTE_MCP_CREDENTIAL`
+- `RECALLANT_REMOTE_MCP_CREDENTIAL_REF` or the advanced/debug-only
+  `RECALLANT_REMOTE_MCP_CREDENTIAL`
 - `RECALLANT_PROJECT_ID`
 - `RECALLANT_DEVELOPER_ID`
 - `RECALLANT_REMOTE_MCP_CLIENT_ID`
 
 It may also send:
 
+- `RECALLANT_REMOTE_MCP_CREDENTIAL_STORE`
 - `RECALLANT_REMOTE_MCP_SESSION_ID`
 - `RECALLANT_REMOTE_MCP_TRACE_ID`
 
 Remote bridge hosts must not receive `RECALLANT_DATABASE_URL`, Postgres access, internal server
 paths, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw deployment overlays.
-The bridge rejects forbidden local secret/storage config and forbidden tool-argument payload fields
-before forwarding a memory tool call.
+Generated beginner configs store only a credential reference and resolve the raw scoped credential
+from the user's local Recallant credential store. The bridge rejects forbidden local secret/storage
+config and forbidden tool-argument payload fields before forwarding a memory tool call.
 
 ## 3b) Remote Doctor Diagnostics
 
@@ -102,12 +108,16 @@ Use placeholder-only commands in docs and runbooks:
 ```bash
 recallant remote-doctor \
   --server-url <https-recallant-server> \
-  --credential <scoped-remote-mcp-credential> \
+  --credential-ref <local-credential-ref> \
+  --credential-store <local-credential-store-path> \
   --project-id <project-id> \
   --developer-id <developer-id> \
   --client-id <client-id> \
   --format json
 ```
+
+The explicit `--credential <scoped-remote-mcp-credential>` form remains available for
+advanced/debug workflows where the operator intentionally provides the raw secret boundary.
 
 Add `--capture-proof` only when the operator wants remote MCP memory readiness evidence. Capture
 proof is reported separately from transport, auth, and scope. The deterministic diagnostic coverage
@@ -159,7 +169,10 @@ with a non-secret prefix and lifecycle metadata. The beginner remote onboarding 
 device-pairing flow: the remote workstation runs
 `curl -fsSL https://memory.example.com/connect | bash`, receives an approval URL, and waits while
 the owner approves through the protected central server. The approved poll response creates and
-returns the scoped remote MCP provisioning package once. The existing invite-command flow remains an
+returns the scoped remote MCP provisioning package once. First approval can register a local trusted
+device key; later projects from the same trusted workstation use signed nonce challenges rather than
+another Cloudflare browser approval. Headless servers can redeem short-lived one-time bootstrap
+tokens through the same public start/poll boundary. The existing invite-command flow remains an
 advanced/admin fallback: `recallant invite /path/to/project --server-url https://memory.example.com`
 creates a short-lived one-time invite, and the remote workstation runs the printed
 `curl -fsSL https://memory.example.com/j/<token> | bash` command. The invite token is also stored

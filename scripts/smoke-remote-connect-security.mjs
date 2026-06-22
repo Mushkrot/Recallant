@@ -112,7 +112,7 @@ try {
   const startThree = await postJson(
     baseUrl,
     "/api/connect/start",
-    { project_display_name: "security project" },
+    { project_display_name: "security project", bootstrap_token: "rcl_boot_security_token" },
     { "x-forwarded-for": "198.51.100.10" }
   );
   assert(startThree.status === 409, "rate-limited start did not fail");
@@ -151,7 +151,11 @@ try {
     const response = await fetch(`${baseUrl}${path}`);
     assert(response.status === 401, `${path} was not protected`);
   }
-  for (const path of ["/api/remote-credential", "/api/remote-invite"]) {
+  for (const path of [
+    "/api/remote-credential",
+    "/api/remote-invite",
+    "/api/connect/bootstrap-token"
+  ]) {
     const response = await postJson(baseUrl, path, {});
     assert(response.status === 401, `${path} was not protected`);
   }
@@ -169,6 +173,7 @@ try {
     "/api/connect/start",
     "/api/connect/poll",
     "/api/connect/cancel",
+    "/api/connect/bootstrap-token",
     "/j/*",
     "/api/remote-invite/redeem",
     "/api/mcp*",
@@ -210,7 +215,8 @@ try {
             "/review",
             "/api/review-dashboard",
             "/api/remote-credential",
-            "/api/remote-invite"
+            "/api/remote-invite",
+            "/api/connect/bootstrap-token"
           ],
           rate_limit: "start_route_guarded",
           payload_limit: "poll_payload_guarded",

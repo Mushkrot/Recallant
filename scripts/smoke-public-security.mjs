@@ -140,6 +140,9 @@ mustInclude(
   [
     "universal device-style pairing from",
     "curl -fsSL https://memory.example.com/connect | bash",
+    "Agent runtime must",
+    "not depend on a Cloudflare browser session",
+    "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
     "Remote bridge hosts must not receive `RECALLANT_DATABASE_URL`, Postgres access, internal server",
     "paths, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw deployment overlays",
     "The existing invite-command flow remains an",

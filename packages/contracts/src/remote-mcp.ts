@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
 export const remoteMcpEndpointPath = "/api/mcp" as const;
 
 export const remoteConnectBootstrapPath = "/connect" as const;
@@ -20,11 +25,16 @@ export const remoteConnectDefaultExpiresSeconds = 600 as const;
 
 export type RemoteConnectStartRequest = {
   target?: string | null;
+  project_id?: string | null;
   project_display_name?: string | null;
   project_fingerprint?: string | null;
   project_path_hint_redacted?: string | null;
   repo_remote_hash?: string | null;
   requested_by_ip_hash?: string | null;
+  trusted_device_registration?: RemoteTrustedDeviceRegistration | null;
+  trusted_device?: RemoteConnectTrustedDeviceStart | null;
+  bootstrap_token?: string | null;
+  consent_scope?: RemoteAgentConsentScope | null;
 };
 
 export type RemoteConnectStartResponse = {
@@ -35,6 +45,9 @@ export type RemoteConnectStartResponse = {
   approve_url: string;
   expires_at: string;
   interval_seconds: number;
+  approval_mode?: RemoteConnectApprovalMode;
+  trusted_device?: RemoteConnectTrustedDeviceStartResult | null;
+  bootstrap_token?: RemoteConnectBootstrapTokenStartResult | null;
 };
 
 export type RemoteConnectPollRequest = {
@@ -52,6 +65,7 @@ export type RemoteConnectPollResponse =
   | {
       ok: true;
       status: "approved";
+      approval_mode: RemoteConnectApprovalMode;
       request_id: string;
       bootstrap: {
         server_url: string;
@@ -66,6 +80,141 @@ export type RemoteConnectPollResponse =
 
 export type RemoteConnectCancelRequest = {
   poll_token: string;
+};
+
+export type RemoteConnectApprovalMode = "human_approval" | "trusted_device" | "bootstrap_token";
+
+export type RemoteTrustedDeviceStatus = "active" | "expired" | "revoked";
+
+export const remoteTrustedDeviceDefaultExpiresSeconds = 90 * 24 * 60 * 60;
+
+export type RemoteTrustedDeviceRegistration = {
+  device_name: string;
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  public_key_material: string;
+  public_key_algorithm: "ed25519-v1" | "p256-v1" | "unknown";
+  trust_expires_at?: string | null;
+};
+
+export type RemoteConnectTrustedDeviceStart = {
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  public_key_material: string;
+  challenge_nonce: string;
+  challenge_signature: string;
+  signature_algorithm: "ed25519-v1" | "p256-v1" | "unknown";
+};
+
+export type RemoteConnectTrustedDeviceStartResult =
+  | {
+      status: "approved";
+      approval_mode: "trusted_device";
+      browser_approval_required: false;
+      device_key_prefix: string;
+      public_key_fingerprint: string;
+    }
+  | {
+      status: "fallback";
+      reason:
+        | "missing_device"
+        | "invalid_device"
+        | "invalid_signature"
+        | "expired"
+        | "revoked"
+        | "replayed";
+      browser_approval_required: true;
+      device_key_prefix: string;
+      public_key_fingerprint: string;
+    }
+  | {
+      status: "pending_human_approval";
+      browser_approval_required: true;
+      device_key_prefix: string;
+      public_key_fingerprint: string;
+    };
+
+export type RemoteConnectTrustedDeviceResult = {
+  status: RemoteTrustedDeviceStatus;
+  device_id: string;
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
+export type RemoteConnectBootstrapTokenStatus = "active" | "expired" | "redeemed" | "revoked";
+
+export const remoteConnectBootstrapTokenDefaultExpiresSeconds = 15 * 60;
+
+export type RemoteConnectBootstrapTokenCreateRequest = {
+  project_id?: string | null;
+  developer_id: string;
+  target?: RemoteMcpClientTarget | null;
+  label?: string | null;
+  allow_project_create?: boolean;
+  expires_at?: string | null;
+};
+
+export type RemoteConnectBootstrapTokenCreateResponse = {
+  ok: true;
+  bootstrap_token: string;
+  token_prefix: string;
+  status: "active";
+  project_id: string | null;
+  developer_id: string;
+  target: RemoteMcpClientTarget;
+  expires_at: string;
+};
+
+export type RemoteConnectBootstrapTokenRedeemRequest = {
+  bootstrap_token: string;
+  project_display_name?: string | null;
+  project_fingerprint?: string | null;
+  project_path_hint_redacted?: string | null;
+  client_id?: string | null;
+  target?: RemoteMcpClientTarget | null;
+};
+
+export type RemoteConnectBootstrapTokenRedeemResponse = {
+  ok: true;
+  approval_mode: "bootstrap_token";
+  token_prefix: string;
+  project_id: string | null;
+  developer_id: string;
+  client_id: string;
+  target: RemoteMcpClientTarget;
+};
+
+export type RemoteConnectBootstrapTokenStartResult = {
+  status: "approved";
+  approval_mode: "bootstrap_token";
+  browser_approval_required: false;
+  token_prefix: string;
+};
+
+export type RemoteConnectCredentialStoreReference = {
+  kind: "local_file_v1" | "os_keychain" | "env_reference";
+  key: string;
+  display_path?: string | null;
+  credential_prefix?: string | null;
+};
+
+export type RemoteAgentConsentScope = {
+  destination: {
+    server_url: string;
+    endpoint_path: typeof remoteMcpEndpointPath;
+  };
+  credential_scope: {
+    project_id: string | null;
+    developer_id: string | null;
+    client_id: string | null;
+    credential_prefix?: string | null;
+  };
+  allowed_context: string[];
+  redaction_boundary: string[];
+  not_sent: string[];
+  recommended_next_call: "memory_get_context_pack" | "recallant context";
 };
 
 export const remoteMcpTransport = "mcp_streamable_http" as const;
@@ -84,6 +233,8 @@ export const remoteMcpAuthSchemes = ["Bearer", "Cloudflare-Access"] as const;
 export const remoteMcpBridgeEnv = {
   serverUrl: "RECALLANT_REMOTE_MCP_URL",
   credential: "RECALLANT_REMOTE_MCP_CREDENTIAL",
+  credentialRef: "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
+  credentialStore: "RECALLANT_REMOTE_MCP_CREDENTIAL_STORE",
   projectId: "RECALLANT_PROJECT_ID",
   developerId: "RECALLANT_DEVELOPER_ID",
   clientId: "RECALLANT_REMOTE_MCP_CLIENT_ID",
@@ -94,6 +245,8 @@ export const remoteMcpBridgeEnv = {
 export const remoteMcpBridgeFlags = {
   serverUrl: "--server-url",
   credential: "--credential",
+  credentialRef: "--credential-ref",
+  credentialStore: "--credential-store",
   projectId: "--project-id",
   developerId: "--developer-id",
   clientId: "--client-id",
@@ -231,7 +384,9 @@ export type RemoteMcpServerConfig = {
       args: string[];
       env: {
         RECALLANT_REMOTE_MCP_URL: string;
-        RECALLANT_REMOTE_MCP_CREDENTIAL: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL?: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL_REF?: string;
+        RECALLANT_REMOTE_MCP_CREDENTIAL_STORE?: string;
         RECALLANT_PROJECT_ID: string;
         RECALLANT_DEVELOPER_ID: string;
         RECALLANT_REMOTE_MCP_CLIENT_ID: string;
@@ -337,6 +492,8 @@ export type RemoteMcpProvisioningOutput = {
 export type RemoteMcpBridgeConfigInput = {
   serverUrl?: string | null;
   credential?: string | null;
+  credentialRef?: string | null;
+  credentialStorePath?: string | null;
   projectId?: string | null;
   developerId?: string | null;
   clientId?: string | null;
@@ -348,12 +505,133 @@ export type RemoteMcpBridgeConfig = {
   serverUrl: string;
   endpointUrl: string;
   credential: string;
+  credentialRef: string | null;
+  credentialStorePath: string | null;
   projectId: string;
   developerId: string;
   clientId: string;
   sessionId: string | null;
   traceId: string | null;
 };
+
+export type RemoteMcpCredentialStoreEntry = {
+  credential: string;
+  credential_prefix: string | null;
+  server_url: string;
+  project_id: string;
+  developer_id: string;
+  client_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RemoteMcpCredentialStoreFile = {
+  version: "remote-mcp-credential-store-v1";
+  credentials: Record<string, RemoteMcpCredentialStoreEntry>;
+};
+
+export function remoteMcpCredentialStorePath(home = homedir()) {
+  return join(home, ".config", "recallant", "remote-mcp-credentials.json");
+}
+
+export function remoteMcpCredentialStoreKey(input: {
+  serverUrl: string;
+  projectId: string;
+  developerId: string;
+  clientId: string;
+}) {
+  const hash = createHash("sha256")
+    .update(
+      [
+        normalizeRemoteMcpBridgeServerUrl(input.serverUrl),
+        input.projectId,
+        input.developerId,
+        input.clientId
+      ].join("\n")
+    )
+    .digest("hex")
+    .slice(0, 24);
+  return `rclcred_${hash}`;
+}
+
+function emptyRemoteMcpCredentialStore(): RemoteMcpCredentialStoreFile {
+  return { version: "remote-mcp-credential-store-v1", credentials: {} };
+}
+
+function readRemoteMcpCredentialStore(path: string): RemoteMcpCredentialStoreFile {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RemoteMcpCredentialStoreFile>;
+    if (parsed.version === "remote-mcp-credential-store-v1" && parsed.credentials) {
+      return {
+        version: "remote-mcp-credential-store-v1",
+        credentials: parsed.credentials as Record<string, RemoteMcpCredentialStoreEntry>
+      };
+    }
+  } catch {
+    return emptyRemoteMcpCredentialStore();
+  }
+  return emptyRemoteMcpCredentialStore();
+}
+
+export function storeRemoteMcpCredential(input: {
+  credential: string;
+  serverUrl: string;
+  projectId: string;
+  developerId: string;
+  clientId: string;
+  credentialPrefix?: string | null;
+  storePath?: string | null;
+}) {
+  const storePath = input.storePath?.trim() || remoteMcpCredentialStorePath();
+  const key = remoteMcpCredentialStoreKey(input);
+  const now = new Date().toISOString();
+  const store = readRemoteMcpCredentialStore(storePath);
+  const previous = store.credentials[key];
+  store.credentials[key] = {
+    credential: input.credential,
+    credential_prefix: input.credentialPrefix ?? previous?.credential_prefix ?? null,
+    server_url: normalizeRemoteMcpBridgeServerUrl(input.serverUrl),
+    project_id: input.projectId,
+    developer_id: input.developerId,
+    client_id: input.clientId,
+    created_at: previous?.created_at ?? now,
+    updated_at: now
+  };
+  mkdirSync(dirname(storePath), { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dirname(storePath), 0o700);
+  } catch {
+    // Best effort on filesystems that do not support chmod.
+  }
+  writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(storePath, 0o600);
+  } catch {
+    // Best effort on filesystems that do not support chmod.
+  }
+  return {
+    kind: "local_file_v1" as const,
+    key,
+    display_path: storePath,
+    credential_prefix: store.credentials[key].credential_prefix
+  };
+}
+
+export function resolveRemoteMcpStoredCredential(input: {
+  credential?: string | null;
+  credentialRef?: string | null;
+  credentialStorePath?: string | null;
+}) {
+  const explicit = optionalBridgeString(input.credential);
+  if (explicit) return explicit;
+  const credentialRef = optionalBridgeString(input.credentialRef);
+  if (!credentialRef) return null;
+  const storePath =
+    optionalBridgeString(input.credentialStorePath) ?? remoteMcpCredentialStorePath();
+  const store = readRemoteMcpCredentialStore(storePath);
+  const credential = store.credentials[credentialRef]?.credential;
+  return optionalBridgeString(credential);
+}
 
 export const remoteMcpHeaders = {
   required: remoteMcpRequiredHeaders,
@@ -578,10 +856,16 @@ export function validateRemoteMcpBridgeConfig(
   const serverUrl = normalizeRemoteMcpBridgeServerUrl(
     requiredBridgeString(input.serverUrl, remoteMcpBridgeEnv.serverUrl)
   );
+  const credential = resolveRemoteMcpStoredCredential(input);
   return {
     serverUrl,
     endpointUrl: remoteMcpBridgeEndpointUrl(serverUrl),
-    credential: requiredBridgeString(input.credential, remoteMcpBridgeEnv.credential),
+    credential: requiredBridgeString(
+      credential,
+      `${remoteMcpBridgeEnv.credential} or ${remoteMcpBridgeEnv.credentialRef}`
+    ),
+    credentialRef: optionalBridgeString(input.credentialRef),
+    credentialStorePath: optionalBridgeString(input.credentialStorePath),
     projectId: requiredBridgeString(input.projectId, remoteMcpBridgeEnv.projectId),
     developerId: requiredBridgeString(input.developerId, remoteMcpBridgeEnv.developerId),
     clientId: requiredBridgeString(input.clientId, remoteMcpBridgeEnv.clientId),
@@ -607,11 +891,14 @@ export function remoteMcpBridgeHeaders(input: RemoteMcpBridgeConfigInput) {
 export function remoteMcpServerConfig(input: RemoteMcpBridgeConfigInput): RemoteMcpServerConfig {
   const env: RemoteMcpServerConfig["mcpServers"]["recallant"]["env"] = {
     RECALLANT_REMOTE_MCP_URL: input.serverUrl ?? "",
-    RECALLANT_REMOTE_MCP_CREDENTIAL: input.credential ?? "",
     RECALLANT_PROJECT_ID: input.projectId ?? "",
     RECALLANT_DEVELOPER_ID: input.developerId ?? "",
     RECALLANT_REMOTE_MCP_CLIENT_ID: input.clientId ?? ""
   };
+  if (input.credentialRef) env.RECALLANT_REMOTE_MCP_CREDENTIAL_REF = input.credentialRef;
+  else env.RECALLANT_REMOTE_MCP_CREDENTIAL = input.credential ?? "";
+  if (input.credentialStorePath)
+    env.RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = input.credentialStorePath;
   if (input.sessionId) env.RECALLANT_REMOTE_MCP_SESSION_ID = input.sessionId;
   if (input.traceId) env.RECALLANT_REMOTE_MCP_TRACE_ID = input.traceId;
   return {

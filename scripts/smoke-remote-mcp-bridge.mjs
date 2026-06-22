@@ -1,11 +1,17 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createRecallantRemoteBridgeServer,
   runRecallantRemoteBridge
 } from "../packages/mcp/dist/remote-bridge.js";
+import {
+  storeRemoteMcpCredential,
+  validateRemoteMcpBridgeConfig
+} from "../packages/contracts/dist/index.js";
 import {
   remoteClientTargetConfig,
   renderRemoteClientTargetConfig
@@ -207,6 +213,16 @@ const originalDatabaseUrl = process.env.RECALLANT_DATABASE_URL;
 delete process.env.RECALLANT_DATABASE_URL;
 
 const fixture = await startCentralMcpFixture();
+const credentialStoreDir = await mkdtemp(join(tmpdir(), "recallant-bridge-credential-store-"));
+const credentialStore = storeRemoteMcpCredential({
+  credential: validCredential,
+  serverUrl: fixture.serverUrl,
+  projectId: expectedScope.projectId,
+  developerId: expectedScope.developerId,
+  clientId: expectedScope.clientId,
+  credentialPrefix: "bridge-fixture",
+  storePath: join(credentialStoreDir, "remote-mcp-credentials.json")
+});
 function bridgeConfig(overrides = {}) {
   return {
     serverUrl: fixture.serverUrl,
@@ -277,9 +293,16 @@ async function assertNoCredentialLeakOutsideAllowedBoundary(outputText) {
     null,
     remoteClientTargetConfig("generic", {
       ...bridgeConfig(),
-      credential: "${RECALLANT_REMOTE_MCP_CREDENTIAL}"
+      credential: null,
+      credentialRef: credentialStore.key,
+      credentialStorePath: credentialStore.display_path
     })
   );
+  assert(
+    generatedConfig.includes("RECALLANT_REMOTE_MCP_CREDENTIAL_REF"),
+    "generated config did not use credential ref"
+  );
+  assert(!generatedConfig.includes(validCredential), "generated config embedded raw credential");
   const docs = await Promise.all(
     ["docs/MCP_SPEC.md", "docs/CLIENT_SETUP.md", "docs/CONTRACT_STATUS.md"].map((path) =>
       readFile(path, "utf8")
@@ -402,6 +425,21 @@ try {
   await rotatedNewRoundtrip.mcpClient.close();
   await rotatedNewRoundtrip.bridgeServer.close();
 
+  const storedConfig = validateRemoteMcpBridgeConfig({
+    serverUrl: fixture.serverUrl,
+    credentialRef: credentialStore.key,
+    credentialStorePath: credentialStore.display_path,
+    projectId: expectedScope.projectId,
+    developerId: expectedScope.developerId,
+    clientId: expectedScope.clientId,
+    sessionId: expectedScope.sessionId,
+    traceId: expectedScope.traceId
+  });
+  assert(storedConfig.credential === validCredential, "credential store lookup failed");
+  const storedCredentialRoundtrip = await runBridgeRoundtrip(storedConfig);
+  await storedCredentialRoundtrip.mcpClient.close();
+  await storedCredentialRoundtrip.bridgeServer.close();
+
   const blockedConfigCases = [
     await expectConfigBlocked("blocked_database_url_env", ["node", "recallant", "remote-bridge"], {
       RECALLANT_DATABASE_URL: "postgres://blocked"
@@ -480,6 +518,8 @@ try {
       structured_content: call.structuredContent,
       failure_cases: failureCases,
       rotated_new_credential_succeeds: true,
+      credential_store_lookup_succeeds: true,
+      generated_config_uses_credential_ref: true,
       blocked_config_cases: blockedConfigCases,
       forbidden_tool_payload_forwarded: false,
       required_headers_seen: true,

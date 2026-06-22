@@ -48,7 +48,23 @@ curl -fsSL https://memory.example.com/connect | bash
 ```
 
 It works even when `recallant` is missing or old on the remote machine. The remote machine
-starts a pending connection request and the owner approves it in the protected browser flow.
+starts a pending connection request and the owner approves it in the protected browser flow. That
+first approval registers a local trusted-device key on the workstation. Later projects from the same
+trusted workstation can reconnect with the same `curl .../connect | bash` / `connect-cloud` path
+using signed device challenges instead of another Cloudflare email-code browser approval.
+
+For headless servers or CI-like hosts where no browser approval is practical, an administrator can
+create a short-lived one-time bootstrap token through the protected central server API. The remote
+host then runs:
+
+```bash
+recallant connect-cloud . --server-url https://memory.example.com --bootstrap-token <one-time-token>
+```
+
+Bootstrap tokens are one-time, hash/prefix stored on the server, expire quickly, and do not grant
+Workbench, admin, credential-management, backup, provider, raw-artifact, or browser-session access.
+They only approve the remote connect request enough for `/api/connect/poll` to return a scoped MCP
+credential once.
 
 Advanced/admin fallback: create a short-lived invite on the central Recallant server:
 
@@ -173,6 +189,13 @@ Codex in that project. If `remote-doctor` fails, the script keeps the credential
 the operator toward server URL, credential status, project/developer/client scope, or edge/access
 policy instead of local Docker/Postgres setup.
 
+For no-browser servers, use the protected bootstrap-token path instead of an invite when the host
+should autonomously connect once and then rely on its scoped project credential:
+
+```bash
+recallant connect-cloud . --server-url https://memory.example.com --bootstrap-token <one-time-token>
+```
+
 Maintainers can still use the lower-level package form when debugging provisioning or credential
 scope directly:
 
@@ -203,12 +226,17 @@ recallant connect-remote codex \
 The generated MCP server uses `recallant remote-bridge` and these remote-only environment variables:
 
 - `RECALLANT_REMOTE_MCP_URL`
-- `RECALLANT_REMOTE_MCP_CREDENTIAL`
+- `RECALLANT_REMOTE_MCP_CREDENTIAL_REF`
+- optional `RECALLANT_REMOTE_MCP_CREDENTIAL_STORE`
 - `RECALLANT_PROJECT_ID`
 - `RECALLANT_DEVELOPER_ID`
 - `RECALLANT_REMOTE_MCP_CLIENT_ID`
 - optional `RECALLANT_REMOTE_MCP_SESSION_ID`
 - optional `RECALLANT_REMOTE_MCP_TRACE_ID`
+
+New generated configs reference the local credential store instead of embedding the raw scoped
+credential. The explicit `RECALLANT_REMOTE_MCP_CREDENTIAL` value remains an advanced/debug-only
+compatibility path, not the beginner output.
 
 The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,
 Workbench/admin auth, raw artifacts, backups, or provider secrets. Local stdio MCP remains the
@@ -462,6 +490,23 @@ The first agent session after connect should:
 
 That startup contract is what turns a registered project into an agent-ready project. If the loop is
 not visible in Recallant, the project is configured but not yet capture active.
+
+For remote projects, `recallant agent-start --format json` reports the external Recallant consent
+boundary before agent work continues: destination server, HTTPS `/api/mcp` endpoint, project /
+developer / client credential scope, allowed context classes, prohibited data classes, and the
+recommended next call. Text mode prints the same boundary for humans.
+
+The prohibited classes are `.env`, private keys, raw credentials, customer data, provider secrets,
+database URLs, raw artifacts, and backups. Those must not be sent through Recallant memory tools,
+stored in consent receipts, or copied into project config. The local consent receipt written by
+`connect-cloud` is a non-secret reminder of the remote boundary; it stores credential references and
+redaction classes, not raw credentials or private keys.
+
+Cloudflare Access remains the human gate for dashboard/admin/approval surfaces. Agent runtime uses
+the scoped machine credential from the local credential store and does not require Cloudflare browser
+auth after the project is connected. Codex or another agent client may still ask its own
+external-context safety confirmation; that client-level prompt is separate from Recallant auth and
+should be answered only after reviewing the reported consent boundary.
 
 If MCP tools are unavailable, use CLI fallback commands:
 

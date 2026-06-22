@@ -64,7 +64,7 @@ for (const marker of [
 
 const contractStatus = await read("docs/CONTRACT_STATUS.md");
 for (const marker of [
-  "Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, and CLI-first remote diagnostics slice",
+  "Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, CLI-first diagnostics",
   "Remote project access to a central server",
   "remote-mcp-contract:smoke",
   "remote-mcp-provisioning:smoke",

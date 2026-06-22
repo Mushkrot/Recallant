@@ -140,6 +140,8 @@ export type RedeemRemoteOnboardingInviteResult = {
 
 export type RemoteConnectRequestStatus = "pending" | "approved" | "denied" | "expired" | "redeemed";
 
+export type RemoteConnectApprovalMode = "human_approval" | "trusted_device" | "bootstrap_token";
+
 export type RemoteConnectRequestRow = {
   id: string;
   device_code_prefix: string;
@@ -154,6 +156,11 @@ export type RemoteConnectRequestRow = {
   project_path_hint_redacted: string | null;
   repo_remote_hash: string | null;
   requested_by_ip_hash: string | null;
+  trusted_device_key_prefix: string | null;
+  trusted_device_public_key_fingerprint: string | null;
+  trusted_device_public_key_hash: string | null;
+  trusted_device_public_key_algorithm: string | null;
+  trusted_device_name: string | null;
   created_by: string;
   approved_by: string | null;
   approved_project_id: string | null;
@@ -170,7 +177,7 @@ export type RemoteConnectRequestRow = {
 
 export type RemoteConnectRequestSummary = Omit<
   RemoteConnectRequestRow,
-  "device_code_hash" | "poll_token_hash"
+  "device_code_hash" | "poll_token_hash" | "trusted_device_public_key_hash"
 > & {
   status: RemoteConnectRequestStatus;
 };
@@ -182,6 +189,12 @@ export type CreateRemoteConnectRequestInput = {
   projectPathHintRedacted?: string | null;
   repoRemoteHash?: string | null;
   requestedByIpHash?: string | null;
+  trustedDeviceKeyPrefix?: string | null;
+  trustedDevicePublicKeyFingerprint?: string | null;
+  trustedDevicePublicKeyMaterial?: string | null;
+  trustedDevicePublicKeyHash?: string | null;
+  trustedDevicePublicKeyAlgorithm?: string | null;
+  trustedDeviceName?: string | null;
   expiresAt?: string | Date | null;
   createdBy?: string | null;
 };
@@ -209,6 +222,14 @@ export type GetRemoteConnectRequestForApprovalInput = {
   deviceCode: string;
 };
 
+export type RemoteConnectTrustedDeviceRegistrationSummary = {
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  public_key_hash: string;
+  public_key_algorithm: string | null;
+  device_name: string | null;
+};
+
 export type PollRemoteConnectRequestInput = {
   pollToken: string;
   redeemedBy?: string | null;
@@ -229,6 +250,142 @@ export type PollRemoteConnectRequestResult =
       client_id: string;
       target: string;
     };
+
+export type RemoteTrustedDeviceStatus = "active" | "expired" | "revoked";
+
+export type RemoteTrustedDeviceRow = {
+  id: string;
+  developer_id: string;
+  device_key_prefix: string;
+  device_public_key_fingerprint: string;
+  device_public_key_hash: string;
+  hash_version: string;
+  public_key_algorithm: string;
+  device_name: string | null;
+  label: string | null;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+  last_used_at: Date | null;
+  expires_at: Date | null;
+  revoked_at: Date | null;
+};
+
+export type RemoteTrustedDeviceSummary = Omit<RemoteTrustedDeviceRow, "device_public_key_hash"> & {
+  status: RemoteTrustedDeviceStatus;
+};
+
+export type CreateRemoteTrustedDeviceInput = {
+  developerId: string;
+  deviceKeyPrefix: string;
+  publicKeyFingerprint: string;
+  publicKeyMaterial?: string | null;
+  publicKeyHash?: string | null;
+  publicKeyAlgorithm?: string | null;
+  deviceName?: string | null;
+  label?: string | null;
+  expiresAt?: string | Date | null;
+  createdBy?: string | null;
+};
+
+export type VerifyRemoteTrustedDeviceInput = {
+  developerId: string;
+  deviceKeyPrefix: string;
+  publicKeyFingerprint: string;
+  publicKeyMaterial?: string | null;
+  challengeNonce?: string | null;
+  verifiedBy?: string | null;
+};
+
+export type VerifyRemoteTrustedDeviceResult =
+  | {
+      ok: true;
+      device: RemoteTrustedDeviceSummary;
+    }
+  | {
+      ok: false;
+      code: "missing_device" | "invalid_device" | "expired" | "revoked" | "replayed";
+      message: string;
+      device?: RemoteTrustedDeviceSummary;
+    };
+
+export type VerifyRemoteTrustedDeviceChallengeInput = {
+  deviceKeyPrefix: string;
+  publicKeyFingerprint: string;
+  publicKeyMaterial: string;
+  challengeNonce: string;
+  verifiedBy?: string | null;
+};
+
+export type RevokeRemoteTrustedDeviceInput = {
+  deviceId: string;
+  revokedBy?: string | null;
+};
+
+export type RemoteConnectBootstrapTokenStatus = "active" | "expired" | "redeemed" | "revoked";
+
+export type RemoteConnectBootstrapTokenRow = {
+  id: string;
+  project_id: string | null;
+  developer_id: string;
+  token_prefix: string;
+  token_hash: string;
+  hash_version: string;
+  target: string;
+  label: string | null;
+  allow_project_create: boolean;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+  expires_at: Date;
+  redeemed_at: Date | null;
+  revoked_at: Date | null;
+  redeemed_client_id: string | null;
+  redeemed_project_id: string | null;
+};
+
+export type RemoteConnectBootstrapTokenSummary = Omit<
+  RemoteConnectBootstrapTokenRow,
+  "token_hash"
+> & {
+  status: RemoteConnectBootstrapTokenStatus;
+};
+
+export type CreateRemoteConnectBootstrapTokenInput = {
+  projectId?: string | null;
+  developerId: string;
+  target?: string | null;
+  label?: string | null;
+  allowProjectCreate?: boolean;
+  expiresAt?: string | Date | null;
+  createdBy?: string | null;
+};
+
+export type CreateRemoteConnectBootstrapTokenResult = {
+  token: string;
+  bootstrap_token: RemoteConnectBootstrapTokenSummary;
+};
+
+export type RedeemRemoteConnectBootstrapTokenInput = {
+  token: string;
+  clientId?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  redeemedBy?: string | null;
+};
+
+export type RedeemRemoteConnectBootstrapTokenResult = {
+  bootstrap_token: RemoteConnectBootstrapTokenSummary;
+  project_id: string | null;
+  developer_id: string;
+  client_id: string;
+  target: string;
+};
+
+export type RevokeRemoteConnectBootstrapTokenInput = {
+  tokenId: string;
+  revokedBy?: string | null;
+};
 
 export type CreateRemoteMcpCredentialInput = {
   projectId: string;
@@ -1733,6 +1890,11 @@ function chunkText(text: string, maxChars = 4_000) {
 const remoteConnectHashVersion = "sha256-v1" as const;
 const remoteConnectPrefixBytes = 8;
 const remoteConnectSecretBytes = 24;
+const remoteTrustedDeviceHashVersion = "sha256-v1" as const;
+const remoteTrustedDeviceDefaultExpiresMs = 90 * 24 * 60 * 60 * 1000;
+const remoteConnectBootstrapTokenHashVersion = "sha256-v1" as const;
+const remoteConnectBootstrapPrefixBytes = 8;
+const remoteConnectBootstrapSecretBytes = 24;
 
 function generateRemoteConnectSecret(kind: "conn" | "poll") {
   const prefix = randomBytes(remoteConnectPrefixBytes).toString("hex");
@@ -1742,9 +1904,7 @@ function generateRemoteConnectSecret(kind: "conn" | "poll") {
 
 function extractRemoteConnectPrefix(secret: string, kind: "conn" | "poll") {
   const parts = secret.split("_");
-  return parts.length >= 4 && parts[0] === "rcl" && parts[1] === kind && parts[3]
-    ? parts[2]
-    : null;
+  return parts.length >= 4 && parts[0] === "rcl" && parts[1] === kind && parts[3] ? parts[2] : null;
 }
 
 function hashRemoteConnectSecret(secret: string) {
@@ -1770,13 +1930,87 @@ function remoteConnectRequestStatus(row: RemoteConnectRequestRow): RemoteConnect
   return row.status;
 }
 
+function defaultRemoteTrustedDeviceExpiry() {
+  return new Date(Date.now() + remoteTrustedDeviceDefaultExpiresMs);
+}
+
+function hashRemoteTrustedDevicePublicKey(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function hashRemoteTrustedDeviceChallengeNonce(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function remoteTrustedDeviceStatus(row: RemoteTrustedDeviceRow): RemoteTrustedDeviceStatus {
+  if (row.revoked_at) return "revoked";
+  if (row.expires_at && row.expires_at.getTime() <= Date.now()) return "expired";
+  return "active";
+}
+
+function summarizeRemoteTrustedDevice(row: RemoteTrustedDeviceRow): RemoteTrustedDeviceSummary {
+  const summary = { ...row } as RemoteTrustedDeviceSummary & {
+    device_public_key_hash?: string;
+  };
+  delete summary.device_public_key_hash;
+  summary.status = remoteTrustedDeviceStatus(row);
+  return summary;
+}
+
+function generateRemoteConnectBootstrapToken() {
+  const prefix = randomBytes(remoteConnectBootstrapPrefixBytes).toString("hex");
+  const secret = randomBytes(remoteConnectBootstrapSecretBytes).toString("base64url");
+  return `rcl_boot_${prefix}_${secret}`;
+}
+
+function extractRemoteConnectBootstrapPrefix(token: string) {
+  const parts = token.split("_");
+  return parts.length >= 4 && parts[0] === "rcl" && parts[1] === "boot" && parts[3]
+    ? parts[2]
+    : null;
+}
+
+function hashRemoteConnectBootstrapToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function constantTimeRemoteConnectBootstrapHashEquals(left: string, right: string) {
+  const leftBuffer = Buffer.from(left, "hex");
+  const rightBuffer = Buffer.from(right, "hex");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function defaultRemoteConnectBootstrapTokenExpiry() {
+  return new Date(Date.now() + 15 * 60_000);
+}
+
+function remoteConnectBootstrapTokenStatus(
+  row: RemoteConnectBootstrapTokenRow
+): RemoteConnectBootstrapTokenStatus {
+  if (row.revoked_at) return "revoked";
+  if (row.redeemed_at) return "redeemed";
+  if (row.expires_at.getTime() <= Date.now()) return "expired";
+  return "active";
+}
+
+function summarizeRemoteConnectBootstrapToken(
+  row: RemoteConnectBootstrapTokenRow
+): RemoteConnectBootstrapTokenSummary {
+  const summary = { ...row } as RemoteConnectBootstrapTokenSummary & { token_hash?: string };
+  delete summary.token_hash;
+  summary.status = remoteConnectBootstrapTokenStatus(row);
+  return summary;
+}
+
 function summarizeRemoteConnectRequest(row: RemoteConnectRequestRow): RemoteConnectRequestSummary {
   const summary = { ...row } as RemoteConnectRequestSummary & {
     device_code_hash?: string;
     poll_token_hash?: string;
+    trusted_device_public_key_hash?: string;
   };
   delete summary.device_code_hash;
   delete summary.poll_token_hash;
+  delete summary.trusted_device_public_key_hash;
   summary.status = remoteConnectRequestStatus(row);
   return summary;
 }
@@ -1865,6 +2099,11 @@ export class RecallantDb {
         project_path_hint_redacted TEXT,
         repo_remote_hash TEXT,
         requested_by_ip_hash TEXT,
+        trusted_device_key_prefix TEXT,
+        trusted_device_public_key_fingerprint TEXT,
+        trusted_device_public_key_hash TEXT,
+        trusted_device_public_key_algorithm TEXT,
+        trusted_device_name TEXT,
         created_by TEXT NOT NULL DEFAULT 'remote-connect',
         approved_by TEXT,
         approved_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -1899,6 +2138,112 @@ export class RecallantDb {
     await this.pool.query(`
       CREATE INDEX IF NOT EXISTS idx_remote_connect_requests_status_time
         ON remote_connect_requests (status, created_at DESC)
+    `);
+    await this.pool.query(`
+      ALTER TABLE remote_connect_requests
+        ADD COLUMN IF NOT EXISTS repo_remote_hash TEXT,
+        ADD COLUMN IF NOT EXISTS requested_by_ip_hash TEXT,
+        ADD COLUMN IF NOT EXISTS trusted_device_key_prefix TEXT,
+        ADD COLUMN IF NOT EXISTS trusted_device_public_key_fingerprint TEXT,
+        ADD COLUMN IF NOT EXISTS trusted_device_public_key_hash TEXT,
+        ADD COLUMN IF NOT EXISTS trusted_device_public_key_algorithm TEXT,
+        ADD COLUMN IF NOT EXISTS trusted_device_name TEXT,
+        ADD COLUMN IF NOT EXISTS approved_by TEXT,
+        ADD COLUMN IF NOT EXISTS approved_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS developer_id UUID REFERENCES developers(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS client_id TEXT,
+        ADD COLUMN IF NOT EXISTS credential_id UUID REFERENCES remote_mcp_credentials(id) ON DELETE SET NULL
+    `);
+  }
+
+  async ensureRemoteTrustedDeviceSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS remote_trusted_devices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+        device_key_prefix TEXT NOT NULL,
+        device_public_key_fingerprint TEXT NOT NULL,
+        device_public_key_hash TEXT NOT NULL,
+        hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+        public_key_algorithm TEXT NOT NULL DEFAULT 'unknown',
+        device_name TEXT,
+        label TEXT,
+        created_by TEXT NOT NULL DEFAULT 'remote-connect-approval',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_used_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        CHECK (device_key_prefix <> ''),
+        CHECK (device_public_key_fingerprint <> ''),
+        CHECK (device_public_key_hash <> ''),
+        CHECK (hash_version <> ''),
+        CHECK (public_key_algorithm <> '')
+      )
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_trusted_devices_prefix_active
+        ON remote_trusted_devices (developer_id, device_key_prefix, device_public_key_fingerprint)
+        WHERE revoked_at IS NULL
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_trusted_devices_developer_time
+        ON remote_trusted_devices (developer_id, created_at DESC)
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS remote_trusted_device_challenges (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        device_id UUID NOT NULL REFERENCES remote_trusted_devices(id) ON DELETE CASCADE,
+        challenge_nonce_prefix TEXT NOT NULL,
+        challenge_nonce_hash TEXT NOT NULL,
+        hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (challenge_nonce_prefix <> ''),
+        CHECK (challenge_nonce_hash <> ''),
+        CHECK (hash_version <> '')
+      )
+    `);
+    await this.pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_trusted_device_challenges_once
+        ON remote_trusted_device_challenges (device_id, challenge_nonce_hash)
+    `);
+  }
+
+  async ensureRemoteConnectBootstrapTokenSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS remote_connect_bootstrap_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+        developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+        token_prefix TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        hash_version TEXT NOT NULL DEFAULT 'sha256-v1',
+        target TEXT NOT NULL DEFAULT 'codex',
+        label TEXT,
+        allow_project_create BOOLEAN NOT NULL DEFAULT false,
+        created_by TEXT NOT NULL DEFAULT 'remote-connect-bootstrap',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        redeemed_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ,
+        redeemed_client_id TEXT,
+        redeemed_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        CHECK (token_prefix <> ''),
+        CHECK (token_hash <> ''),
+        CHECK (hash_version <> ''),
+        CHECK (target IN ('codex', 'cursor', 'claude_code', 'generic'))
+      )
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_connect_bootstrap_tokens_prefix_active
+        ON remote_connect_bootstrap_tokens (token_prefix, token_hash)
+        WHERE redeemed_at IS NULL AND revoked_at IS NULL
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_remote_connect_bootstrap_tokens_scope
+        ON remote_connect_bootstrap_tokens (developer_id, project_id, created_at DESC)
     `);
   }
 
@@ -3130,6 +3475,101 @@ export class RecallantDb {
     }
   }
 
+  private async recordRemoteTrustedDeviceAudit(input: {
+    operation: string;
+    status: "success" | "skipped" | "error";
+    developerId?: string | null;
+    deviceId?: string | null;
+    deviceKeyPrefix?: string | null;
+    publicKeyFingerprint?: string | null;
+    actorId?: string | null;
+    errorCode?: string | null;
+    metadata?: JsonObject | null;
+  }) {
+    try {
+      const activity = await this.startSystemActivity({
+        developer_id: input.developerId ?? null,
+        project_id: null,
+        surface: "remote_trusted_devices",
+        operation: `remote_trusted_device.${input.operation}`,
+        actor_kind: input.actorId ? "user" : "system",
+        actor_id: input.actorId ?? "remote_trusted_devices",
+        client_kind: "remote_connect",
+        related_ids: {
+          device_id: input.deviceId ?? null,
+          device_key_prefix: input.deviceKeyPrefix ?? null,
+          public_key_fingerprint: input.publicKeyFingerprint ?? null
+        },
+        metadata: {
+          audit_policy: "remote_trusted_device_redacted_no_private_key_no_raw_secret",
+          ...input.metadata
+        }
+      });
+      await this.finishSystemActivity({
+        id: activity.id,
+        status: input.status,
+        error_code: input.errorCode ?? null,
+        error_message: input.errorCode ?? null,
+        metadata: {
+          operation: `remote_trusted_device.${input.operation}`,
+          device_id: input.deviceId ?? null,
+          device_key_prefix: input.deviceKeyPrefix ?? null,
+          public_key_fingerprint: input.publicKeyFingerprint ?? null
+        }
+      });
+    } catch {
+      // Trusted-device lifecycle should not fail because audit storage is unavailable.
+    }
+  }
+
+  private async recordRemoteConnectBootstrapTokenAudit(input: {
+    operation: string;
+    status: "success" | "skipped" | "error";
+    projectId?: string | null;
+    developerId?: string | null;
+    tokenId?: string | null;
+    tokenPrefix?: string | null;
+    clientId?: string | null;
+    actorId?: string | null;
+    errorCode?: string | null;
+    metadata?: JsonObject | null;
+  }) {
+    try {
+      const activity = await this.startSystemActivity({
+        developer_id: input.developerId ?? null,
+        project_id: input.projectId ?? null,
+        surface: "remote_connect_bootstrap_tokens",
+        operation: `remote_connect_bootstrap_token.${input.operation}`,
+        actor_kind: input.actorId ? "user" : "system",
+        actor_id: input.actorId ?? "remote_connect_bootstrap_tokens",
+        client_kind: "remote_connect",
+        related_ids: {
+          token_id: input.tokenId ?? null,
+          token_prefix: input.tokenPrefix ?? null,
+          client_id: input.clientId ?? null
+        },
+        metadata: {
+          audit_policy: "remote_connect_bootstrap_redacted_no_raw_token_no_hash",
+          ...input.metadata
+        }
+      });
+      await this.finishSystemActivity({
+        id: activity.id,
+        status: input.status,
+        error_code: input.errorCode ?? null,
+        error_message: input.errorCode ?? null,
+        metadata: {
+          operation: `remote_connect_bootstrap_token.${input.operation}`,
+          token_id: input.tokenId ?? null,
+          token_prefix: input.tokenPrefix ?? null,
+          client_id: input.clientId ?? null
+        }
+      });
+    } catch {
+      // Bootstrap-token lifecycle should not fail because audit storage is unavailable.
+    }
+  }
+
   async createRemoteOnboardingInvite(
     input: CreateRemoteOnboardingInviteInput
   ): Promise<CreateRemoteOnboardingInviteResult> {
@@ -3307,6 +3747,551 @@ export class RecallantDb {
     return result;
   }
 
+  async createRemoteTrustedDevice(
+    input: CreateRemoteTrustedDeviceInput
+  ): Promise<RemoteTrustedDeviceSummary> {
+    await this.ensureRemoteTrustedDeviceSchema();
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    const deviceKeyPrefix = normalizeRemoteMcpCredentialString(input.deviceKeyPrefix);
+    const publicKeyFingerprint = normalizeRemoteMcpCredentialString(input.publicKeyFingerprint);
+    if (!developerId || !deviceKeyPrefix || !publicKeyFingerprint) {
+      throw new Error(
+        "VALIDATION_ERROR: developerId, deviceKeyPrefix, and publicKeyFingerprint are required"
+      );
+    }
+    const publicKeyMaterial =
+      normalizeRemoteMcpCredentialString(input.publicKeyMaterial) ?? publicKeyFingerprint;
+    const publicKeyHash =
+      normalizeRemoteMcpCredentialString(input.publicKeyHash) ??
+      hashRemoteTrustedDevicePublicKey(publicKeyMaterial);
+    const expiresAt =
+      normalizeRemoteMcpCredentialDate(input.expiresAt) ?? defaultRemoteTrustedDeviceExpiry();
+    const createdBy =
+      normalizeRemoteMcpCredentialString(input.createdBy) ?? "remote-connect-approval";
+    const result = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        INSERT INTO remote_trusted_devices (
+          developer_id, device_key_prefix, device_public_key_fingerprint,
+          device_public_key_hash, hash_version, public_key_algorithm, device_name, label,
+          created_by, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING *
+      `,
+      [
+        developerId,
+        deviceKeyPrefix,
+        publicKeyFingerprint,
+        publicKeyHash,
+        remoteTrustedDeviceHashVersion,
+        normalizeRemoteMcpCredentialString(input.publicKeyAlgorithm) ?? "unknown",
+        normalizeRemoteMcpCredentialString(input.deviceName),
+        normalizeRemoteMcpCredentialString(input.label),
+        createdBy,
+        expiresAt
+      ]
+    );
+    const device = summarizeRemoteTrustedDevice(result.rows[0] as RemoteTrustedDeviceRow);
+    await this.recordRemoteTrustedDeviceAudit({
+      operation: "create",
+      status: "success",
+      developerId,
+      deviceId: device.id,
+      deviceKeyPrefix: device.device_key_prefix,
+      publicKeyFingerprint: device.device_public_key_fingerprint,
+      actorId: createdBy,
+      metadata: {
+        device_name_present: Boolean(device.device_name),
+        label_present: Boolean(device.label),
+        expires_at: device.expires_at?.toISOString() ?? null
+      }
+    });
+    return device;
+  }
+
+  async verifyRemoteTrustedDevice(
+    input: VerifyRemoteTrustedDeviceInput
+  ): Promise<VerifyRemoteTrustedDeviceResult> {
+    await this.ensureRemoteTrustedDeviceSchema();
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    const deviceKeyPrefix = normalizeRemoteMcpCredentialString(input.deviceKeyPrefix);
+    const publicKeyFingerprint = normalizeRemoteMcpCredentialString(input.publicKeyFingerprint);
+    if (!developerId || !deviceKeyPrefix || !publicKeyFingerprint) {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify",
+        status: "skipped",
+        developerId,
+        deviceKeyPrefix,
+        publicKeyFingerprint,
+        errorCode: "missing_device",
+        metadata: { result: "missing_device" }
+      });
+      return {
+        ok: false,
+        code: "missing_device",
+        message: "Trusted device developer, prefix, and fingerprint are required."
+      };
+    }
+    const publicKeyMaterial =
+      normalizeRemoteMcpCredentialString(input.publicKeyMaterial) ?? publicKeyFingerprint;
+    const presentedHash = hashRemoteTrustedDevicePublicKey(publicKeyMaterial);
+    const candidates = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        SELECT *
+        FROM remote_trusted_devices
+        WHERE developer_id = $1
+          AND device_key_prefix = $2
+          AND device_public_key_fingerprint = $3
+        ORDER BY created_at DESC
+      `,
+      [developerId, deviceKeyPrefix, publicKeyFingerprint]
+    );
+    const matched = candidates.rows.find((row) => {
+      if (row.hash_version !== remoteTrustedDeviceHashVersion) return false;
+      const expectedBuffer = Buffer.from(row.device_public_key_hash, "hex");
+      const actualBuffer = Buffer.from(presentedHash, "hex");
+      return (
+        expectedBuffer.length === actualBuffer.length &&
+        timingSafeEqual(expectedBuffer, actualBuffer)
+      );
+    });
+    if (!matched) {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify",
+        status: "skipped",
+        developerId,
+        deviceKeyPrefix,
+        publicKeyFingerprint,
+        errorCode: "invalid_device",
+        metadata: { result: "invalid_device" }
+      });
+      return {
+        ok: false,
+        code: "invalid_device",
+        message: "Trusted device was not recognized."
+      };
+    }
+    const summary = summarizeRemoteTrustedDevice(matched);
+    if (summary.status !== "active") {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify",
+        status: "skipped",
+        developerId,
+        deviceId: summary.id,
+        deviceKeyPrefix: summary.device_key_prefix,
+        publicKeyFingerprint: summary.device_public_key_fingerprint,
+        errorCode: summary.status,
+        metadata: { result: summary.status }
+      });
+      return {
+        ok: false,
+        code: summary.status,
+        message: `Trusted device is ${summary.status}.`,
+        device: summary
+      };
+    }
+    const updated = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        UPDATE remote_trusted_devices
+        SET last_used_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [matched.id]
+    );
+    const device = summarizeRemoteTrustedDevice(updated.rows[0] as RemoteTrustedDeviceRow);
+    await this.recordRemoteTrustedDeviceAudit({
+      operation: "verify",
+      status: "success",
+      developerId,
+      deviceId: device.id,
+      deviceKeyPrefix: device.device_key_prefix,
+      publicKeyFingerprint: device.device_public_key_fingerprint,
+      actorId: normalizeRemoteMcpCredentialString(input.verifiedBy) ?? "remote-connect",
+      metadata: {
+        result: "success",
+        challenge_nonce_present: Boolean(normalizeRemoteMcpCredentialString(input.challengeNonce))
+      }
+    });
+    return { ok: true, device };
+  }
+
+  async verifyRemoteTrustedDeviceChallenge(
+    input: VerifyRemoteTrustedDeviceChallengeInput
+  ): Promise<VerifyRemoteTrustedDeviceResult> {
+    await this.ensureRemoteTrustedDeviceSchema();
+    const deviceKeyPrefix = normalizeRemoteMcpCredentialString(input.deviceKeyPrefix);
+    const publicKeyFingerprint = normalizeRemoteMcpCredentialString(input.publicKeyFingerprint);
+    const publicKeyMaterial = normalizeRemoteMcpCredentialString(input.publicKeyMaterial);
+    const challengeNonce = normalizeRemoteMcpCredentialString(input.challengeNonce);
+    if (!deviceKeyPrefix || !publicKeyFingerprint || !publicKeyMaterial || !challengeNonce) {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify_challenge",
+        status: "skipped",
+        deviceKeyPrefix,
+        publicKeyFingerprint,
+        errorCode: "missing_device",
+        metadata: { result: "missing_device" }
+      });
+      return {
+        ok: false,
+        code: "missing_device",
+        message: "Trusted device prefix, fingerprint, public key, and challenge nonce are required."
+      };
+    }
+
+    const presentedHash = hashRemoteTrustedDevicePublicKey(publicKeyMaterial);
+    const candidates = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        SELECT *
+        FROM remote_trusted_devices
+        WHERE device_key_prefix = $1
+          AND device_public_key_fingerprint = $2
+        ORDER BY created_at DESC
+      `,
+      [deviceKeyPrefix, publicKeyFingerprint]
+    );
+    const matched = candidates.rows.find((row) => {
+      if (row.hash_version !== remoteTrustedDeviceHashVersion) return false;
+      const expectedBuffer = Buffer.from(row.device_public_key_hash, "hex");
+      const actualBuffer = Buffer.from(presentedHash, "hex");
+      return (
+        expectedBuffer.length === actualBuffer.length &&
+        timingSafeEqual(expectedBuffer, actualBuffer)
+      );
+    });
+    if (!matched) {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify_challenge",
+        status: "skipped",
+        deviceKeyPrefix,
+        publicKeyFingerprint,
+        errorCode: "invalid_device",
+        metadata: { result: "invalid_device" }
+      });
+      return {
+        ok: false,
+        code: "invalid_device",
+        message: "Trusted device was not recognized."
+      };
+    }
+
+    const summary = summarizeRemoteTrustedDevice(matched);
+    if (summary.status !== "active") {
+      await this.recordRemoteTrustedDeviceAudit({
+        operation: "verify_challenge",
+        status: "skipped",
+        developerId: summary.developer_id,
+        deviceId: summary.id,
+        deviceKeyPrefix: summary.device_key_prefix,
+        publicKeyFingerprint: summary.device_public_key_fingerprint,
+        errorCode: summary.status,
+        metadata: { result: summary.status }
+      });
+      return {
+        ok: false,
+        code: summary.status,
+        message: `Trusted device is ${summary.status}.`,
+        device: summary
+      };
+    }
+
+    const challengeNonceHash = hashRemoteTrustedDeviceChallengeNonce(challengeNonce);
+    const challengeNoncePrefix = challengeNonceHash.slice(0, 24);
+    try {
+      await this.pool.query(
+        `
+          INSERT INTO remote_trusted_device_challenges (
+            device_id, challenge_nonce_prefix, challenge_nonce_hash, hash_version
+          )
+          VALUES ($1, $2, $3, $4)
+        `,
+        [matched.id, challengeNoncePrefix, challengeNonceHash, remoteTrustedDeviceHashVersion]
+      );
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "23505"
+      ) {
+        await this.recordRemoteTrustedDeviceAudit({
+          operation: "verify_challenge",
+          status: "skipped",
+          developerId: summary.developer_id,
+          deviceId: summary.id,
+          deviceKeyPrefix: summary.device_key_prefix,
+          publicKeyFingerprint: summary.device_public_key_fingerprint,
+          errorCode: "replayed",
+          metadata: { result: "replayed", challenge_nonce_prefix: challengeNoncePrefix }
+        });
+        return {
+          ok: false,
+          code: "replayed",
+          message: "Trusted device challenge was already used.",
+          device: summary
+        };
+      }
+      throw error;
+    }
+
+    const updated = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        UPDATE remote_trusted_devices
+        SET last_used_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [matched.id]
+    );
+    const device = summarizeRemoteTrustedDevice(updated.rows[0] as RemoteTrustedDeviceRow);
+    await this.recordRemoteTrustedDeviceAudit({
+      operation: "verify_challenge",
+      status: "success",
+      developerId: device.developer_id,
+      deviceId: device.id,
+      deviceKeyPrefix: device.device_key_prefix,
+      publicKeyFingerprint: device.device_public_key_fingerprint,
+      actorId: normalizeRemoteMcpCredentialString(input.verifiedBy) ?? "remote-connect",
+      metadata: { result: "success", challenge_nonce_prefix: challengeNoncePrefix }
+    });
+    return { ok: true, device };
+  }
+
+  async revokeRemoteTrustedDevice(
+    input: RevokeRemoteTrustedDeviceInput
+  ): Promise<RemoteTrustedDeviceSummary> {
+    await this.ensureRemoteTrustedDeviceSchema();
+    const revokedBy =
+      normalizeRemoteMcpCredentialString(input.revokedBy) ?? "remote-connect-approval";
+    const result = await this.pool.query<RemoteTrustedDeviceRow>(
+      `
+        UPDATE remote_trusted_devices
+        SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [input.deviceId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("VALIDATION_ERROR: trusted device not found");
+    const device = summarizeRemoteTrustedDevice(row);
+    await this.recordRemoteTrustedDeviceAudit({
+      operation: "revoke",
+      status: "success",
+      developerId: device.developer_id,
+      deviceId: device.id,
+      deviceKeyPrefix: device.device_key_prefix,
+      publicKeyFingerprint: device.device_public_key_fingerprint,
+      actorId: revokedBy,
+      metadata: { result: "revoked" }
+    });
+    return device;
+  }
+
+  async createRemoteConnectBootstrapToken(
+    input: CreateRemoteConnectBootstrapTokenInput
+  ): Promise<CreateRemoteConnectBootstrapTokenResult> {
+    await this.ensureRemoteConnectBootstrapTokenSchema();
+    const developerId = normalizeRemoteMcpCredentialString(input.developerId);
+    if (!developerId) throw new Error("VALIDATION_ERROR: developerId is required");
+    const projectId = normalizeRemoteMcpCredentialString(input.projectId);
+    if (projectId) await this.assertRemoteMcpCredentialScope(projectId, developerId);
+    const token = generateRemoteConnectBootstrapToken();
+    const tokenPrefix = extractRemoteConnectBootstrapPrefix(token);
+    if (!tokenPrefix) throw new Error("Failed to generate remote connect bootstrap token prefix");
+    const expiresAt =
+      normalizeRemoteMcpCredentialDate(input.expiresAt) ??
+      defaultRemoteConnectBootstrapTokenExpiry();
+    const createdBy =
+      normalizeRemoteMcpCredentialString(input.createdBy) ?? "remote-connect-bootstrap";
+    const result = await this.pool.query<RemoteConnectBootstrapTokenRow>(
+      `
+        INSERT INTO remote_connect_bootstrap_tokens (
+          project_id, developer_id, token_prefix, token_hash, hash_version, target, label,
+          allow_project_create, created_by, expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING *
+      `,
+      [
+        projectId,
+        developerId,
+        tokenPrefix,
+        hashRemoteConnectBootstrapToken(token),
+        remoteConnectBootstrapTokenHashVersion,
+        normalizeRemoteOnboardingTarget(input.target),
+        normalizeRemoteMcpCredentialString(input.label),
+        input.allowProjectCreate === true,
+        createdBy,
+        expiresAt
+      ]
+    );
+    const bootstrapToken = summarizeRemoteConnectBootstrapToken(
+      result.rows[0] as RemoteConnectBootstrapTokenRow
+    );
+    await this.recordRemoteConnectBootstrapTokenAudit({
+      operation: "create",
+      status: "success",
+      projectId,
+      developerId,
+      tokenId: bootstrapToken.id,
+      tokenPrefix: bootstrapToken.token_prefix,
+      actorId: createdBy,
+      metadata: {
+        target: bootstrapToken.target,
+        allow_project_create: bootstrapToken.allow_project_create,
+        expires_at: bootstrapToken.expires_at.toISOString()
+      }
+    });
+    return { token, bootstrap_token: bootstrapToken };
+  }
+
+  async redeemRemoteConnectBootstrapToken(
+    input: RedeemRemoteConnectBootstrapTokenInput
+  ): Promise<RedeemRemoteConnectBootstrapTokenResult> {
+    await this.ensureRemoteConnectBootstrapTokenSchema();
+    const token = normalizeRemoteMcpCredentialString(input.token);
+    if (!token) throw new Error("VALIDATION_ERROR: remote connect bootstrap token is required");
+    const tokenPrefix = extractRemoteConnectBootstrapPrefix(token);
+    const tokenHash = hashRemoteConnectBootstrapToken(token);
+    if (!tokenPrefix) {
+      await this.recordRemoteConnectBootstrapTokenAudit({
+        operation: "redeem",
+        status: "skipped",
+        errorCode: "invalid_token",
+        metadata: { result: "invalid_token" }
+      });
+      throw new Error("VALIDATION_ERROR: remote connect bootstrap token is invalid");
+    }
+    const clientId = normalizeRemoteMcpCredentialString(input.clientId) ?? `remote-${randomUUID()}`;
+    const redeemedBy =
+      normalizeRemoteMcpCredentialString(input.redeemedBy) ?? "remote-connect-bootstrap";
+    const result = await withTransaction(this.pool, async (client) => {
+      const candidates = await client.query<RemoteConnectBootstrapTokenRow>(
+        `
+          SELECT *
+          FROM remote_connect_bootstrap_tokens
+          WHERE token_prefix = $1
+          ORDER BY created_at DESC
+          FOR UPDATE
+        `,
+        [tokenPrefix]
+      );
+      const row = candidates.rows.find(
+        (candidate) =>
+          candidate.hash_version === remoteConnectBootstrapTokenHashVersion &&
+          constantTimeRemoteConnectBootstrapHashEquals(candidate.token_hash, tokenHash)
+      );
+      if (!row) throw new Error("VALIDATION_ERROR: remote connect bootstrap token not found");
+      const status = remoteConnectBootstrapTokenStatus(row);
+      if (status !== "active") {
+        throw new Error(`VALIDATION_ERROR: remote connect bootstrap token is ${status}`);
+      }
+      const requestedProjectId = normalizeRemoteMcpCredentialString(input.projectId);
+      let redeemedProjectId = row.project_id ?? requestedProjectId;
+      if (row.project_id && requestedProjectId && row.project_id !== requestedProjectId) {
+        throw new Error("VALIDATION_ERROR: remote connect bootstrap project scope mismatch");
+      }
+      if (!redeemedProjectId && row.allow_project_create !== true) {
+        throw new Error(
+          "VALIDATION_ERROR: remote connect bootstrap token requires an existing project scope"
+        );
+      }
+      if (!redeemedProjectId && row.allow_project_create === true) {
+        redeemedProjectId = randomUUID();
+        await client.query(
+          `
+            INSERT INTO developers (id, name)
+            VALUES ($1, $2)
+            ON CONFLICT (id) DO UPDATE SET updated_at = now()
+          `,
+          [row.developer_id, "Recallant Developer"]
+        );
+        await client.query(
+          `
+            INSERT INTO projects (id, developer_id, name, primary_path, project_kind, memory_domain)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [
+            redeemedProjectId,
+            row.developer_id,
+            normalizeRemoteMcpCredentialString(input.projectName) ?? "remote project",
+            null,
+            "workspace",
+            "agent_work"
+          ]
+        );
+        await this.ensureDefaultModelSettings(client);
+      }
+      const updated = await client.query<RemoteConnectBootstrapTokenRow>(
+        `
+          UPDATE remote_connect_bootstrap_tokens
+          SET redeemed_at = now(),
+              redeemed_client_id = $2,
+              redeemed_project_id = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [row.id, clientId, redeemedProjectId]
+      );
+      const bootstrapToken = summarizeRemoteConnectBootstrapToken(
+        updated.rows[0] as RemoteConnectBootstrapTokenRow
+      );
+      return {
+        bootstrap_token: bootstrapToken,
+        project_id: redeemedProjectId ?? null,
+        developer_id: row.developer_id,
+        client_id: clientId,
+        target: row.target
+      };
+    });
+    await this.recordRemoteConnectBootstrapTokenAudit({
+      operation: "redeem",
+      status: "success",
+      projectId: result.project_id,
+      developerId: result.developer_id,
+      tokenId: result.bootstrap_token.id,
+      tokenPrefix: result.bootstrap_token.token_prefix,
+      clientId,
+      actorId: redeemedBy,
+      metadata: { result: "redeemed", target: result.target }
+    });
+    return result;
+  }
+
+  async revokeRemoteConnectBootstrapToken(
+    input: RevokeRemoteConnectBootstrapTokenInput
+  ): Promise<RemoteConnectBootstrapTokenSummary> {
+    await this.ensureRemoteConnectBootstrapTokenSchema();
+    const revokedBy =
+      normalizeRemoteMcpCredentialString(input.revokedBy) ?? "remote-connect-bootstrap";
+    const result = await this.pool.query<RemoteConnectBootstrapTokenRow>(
+      `
+        UPDATE remote_connect_bootstrap_tokens
+        SET revoked_at = COALESCE(revoked_at, now()), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [input.tokenId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("VALIDATION_ERROR: remote connect bootstrap token not found");
+    const bootstrapToken = summarizeRemoteConnectBootstrapToken(row);
+    await this.recordRemoteConnectBootstrapTokenAudit({
+      operation: "revoke",
+      status: "success",
+      projectId: bootstrapToken.project_id,
+      developerId: bootstrapToken.developer_id,
+      tokenId: bootstrapToken.id,
+      tokenPrefix: bootstrapToken.token_prefix,
+      actorId: revokedBy,
+      metadata: { result: "revoked" }
+    });
+    return bootstrapToken;
+  }
+
   async createRemoteConnectRequest(
     input: CreateRemoteConnectRequestInput = {}
   ): Promise<CreateRemoteConnectRequestResult> {
@@ -3322,14 +4307,24 @@ export class RecallantDb {
       normalizeRemoteMcpCredentialDate(input.expiresAt) ?? defaultRemoteConnectExpiry();
     const target = normalizeRemoteOnboardingTarget(input.target);
     const createdBy = normalizeRemoteMcpCredentialString(input.createdBy) ?? "remote-connect";
+    const trustedDevicePublicKeyMaterial = normalizeRemoteMcpCredentialString(
+      input.trustedDevicePublicKeyMaterial
+    );
+    const trustedDevicePublicKeyHash =
+      normalizeRemoteMcpCredentialString(input.trustedDevicePublicKeyHash) ??
+      (trustedDevicePublicKeyMaterial
+        ? hashRemoteTrustedDevicePublicKey(trustedDevicePublicKeyMaterial)
+        : null);
     const result = await this.pool.query<RemoteConnectRequestRow>(
       `
         INSERT INTO remote_connect_requests (
           device_code_prefix, device_code_hash, poll_token_prefix, poll_token_hash, hash_version,
           status, target, project_display_name, project_fingerprint, project_path_hint_redacted,
-          repo_remote_hash, requested_by_ip_hash, created_by, expires_at
+          repo_remote_hash, requested_by_ip_hash, trusted_device_key_prefix,
+          trusted_device_public_key_fingerprint, trusted_device_public_key_hash,
+          trusted_device_public_key_algorithm, trusted_device_name, created_by, expires_at
         )
-        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13)
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *
       `,
       [
@@ -3344,6 +4339,11 @@ export class RecallantDb {
         normalizeRemoteMcpCredentialString(input.projectPathHintRedacted),
         normalizeRemoteMcpCredentialString(input.repoRemoteHash),
         normalizeRemoteMcpCredentialString(input.requestedByIpHash),
+        normalizeRemoteMcpCredentialString(input.trustedDeviceKeyPrefix),
+        normalizeRemoteMcpCredentialString(input.trustedDevicePublicKeyFingerprint),
+        trustedDevicePublicKeyHash,
+        normalizeRemoteMcpCredentialString(input.trustedDevicePublicKeyAlgorithm),
+        normalizeRemoteMcpCredentialString(input.trustedDeviceName),
         createdBy,
         expiresAt
       ]
@@ -3360,6 +4360,7 @@ export class RecallantDb {
         target: request.target,
         project_display_name_present: Boolean(request.project_display_name),
         project_fingerprint_present: Boolean(request.project_fingerprint),
+        trusted_device_registration_present: Boolean(request.trusted_device_key_prefix),
         expires_at: request.expires_at.toISOString()
       }
     });
@@ -3463,6 +4464,46 @@ export class RecallantDb {
         constantTimeRemoteConnectHashEquals(candidate.device_code_hash, deviceCodeHash)
     );
     return row ? summarizeRemoteConnectRequest(row) : null;
+  }
+
+  async getRemoteConnectTrustedDeviceRegistrationForApproval(
+    input: GetRemoteConnectRequestForApprovalInput
+  ): Promise<RemoteConnectTrustedDeviceRegistrationSummary | null> {
+    await this.ensureRemoteConnectRequestSchema();
+    const deviceCode = normalizeRemoteMcpCredentialString(input.deviceCode);
+    if (!deviceCode) throw new Error("VALIDATION_ERROR: remote connect device code is required");
+    const deviceCodePrefix = extractRemoteConnectPrefix(deviceCode, "conn");
+    const deviceCodeHash = hashRemoteConnectSecret(deviceCode);
+    if (!deviceCodePrefix)
+      throw new Error("VALIDATION_ERROR: remote connect device code is invalid");
+    const candidates = await this.pool.query<RemoteConnectRequestRow>(
+      `
+        SELECT *
+        FROM remote_connect_requests
+        WHERE device_code_prefix = $1
+        ORDER BY created_at DESC
+      `,
+      [deviceCodePrefix]
+    );
+    const row = candidates.rows.find(
+      (candidate) =>
+        candidate.hash_version === remoteConnectHashVersion &&
+        constantTimeRemoteConnectHashEquals(candidate.device_code_hash, deviceCodeHash)
+    );
+    if (
+      !row?.trusted_device_key_prefix ||
+      !row.trusted_device_public_key_fingerprint ||
+      !row.trusted_device_public_key_hash
+    ) {
+      return null;
+    }
+    return {
+      device_key_prefix: row.trusted_device_key_prefix,
+      public_key_fingerprint: row.trusted_device_public_key_fingerprint,
+      public_key_hash: row.trusted_device_public_key_hash,
+      public_key_algorithm: row.trusted_device_public_key_algorithm,
+      device_name: row.trusted_device_name
+    };
   }
 
   async denyRemoteConnectRequest(

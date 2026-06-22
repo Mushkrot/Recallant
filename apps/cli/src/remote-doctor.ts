@@ -6,6 +6,7 @@ import {
   remoteMcpDoctorStage,
   remoteMcpDoctorStageIds,
   redactRemoteMcpDoctorValue,
+  resolveRemoteMcpStoredCredential,
   type RemoteMcpDoctorReport,
   type RemoteMcpDoctorResultCode,
   type RemoteMcpDoctorStage,
@@ -63,9 +64,16 @@ function readOptions(argv: readonly string[]): RemoteDoctorOptions {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("VALIDATION_ERROR: --timeout-ms must be a positive number");
   }
+  const credentialRef = normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credentialRef));
+  const credentialStorePath = normalizedOptional(
+    parseFlag(argv, remoteMcpBridgeFlags.credentialStore)
+  );
+  const credential =
+    normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credential)) ??
+    resolveRemoteMcpStoredCredential({ credentialRef, credentialStorePath });
   return {
     serverUrl: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.serverUrl)),
-    credential: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credential)),
+    credential,
     projectId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.projectId)),
     developerId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.developerId)),
     clientId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.clientId)),
@@ -118,7 +126,10 @@ function validateBeforeNetwork(options: RemoteDoctorOptions) {
   const stages: RemoteMcpDoctorStage[] = [];
   const missing = [
     [remoteMcpBridgeFlags.serverUrl, options.serverUrl],
-    [remoteMcpBridgeFlags.credential, options.credential],
+    [
+      `${remoteMcpBridgeFlags.credential} or ${remoteMcpBridgeFlags.credentialRef}`,
+      options.credential
+    ],
     [remoteMcpBridgeFlags.projectId, options.projectId],
     [remoteMcpBridgeFlags.developerId, options.developerId],
     [remoteMcpBridgeFlags.clientId, options.clientId]

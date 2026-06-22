@@ -1,8 +1,8 @@
 # Universal Remote Connect
 
-Status: the initial universal connect slice is implemented and covered by deterministic storage,
-server, CLI, security, external-rehearsal, and public-doc smoke tests. This document is the public
-contract and regression checklist for that flow.
+Status: the universal remote connect model is implemented and covered by deterministic storage,
+server, CLI, security, external-rehearsal, remote-MCP, agent-capture, and public-doc smoke tests.
+This document is the public contract and regression checklist for that flow.
 
 Recallant remote onboarding works from a clean external workstation or server with one command from
 the project directory:
@@ -14,7 +14,9 @@ curl -fsSL https://memory.example.com/connect | bash
 That command does not depend on an already installed or up-to-date local `recallant` CLI. It does
 not require Docker, Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin cookies, internal server
 paths, raw artifacts, backups, provider secrets, or private deployment overlays on the remote
-machine.
+machine. First approval can register a trusted device, later projects can reconnect with signed
+device challenges, headless hosts can use one-time bootstrap tokens, generated project config stores
+only credential references, and `agent-start` reports the remote consent/redaction boundary.
 
 ## Product Decision
 
@@ -46,11 +48,35 @@ https://memory.example.com/connect/approve?code=ABCD-1234
 After the owner approves in the browser, the CLI receives a provisioning package, writes the
 project-local remote MCP config, runs `remote-doctor`, and reports the next agent-start command.
 
+## Authentication Paths
+
+Recallant remote connect has three distinct authorization paths:
+
+- **First browser approval:** a new workstation runs `curl -fsSL https://memory.example.com/connect
+  | bash`, starts a pending request, and the owner approves it through protected
+  `/connect/approve`.
+- **Trusted-device reconnect:** after that first approval registers the workstation's public device
+  key, later projects from the same workstation use `connect-cloud` signed nonce challenges. The
+  server validates the device key, expiry, revocation, project metadata, and replay table before
+  auto-approving the pending request. This does not grant Workbench, admin,
+  credential-management, backup, provider, or raw-artifact access.
+- **Headless bootstrap token:** servers and CI-like hosts can use a short-lived one-time token:
+
+  ```bash
+  recallant connect-cloud . --server-url https://memory.example.com --bootstrap-token <one-time-token>
+  ```
+
+  Bootstrap tokens are created only through protected admin/human surfaces such as
+  `POST /api/connect/bootstrap-token`. The remote host redeems the token through public
+  `/api/connect/start`, receives no browser cookies, and still gets the scoped MCP credential only
+  through the normal approved `/api/connect/poll` one-time-secret boundary.
+
 ## Trust Boundary
 
 The remote workstation can start and poll a pending connection request, but it cannot create a
 project binding or credential by itself. Approval happens through the central server's protected
-human surface. The server owns:
+human surface, a previously trusted device key, or a one-time headless bootstrap token. The server
+owns:
 
 - owner authentication;
 - project creation or project binding;
@@ -80,6 +106,8 @@ The existing remote routes remain:
 - `GET /j/<token>`: advanced invite bootstrap.
 
 Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected.
+`POST /api/connect/bootstrap-token` is also protected because it creates/revokes headless bootstrap
+tokens; only token redemption through `/api/connect/start` is public.
 
 ## State Model
 
@@ -115,6 +143,7 @@ Add:
 
 ```bash
 recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic]
+recallant connect-cloud <project-dir> --server-url <https-url> --bootstrap-token <one-time-token>
 ```
 
 Aliases:
@@ -129,10 +158,18 @@ This command:
 1. collects safe project metadata;
 2. calls `/api/connect/start`;
 3. prints and optionally opens the approval URL;
-4. polls `/api/connect/poll`;
-5. writes the same remote config as `connect-remote`;
-6. runs `remote-doctor`;
-7. prints acceptance and cleanup guidance.
+4. skips browser approval when a valid trusted-device signature or bootstrap token auto-approves the
+   pending request;
+5. polls `/api/connect/poll`;
+6. stores the raw scoped credential only in the user's local Recallant credential store;
+7. writes generated project config with a credential reference, not the raw secret;
+8. writes a non-secret project-local remote consent receipt;
+9. runs `remote-doctor`;
+10. prints acceptance and cleanup guidance.
+
+The generated config and consent receipt must not contain raw credentials or private keys. The
+credential store entry is local to the user profile; `.codex/config.toml` and equivalent client
+files carry only `RECALLANT_REMOTE_MCP_CREDENTIAL_REF` plus project/developer/client scope.
 
 Existing `recallant invite` remains:
 
@@ -165,6 +202,7 @@ The browser approval route and Workbench remain protected:
 - `/api/review-dashboard`
 - `/api/remote-credential`
 - `/api/remote-invite`
+- `/api/connect/bootstrap-token`
 
 If an edge provider cannot express this path split safely, use a dedicated agent hostname for the
 public routes and keep the Workbench hostname protected.

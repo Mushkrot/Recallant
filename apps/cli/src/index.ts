@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  generateKeyPairSync,
+  randomUUID,
+  sign as signPayload
+} from "node:crypto";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supportedClientKinds } from "@recallant/adapters";
@@ -34,7 +40,12 @@ import {
   renderClientTargetConfig,
   renderRemoteClientTargetConfig
 } from "./client-targets.js";
-import { validateRemoteMcpBridgeConfig } from "@recallant/contracts";
+import {
+  remoteMcpEndpointPath,
+  storeRemoteMcpCredential,
+  validateRemoteMcpBridgeConfig,
+  type RemoteAgentConsentScope
+} from "@recallant/contracts";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
@@ -517,6 +528,35 @@ type AgentSessionState = {
   last_memory_id?: string | null;
 };
 
+const remoteAgentSecretClasses = [
+  ".env",
+  "private keys",
+  "raw credentials",
+  "customer data",
+  "provider secrets",
+  "database URLs",
+  "raw artifacts",
+  "backups"
+] as const;
+
+const remoteAgentAllowedContext = [
+  "Project instructions and agent startup context explicitly read by the agent.",
+  "Redacted project metadata needed to request and retrieve Recallant context packs.",
+  "Agent-authored decisions, actions, test summaries, checkpoints, and closeouts.",
+  "User-provided task context after local review and redaction."
+] as const;
+
+type RemoteAgentConsentReceipt = {
+  schema_version: 1;
+  kind: "recallant_remote_agent_consent";
+  created_at: string;
+  approval_mode: string | null;
+  consent_scope: RemoteAgentConsentScope;
+  credential_ref: string | null;
+  credential_store_path: string | null;
+  no_raw_credentials_or_private_keys: true;
+};
+
 function projectDir(argv: readonly string[]) {
   return resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
 }
@@ -527,6 +567,183 @@ function recallantDir(projectDir: string) {
 
 function currentSessionPathFor(projectDir: string) {
   return join(recallantDir(projectDir), "current-session.json");
+}
+
+function remoteAgentConsentReceiptPath(projectDir: string) {
+  return join(recallantDir(projectDir), "remote-consent.json");
+}
+
+function remoteAgentConsentScope(input: {
+  serverUrl: string;
+  projectId: string | null;
+  developerId: string | null;
+  clientId: string | null;
+  credentialPrefix?: string | null;
+}): RemoteAgentConsentScope {
+  return {
+    destination: {
+      server_url: input.serverUrl,
+      endpoint_path: remoteMcpEndpointPath
+    },
+    credential_scope: {
+      project_id: input.projectId,
+      developer_id: input.developerId,
+      client_id: input.clientId,
+      credential_prefix: input.credentialPrefix ?? null
+    },
+    allowed_context: [...remoteAgentAllowedContext],
+    redaction_boundary: [...remoteAgentSecretClasses],
+    not_sent: [...remoteAgentSecretClasses],
+    recommended_next_call: "memory_get_context_pack"
+  };
+}
+
+function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
+  if (!scope) return {};
+  return {
+    destination: scope.destination,
+    credential_scope: scope.credential_scope,
+    consent_scope: {
+      allowed_context: scope.allowed_context,
+      cloudflare_browser_auth_required: false,
+      note: "Agent runtime uses scoped machine credentials; Cloudflare Access remains for human approval/admin surfaces."
+    },
+    redaction_boundary: scope.redaction_boundary,
+    not_sent: scope.not_sent,
+    recommended_next_call: scope.recommended_next_call,
+    recommended_next_action:
+      "Use memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth."
+  };
+}
+
+function remoteAgentConfigValue(content: string, key: string) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const quoted = content.match(new RegExp(`${escaped}\\s*[:=]\\s*"([^"]+)"`));
+  if (quoted?.[1]) return quoted[1];
+  const bare = content.match(new RegExp(`${escaped}\\s*[:=]\\s*([^,}\\n\\r]+)`));
+  return bare?.[1]?.trim().replace(/^['"]|['"]$/g, "") ?? null;
+}
+
+async function readRemoteAgentConsentScope(projectDir: string) {
+  const receipt = await readOptional(remoteAgentConsentReceiptPath(projectDir));
+  if (receipt) {
+    try {
+      const parsed = JSON.parse(receipt) as Partial<RemoteAgentConsentReceipt>;
+      if (parsed.kind === "recallant_remote_agent_consent" && parsed.consent_scope) {
+        return parsed.consent_scope;
+      }
+    } catch {
+      // Ignore malformed local receipts and fall back to client config discovery.
+    }
+  }
+
+  const candidateFiles = [
+    ".codex/config.toml",
+    ".cursor/mcp.json",
+    ".mcp.json",
+    ".recallant/generic-remote-mcp.json"
+  ];
+  for (const candidate of candidateFiles) {
+    const content = await readOptional(join(projectDir, candidate));
+    if (!content?.includes("RECALLANT_REMOTE_MCP_URL") || !content.includes("remote-bridge")) {
+      continue;
+    }
+    const serverUrl = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_URL");
+    if (!serverUrl) continue;
+    return remoteAgentConsentScope({
+      serverUrl,
+      projectId: remoteAgentConfigValue(content, "RECALLANT_PROJECT_ID"),
+      developerId: remoteAgentConfigValue(content, "RECALLANT_DEVELOPER_ID"),
+      clientId: remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CLIENT_ID"),
+      credentialPrefix:
+        remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_REF") ??
+        (remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL")
+          ? "inline-redacted"
+          : null)
+    });
+  }
+  return null;
+}
+
+async function writeRemoteAgentConsentReceipt(input: {
+  projectDir: string;
+  serverUrl: string;
+  projectId: string | null;
+  developerId: string | null;
+  clientId: string | null;
+  credentialRef: string | null;
+  credentialPrefix: string | null;
+  credentialStorePath: string | null;
+  approvalMode: string | null;
+}) {
+  const scope = remoteAgentConsentScope({
+    serverUrl: input.serverUrl,
+    projectId: input.projectId,
+    developerId: input.developerId,
+    clientId: input.clientId,
+    credentialPrefix: input.credentialPrefix ?? input.credentialRef
+  });
+  const receipt: RemoteAgentConsentReceipt = {
+    schema_version: 1,
+    kind: "recallant_remote_agent_consent",
+    created_at: new Date().toISOString(),
+    approval_mode: input.approvalMode,
+    consent_scope: scope,
+    credential_ref: input.credentialRef,
+    credential_store_path: input.credentialStorePath,
+    no_raw_credentials_or_private_keys: true
+  };
+  await mkdir(recallantDir(input.projectDir), { recursive: true });
+  await writeFile(
+    remoteAgentConsentReceiptPath(input.projectDir),
+    `${JSON.stringify(receipt, null, 2)}\n`
+  );
+  return receipt;
+}
+
+function agentStartHumanReport(input: {
+  mode: string;
+  projectId?: string | null;
+  sessionId: string;
+  contextPackId?: string | null;
+  statePath: string;
+  spoolPath?: string | null;
+  warning?: string | null;
+  previousUnclosedSession?: unknown;
+  consentScope: RemoteAgentConsentScope | null;
+}) {
+  const lines = [
+    "Recallant agent-start",
+    "",
+    "Status: started",
+    `Mode: ${input.mode}`,
+    input.projectId ? `Project id: ${input.projectId}` : null,
+    `Session id: ${input.sessionId}`,
+    input.contextPackId ? `Context pack id: ${input.contextPackId}` : null,
+    `State file: ${input.statePath}`,
+    input.spoolPath ? `Spool file: ${input.spoolPath}` : null,
+    input.warning ? `Warning: ${input.warning}` : null,
+    input.previousUnclosedSession
+      ? `Previous unclosed session: ${JSON.stringify(input.previousUnclosedSession)}`
+      : null
+  ];
+  if (input.consentScope) {
+    lines.push(
+      "",
+      "Remote Recallant consent boundary:",
+      `Destination: ${input.consentScope.destination.server_url}${input.consentScope.destination.endpoint_path}`,
+      `Credential scope: project=${input.consentScope.credential_scope.project_id ?? "unknown"}, developer=${input.consentScope.credential_scope.developer_id ?? "unknown"}, client=${input.consentScope.credential_scope.client_id ?? "unknown"}`,
+      `Allowed context: ${input.consentScope.allowed_context.join(" ")}`,
+      `Do not send: ${input.consentScope.not_sent.join(", ")}.`,
+      "Next: use memory_get_context_pack through the configured Recallant MCP startup flow. Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
+    );
+  } else {
+    lines.push(
+      "",
+      "Next: use memory_get_context_pack through MCP when available, or recallant context as the CLI fallback."
+    );
+  }
+  return `${lines.filter((line): line is string => line !== null).join("\n")}\n`;
 }
 
 async function readAgentSessionState(projectDir: string): Promise<AgentSessionState | null> {
@@ -4657,6 +4874,10 @@ async function loadActiveAgentState(argv: readonly string[]) {
 }
 
 async function runAgentStart(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "json");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const consentScope = await readRemoteAgentConsentScope(projectDir(argv));
+  const consentOutput = remoteAgentConsentOutput(consentScope);
   const database = createRecallantDbFromEnv();
   if (!database) {
     const state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
@@ -4667,42 +4888,59 @@ async function runAgentStart(argv: readonly string[]) {
       metadata: { capture_kind: "agent_start_offline", local_session_id: state.session_id },
       raw_artifacts: []
     });
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "offline_spool",
+      state_path: currentSessionPathFor(state.project_dir),
+      spool_path: spoolPath(argv),
+      local_id: record.local_id,
+      warning: "Server database is unavailable; capture records will sync later.",
+      ...consentOutput
+    };
     process.stdout.write(
-      `${JSON.stringify(
-        {
-          ok: true,
-          action: "agent_start",
-          mode: "offline_spool",
-          state_path: currentSessionPathFor(state.project_dir),
-          spool_path: spoolPath(argv),
-          local_id: record.local_id,
-          warning: "Server database is unavailable; capture records will sync later."
-        },
-        null,
-        2
-      )}\n`
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : agentStartHumanReport({
+            mode: "offline_spool",
+            sessionId: state.session_id,
+            statePath: currentSessionPathFor(state.project_dir),
+            spoolPath: spoolPath(argv),
+            warning: output.warning,
+            consentScope
+          })
     );
     return;
   }
   try {
     const result = await startAgentSession(database, argv);
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "server",
+      project_id: result.state.project_id,
+      session_id: result.state.session_id,
+      context_pack_id: result.state.context_pack_id,
+      state_path: currentSessionPathFor(result.state.project_dir),
+      previous_unclosed_session: result.start_result.previous_unclosed_session,
+      recommended_next_action:
+        consentScope !== null
+          ? "Use memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth. Then use recallant agent-event after meaningful decisions/actions/tests."
+          : "Use recallant agent-event after meaningful decisions/actions/tests.",
+      ...consentOutput
+    };
     process.stdout.write(
-      `${JSON.stringify(
-        {
-          ok: true,
-          action: "agent_start",
-          mode: "server",
-          project_id: result.state.project_id,
-          session_id: result.state.session_id,
-          context_pack_id: result.state.context_pack_id,
-          state_path: currentSessionPathFor(result.state.project_dir),
-          previous_unclosed_session: result.start_result.previous_unclosed_session,
-          recommended_next_action:
-            "Use recallant agent-event after meaningful decisions/actions/tests."
-        },
-        null,
-        2
-      )}\n`
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : agentStartHumanReport({
+            mode: "server",
+            projectId: result.state.project_id,
+            sessionId: result.state.session_id,
+            contextPackId: result.state.context_pack_id,
+            statePath: currentSessionPathFor(result.state.project_dir),
+            previousUnclosedSession: result.start_result.previous_unclosed_session,
+            consentScope
+          })
     );
   } finally {
     await database.close();
@@ -5932,12 +6170,27 @@ function remoteConnectCloudHumanReport(result: {
   target: string;
   serverUrl: string;
   approveUrl: string;
+  approvalMode?: string | null;
+  browserApprovalRequired?: boolean;
+  bootstrapTokenStatus?: string | null;
+  bootstrapTokenPrefix?: string | null;
+  trustedDeviceName?: string | null;
+  trustedDevicePath?: string | null;
+  trustedDeviceStatus?: string | null;
+  credentialStorePath?: string | null;
+  consentReceiptPath?: string | null;
   configFile?: string | null;
   targetFile?: string | null;
   writesFiles: boolean;
   doctorStatus: string;
   status: string;
 }) {
+  const approvalCopy =
+    result.browserApprovalRequired === false
+      ? result.approvalMode === "bootstrap_token"
+        ? `Approval: one-time bootstrap token auto-approved (${result.bootstrapTokenPrefix ?? "redacted prefix"}); browser approval not required.`
+        : `Approval: trusted device auto-approved (${result.approvalMode ?? "trusted_device"}); browser approval not required.`
+      : "Approve this project in your browser:";
   return (
     [
       "Recallant connect-cloud",
@@ -5947,14 +6200,25 @@ function remoteConnectCloudHumanReport(result: {
       `Agent client: ${result.target}`,
       `Server: ${result.serverUrl}`,
       "",
-      "Approve this project in your browser:",
-      `  ${result.approveUrl}`,
+      result.trustedDeviceName ? `Trusted device: ${result.trustedDeviceName}` : null,
+      result.trustedDeviceStatus ? `Trusted device status: ${result.trustedDeviceStatus}` : null,
+      result.trustedDevicePath ? `Trusted device store: ${result.trustedDevicePath}` : null,
+      result.bootstrapTokenStatus ? `Bootstrap token: ${result.bootstrapTokenStatus}` : null,
+      result.bootstrapTokenPrefix ? `Bootstrap token prefix: ${result.bootstrapTokenPrefix}` : null,
+      result.trustedDeviceName ? "" : null,
+      approvalCopy,
+      result.browserApprovalRequired === false ? null : `  ${result.approveUrl}`,
       "",
       result.configFile ? `Config file: ${result.configFile}` : null,
       result.targetFile ? `Target file: ${result.targetFile}` : null,
+      result.credentialStorePath
+        ? `Credential storage: local Recallant credential store (${result.credentialStorePath}); project config uses a credential ref, not the raw secret.`
+        : "Credential storage: project config uses a credential ref; raw scoped credentials are not written into tracked config.",
+      result.consentReceiptPath ? `Consent receipt: ${result.consentReceiptPath}` : null,
       `Writes files: ${result.writesFiles ? "yes" : "no"}`,
       `Remote doctor: ${result.doctorStatus}`,
       "",
+      "First browser approval can register a trusted device key; later projects from that trusted device use signed nonce reconnect. Headless servers should use a one-time bootstrap token.",
       "This flow does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, or provider secrets.",
       ""
     ]
@@ -5965,6 +6229,142 @@ function remoteConnectCloudHumanReport(result: {
 
 function remoteConnectHash(value: string) {
   return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+type RemoteConnectTrustedDeviceState = {
+  version: "remote-trusted-device-v1";
+  device_name: string;
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  public_key_algorithm: "ed25519-v1";
+  public_key_material: string;
+  private_key_material: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function remoteConnectTrustedDevicePath() {
+  return join(homedir(), ".config", "recallant", "trusted-device.json");
+}
+
+function parseRemoteTrustedDeviceState(
+  text: string | null
+): RemoteConnectTrustedDeviceState | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as Partial<RemoteConnectTrustedDeviceState>;
+    if (
+      parsed.version === "remote-trusted-device-v1" &&
+      parsed.device_key_prefix &&
+      parsed.public_key_fingerprint &&
+      parsed.public_key_algorithm === "ed25519-v1" &&
+      parsed.public_key_material &&
+      parsed.private_key_material
+    ) {
+      return {
+        version: "remote-trusted-device-v1",
+        device_name: parsed.device_name || hostname() || "remote-device",
+        device_key_prefix: parsed.device_key_prefix,
+        public_key_fingerprint: parsed.public_key_fingerprint,
+        public_key_algorithm: "ed25519-v1",
+        public_key_material: parsed.public_key_material,
+        private_key_material: parsed.private_key_material,
+        created_at: parsed.created_at || new Date().toISOString(),
+        updated_at: parsed.updated_at || new Date().toISOString()
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function ensureRemoteConnectTrustedDevice() {
+  const path = remoteConnectTrustedDevicePath();
+  const existing = parseRemoteTrustedDeviceState(await readOptional(path));
+  if (existing) return { state: existing, path, created: false };
+
+  const pair = generateKeyPairSync("ed25519");
+  const publicKeyMaterial = pair.publicKey.export({ format: "pem", type: "spki" }).toString();
+  const privateKeyMaterial = pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const fingerprint = createHash("sha256").update(publicKeyMaterial).digest("hex");
+  const now = new Date().toISOString();
+  const state: RemoteConnectTrustedDeviceState = {
+    version: "remote-trusted-device-v1",
+    device_name: hostname() || "remote-device",
+    device_key_prefix: fingerprint.slice(0, 16),
+    public_key_fingerprint: fingerprint,
+    public_key_algorithm: "ed25519-v1",
+    public_key_material: publicKeyMaterial,
+    private_key_material: privateKeyMaterial,
+    created_at: now,
+    updated_at: now
+  };
+  await mkdir(dirname(path), { recursive: true });
+  await chmod(dirname(path), 0o700).catch(() => undefined);
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await chmod(path, 0o600).catch(() => undefined);
+  return { state, path, created: true };
+}
+
+function remoteConnectTrustedDeviceChallengePayload(input: {
+  target: string;
+  projectFingerprint: string | null | undefined;
+  projectPathHintRedacted: string | null | undefined;
+  challengeNonce: string;
+}) {
+  return [
+    "recallant-connect-trusted-device-v1",
+    `target:${input.target}`,
+    `project_fingerprint:${input.projectFingerprint ?? ""}`,
+    `project_path_hint_redacted:${input.projectPathHintRedacted ?? ""}`,
+    `challenge_nonce:${input.challengeNonce}`
+  ].join("\n");
+}
+
+function signRemoteConnectTrustedDeviceChallenge(input: {
+  state: RemoteConnectTrustedDeviceState;
+  target: string;
+  projectFingerprint: string;
+  projectPathHintRedacted: string;
+  challengeNonce: string;
+}) {
+  const payload = remoteConnectTrustedDeviceChallengePayload({
+    target: input.target,
+    projectFingerprint: input.projectFingerprint,
+    projectPathHintRedacted: input.projectPathHintRedacted,
+    challengeNonce: input.challengeNonce
+  });
+  return signPayload(
+    null,
+    Buffer.from(payload, "utf8"),
+    createPrivateKey(input.state.private_key_material)
+  ).toString("base64url");
+}
+
+async function confirmRemoteConnectLocalFolder(
+  argv: readonly string[],
+  projectDir: string,
+  pathHint: string
+) {
+  if (argv.includes("--yes") || argv.includes("--non-interactive")) return "explicit_yes";
+  if (!process.stdin.isTTY) return "skipped_non_tty";
+  process.stdout.write(
+    [
+      "Recallant will request a scoped remote project credential for this local folder.",
+      `Project: ${projectDir}`,
+      `Path hint: ${pathHint}`,
+      "Type yes to continue: "
+    ].join("\n")
+  );
+  const answer = await new Promise<string>((resolveAnswer) => {
+    process.stdin.setEncoding("utf8");
+    process.stdin.once("data", (chunk) => resolveAnswer(String(chunk).trim()));
+  });
+  if (!["y", "yes"].includes(answer.toLowerCase())) {
+    throw new Error("VALIDATION_ERROR: local folder confirmation declined");
+  }
+  return "confirmed_tty";
 }
 
 async function projectPathHint(projectDir: string) {
@@ -6064,7 +6464,21 @@ async function runConnectRemote(argv: readonly string[]) {
     sessionId: parseFlag(argv, "--session-id"),
     traceId: parseFlag(argv, "--trace-id")
   });
-  const targetConfig = remoteClientTargetConfig(target, config);
+  const credentialStore = writeConfig
+    ? storeRemoteMcpCredential({
+        credential: config.credential,
+        serverUrl: config.serverUrl,
+        projectId: config.projectId,
+        developerId: config.developerId,
+        clientId: config.clientId
+      })
+    : null;
+  const targetConfig = remoteClientTargetConfig(target, {
+    ...config,
+    credential: credentialStore ? null : config.credential,
+    credentialRef: credentialStore?.key ?? null,
+    credentialStorePath: credentialStore?.display_path ?? null
+  });
   const targetFile = resolve(projectDir, targetConfig.config_file);
   const existing = writeConfig ? await readOptional(targetFile) : null;
   const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
@@ -6080,6 +6494,7 @@ async function runConnectRemote(argv: readonly string[]) {
     config_file: targetConfig.config_file,
     project_dir: projectDir,
     target_file: targetFile,
+    credential_store: credentialStore,
     format: targetConfig.format,
     setup_hint: targetConfig.setup_hint,
     writes_files: writeConfig,
@@ -6116,19 +6531,85 @@ async function runConnectCloud(argv: readonly string[]) {
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? positional[0] ?? process.cwd());
   const target = parseFlag(argv, "--target") ?? parseFlag(argv, "--client") ?? "codex";
   const serverUrl = normalizeInviteServerUrl(requiredFlag(argv, "--server-url"));
+  const bootstrapToken = parseFlag(argv, "--bootstrap-token");
   const skipDoctor = argv.includes("--skip-doctor");
   const dryRun = argv.includes("--dry-run");
   const pollTimeoutMs = parsePositiveInt(parseFlag(argv, "--poll-timeout-ms"), 120_000);
   const pollIntervalMs = parsePositiveInt(parseFlag(argv, "--poll-interval-ms"), 2_000);
   const pathHint = await projectPathHint(projectDir);
-  const start = await postJson(`${serverUrl}/api/connect/start`, {
+  const projectFingerprint = remoteConnectHash(`${target}:${pathHint}`);
+  const localConfirmation = await confirmRemoteConnectLocalFolder(argv, projectDir, pathHint);
+  const trustedDevice = bootstrapToken ? null : await ensureRemoteConnectTrustedDevice();
+  const challengeNonce = trustedDevice ? randomUUID() : null;
+  const challengeSignature =
+    trustedDevice && challengeNonce
+      ? signRemoteConnectTrustedDeviceChallenge({
+          state: trustedDevice.state,
+          target,
+          projectFingerprint,
+          projectPathHintRedacted: pathHint,
+          challengeNonce
+        })
+      : null;
+  const startBody: Record<string, unknown> = {
     target,
     project_display_name: basename(projectDir) || "project",
-    project_fingerprint: remoteConnectHash(`${target}:${pathHint}`),
+    project_fingerprint: projectFingerprint,
     project_path_hint_redacted: pathHint
-  });
+  };
+  if (bootstrapToken) {
+    startBody.bootstrap_token = bootstrapToken;
+  }
+  if (trustedDevice && challengeNonce && challengeSignature) {
+    startBody.trusted_device_registration = {
+      device_name: trustedDevice.state.device_name,
+      device_key_prefix: trustedDevice.state.device_key_prefix,
+      public_key_fingerprint: trustedDevice.state.public_key_fingerprint,
+      public_key_material: trustedDevice.state.public_key_material,
+      public_key_algorithm: trustedDevice.state.public_key_algorithm
+    };
+    startBody.trusted_device = {
+      device_key_prefix: trustedDevice.state.device_key_prefix,
+      public_key_fingerprint: trustedDevice.state.public_key_fingerprint,
+      public_key_material: trustedDevice.state.public_key_material,
+      challenge_nonce: challengeNonce,
+      challenge_signature: challengeSignature,
+      signature_algorithm: trustedDevice.state.public_key_algorithm
+    };
+  }
+  const start = await postJson(`${serverUrl}/api/connect/start`, startBody);
   const approveUrl = requireStringField(start, "approve_url");
   const pollToken = requireStringField(start, "poll_token");
+  const startTrustedDevice =
+    start.trusted_device &&
+    typeof start.trusted_device === "object" &&
+    !Array.isArray(start.trusted_device)
+      ? (start.trusted_device as Record<string, unknown>)
+      : null;
+  const startBootstrapToken =
+    start.bootstrap_token &&
+    typeof start.bootstrap_token === "object" &&
+    !Array.isArray(start.bootstrap_token)
+      ? (start.bootstrap_token as Record<string, unknown>)
+      : null;
+  const browserApprovalRequired =
+    startBootstrapToken?.browser_approval_required === false
+      ? false
+      : startTrustedDevice?.browser_approval_required !== false;
+  const trustedDeviceReconnectStatus =
+    typeof startTrustedDevice?.status === "string" ? startTrustedDevice.status : null;
+  const trustedDeviceFallbackReason =
+    typeof startTrustedDevice?.reason === "string" ? startTrustedDevice.reason : null;
+  const bootstrapTokenStatus =
+    typeof startBootstrapToken?.status === "string" ? startBootstrapToken.status : null;
+  const bootstrapTokenPrefix =
+    typeof startBootstrapToken?.token_prefix === "string" ? startBootstrapToken.token_prefix : null;
+  const startApprovalMode =
+    typeof start.approval_mode === "string"
+      ? start.approval_mode
+      : browserApprovalRequired
+        ? "human_approval"
+        : "trusted_device";
   if (format === "text") {
     process.stdout.write(
       [
@@ -6137,12 +6618,32 @@ async function runConnectCloud(argv: readonly string[]) {
         `Project: ${projectDir}`,
         `Server: ${serverUrl}`,
         "",
-        "Approve this project in your browser:",
-        `  ${approveUrl}`,
+        trustedDevice ? `Trusted device: ${trustedDevice.state.device_name}` : null,
+        trustedDevice
+          ? `Trusted device status: ${trustedDevice.created ? "created" : "reused"}`
+          : null,
+        trustedDeviceReconnectStatus
+          ? `Trusted reconnect: ${trustedDeviceReconnectStatus}${trustedDeviceFallbackReason ? ` (${trustedDeviceFallbackReason})` : ""}`
+          : null,
+        trustedDevice ? `Trusted device store: ${trustedDevice.path}` : null,
+        bootstrapToken ? `Bootstrap token: ${bootstrapTokenStatus ?? "submitted"}` : null,
+        bootstrapTokenPrefix ? `Bootstrap token prefix: ${bootstrapTokenPrefix}` : null,
+        `Local confirmation: ${localConfirmation}`,
         "",
-        `Waiting for approval for up to ${Math.round(pollTimeoutMs / 1000)} seconds...`,
+        browserApprovalRequired
+          ? "Approve this project in your browser:"
+          : startApprovalMode === "bootstrap_token"
+            ? "Bootstrap token approved this project; browser approval is not required."
+            : "Trusted device approved this project; browser approval is not required.",
+        browserApprovalRequired ? `  ${approveUrl}` : null,
+        "",
+        browserApprovalRequired
+          ? `Waiting for approval for up to ${Math.round(pollTimeoutMs / 1000)} seconds...`
+          : "Waiting for scoped project credential...",
         ""
-      ].join("\n")
+      ]
+        .filter((line): line is string => line !== null)
+        .join("\n")
     );
   }
   if (dryRun) {
@@ -6154,6 +6655,27 @@ async function runConnectCloud(argv: readonly string[]) {
       target,
       server_url: serverUrl,
       approve_url: approveUrl,
+      approval_mode: startApprovalMode,
+      browser_approval_required: browserApprovalRequired,
+      local_confirmation: localConfirmation,
+      trusted_device: {
+        device_name: trustedDevice?.state.device_name ?? null,
+        device_key_prefix: trustedDevice?.state.device_key_prefix ?? null,
+        public_key_fingerprint: trustedDevice?.state.public_key_fingerprint ?? null,
+        public_key_algorithm: trustedDevice?.state.public_key_algorithm ?? null,
+        store_path: trustedDevice?.path ?? null,
+        created: trustedDevice?.created ?? false,
+        reconnect_status: trustedDeviceReconnectStatus,
+        fallback_reason: trustedDeviceFallbackReason,
+        private_key_printed: false
+      },
+      bootstrap_token: bootstrapToken
+        ? {
+            status: bootstrapTokenStatus,
+            token_prefix: bootstrapTokenPrefix,
+            token_printed: false
+          }
+        : null,
       writes_files: false,
       doctor_status: "not_run_dry_run",
       safety: {
@@ -6173,6 +6695,17 @@ async function runConnectCloud(argv: readonly string[]) {
             target,
             serverUrl,
             approveUrl,
+            approvalMode: startApprovalMode,
+            browserApprovalRequired,
+            trustedDeviceName: trustedDevice?.state.device_name,
+            trustedDevicePath: trustedDevice?.path,
+            trustedDeviceStatus: trustedDevice
+              ? trustedDevice.created
+                ? "created"
+                : "reused"
+              : null,
+            bootstrapTokenStatus,
+            bootstrapTokenPrefix,
             writesFiles: false,
             doctorStatus: "not_run_dry_run",
             status: "dry_run"
@@ -6199,8 +6732,14 @@ async function runConnectCloud(argv: readonly string[]) {
     await sleep(pollIntervalMs);
   }
   if (!approved) throw new Error("VALIDATION_ERROR: remote connect approval timed out");
+  const approvalReceivedLabel =
+    startApprovalMode === "trusted_device"
+      ? "Trusted device approval received"
+      : startApprovalMode === "bootstrap_token"
+        ? "Bootstrap token approval received"
+        : "Approval received";
   if (format === "text")
-    process.stdout.write("\nApproval received. Writing remote MCP config...\n");
+    process.stdout.write(`\n${approvalReceivedLabel}. Writing remote MCP config...\n`);
   const bootstrap = approved.bootstrap;
   if (!bootstrap || typeof bootstrap !== "object" || Array.isArray(bootstrap)) {
     throw new Error("VALIDATION_ERROR: approved remote connect response is missing bootstrap data");
@@ -6215,8 +6754,30 @@ async function runConnectCloud(argv: readonly string[]) {
     sessionId: parseFlag(argv, "--session-id"),
     traceId: parseFlag(argv, "--trace-id")
   });
+  const approvedCredential =
+    approved.credential &&
+    typeof approved.credential === "object" &&
+    !Array.isArray(approved.credential)
+      ? (approved.credential as Record<string, unknown>)
+      : null;
+  const credentialStore = storeRemoteMcpCredential({
+    credential: config.credential,
+    serverUrl: config.serverUrl,
+    projectId: config.projectId,
+    developerId: config.developerId,
+    clientId: config.clientId,
+    credentialPrefix:
+      typeof approvedCredential?.credential_prefix === "string"
+        ? approvedCredential.credential_prefix
+        : null
+  });
   const approvedTarget = String(bootstrapRecord.target ?? target);
-  const targetConfig = remoteClientTargetConfig(approvedTarget, config);
+  const targetConfig = remoteClientTargetConfig(approvedTarget, {
+    ...config,
+    credential: null,
+    credentialRef: credentialStore.key,
+    credentialStorePath: credentialStore.display_path
+  });
   const targetFile = resolve(projectDir, targetConfig.config_file);
   const existing = await readOptional(targetFile);
   const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
@@ -6232,8 +6793,10 @@ async function runConnectCloud(argv: readonly string[]) {
       "remote-doctor",
       "--server-url",
       config.serverUrl,
-      "--credential",
-      config.credential,
+      "--credential-ref",
+      credentialStore.key,
+      "--credential-store",
+      credentialStore.display_path,
       "--project-id",
       config.projectId,
       "--developer-id",
@@ -6245,6 +6808,19 @@ async function runConnectCloud(argv: readonly string[]) {
     ]);
     doctorStatus = "passed";
   }
+  const approvalMode =
+    typeof approved.approval_mode === "string" ? approved.approval_mode : startApprovalMode;
+  const consentReceipt = await writeRemoteAgentConsentReceipt({
+    projectDir,
+    serverUrl: config.serverUrl,
+    projectId: config.projectId,
+    developerId: config.developerId,
+    clientId: config.clientId,
+    credentialRef: credentialStore.key,
+    credentialPrefix: credentialStore.credential_prefix ?? credentialStore.key,
+    credentialStorePath: credentialStore.display_path,
+    approvalMode
+  });
   const result = {
     ok: true,
     action: "connect_cloud",
@@ -6253,8 +6829,35 @@ async function runConnectCloud(argv: readonly string[]) {
     target: targetConfig.target,
     server_url: config.serverUrl,
     approve_url: approveUrl,
+    approval_mode: approvalMode,
+    browser_approval_required: browserApprovalRequired,
+    local_confirmation: localConfirmation,
+    credential_store: credentialStore,
+    trusted_device: {
+      device_name: trustedDevice?.state.device_name ?? null,
+      device_key_prefix: trustedDevice?.state.device_key_prefix ?? null,
+      public_key_fingerprint: trustedDevice?.state.public_key_fingerprint ?? null,
+      public_key_algorithm: trustedDevice?.state.public_key_algorithm ?? null,
+      store_path: trustedDevice?.path ?? null,
+      created: trustedDevice?.created ?? false,
+      reconnect_status: trustedDeviceReconnectStatus,
+      fallback_reason: trustedDeviceFallbackReason,
+      private_key_printed: false
+    },
+    bootstrap_token: bootstrapToken
+      ? {
+          status: bootstrapTokenStatus,
+          token_prefix: bootstrapTokenPrefix,
+          token_printed: false
+        }
+      : null,
     config_file: targetConfig.config_file,
     target_file: targetFile,
+    consent_receipt: {
+      path: remoteAgentConsentReceiptPath(projectDir),
+      no_raw_credentials_or_private_keys: consentReceipt.no_raw_credentials_or_private_keys,
+      redaction_boundary: consentReceipt.consent_scope.redaction_boundary
+    },
     writes_files: true,
     doctor_status: doctorStatus,
     scope: {
@@ -6283,6 +6886,19 @@ async function runConnectCloud(argv: readonly string[]) {
           target: targetConfig.target,
           serverUrl: config.serverUrl,
           approveUrl,
+          approvalMode,
+          browserApprovalRequired,
+          trustedDeviceName: trustedDevice?.state.device_name,
+          trustedDevicePath: trustedDevice?.path,
+          trustedDeviceStatus: trustedDevice
+            ? trustedDevice.created
+              ? "created"
+              : "reused"
+            : null,
+          bootstrapTokenStatus,
+          bootstrapTokenPrefix,
+          credentialStorePath: credentialStore.display_path,
+          consentReceiptPath: remoteAgentConsentReceiptPath(projectDir),
           configFile: targetConfig.config_file,
           targetFile,
           writesFiles: true,
@@ -8018,9 +8634,9 @@ function usageText(command?: string) {
     command === "connect-remote-auto"
   ) {
     return [
-      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--poll-timeout-ms <ms>] [--skip-doctor] [--format json|text]",
+      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--bootstrap-token <one-time-token>] [--poll-timeout-ms <ms>] [--skip-doctor] [--yes] [--format json|text]",
       "",
-      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, writes project-local remote MCP config after approval, and runs remote-doctor by default.",
+      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, registers a local trusted device key on first approval, reuses that key for signed trusted-device reconnect, supports one-time headless bootstrap tokens for servers, writes project-local remote MCP config after approval, and runs remote-doctor by default.",
       "",
       "This command does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, provider secrets, or a current preinstalled Recallant CLI when launched through `curl -fsSL https://memory.example.com/connect | bash`.",
       "",

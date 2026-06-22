@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -26,14 +26,18 @@ function env(extra = {}) {
   };
 }
 
-async function cli(cwd, args, extraEnv = {}) {
+async function cliRaw(cwd, args, extraEnv = {}) {
   const { stdout, stderr } = await execFileAsync(process.execPath, [cliPath, ...args], {
     cwd,
     env: env(extraEnv),
     maxBuffer: 8 * 1024 * 1024
   });
   if (stderr.trim()) process.stderr.write(stderr);
-  return JSON.parse(stdout);
+  return stdout;
+}
+
+async function cli(cwd, args, extraEnv = {}) {
+  return JSON.parse(await cliRaw(cwd, args, extraEnv));
 }
 
 function assert(condition, message) {
@@ -42,6 +46,7 @@ function assert(condition, message) {
 
 const onlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-online-"));
 const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-offline-"));
+const remoteProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-remote-"));
 const marker = `CAPTURE-SMOKE-${randomUUID()}`;
 
 try {
@@ -57,7 +62,10 @@ try {
     "--task-hint",
     `${marker} readiness decision`
   ]);
-  assert(started.mode === "server", `agent-start did not use server mode: ${JSON.stringify(started)}`);
+  assert(
+    started.mode === "server",
+    `agent-start did not use server mode: ${JSON.stringify(started)}`
+  );
   assert(started.session_id, "agent-start did not return a session id");
   assert(
     started.project_id === attach.project_id,
@@ -79,7 +87,10 @@ try {
     decision.project_id === attach.project_id,
     `decision event used a different project id than attach: ${JSON.stringify(decision)}`
   );
-  assert(decision.memory?.status === "accepted", `decision memory was not accepted: ${JSON.stringify(decision)}`);
+  assert(
+    decision.memory?.status === "accepted",
+    `decision memory was not accepted: ${JSON.stringify(decision)}`
+  );
 
   const action = await cli(onlineProject, [
     "agent-event",
@@ -147,20 +158,30 @@ try {
     "--summary",
     `Closed capture smoke for ${marker}`
   ]);
-  assert(closeout.closeout?.report_required === false, `closeout reported warnings: ${JSON.stringify(closeout)}`);
+  assert(
+    closeout.closeout?.report_required === false,
+    `closeout reported warnings: ${JSON.stringify(closeout)}`
+  );
 
   const secondStart = await cli(onlineProject, [
     "agent-start",
     "--task-hint",
     `${marker} readiness decision`
   ]);
-  assert(secondStart.session_id !== started.session_id, "second session reused the first session id");
+  assert(
+    secondStart.session_id !== started.session_id,
+    "second session reused the first session id"
+  );
   assert(
     secondStart.project_id === attach.project_id,
     `second agent-start used a different project id than attach: ${JSON.stringify(secondStart)}`
   );
 
-  const context = await cli(onlineProject, ["context", "--task-hint", `${marker} readiness decision`]);
+  const context = await cli(onlineProject, [
+    "context",
+    "--task-hint",
+    `${marker} readiness decision`
+  ]);
   const working = context.sections?.working_memories ?? [];
   assert(
     working.some((memory) => String(memory.body).includes(marker)),
@@ -233,7 +254,12 @@ try {
     `detach dry-run changed state or skipped confirmation: ${JSON.stringify(detachDryRun)}`
   );
 
-  const detach = await cli(onlineProject, ["detach", "--project-id", attach.project_id, "--confirm"]);
+  const detach = await cli(onlineProject, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--confirm"
+  ]);
   assert(
     detach.status === "detached" &&
       detach.writes_database === true &&
@@ -258,22 +284,123 @@ try {
 
   const offlineEvent = await cli(
     offlineProject,
-    ["agent-event", "--kind", "action", "--text", `Offline action ${marker}: spool fallback works.`],
+    [
+      "agent-event",
+      "--kind",
+      "action",
+      "--text",
+      `Offline action ${marker}: spool fallback works.`
+    ],
     { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
   );
   assert(offlineEvent.mode === "offline_spool", "offline agent-event did not spool");
 
   const dryRun = await cli(offlineProject, ["sync-spool", "--dry-run"]);
-  assert(dryRun.unsynced_count >= 2, `sync-spool dry-run missed offline records: ${JSON.stringify(dryRun)}`);
+  assert(
+    dryRun.unsynced_count >= 2,
+    `sync-spool dry-run missed offline records: ${JSON.stringify(dryRun)}`
+  );
 
   const synced = await cli(offlineProject, ["sync-spool"]);
-  assert(synced.synced_count >= 2, `sync-spool did not upload offline records: ${JSON.stringify(synced)}`);
+  assert(
+    synced.synced_count >= 2,
+    `sync-spool did not upload offline records: ${JSON.stringify(synced)}`
+  );
 
   const syncedAgain = await cli(offlineProject, ["sync-spool"]);
   assert(syncedAgain.synced_count === 0, "repeat sync-spool created duplicate work");
+
+  await mkdir(join(remoteProject, ".codex"), { recursive: true });
+  await writeFile(
+    join(remoteProject, ".codex", "config.toml"),
+    `[mcp_servers.recallant]
+command = "recallant"
+args = ["remote-bridge"]
+env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PROJECT_ID = "remote-project-id", RECALLANT_DEVELOPER_ID = "remote-developer-id", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-client-id", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "rclcred_lookup" }
+`
+  );
+  const requiredSecretClasses = [
+    ".env",
+    "private keys",
+    "raw credentials",
+    "customer data",
+    "provider secrets",
+    "database URLs",
+    "raw artifacts",
+    "backups"
+  ];
+  const remoteStart = await cli(
+    remoteProject,
+    ["agent-start", "--format", "json", "--task-hint", `${marker} remote consent`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    remoteStart.destination?.server_url === "https://recallant.example.com",
+    "remote consent missing destination"
+  );
+  assert(
+    remoteStart.destination?.endpoint_path === "/api/mcp",
+    "remote consent missing endpoint path"
+  );
+  assert(
+    remoteStart.credential_scope?.project_id === "remote-project-id",
+    "remote consent missing project scope"
+  );
+  assert(
+    remoteStart.credential_scope?.developer_id === "remote-developer-id",
+    "remote consent missing developer scope"
+  );
+  assert(
+    remoteStart.credential_scope?.client_id === "remote-client-id",
+    "remote consent missing client scope"
+  );
+  for (const secretClass of requiredSecretClasses) {
+    assert(
+      remoteStart.redaction_boundary?.includes(secretClass),
+      `redaction boundary missing ${secretClass}`
+    );
+    assert(remoteStart.not_sent?.includes(secretClass), `not_sent missing ${secretClass}`);
+  }
+  assert(
+    remoteStart.recommended_next_call === "memory_get_context_pack",
+    "remote agent-start did not recommend context pack startup"
+  );
+  assert(
+    String(remoteStart.recommended_next_action ?? "").includes(
+      "does not require Cloudflare browser auth"
+    ),
+    "remote agent-start recommendation did not clarify Cloudflare browser auth"
+  );
+  assert(
+    !JSON.stringify(remoteStart).includes("PRIVATE KEY"),
+    "remote consent JSON leaked private key text"
+  );
+  assert(
+    !JSON.stringify(remoteStart).includes("rcl_mcp_connect_secret"),
+    "remote consent JSON leaked raw credential"
+  );
+
+  const remoteText = await cliRaw(
+    remoteProject,
+    ["agent-start", "--format", "text", "--task-hint", `${marker} remote consent text`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    remoteText.includes("Remote Recallant consent boundary"),
+    "text output missing consent section"
+  );
+  assert(remoteText.includes("Do not send:"), "text output missing prohibited classes");
+  assert(
+    remoteText.includes("does not require Cloudflare browser auth"),
+    "text output missing Cloudflare clarification"
+  );
+  for (const secretClass of requiredSecretClasses) {
+    assert(remoteText.includes(secretClass), `text output missing ${secretClass}`);
+  }
 } finally {
   await rm(onlineProject, { recursive: true, force: true });
   await rm(offlineProject, { recursive: true, force: true });
+  await rm(remoteProject, { recursive: true, force: true });
 }
 
 process.stdout.write("Product acceptance smoke passed\n");

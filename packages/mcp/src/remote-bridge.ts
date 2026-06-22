@@ -79,6 +79,12 @@ function readBridgeConfig(argv: readonly string[], env: NodeJS.ProcessEnv): Remo
       parseBridgeFlag(argv, remoteMcpBridgeFlags.serverUrl) ?? env[remoteMcpBridgeEnv.serverUrl],
     credential:
       parseBridgeFlag(argv, remoteMcpBridgeFlags.credential) ?? env[remoteMcpBridgeEnv.credential],
+    credentialRef:
+      parseBridgeFlag(argv, remoteMcpBridgeFlags.credentialRef) ??
+      env[remoteMcpBridgeEnv.credentialRef],
+    credentialStorePath:
+      parseBridgeFlag(argv, remoteMcpBridgeFlags.credentialStore) ??
+      env[remoteMcpBridgeEnv.credentialStore],
     projectId:
       parseBridgeFlag(argv, remoteMcpBridgeFlags.projectId) ?? env[remoteMcpBridgeEnv.projectId],
     developerId:

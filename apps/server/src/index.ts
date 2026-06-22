@@ -1,4 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  createPublicKey,
+  timingSafeEqual,
+  verify as verifySignature
+} from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -537,6 +543,7 @@ function classifyHttpAuditRoute(method: string, pathname: string): HttpAuditRout
   if (
     pathname === "/api/remote-credentials" ||
     pathname === "/api/remote-credential" ||
+    pathname === "/api/connect/bootstrap-token" ||
     pathname === "/remote-credential"
   ) {
     return {
@@ -876,11 +883,15 @@ type RemoteInviteRedeemResponse = {
 
 type RemoteConnectStartRequest = {
   target?: unknown;
+  project_id?: unknown;
   project_display_name?: unknown;
   project_fingerprint?: unknown;
   project_path_hint_redacted?: unknown;
   repo_remote_hash?: unknown;
   requested_by_ip_hash?: unknown;
+  trusted_device_registration?: unknown;
+  trusted_device?: unknown;
+  bootstrap_token?: unknown;
   expires_at?: unknown;
 };
 
@@ -894,6 +905,18 @@ type RemoteConnectApprovalRequest = {
   project_id?: unknown;
   developer_id?: unknown;
   client_id?: unknown;
+};
+
+type RemoteConnectBootstrapTokenRequest = {
+  action?: unknown;
+  project_id?: unknown;
+  developer_id?: unknown;
+  token_id?: unknown;
+  target?: unknown;
+  label?: unknown;
+  allow_project_create?: unknown;
+  expires_at?: unknown;
+  server_url?: unknown;
 };
 
 const remoteConnectRateLimitWindowMs = 60_000;
@@ -1016,6 +1039,200 @@ function assertRemoteConnectPayloadBudget(input: unknown, label: string) {
   }
 }
 
+function remoteConnectTrustedDeviceRegistration(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const record = input as Record<string, unknown>;
+  const deviceKeyPrefix = optionalInput(record.device_key_prefix);
+  const publicKeyFingerprint = optionalInput(record.public_key_fingerprint);
+  const publicKeyMaterial = optionalInput(record.public_key_material);
+  if (!deviceKeyPrefix || !publicKeyFingerprint || !publicKeyMaterial) {
+    throw new Error("VALIDATION_ERROR: trusted device registration is incomplete");
+  }
+  return {
+    deviceKeyPrefix,
+    publicKeyFingerprint,
+    publicKeyMaterial,
+    publicKeyHash: createHash("sha256").update(publicKeyMaterial).digest("hex"),
+    publicKeyAlgorithm: optionalInput(record.public_key_algorithm) ?? "unknown",
+    deviceName: optionalInput(record.device_name) ?? "trusted remote device"
+  };
+}
+
+function remoteConnectTrustedDeviceStart(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const record = input as Record<string, unknown>;
+  const deviceKeyPrefix = optionalInput(record.device_key_prefix);
+  const publicKeyFingerprint = optionalInput(record.public_key_fingerprint);
+  const publicKeyMaterial = optionalInput(record.public_key_material);
+  const challengeNonce = optionalInput(record.challenge_nonce);
+  const challengeSignature = optionalInput(record.challenge_signature);
+  const signatureAlgorithm = optionalInput(record.signature_algorithm) ?? "unknown";
+  if (
+    !deviceKeyPrefix ||
+    !publicKeyFingerprint ||
+    !publicKeyMaterial ||
+    !challengeNonce ||
+    !challengeSignature
+  ) {
+    throw new Error("VALIDATION_ERROR: trusted device signed challenge is incomplete");
+  }
+  return {
+    deviceKeyPrefix,
+    publicKeyFingerprint,
+    publicKeyMaterial,
+    challengeNonce,
+    challengeSignature,
+    signatureAlgorithm
+  };
+}
+
+function remoteConnectTrustedDeviceChallengePayload(input: {
+  target: string;
+  projectFingerprint: string | null | undefined;
+  projectPathHintRedacted: string | null | undefined;
+  challengeNonce: string;
+}) {
+  return [
+    "recallant-connect-trusted-device-v1",
+    `target:${input.target}`,
+    `project_fingerprint:${input.projectFingerprint ?? ""}`,
+    `project_path_hint_redacted:${input.projectPathHintRedacted ?? ""}`,
+    `challenge_nonce:${input.challengeNonce}`
+  ].join("\n");
+}
+
+function verifyRemoteConnectTrustedDeviceSignature(input: {
+  publicKeyMaterial: string;
+  challengeSignature: string;
+  payload: string;
+  signatureAlgorithm: string;
+}) {
+  if (input.signatureAlgorithm !== "ed25519-v1") return false;
+  try {
+    return verifySignature(
+      null,
+      Buffer.from(input.payload, "utf8"),
+      createPublicKey(input.publicKeyMaterial),
+      Buffer.from(input.challengeSignature, "base64url")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function remoteConnectApprovalMode(approvedBy: string | null | undefined) {
+  if (approvedBy?.startsWith("trusted-device:")) return "trusted_device";
+  if (approvedBy?.startsWith("bootstrap-token:")) return "bootstrap_token";
+  return "human_approval";
+}
+
+async function maybeApproveRemoteConnectWithTrustedDevice(input: {
+  database: RecallantDb;
+  deviceCode: string;
+  request: RemoteConnectRequestSummary;
+  trustedDevice: NonNullable<ReturnType<typeof remoteConnectTrustedDeviceStart>>;
+  target: string;
+  projectFingerprint: string | null | undefined;
+  projectPathHintRedacted: string | null | undefined;
+}) {
+  const payload = remoteConnectTrustedDeviceChallengePayload({
+    target: input.target,
+    projectFingerprint: input.projectFingerprint,
+    projectPathHintRedacted: input.projectPathHintRedacted,
+    challengeNonce: input.trustedDevice.challengeNonce
+  });
+  const signatureOk = verifyRemoteConnectTrustedDeviceSignature({
+    publicKeyMaterial: input.trustedDevice.publicKeyMaterial,
+    challengeSignature: input.trustedDevice.challengeSignature,
+    payload,
+    signatureAlgorithm: input.trustedDevice.signatureAlgorithm
+  });
+  if (!signatureOk) {
+    return {
+      status: "fallback",
+      reason: "invalid_signature",
+      browser_approval_required: true,
+      device_key_prefix: input.trustedDevice.deviceKeyPrefix,
+      public_key_fingerprint: input.trustedDevice.publicKeyFingerprint
+    };
+  }
+
+  const verification = await input.database.verifyRemoteTrustedDeviceChallenge({
+    deviceKeyPrefix: input.trustedDevice.deviceKeyPrefix,
+    publicKeyFingerprint: input.trustedDevice.publicKeyFingerprint,
+    publicKeyMaterial: input.trustedDevice.publicKeyMaterial,
+    challengeNonce: input.trustedDevice.challengeNonce,
+    verifiedBy: "remote-connect"
+  });
+  if (!verification.ok) {
+    return {
+      status: "fallback",
+      reason: verification.code,
+      browser_approval_required: true,
+      device_key_prefix: input.trustedDevice.deviceKeyPrefix,
+      public_key_fingerprint: input.trustedDevice.publicKeyFingerprint
+    };
+  }
+
+  const project = await input.database.createMemorySpace({
+    name: input.request.project_display_name ?? "remote project",
+    developerId: verification.device.developer_id,
+    projectKind: "workspace",
+    memoryDomain: "agent_work"
+  });
+  const approvedRequest = await input.database.approveRemoteConnectRequest({
+    deviceCode: input.deviceCode,
+    projectId: project.project_id,
+    developerId: verification.device.developer_id,
+    clientId: `remote-${input.trustedDevice.deviceKeyPrefix}`,
+    approvedBy: `trusted-device:${input.trustedDevice.deviceKeyPrefix}`
+  });
+  return {
+    status: "approved",
+    approval_mode: "trusted_device",
+    browser_approval_required: false,
+    device_key_prefix: input.trustedDevice.deviceKeyPrefix,
+    public_key_fingerprint: input.trustedDevice.publicKeyFingerprint,
+    request: approvedRequest
+  };
+}
+
+async function maybeApproveRemoteConnectWithBootstrapToken(input: {
+  database: RecallantDb;
+  deviceCode: string;
+  request: RemoteConnectRequestSummary;
+  bootstrapToken: string;
+  projectId?: string | null;
+}) {
+  const clientId = `remote-bootstrap-${createHash("sha256")
+    .update(input.request.id)
+    .digest("hex")
+    .slice(0, 12)}`;
+  const redeemed = await input.database.redeemRemoteConnectBootstrapToken({
+    token: input.bootstrapToken,
+    clientId,
+    projectId: input.projectId,
+    redeemedBy: "remote-connect-bootstrap"
+  });
+  if (!redeemed.project_id) {
+    throw new Error("VALIDATION_ERROR: bootstrap token did not resolve a project scope");
+  }
+  const approvedRequest = await input.database.approveRemoteConnectRequest({
+    deviceCode: input.deviceCode,
+    projectId: redeemed.project_id,
+    developerId: redeemed.developer_id,
+    clientId: redeemed.client_id,
+    approvedBy: `bootstrap-token:${redeemed.bootstrap_token.token_prefix}`
+  });
+  return {
+    status: "approved",
+    approval_mode: "bootstrap_token",
+    browser_approval_required: false,
+    token_prefix: redeemed.bootstrap_token.token_prefix,
+    request: approvedRequest
+  };
+}
+
 function remoteInviteRedeemUrl(serverUrl: string) {
   return `${serverUrl}/api/remote-invite/redeem`;
 }
@@ -1039,7 +1256,10 @@ curl -fsSL ${shellSingleQuote(`${serverUrl}/connect/client-bootstrap.sh`)} | bas
 }
 
 function remoteConnectClientBootstrapScript() {
-  return readFileSync(join(process.cwd(), "scripts", "install-recallant-client-bootstrap.sh"), "utf8");
+  return readFileSync(
+    join(process.cwd(), "scripts", "install-recallant-client-bootstrap.sh"),
+    "utf8"
+  );
 }
 
 function htmlEscape(value: unknown) {
@@ -1081,12 +1301,22 @@ function renderRemoteConnectApprovalPage(input: {
   <main>
     <h1>Approve Recallant remote connect</h1>
     ${input.error ? `<p class="error">${htmlEscape(input.error)}</p>` : ""}
+    <p>
+      This is the human approval gate for a remote agent client. Approve only if you recognize the
+      project and device. Approval creates scoped machine access for Recallant memory over HTTPS
+      <code>/api/mcp</code>; it does not grant Workbench, admin, credential-management, backup,
+      provider, or raw-artifact access.
+    </p>
     <div class="meta">
       <p><strong>Status:</strong> ${htmlEscape(status)}</p>
       <p><strong>Target client:</strong> ${htmlEscape(request?.target ?? "unknown")}</p>
       <p><strong>Project:</strong> ${htmlEscape(request?.project_display_name ?? "not provided")}</p>
       <p><strong>Project fingerprint:</strong> ${htmlEscape(request?.project_fingerprint ?? "not provided")}</p>
       <p><strong>Path hint:</strong> ${htmlEscape(request?.project_path_hint_redacted ?? "not provided")}</p>
+      <p><strong>Trusted device:</strong> ${htmlEscape(request?.trusted_device_name ?? "not requested")}</p>
+      <p><strong>Device fingerprint:</strong> ${htmlEscape(request?.trusted_device_public_key_fingerprint ?? "not provided")}</p>
+      <p><strong>Trust duration:</strong> ${request?.trusted_device_key_prefix ? "up to 90 days unless revoked" : "this approval only"}</p>
+      <p><strong>Trust effect:</strong> ${request?.trusted_device_key_prefix ? "Future projects from this device can request Recallant project connection with signed machine auth. This does not grant Workbench, admin, credential-management, backup, provider, or raw-artifact access." : "Only this project connection will be approved."}</p>
       <p><strong>Expires:</strong> ${htmlEscape(request?.expires_at?.toISOString?.() ?? request?.expires_at ?? "unknown")}</p>
     </div>
     <form method="post" action="${remoteConnectApprovePath}">
@@ -1130,6 +1360,53 @@ async function handleRemoteInviteCreate(
   };
 }
 
+async function handleRemoteConnectBootstrapToken(
+  database: RecallantDb,
+  request: IncomingMessage,
+  input: RemoteConnectBootstrapTokenRequest,
+  actorId: string
+) {
+  const action = optionalInput(input.action) ?? "create";
+  if (action === "create") {
+    const developerId = optionalInput(input.developer_id);
+    if (!developerId) throw new Error("VALIDATION_ERROR: developer_id is required");
+    const result = await database.createRemoteConnectBootstrapToken({
+      projectId: optionalInput(input.project_id),
+      developerId,
+      target: optionalInput(input.target),
+      label: optionalInput(input.label),
+      allowProjectCreate: booleanInput(input.allow_project_create),
+      expiresAt: optionalInput(input.expires_at),
+      createdBy: actorId
+    });
+    const serverUrl = remoteInviteServerUrl(input, request);
+    return {
+      ok: true,
+      action,
+      bootstrap_token: result.bootstrap_token,
+      token: result.token,
+      token_prefix: result.bootstrap_token.token_prefix,
+      command: `recallant connect-cloud . --server-url ${shellSingleQuote(serverUrl)} --bootstrap-token ${shellSingleQuote(result.token)}`,
+      secret_print_policy: "shown_once_create_output_only"
+    };
+  }
+  if (action === "revoke") {
+    const tokenId = optionalInput(input.token_id);
+    if (!tokenId) throw new Error("VALIDATION_ERROR: token_id is required");
+    const bootstrapToken = await database.revokeRemoteConnectBootstrapToken({
+      tokenId,
+      revokedBy: actorId
+    });
+    return {
+      ok: true,
+      action,
+      bootstrap_token: bootstrapToken,
+      secret_print_policy: "redacted"
+    };
+  }
+  throw new Error("VALIDATION_ERROR: connect bootstrap token supports create|revoke");
+}
+
 async function handleRemoteConnectStart(
   database: RecallantDb,
   request: IncomingMessage,
@@ -1137,26 +1414,85 @@ async function handleRemoteConnectStart(
 ) {
   assertRemoteConnectPayloadBudget(input, "remote connect start");
   const serverUrl = remoteInviteServerUrl({}, request);
+  const target = optionalInput(input.target) ?? "codex";
+  const projectFingerprint = optionalInput(input.project_fingerprint);
+  const projectPathHintRedacted = optionalInput(input.project_path_hint_redacted);
+  const bootstrapToken = optionalInput(input.bootstrap_token);
+  const trustedDeviceRegistration = remoteConnectTrustedDeviceRegistration(
+    input.trusted_device_registration
+  );
+  const trustedDevice = remoteConnectTrustedDeviceStart(input.trusted_device);
   const result = await database.createRemoteConnectRequest({
-    target: optionalInput(input.target) ?? "codex",
+    target,
     projectDisplayName: optionalInput(input.project_display_name),
-    projectFingerprint: optionalInput(input.project_fingerprint),
-    projectPathHintRedacted: optionalInput(input.project_path_hint_redacted),
+    projectFingerprint,
+    projectPathHintRedacted,
     repoRemoteHash: optionalInput(input.repo_remote_hash),
     requestedByIpHash: optionalInput(input.requested_by_ip_hash),
+    trustedDeviceKeyPrefix: trustedDeviceRegistration?.deviceKeyPrefix,
+    trustedDevicePublicKeyFingerprint: trustedDeviceRegistration?.publicKeyFingerprint,
+    trustedDevicePublicKeyHash: trustedDeviceRegistration?.publicKeyHash,
+    trustedDevicePublicKeyAlgorithm: trustedDeviceRegistration?.publicKeyAlgorithm,
+    trustedDeviceName: trustedDeviceRegistration?.deviceName,
     expiresAt: optionalInput(input.expires_at),
     createdBy: "remote-connect"
   });
+  const bootstrapApproval = bootstrapToken
+    ? await maybeApproveRemoteConnectWithBootstrapToken({
+        database,
+        deviceCode: result.device_code,
+        request: result.request,
+        bootstrapToken,
+        projectId: optionalInput(input.project_id)
+      })
+    : null;
+  const trustedDeviceApproval = bootstrapApproval
+    ? null
+    : trustedDevice
+      ? await maybeApproveRemoteConnectWithTrustedDevice({
+          database,
+          deviceCode: result.device_code,
+          request: result.request,
+          trustedDevice,
+          target,
+          projectFingerprint,
+          projectPathHintRedacted
+        })
+      : trustedDeviceRegistration
+        ? {
+            status: "pending_human_approval",
+            browser_approval_required: true,
+            device_key_prefix: trustedDeviceRegistration.deviceKeyPrefix,
+            public_key_fingerprint: trustedDeviceRegistration.publicKeyFingerprint
+          }
+        : null;
+  const machineApproval = bootstrapApproval ?? trustedDeviceApproval;
+  const trustedDeviceApproved =
+    machineApproval && "request" in machineApproval ? machineApproval : null;
+  const approvalMode =
+    trustedDeviceApproved?.status === "approved"
+      ? trustedDeviceApproved.approval_mode
+      : "human_approval";
   return {
     ok: true,
     action: "start",
     request_id: result.request.id,
-    request: result.request,
+    request: trustedDeviceApproved?.request ?? result.request,
     device_code: result.device_code,
     poll_token: result.poll_token,
     approve_url: remoteConnectApprovalUrl(serverUrl, result.device_code),
     expires_at: result.request.expires_at,
     interval_seconds: 2,
+    approval_mode: approvalMode,
+    trusted_device: trustedDeviceApproval,
+    bootstrap_token: bootstrapApproval
+      ? {
+          status: bootstrapApproval.status,
+          approval_mode: bootstrapApproval.approval_mode,
+          browser_approval_required: bootstrapApproval.browser_approval_required,
+          token_prefix: bootstrapApproval.token_prefix
+        }
+      : null,
     secret_print_policy: "device_and_poll_tokens_shown_once_start_output_only"
   };
 }
@@ -1197,6 +1533,7 @@ async function handleRemoteConnectPoll(
     ok: true,
     action: "poll",
     status: "approved",
+    approval_mode: remoteConnectApprovalMode(result.request.approved_by),
     request_id: result.request.id,
     credential: result.credential,
     one_time_secret: result.secret,
@@ -1237,6 +1574,19 @@ async function handleRemoteConnectApprove(
     projectKind: "workspace",
     memoryDomain: "agent_work"
   });
+  const trustedDeviceRegistration =
+    await database.getRemoteConnectTrustedDeviceRegistrationForApproval({ deviceCode: code });
+  if (trustedDeviceRegistration) {
+    await database.createRemoteTrustedDevice({
+      developerId: project.developer_id,
+      deviceKeyPrefix: trustedDeviceRegistration.device_key_prefix,
+      publicKeyFingerprint: trustedDeviceRegistration.public_key_fingerprint,
+      publicKeyHash: trustedDeviceRegistration.public_key_hash,
+      publicKeyAlgorithm: trustedDeviceRegistration.public_key_algorithm,
+      deviceName: trustedDeviceRegistration.device_name,
+      createdBy: approvedBy
+    });
+  }
   return {
     ok: true,
     action,
@@ -6579,6 +6929,26 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = (await readJson(request)) as RemoteCredentialProvisioningRequest;
         try {
           const result = await handleRemoteCredentialProvisioning(database, request, body);
+          write(response, 200, JSON.stringify(result), "application/json");
+        } catch (error) {
+          write(
+            response,
+            409,
+            JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+            "application/json"
+          );
+        }
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/connect/bootstrap-token") {
+        const body = (await readJson(request)) as RemoteConnectBootstrapTokenRequest;
+        try {
+          const result = await handleRemoteConnectBootstrapToken(
+            database,
+            request,
+            body,
+            auth.mode === "cloudflare" && auth.email ? auth.email : "workbench"
+          );
           write(response, 200, JSON.stringify(result), "application/json");
         } catch (error) {
           write(

@@ -137,6 +137,9 @@ mustInclude(
     "Remote Existing-Server Setup",
     "curl -fsSL https://memory.example.com/connect | bash",
     "works even when `recallant` is missing or old",
+    "registers a local trusted-device key",
+    "credential reference, not the raw",
+    "--bootstrap-token <one-time-token>",
     "Advanced/admin fallback",
     "recallant invite /path/to/project --server-url https://memory.example.com",
     "curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash",
@@ -186,6 +189,8 @@ mustInclude(
     "It works even when `recallant` is missing or old",
     "Advanced/admin fallback",
     "not the universal first-run command",
+    "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
+    "does not require Cloudflare browser",
     "The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,",
     "Workbench/admin auth, raw artifacts, backups, or provider secrets"
   ],
@@ -202,9 +207,10 @@ const remoteConnectPlan = await read("docs/REMOTE_CONNECT_PLAN.md");
 mustInclude(
   remoteConnectPlan,
   [
-    "Status: the initial universal connect slice is implemented",
+    "Status: the universal remote connect model is implemented",
     "curl -fsSL https://memory.example.com/connect | bash",
     "does not depend on an already installed or up-to-date local `recallant` CLI",
+    "credential reference, not the raw secret",
     "Server-generated invites remain supported as an advanced/admin path",
     "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected"
   ],
@@ -347,7 +353,11 @@ mustInclude(
 mustInclude(
   contractStatus,
   [
-    "universal `curl .../connect \\| bash` device-pairing beginner UX are present",
+    "universal `curl .../connect \\| bash` beginner UX are present",
+    "trusted-device registration/reconnect",
+    "headless",
+    "bootstrap-token redemption",
+    "local credential-store references",
     "GET /connect",
     "/api/connect/start",
     "/api/connect/poll",

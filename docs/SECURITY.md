@@ -25,12 +25,20 @@ bounded by design, and conservative about secrets.
 - Remote admin/API access must require authentication.
 - No unauthenticated public route should expose the Workbench, MCP tools, backups, raw artifacts, or
   provider settings.
-- Remote MCP/agent endpoints are private-by-default. The first `POST /api/mcp` slice requires
-  explicit DB-backed scoped credentials plus project/developer/client scope before tool execution.
-  Credentials are project/developer scoped, optionally client scoped, revocable, rotatable,
-  hash-stored, and audited without raw credential values. Remote onboarding invites are one-time,
-  short-lived, hash-stored tokens that redeem into scoped credentials without exposing Postgres,
-  Workbench/admin auth, raw artifacts, backups, or provider secrets to the remote machine.
+- Cloudflare Access or an equivalent edge gate protects human/admin/approval surfaces such as the
+  Workbench, `/connect/approve`, credential-management, backup, provider, and raw-artifact routes.
+  Agent runtime does not use a Cloudflare browser session; it uses scoped machine credentials.
+- Public agent routes are limited to the universal connect bootstrap/start/poll/cancel path,
+  bootstrap-token redemption through `/api/connect/start`, invite redemption, and `/api/mcp` with
+  scoped Bearer credentials. They must not expose Workbench/admin capabilities.
+- Remote MCP/agent endpoints require explicit DB-backed scoped credentials plus
+  project/developer/client scope before tool execution. Credentials are project/developer scoped,
+  optionally client scoped, revocable, rotatable, hash-stored, and audited without raw credential
+  values. Universal connect registers a local trusted-device key after first human approval, uses
+  signed nonce challenges for trusted-device reconnect, supports one-time headless bootstrap tokens,
+  writes generated project config with a local credential-store reference, and does not expose
+  Postgres, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw scoped
+  credentials to the project.
 - Public Workbench readiness requires an auth-protected private origin plus authenticated edge
   access. Do not make the Workbench public by changing the default bind host.
 - Production readiness treats stopped services, disabled restart behavior, missing service env
@@ -127,10 +135,10 @@ The public security review is executable, not only narrative. Run:
 
 Together these cover install/auth/Workbench/backups/secrets: private-by-default HTTP binding,
 Cloudflare/private access preconditions, Workbench auth, browser-facing secret redaction, generated
-secret file permissions, rollback confirmation, redacted local backups, and static checks that the
-runtime Workbench smoke keeps exercising secret and route exposure cases. The public security smoke
-also scans public docs and public runtime/install code for owner-only paths and deployment markers so
-private overlays stay out of the OSS surface.
+secret file permissions, scoped machine-credential routing for agents, rollback confirmation,
+redacted local backups, and static checks that the runtime Workbench smoke keeps exercising secret
+and route exposure cases. The public security smoke also scans public docs and public runtime/install
+code for owner-only paths and deployment markers so private overlays stay out of the OSS surface.
 
 ## Reporting Issues
 
