@@ -491,10 +491,11 @@ The first agent session after connect should:
 That startup contract is what turns a registered project into an agent-ready project. If the loop is
 not visible in Recallant, the project is configured but not yet capture active.
 
-For remote projects, `recallant agent-start --format json` reports the external Recallant consent
-boundary before agent work continues: destination server, HTTPS `/api/mcp` endpoint, project /
-developer / client credential scope, allowed context classes, prohibited data classes, and the
-recommended next call. Text mode prints the same boundary for humans.
+For remote projects, `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` and
+the external Recallant consent boundary before agent work continues: destination server, HTTPS
+`/api/mcp` endpoint, project / developer / client credential scope, allowed context classes,
+prohibited data classes, and the recommended next call. Text mode prints the same boundary for
+humans.
 
 The prohibited classes are `.env`, private keys, raw credentials, customer data, provider secrets,
 database URLs, raw artifacts, and backups. Those must not be sent through Recallant memory tools,
@@ -507,6 +508,10 @@ the scoped machine credential from the local credential store and does not requi
 auth after the project is connected. Codex or another agent client may still ask its own
 external-context safety confirmation; that client-level prompt is separate from Recallant auth and
 should be answered only after reviewing the reported consent boundary.
+
+Remote-only projects must not report `mode: "offline_spool"` just because the external workstation
+does not have `RECALLANT_DATABASE_URL`. Offline spool remains a fail-soft fallback for local capture
+when no remote MCP consent/config is present; it is not the normal remote-connect startup mode.
 
 If MCP tools are unavailable, use CLI fallback commands:
 

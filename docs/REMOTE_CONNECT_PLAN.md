@@ -16,7 +16,8 @@ not require Docker, Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin cookies,
 paths, raw artifacts, backups, provider secrets, or private deployment overlays on the remote
 machine. First approval can register a trusted device, later projects can reconnect with signed
 device challenges, headless hosts can use one-time bootstrap tokens, generated project config stores
-only credential references, and `agent-start` reports the remote consent/redaction boundary.
+only credential references, and remote-only `agent-start` returns `remote_mcp_ready` with the
+remote consent/redaction boundary instead of falling back to local offline spool messaging.
 
 ## Product Decision
 
@@ -46,7 +47,10 @@ https://memory.example.com/connect/approve?code=ABCD-1234
 ```
 
 After the owner approves in the browser, the CLI receives a provisioning package, writes the
-project-local remote MCP config, runs `remote-doctor`, and reports the next agent-start command.
+project-local remote MCP config, runs `remote-doctor`, and reports the next `agent-start` command.
+For remote-only projects, that command is a readiness/consent handoff: it should report
+`mode: "remote_mcp_ready"` and direct the agent to the configured MCP `memory_get_context_pack`
+flow without requiring local Recallant storage or Cloudflare browser auth.
 
 ## Authentication Paths
 
