@@ -862,6 +862,7 @@ try {
 const redactedEvidence = redactJson(evidence, input);
 const evidencePath = join(outputDir, `${runId}.evidence.json`);
 const summaryPath = join(outputDir, `${runId}.summary.md`);
+await mkdir(outputDir, { recursive: true });
 await writeFile(evidencePath, `${JSON.stringify(redactedEvidence, null, 2)}\n`);
 await writeFile(summaryPath, summaryText(redactedEvidence));
 

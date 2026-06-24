@@ -408,7 +408,8 @@ recallant remote-acceptance \
 
 If the project already has Recallant remote client config from bootstrap, `remote-acceptance` reads
 the scoped server URL, credential, project id, developer id, and client id from that local config.
-Operators can still pass those flags explicitly to override the config during diagnostics.
+Operators can still pass those flags explicitly to override the config during diagnostics. The
+evidence output directory is created automatically when it does not exist.
 
 Validate a saved evidence file before sharing it or committing an optional internal rehearsal
 report:
@@ -576,6 +577,20 @@ prohibited data classes, the recommended context-pack call, and the recommended 
 Text mode prints the same boundary for humans. Local `recallant doctor` should describe this as
 `remote-ready, local storage not attached` so agents do not run local `attach --confirm` unless the
 operator explicitly chooses the local-storage path.
+
+For an already connected remote project, use `recallant agent-start --format json` as the first
+refresh check. If it reports `remote_mcp_ready`, the existing scoped config is usable; no local
+`attach`, `onboard`, or import is needed. If the local client itself needs to be updated or the
+project config must be rewritten, rerun the central-server bootstrap (`curl -fsSL
+https://memory.example.com/connect | bash`) or the explicit remote flow:
+
+```bash
+recallant connect-cloud . --server-url https://memory.example.com --yes
+```
+
+Older client builds may still route `recallant connect . --server-url ...` through the local-storage
+connect path and fail with `connect requires an attached project with .recallant/config`; update the
+remote client or use `connect-cloud` directly before retrying that shorthand.
 
 After `remote_mcp_ready`, a useful first proof is a small non-secret governed memory marker:
 `memory_create_agent_memory` with `scope: "project"`, `created_by: "agent"`, and
