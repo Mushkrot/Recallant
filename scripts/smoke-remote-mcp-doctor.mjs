@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { storeRemoteMcpCredential } from "../packages/contracts/dist/index.js";
@@ -463,6 +463,37 @@ try {
     "stored credential output leaked store path"
   );
   summary.push({ scenario: "stored-credential-json", ok: true });
+
+  const inferredProject = await mkdtemp(join(tmpdir(), "recallant-doctor-infer-project-"));
+  await mkdir(join(inferredProject, ".codex"), { recursive: true });
+  await writeFile(
+    join(inferredProject, ".codex", "config.toml"),
+    [
+      "[mcp_servers.recallant]",
+      'command = "recallant"',
+      'args = ["remote-bridge"]',
+      `env = { RECALLANT_REMOTE_MCP_URL = "${fixture.serverUrl}", RECALLANT_PROJECT_ID = "${expectedScope.projectId}", RECALLANT_DEVELOPER_ID = "${expectedScope.developerId}", RECALLANT_REMOTE_MCP_CLIENT_ID = "${expectedScope.clientId}", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "${credentialStore.key}", RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = "${credentialStore.display_path}" }`,
+      ""
+    ].join("\n")
+  );
+  const inferredConfig = parseJsonOutput(
+    await runDoctor([
+      "--project-dir",
+      inferredProject,
+      "--timeout-ms",
+      "1000",
+      "--allow-insecure-localhost",
+      "--semantic-proof",
+      "--format",
+      "json"
+    ])
+  );
+  assert(
+    stageCode(inferredConfig, "semantic_memory_proof") === "pass:semantic_memory_proof_ok",
+    "project-local remote config inference did not prove semantic memory"
+  );
+  assertNoLeak("inferred-project-config", JSON.stringify(inferredConfig));
+  summary.push({ scenario: "inferred-project-config", ok: true });
 
   const human = await runDoctor(baseArgs(fixture, { format: "text" }));
   assert(human.stdout.includes("Recallant remote-doctor"));

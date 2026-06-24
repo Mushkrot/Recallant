@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import {
   remoteMcpBridgeEndpointUrl,
@@ -17,8 +19,11 @@ import {
 } from "@recallant/contracts";
 
 type RemoteDoctorOptions = {
+  projectDir: string | null;
   serverUrl: string | null;
   credential: string | null;
+  credentialRef: string | null;
+  credentialStorePath: string | null;
   projectId: string | null;
   developerId: string | null;
   clientId: string | null;
@@ -57,6 +62,110 @@ function normalizedOptional(value: string | null | undefined) {
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function readText(path: string) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function remoteConfigValue(content: string, key: string) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const quoted = content.match(new RegExp(`${escaped}\\s*[:=]\\s*"([^"]+)"`));
+  if (quoted?.[1]) return quoted[1];
+  const bare = content.match(new RegExp(`${escaped}\\s*[:=]\\s*([^,}\\n\\r]+)`));
+  return bare?.[1]?.trim().replace(/^['"]|['"]$/g, "") ?? null;
+}
+
+type RemoteDoctorProjectConfig = {
+  serverUrl: string | null;
+  credentialRef: string | null;
+  credentialStorePath: string | null;
+  projectId: string | null;
+  developerId: string | null;
+  clientId: string | null;
+  sessionId: string | null;
+  traceId: string | null;
+};
+
+function emptyRemoteDoctorProjectConfig(): RemoteDoctorProjectConfig {
+  return {
+    serverUrl: null,
+    credentialRef: null,
+    credentialStorePath: null,
+    projectId: null,
+    developerId: null,
+    clientId: null,
+    sessionId: null,
+    traceId: null
+  };
+}
+
+function readRemoteDoctorProjectConfig(projectDir: string | null): RemoteDoctorProjectConfig {
+  if (!projectDir) return emptyRemoteDoctorProjectConfig();
+  const receipt = readText(join(projectDir, ".recallant", "remote-consent.json"));
+  if (receipt) {
+    try {
+      const parsed = JSON.parse(receipt) as Record<string, unknown>;
+      const consentScope =
+        parsed.consent_scope && typeof parsed.consent_scope === "object"
+          ? (parsed.consent_scope as Record<string, unknown>)
+          : null;
+      const destination =
+        consentScope?.destination && typeof consentScope.destination === "object"
+          ? (consentScope.destination as Record<string, unknown>)
+          : null;
+      const credentialScope =
+        consentScope?.credential_scope && typeof consentScope.credential_scope === "object"
+          ? (consentScope.credential_scope as Record<string, unknown>)
+          : null;
+      if (parsed.kind === "recallant_remote_agent_consent" && destination && credentialScope) {
+        return {
+          serverUrl: normalizedOptional(String(destination.server_url ?? "")),
+          credentialRef: normalizedOptional(String(parsed.credential_ref ?? "")),
+          credentialStorePath: normalizedOptional(String(parsed.credential_store_path ?? "")),
+          projectId: normalizedOptional(String(credentialScope.project_id ?? "")),
+          developerId: normalizedOptional(String(credentialScope.developer_id ?? "")),
+          clientId: normalizedOptional(String(credentialScope.client_id ?? "")),
+          sessionId: null,
+          traceId: null
+        };
+      }
+    } catch {
+      // Ignore malformed receipts and fall back to client config discovery.
+    }
+  }
+
+  const candidates = [
+    ".codex/config.toml",
+    ".cursor/mcp.json",
+    ".mcp.json",
+    ".recallant/generic-remote-mcp.json"
+  ];
+  for (const candidate of candidates) {
+    const content = readText(join(projectDir, candidate));
+    if (!content?.includes("RECALLANT_REMOTE_MCP_URL") || !content.includes("remote-bridge")) {
+      continue;
+    }
+    return {
+      serverUrl: normalizedOptional(remoteConfigValue(content, "RECALLANT_REMOTE_MCP_URL")),
+      credentialRef: normalizedOptional(
+        remoteConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_REF")
+      ),
+      credentialStorePath: normalizedOptional(
+        remoteConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_STORE")
+      ),
+      projectId: normalizedOptional(remoteConfigValue(content, "RECALLANT_PROJECT_ID")),
+      developerId: normalizedOptional(remoteConfigValue(content, "RECALLANT_DEVELOPER_ID")),
+      clientId: normalizedOptional(remoteConfigValue(content, "RECALLANT_REMOTE_MCP_CLIENT_ID")),
+      sessionId: normalizedOptional(remoteConfigValue(content, "RECALLANT_REMOTE_MCP_SESSION_ID")),
+      traceId: normalizedOptional(remoteConfigValue(content, "RECALLANT_REMOTE_MCP_TRACE_ID"))
+    };
+  }
+  return emptyRemoteDoctorProjectConfig();
+}
+
 function readOptions(argv: readonly string[]): RemoteDoctorOptions {
   const format = hasFlag(argv, "--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "json" && format !== "text") {
@@ -67,21 +176,38 @@ function readOptions(argv: readonly string[]): RemoteDoctorOptions {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("VALIDATION_ERROR: --timeout-ms must be a positive number");
   }
-  const credentialRef = normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credentialRef));
-  const credentialStorePath = normalizedOptional(
-    parseFlag(argv, remoteMcpBridgeFlags.credentialStore)
-  );
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const projectConfig = readRemoteDoctorProjectConfig(projectDir);
+  const credentialRef =
+    normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credentialRef)) ??
+    projectConfig.credentialRef;
+  const credentialStorePath =
+    normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credentialStore)) ??
+    projectConfig.credentialStorePath;
   const credential =
     normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.credential)) ??
     resolveRemoteMcpStoredCredential({ credentialRef, credentialStorePath });
   return {
-    serverUrl: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.serverUrl)),
+    projectDir,
+    serverUrl:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.serverUrl)) ??
+      projectConfig.serverUrl,
     credential,
-    projectId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.projectId)),
-    developerId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.developerId)),
-    clientId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.clientId)),
-    sessionId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.sessionId)),
-    traceId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.traceId)),
+    credentialRef,
+    credentialStorePath,
+    projectId:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.projectId)) ??
+      projectConfig.projectId,
+    developerId:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.developerId)) ??
+      projectConfig.developerId,
+    clientId:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.clientId)) ?? projectConfig.clientId,
+    sessionId:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.sessionId)) ??
+      projectConfig.sessionId,
+    traceId:
+      normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.traceId)) ?? projectConfig.traceId,
     format,
     timeoutMs,
     captureProof: hasFlag(argv, "--capture-proof") || hasFlag(argv, "--semantic-proof"),

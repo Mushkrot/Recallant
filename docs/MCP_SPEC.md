@@ -108,18 +108,14 @@ Diagnostic stages are intentionally separate:
 Use placeholder-only commands in docs and runbooks:
 
 ```bash
-recallant remote-doctor \
-  --server-url <https-recallant-server> \
-  --credential-ref <local-credential-ref> \
-  --credential-store <local-credential-store-path> \
-  --project-id <project-id> \
-  --developer-id <developer-id> \
-  --client-id <client-id> \
-  --format json
+recallant remote-doctor --project-dir . --format json
 ```
 
-The explicit `--credential <scoped-remote-mcp-credential>` form remains available for
-advanced/debug workflows where the operator intentionally provides the raw secret boundary.
+When a project-local remote MCP config exists, `remote-doctor` can infer the server URL, credential
+reference, credential-store path, and project/developer/client scope from that project directory.
+Explicit `--server-url`, `--credential-ref`, `--credential-store`, and scope flags remain available
+for advanced/debug workflows. The explicit `--credential <scoped-remote-mcp-credential>` form is
+only for cases where the operator intentionally provides the raw secret boundary.
 
 Add `--capture-proof` only when the operator wants remote MCP session/context readiness evidence.
 This uses `memory_start_session` and `memory_get_context_pack` and is reported separately from

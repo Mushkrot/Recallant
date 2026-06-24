@@ -9081,13 +9081,16 @@ function usageText(command?: string) {
   }
   if (command === "remote-doctor") {
     return [
-      "Usage: recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--semantic-proof] [--format json|text]",
+      "Usage: recallant remote-doctor [--project-dir <path>] [--capture-proof] [--semantic-proof] [--format json|text]",
+      "       recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--semantic-proof] [--format json|text]",
       "",
       "Diagnose HTTPS /api/mcp reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize, tools/list, optional session/context readiness proof, and optional governed semantic marker proof without local database access.",
+      "If the project already has a project-local remote MCP config, --project-dir is enough; remote-doctor reads the server, scope, credential ref, and local credential store path from that config.",
       "",
       "--capture-proof proves session/context readiness only. --semantic-proof also proves checkpoint state and governed memory create+recall with one synthetic marker.",
       "",
-      "Example: recallant remote-doctor --server-url https://recallant.example.com --credential <scoped-token> --project-id <project-id> --developer-id <developer-id> --client-id <client-id> --format json",
+      "Example: recallant remote-doctor --project-dir . --semantic-proof",
+      "Advanced example: recallant remote-doctor --server-url https://recallant.example.com --credential <scoped-token> --project-id <project-id> --developer-id <developer-id> --client-id <client-id> --format json",
       ""
     ].join("\n");
   }

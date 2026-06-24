@@ -365,14 +365,13 @@ posture, edge/access denial, scoped credential auth, project/developer/client sc
 memory recall proof.
 
 ```bash
-recallant remote-doctor \
-  --server-url <https-recallant-server> \
-  --credential <scoped-remote-mcp-credential> \
-  --project-id <project-id> \
-  --developer-id <developer-id> \
-  --client-id <client-id> \
-  --format json
+recallant remote-doctor --project-dir . --format json
 ```
+
+If the project already has a project-local remote MCP config from `connect-cloud` or the universal
+connect flow, `--project-dir` is enough: `remote-doctor` reads the server URL, project/developer/client
+scope, credential reference, and local credential-store path from that config. Explicit
+`--server-url`, credential, and scope flags remain available for advanced/debug workflows.
 
 Add `--capture-proof` only when the remote MCP tools should also prove session/context readiness.
 That stage uses `memory_start_session` and `memory_get_context_pack`; it does not prove checkpoint
