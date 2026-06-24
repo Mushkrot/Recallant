@@ -54,6 +54,7 @@ function makeProvisioningFetch({ token, tokenId }) {
     const payload = JSON.parse(init.body);
     requests.push({
       url: parsedUrl.pathname,
+      origin: parsedUrl.origin,
       authorization: init.headers.authorization,
       payload
     });
@@ -165,6 +166,8 @@ async function fakeExternalCommand(command, args, runOptions = {}) {
     };
   }
   if (subcommand === "agent-start") {
+    await mkdir(join(runOptions.cwd ?? ".", ".recallant"), { recursive: true });
+    await writeFile(join(runOptions.cwd ?? ".", ".recallant", "current-session.json"), "{}\n");
     return {
       exitCode: 0,
       stdout: `${JSON.stringify({
@@ -177,6 +180,13 @@ async function fakeExternalCommand(command, args, runOptions = {}) {
     };
   }
   if (subcommand === "remote-acceptance") {
+    if (await exists(join(runOptions.cwd ?? ".", ".recallant"))) {
+      return {
+        exitCode: 1,
+        stdout: "Result: FAIL\n- Error: before bootstrap: project contains .recallant\n",
+        stderr: ""
+      };
+    }
     const outputDir = args[args.indexOf("--output-dir") + 1];
     await mkdir(outputDir, { recursive: true });
     await writeFile(join(outputDir, "canary.evidence.json"), "{}\n");
@@ -215,6 +225,7 @@ const help = usageText();
 for (const marker of [
   "Usage: recallant remote-live-external-canary",
   "--dry-run",
+  "--controller-url",
   "--output-dir",
   "--keep-artifacts-on-fail",
   "cleanup",
@@ -255,6 +266,10 @@ assert(dryRunJson.status === "dry_run", "dry-run status mismatch");
 assert(
   dryRunJson.controller.required_env.includes("RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN"),
   "dry-run did not list controller auth token requirement"
+);
+assert(
+  dryRunJson.controller.optional_env.includes("RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL"),
+  "dry-run did not list optional controller URL"
 );
 assert(
   dryRunJson.external_child.env.forbidden_keys_present.length === 0,
@@ -341,9 +356,45 @@ assert(
   "controller did not use protected route auth"
 );
 assert(
+  provisioning.requests[0]?.origin === "https://recallant.example.com",
+  "controller default did not use server URL origin"
+);
+assert(
   provisioning.requests[0]?.payload.action === "create" &&
     provisioning.requests[0]?.payload.allow_project_create === true,
   "controller did not create a bootstrap token through the existing contract"
+);
+
+const splitControllerProvisioning = makeProvisioningFetch({
+  token: bootstrapToken,
+  tokenId: "bootstrap-token-split-controller"
+});
+const splitControllerJson = await resultFor(
+  parseArgs(["--live", "--json", "--controller-url", "http://127.0.0.1:9988"], liveEnv),
+  liveEnv,
+  {
+    fetch: splitControllerProvisioning.fetchImpl,
+    runCommand: fakeExternalCommand
+  }
+);
+assert(
+  splitControllerJson.status === "pass_live_external_canary",
+  "split controller URL canary did not pass"
+);
+assert(
+  splitControllerProvisioning.requests[0]?.origin === "http://127.0.0.1:9988",
+  "controller URL was not used for protected provisioning"
+);
+const splitControllerCommands = splitControllerJson.sandbox.commands
+  .map((commandResult) => commandResult.command)
+  .join("\n");
+assert(
+  splitControllerCommands.includes("https://recallant.example.com"),
+  "external child did not keep using public server URL"
+);
+assert(
+  !splitControllerCommands.includes("127.0.0.1"),
+  "external child received server-local controller URL"
 );
 
 const skipLiveValidationEnv = {

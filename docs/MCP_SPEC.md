@@ -230,18 +230,22 @@ in public docs:
 
 ```bash
 RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL=<https-recallant-server> \
+RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL=<server-local-controller-url> \
 RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN=<controller-auth-token> \
 RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID=<developer-id> \
 RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1 \
 npm run remote-live-external-canary -- --live --json
 ```
 
-The controller side may call protected provisioning or validation routes, but the external child
-must not receive `RECALLANT_DATABASE_URL`, Postgres access, Workbench/admin auth, provider secrets,
-raw artifacts, backups, raw scoped credential values, bootstrap token values in output, controller
-auth tokens, or private topology. If server trace validation is not enabled, the canary reports
+The optional controller URL is for server-local protected provisioning and validation only; it must
+not be sent to the external child. The external child uses the public HTTPS server URL and must not
+receive `RECALLANT_DATABASE_URL`, Postgres access, Workbench/admin auth, provider secrets, raw
+artifacts, backups, raw scoped credential values, bootstrap token values in output, controller auth
+tokens, or private topology. If server trace validation is not enabled, the canary reports
 `server_trace_validation_skipped` and `not_release_pass`; that is a diagnostic result, not a remote
-release gate pass.
+release gate pass. Server trace validation checks the redacted remote MCP audit envelope plus central
+DB facts for sessions, accepted memory, checkpoint, and next-session recall; it does not require raw
+tool-call bodies or secret-bearing audit metadata.
 
 ## 4) Scope Validation
 

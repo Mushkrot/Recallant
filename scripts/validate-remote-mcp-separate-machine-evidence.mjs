@@ -4,7 +4,8 @@ import { basename } from "node:path";
 
 const forbiddenEvidencePattern =
   /"RECALLANT_DATABASE_URL"\s*[:=]|RECALLANT_DATABASE_URL\s*=|DATABASE_URL\s*=|postgres:\/\/|pgvector|recallant-postgres|\/ai\//i;
-const explicitSecretPattern = /\bBearer\s+[A-Za-z0-9._-]+|\bsk-[A-Za-z0-9_-]{12,}|--credential\s+(?!\[REDACTED_CREDENTIAL\])[^\s"']+/i;
+const explicitSecretPattern =
+  /\bBearer\s+[A-Za-z0-9._-]+|\bsk-[A-Za-z0-9_-]{12,}|\brcl_(?:boot|mcp)_[A-Za-z0-9]+_[A-Za-z0-9._-]+\b|--(?:credential|bootstrap-token)\s+(?!\[(?:REDACTED_CREDENTIAL|REDACTED_BOOTSTRAP_TOKEN|REDACTED_CANARY_RUNTIME)\])[^\s"']+/i;
 
 function usage() {
   process.stdout.write(`Usage: node scripts/validate-remote-mcp-separate-machine-evidence.mjs --evidence <path>
@@ -60,6 +61,36 @@ function stageStatus(evidence, id) {
     ? evidence.remote_doctor.json.stages
     : [];
   return stages.find((stage) => stage?.id === id) ?? null;
+}
+
+function bootstrapCommandIsRedactedOrSkipped(evidence, bootstrap) {
+  const command = String(bootstrap.command ?? "");
+  if (command === "skipped") {
+    const inferredInputs = Array.isArray(evidence.inferred_inputs) ? evidence.inferred_inputs : [];
+    assert(
+      inferredInputs.includes("credentialRef"),
+      "skipped bootstrap must infer a project credential reference"
+    );
+    assert(
+      /credential reference|credential-ref/i.test(String(bootstrap.stdout ?? "")),
+      "skipped bootstrap must explain the credential reference"
+    );
+    return;
+  }
+  assert(
+    /--credential\s+\[REDACTED_CREDENTIAL\]/.test(command) ||
+      /--bootstrap-token\s+\[(?:REDACTED_BOOTSTRAP_TOKEN|REDACTED_CANARY_RUNTIME)\]/.test(command),
+    "bootstrap command must redact credential or bootstrap token"
+  );
+}
+
+function remoteDoctorJsonPassed(json) {
+  return (
+    json?.overall?.status === "pass" ||
+    json?.status === "pass" ||
+    json?.summary?.ok === true ||
+    (Array.isArray(json?.summary?.failed_stage_ids) && json.summary.failed_stage_ids.length === 0)
+  );
 }
 
 function findUnredactedSecretValue(value, path = "$") {
@@ -119,10 +150,10 @@ export function validateEvidence(evidence, rawText) {
 
   const bootstrap = object(evidence.bootstrap, "bootstrap");
   assert(bootstrap.exit_code === 0, "bootstrap must exit 0");
-  assert(String(bootstrap.command ?? "").includes("[REDACTED_CREDENTIAL]"), "bootstrap command must redact credential");
+  bootstrapCommandIsRedactedOrSkipped(evidence, bootstrap);
   const doctor = object(evidence.remote_doctor, "remote_doctor");
   assert(doctor.exit_code === 0, "remote_doctor must exit 0");
-  assert(doctor.json?.overall?.status === "pass" || doctor.json?.status === "pass", "remote_doctor JSON must pass");
+  assert(remoteDoctorJsonPassed(doctor.json), "remote_doctor JSON must pass");
   assert(stageStatus(evidence, "mcp_initialize")?.status === "pass", "remote_doctor initialize stage must pass");
   assert(stageStatus(evidence, "tools_list")?.status === "pass", "remote_doctor tools_list stage must pass");
 

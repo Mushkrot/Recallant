@@ -26,6 +26,7 @@ const forbiddenOutputClasses = [
 ];
 
 const optionalLiveEnv = [
+  "RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL",
   "RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN",
   "RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID",
   "RECALLANT_LIVE_EXTERNAL_CANARY_PROJECT_ID",
@@ -55,6 +56,10 @@ export function parseArgs(argv, env = process.env) {
     outputDir: env.RECALLANT_LIVE_EXTERNAL_CANARY_OUTPUT_DIR ?? "",
     keepArtifactsOnFail: env.RECALLANT_LIVE_EXTERNAL_CANARY_KEEP_ARTIFACTS_ON_FAIL === "1",
     serverUrl: env.RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL ?? "",
+    controllerUrl:
+      env.RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL ??
+      env.RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL ??
+      "",
     target: env.RECALLANT_LIVE_EXTERNAL_CANARY_TARGET ?? "codex",
     authToken: env.RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN ?? "",
     developerId: env.RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID ?? "",
@@ -84,6 +89,9 @@ export function parseArgs(argv, env = process.env) {
     else if (arg === "--live") options.live = true;
     else if (arg === "--server-url") {
       options.serverUrl = next ?? "";
+      index += 1;
+    } else if (arg === "--controller-url") {
+      options.controllerUrl = next ?? "";
       index += 1;
     } else if (arg === "--target" || arg === "--client") {
       options.target = next ?? "";
@@ -149,6 +157,8 @@ Current command contract:
   --live                     Require live inputs; missing inputs fail instead of skipping.
   --server-url <https-url>   Live central Recallant server URL. Env:
                              RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL.
+  --controller-url <url>     Optional server-local controller URL for protected provisioning.
+                             Defaults to --server-url and is never sent to the external child.
   --auth-token <token>       Privileged controller token for protected provisioning routes.
                              Never sent to the external child or printed.
   --developer-id <id>        Developer scope for disposable live access.
@@ -178,6 +188,15 @@ function validHttpsUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function validControllerUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
   } catch {
     return false;
   }
@@ -269,6 +288,7 @@ function controllerRequiredEnv(options) {
 function controllerValueForEnv(key, options) {
   const values = {
     RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL: options.serverUrl,
+    RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL: options.controllerUrl,
     RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN: options.authToken,
     RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID: options.developerId,
     RECALLANT_LIVE_EXTERNAL_CANARY_PROJECT_ID: options.projectId,
@@ -286,6 +306,7 @@ function controllerInputState(options) {
   const missing = required.filter((key) => !providedRequired[key]);
   const anyProvided = [
     ...required,
+    "RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL",
     "RECALLANT_LIVE_EXTERNAL_CANARY_PROJECT_ID",
     "RECALLANT_LIVE_EXTERNAL_CANARY_CLIENT_ID",
     "RECALLANT_LIVE_EXTERNAL_CANARY_LABEL",
@@ -305,8 +326,8 @@ function baseController(options, inputState) {
     mode: options.controllerMode,
     provisioning_contract:
       options.controllerMode === "scoped_credential"
-        ? "protected /api/remote-credential create"
-        : "protected /api/connect/bootstrap-token create",
+        ? "protected controller /api/remote-credential create"
+        : "protected controller /api/connect/bootstrap-token create",
     required_env: inputState.required_env,
     optional_env: inputState.optional_env,
     provided_required: inputState.provided_required,
@@ -337,11 +358,24 @@ async function postJson(fetchImpl, url, payload, options) {
   try {
     body = text ? JSON.parse(text) : {};
   } catch {
-    body = { ok: false, error: redactControllerText(text, options) };
+    throw new Error(
+      `provisioning request returned non-JSON ${response.status}: ${redactControllerText(
+        text.slice(0, 500),
+        options
+      )}`
+    );
   }
   if (!response.ok) {
     throw new Error(
       `provisioning request failed ${response.status}: ${redactControllerText(JSON.stringify(body), options)}`
+    );
+  }
+  if (body && typeof body === "object" && body.ok === false) {
+    throw new Error(
+      `provisioning request failed ${response.status}: ${redactControllerText(
+        JSON.stringify(body),
+        options
+      )}`
     );
   }
   return body;
@@ -369,7 +403,7 @@ function redactedArtifacts(outputDir, options) {
 
 async function createDisposableAccess(options, fetchImpl) {
   if (options.controllerMode === "bootstrap_token") {
-    const endpoint = new URL("/api/connect/bootstrap-token", options.serverUrl);
+    const endpoint = new URL("/api/connect/bootstrap-token", options.controllerUrl);
     const payload = {
       action: "create",
       developer_id: options.developerId,
@@ -387,6 +421,11 @@ async function createDisposableAccess(options, fetchImpl) {
         : {};
     const id = tokenRecord.id ?? body.token_id ?? null;
     const prefix = body.token_prefix ?? tokenRecord.token_prefix ?? secretPrefix(rawToken, "boot");
+    if (!rawToken || !id || !prefix) {
+      throw new Error(
+        "provisioning request did not return a complete bootstrap token, token id, and prefix"
+      );
+    }
     return {
       disposable: {
         kind: "bootstrap_token",
@@ -403,7 +442,7 @@ async function createDisposableAccess(options, fetchImpl) {
     };
   }
 
-  const endpoint = new URL("/api/remote-credential", options.serverUrl);
+  const endpoint = new URL("/api/remote-credential", options.controllerUrl);
   const payload = {
     action: "create",
     project_id: options.projectId,
@@ -420,6 +459,11 @@ async function createDisposableAccess(options, fetchImpl) {
     credential.credential_prefix ??
     body.credential_prefix ??
     secretPrefix(body.one_time_secret, "mcp");
+  if (!(body.one_time_secret ?? body.secret) || !(credential.id ?? body.credential_id) || !prefix) {
+    throw new Error(
+      "provisioning request did not return a complete scoped credential, credential id, and prefix"
+    );
+  }
   return {
     disposable: {
       kind: "scoped_credential",
@@ -442,7 +486,7 @@ async function createDisposableAccess(options, fetchImpl) {
 
 async function revokeDisposableAccess(options, fetchImpl) {
   if (options.cleanupKind === "bootstrap_token") {
-    const endpoint = new URL("/api/connect/bootstrap-token", options.serverUrl);
+    const endpoint = new URL("/api/connect/bootstrap-token", options.controllerUrl);
     const body = await postJson(
       fetchImpl,
       endpoint,
@@ -456,7 +500,7 @@ async function revokeDisposableAccess(options, fetchImpl) {
       raw_secret_value_printed: false
     };
   }
-  const endpoint = new URL("/api/remote-credential", options.serverUrl);
+  const endpoint = new URL("/api/remote-credential", options.controllerUrl);
   const body = await postJson(
     fetchImpl,
     endpoint,
@@ -633,6 +677,8 @@ function nextDiagnosticCommandForGate(gate) {
     input_validation: "npm run remote-live-external-canary -- --dry-run --json",
     bootstrap: "npm run remote-live-external-canary -- --live --json",
     remote_acceptance_cleanup: "recallant remote-acceptance cleanup --project-dir <project> --confirm",
+    post_agent_start_remote_acceptance_cleanup:
+      "recallant remote-acceptance cleanup --project-dir <project> --confirm",
     agent_start: "recallant agent-start --format json",
     remote_acceptance: "recallant remote-acceptance --project-dir . --semantic-proof",
     evidence_validation: "recallant remote-acceptance validate --evidence <redacted>",
@@ -861,6 +907,22 @@ async function runExternalSandbox(options, parentEnv, provisioning, outputDir, d
       commandSummary("agent_start", agentStartInvocation, agentStart, options, secretMaterial, paths)
     );
 
+    const postAgentStartCleanup = await runCommand(cleanupInvocation.command, cleanupInvocation.args, {
+      cwd: paths.project,
+      env: childEnv,
+      label: "post_agent_start_remote_acceptance_cleanup"
+    });
+    commandResults.push(
+      commandSummary(
+        "post_agent_start_remote_acceptance_cleanup",
+        cleanupInvocation,
+        postAgentStartCleanup,
+        options,
+        secretMaterial,
+        paths
+      )
+    );
+
     const acceptanceInvocation = recallantInvocation(options, "remote-acceptance", [
       "--project-dir",
       ".",
@@ -980,6 +1042,7 @@ async function runExternalSandbox(options, parentEnv, provisioning, outputDir, d
       bootstrap.exitCode === 0 &&
       localCleanup.exitCode === 0 &&
       agentStart.exitCode === 0 &&
+      postAgentStartCleanup.exitCode === 0 &&
       agentStartJson?.mode === "remote_mcp_ready" &&
       acceptance.exitCode === 0 &&
       evidenceValidation.status === "pass" &&
@@ -1049,17 +1112,24 @@ export async function resultFor(options, env = process.env, deps = {}) {
     (options.live || inputState.any_live_input_provided) && options.serverUrl.trim()
       ? !validHttpsUrl(options.serverUrl.trim())
       : false;
+  const invalidControllerUrl =
+    (options.live || inputState.any_live_input_provided || options.mode === "cleanup") &&
+    options.controllerUrl.trim()
+      ? !validControllerUrl(options.controllerUrl.trim())
+      : false;
   const invalidControllerMode = !controllerModes.includes(options.controllerMode);
   const invalidCleanupKind =
     options.mode === "cleanup" && options.cleanupKind && !cleanupKinds.includes(options.cleanupKind);
 
   if (options.mode === "cleanup") {
-    if (invalidUrl || invalidControllerMode || invalidCleanupKind) {
+    if (invalidUrl || invalidControllerUrl || invalidControllerMode || invalidCleanupKind) {
       return {
         status: "blocked_live_external_canary_input",
         mode: "cleanup",
         reason: invalidUrl
           ? "live server URL must be HTTPS and must not include credentials"
+          : invalidControllerUrl
+            ? "controller URL must be HTTP(S) and must not include credentials"
           : invalidCleanupKind
             ? "cleanup kind must be bootstrap_token or scoped_credential"
             : "controller mode must be bootstrap_token or scoped_credential",
@@ -1077,6 +1147,8 @@ export async function resultFor(options, env = process.env, deps = {}) {
         failure: blockedFailure(
           invalidUrl
             ? "live server URL must be HTTPS and must not include credentials"
+            : invalidControllerUrl
+              ? "controller URL must be HTTP(S) and must not include credentials"
             : invalidCleanupKind
               ? "cleanup kind must be bootstrap_token or scoped_credential"
               : "controller mode must be bootstrap_token or scoped_credential",
@@ -1157,12 +1229,14 @@ export async function resultFor(options, env = process.env, deps = {}) {
     };
   }
 
-  if (invalidUrl || invalidControllerMode) {
+  if (invalidUrl || invalidControllerUrl || invalidControllerMode) {
     return {
       status: "blocked_live_external_canary_input",
       mode: "live",
       reason: invalidUrl
         ? "live server URL must be HTTPS and must not include credentials"
+        : invalidControllerUrl
+          ? "controller URL must be HTTP(S) and must not include credentials"
         : "controller mode must be bootstrap_token or scoped_credential",
       external_child: { env: childEnv, target: options.target },
       controller: baseController(options, inputState),
@@ -1175,6 +1249,8 @@ export async function resultFor(options, env = process.env, deps = {}) {
       failure: blockedFailure(
         invalidUrl
           ? "live server URL must be HTTPS and must not include credentials"
+          : invalidControllerUrl
+            ? "controller URL must be HTTP(S) and must not include credentials"
           : "controller mode must be bootstrap_token or scoped_credential",
         outputDir
       ),

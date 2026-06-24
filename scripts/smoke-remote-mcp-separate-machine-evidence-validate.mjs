@@ -172,6 +172,10 @@ const passPath = join(dir, "pass.evidence.json");
 const dirtyPath = join(dir, "dirty.evidence.json");
 const transportOnlyPath = join(dir, "transport-only.evidence.json");
 const leakedPath = join(dir, "leaked.evidence.json");
+const skippedCredentialRefPath = join(dir, "skipped-credential-ref.evidence.json");
+const badSkippedPath = join(dir, "bad-skipped.evidence.json");
+const leakedBootstrapTokenPath = join(dir, "leaked-bootstrap-token.evidence.json");
+const summaryDoctorPath = join(dir, "summary-doctor.evidence.json");
 
 await writeFile(passPath, `${JSON.stringify(baseEvidence(), null, 2)}\n`);
 await writeFile(
@@ -225,6 +229,85 @@ await writeFile(
     2
   )}\n`
 );
+await writeFile(
+  skippedCredentialRefPath,
+  `${JSON.stringify(
+    baseEvidence({
+      inferred_inputs: [
+        "serverUrl",
+        "projectId",
+        "developerId",
+        "clientId",
+        "credentialRef",
+        "credentialStorePath"
+      ],
+      bootstrap: {
+        command: "skipped",
+        exit_code: 0,
+        stdout: "bootstrap skipped: using existing project remote config credential reference",
+        stderr: ""
+      }
+    }),
+    null,
+    2
+  )}\n`
+);
+await writeFile(
+  badSkippedPath,
+  `${JSON.stringify(
+    baseEvidence({
+      inferred_inputs: ["serverUrl", "projectId", "developerId", "clientId"],
+      bootstrap: {
+        command: "skipped",
+        exit_code: 0,
+        stdout: "bootstrap skipped",
+        stderr: ""
+      }
+    }),
+    null,
+    2
+  )}\n`
+);
+await writeFile(
+  leakedBootstrapTokenPath,
+  `${JSON.stringify(
+    baseEvidence({
+      bootstrap: {
+        command: "recallant connect-cloud . --bootstrap-token rcl_boot_prefix_abcdefghijklmnopqrstuvwxyz123456",
+        exit_code: 0,
+        stdout: "",
+        stderr: ""
+      }
+    }),
+    null,
+    2
+  )}\n`
+);
+await writeFile(
+  summaryDoctorPath,
+  `${JSON.stringify(
+    baseEvidence({
+      remote_doctor: {
+        exit_code: 0,
+        json: {
+          summary: {
+            ok: true,
+            failed_stage_ids: [],
+            warning_stage_ids: [],
+            skipped_stage_ids: []
+          },
+          stages: [
+            { id: "mcp_initialize", status: "pass", code: "initialize_ok" },
+            { id: "tools_list", status: "pass", code: "tools_list_ok" },
+            { id: "semantic_memory_proof", status: "pass", code: "semantic_memory_proof_ok" }
+          ]
+        }
+      }
+    }),
+    null,
+    2
+  )}\n`
+);
 
 const pass = await runValidator(passPath, 0);
 assert(pass.report?.status === "pass", "valid evidence did not pass");
@@ -237,6 +320,20 @@ const transportOnly = await runValidator(transportOnlyPath, 1);
 assert(transportOnly.stderr.includes("capture/recall"), "transport-only evidence reason missing");
 const leaked = await runValidator(leakedPath, 1);
 assert(leaked.stderr.includes("unredacted token"), "leaked token reason missing");
+const skippedCredentialRef = await runValidator(skippedCredentialRefPath, 0);
+assert(
+  skippedCredentialRef.report?.status === "pass",
+  "credential-ref skipped bootstrap evidence did not pass"
+);
+const badSkipped = await runValidator(badSkippedPath, 1);
+assert(badSkipped.stderr.includes("credential reference"), "bad skipped reason missing");
+const leakedBootstrapToken = await runValidator(leakedBootstrapTokenPath, 1);
+assert(
+  leakedBootstrapToken.stderr.includes("unredacted token"),
+  "leaked bootstrap token reason missing"
+);
+const summaryDoctor = await runValidator(summaryDoctorPath, 0);
+assert(summaryDoctor.report?.status === "pass", "summary.ok remote-doctor evidence did not pass");
 
 process.stdout.write(
   `${JSON.stringify(
@@ -246,7 +343,11 @@ process.stdout.write(
         "valid_bundle_passes",
         "dirty_project_rejected",
         "transport_only_rejected",
-        "unredacted_token_rejected"
+        "unredacted_token_rejected",
+        "credential_ref_skipped_bootstrap_allowed",
+        "unsafe_skipped_bootstrap_rejected",
+        "unredacted_bootstrap_token_rejected",
+        "remote_doctor_summary_shape_allowed"
       ]
     },
     null,

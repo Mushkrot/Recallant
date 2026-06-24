@@ -47,6 +47,32 @@ function assertNoSecrets(value, label) {
   assert(!forbiddenPattern.test(serialized), `${label} contains forbidden secret-like or local DB text`);
 }
 
+const requiredCaptureRecallOperations = [
+  "memory_start_session",
+  "memory_get_context_pack",
+  "memory_create_agent_memory",
+  "memory_set_checkpoint",
+  "memory_recall_agent_memories"
+];
+
+function assertAuditCoversCaptureRecall(auditRows) {
+  const operations = new Set(auditRows.map((row) => row.operation));
+  const directToolRowsPresent = requiredCaptureRecallOperations.every((operation) =>
+    operations.has(operation)
+  );
+  if (directToolRowsPresent) return "direct_tool_operations";
+
+  assert(operations.has("remote_mcp.initialize"), "audit ledger missing remote_mcp.initialize");
+  assert(operations.has("remote_mcp.tools/list"), "audit ledger missing remote_mcp.tools/list");
+  assert(operations.has("remote_mcp.tools/call"), "audit ledger missing remote_mcp.tools/call");
+  const toolCallCount = auditRows.filter((row) => row.operation === "remote_mcp.tools/call").length;
+  assert(
+    toolCallCount >= requiredCaptureRecallOperations.length,
+    "audit ledger missing enough remote_mcp.tools/call rows"
+  );
+  return "remote_mcp_envelope";
+}
+
 function redactError(text) {
   return String(text)
     .replace(forbiddenPattern, "[REDACTED]")
@@ -170,16 +196,7 @@ async function validateLiveCaptureRecallAcceptance(evidence, rawText, evidenceFi
       nextSessionId
     ]);
     assert(auditRows.length >= 5, "audit ledger must include the capture/recall operation rows");
-    const operations = new Set(auditRows.map((row) => row.operation));
-    for (const operation of [
-      "memory_start_session",
-      "memory_get_context_pack",
-      "memory_create_agent_memory",
-      "memory_set_checkpoint",
-      "memory_recall_agent_memories"
-    ]) {
-      assert(operations.has(operation), `audit ledger missing ${operation}`);
-    }
+    const auditCoverage = assertAuditCoversCaptureRecall(auditRows);
     assert(
       auditRows.every((row) => row.status === "success"),
       "capture/recall audit rows must all be successful"
@@ -200,6 +217,7 @@ async function validateLiveCaptureRecallAcceptance(evidence, rawText, evidenceFi
         "next_session_recall_valid",
         "workbench_project_visible",
         "workbench_context_write_checkpoint_visible",
+        `audit_coverage_${auditCoverage}`,
         "audit_rows_successful",
         "audit_rows_redacted"
       ]

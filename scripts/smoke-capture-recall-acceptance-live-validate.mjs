@@ -247,16 +247,21 @@ try {
     metadata: { capture_kind: "agent_recall", trace_id: traceId }
   });
   for (const [operation, sessionId] of [
-    ["memory_start_session", first.session_id],
-    ["memory_get_context_pack", first.session_id],
-    ["memory_create_agent_memory", first.session_id],
-    ["memory_set_checkpoint", first.session_id],
-    ["memory_recall_agent_memories", first.session_id],
-    ["memory_start_session", next.session_id],
-    ["memory_get_context_pack", next.session_id],
-    ["memory_recall_agent_memories", next.session_id]
+    ["remote_mcp.initialize", null],
+    ["remote_mcp.tools/list", null],
+    ["remote_mcp.tools/call", first.session_id],
+    ["remote_mcp.tools/call", first.session_id],
+    ["remote_mcp.tools/call", first.session_id],
+    ["remote_mcp.tools/call", first.session_id],
+    ["remote_mcp.tools/call", first.session_id],
+    ["remote_mcp.tools/call", next.session_id],
+    ["remote_mcp.tools/call", next.session_id],
+    ["remote_mcp.tools/call", next.session_id]
   ]) {
-    await writeAudit(db, operation, sessionId, { trace_id: traceId, marker });
+    await writeAudit(db, operation, sessionId, {
+      trace_id: traceId,
+      audit_policy: "remote_mcp_redacted_no_raw_body_no_auth_headers"
+    });
   }
 
   const evidence = baseEvidence(first.session_id, next.session_id, created.memory_id);
@@ -268,6 +273,10 @@ try {
   assert(report.first_session_id === first.session_id, "first session mismatch");
   assert(report.next_session_id === next.session_id, "next session mismatch");
   assert(report.memory_id === created.memory_id, "memory mismatch");
+  assert(
+    report.checks.includes("audit_coverage_remote_mcp_envelope"),
+    "validator did not accept the remote MCP audit envelope"
+  );
   process.stdout.write(
     JSON.stringify(
       {

@@ -428,8 +428,10 @@ recallant remote-acceptance validate-live --evidence recallant-external-evidence
 ```
 
 That server-side gate requires `RECALLANT_DATABASE_URL` and verifies Workbench project/readiness
-evidence plus redacted `system_activity_events` rows for session start, context pack, memory write,
-checkpoint, and recall. It does not grant the external machine Workbench/admin or database access.
+evidence plus redacted `system_activity_events` coverage for the remote MCP initialize/list/call
+envelope. The tool-specific proof still comes from the evidence bundle and central DB facts for the
+sessions, accepted memory, checkpoint, and next-session recall. It does not grant the external
+machine Workbench/admin or database access.
 A separate human-written report file is optional audit paperwork, not a product-readiness blocker
 after the evidence bundle or server-side trace verification has passed.
 
@@ -451,19 +453,22 @@ controller inputs. Use placeholder values in shared docs and runbooks:
 
 ```bash
 RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL=<https-recallant-server> \
+RECALLANT_LIVE_EXTERNAL_CANARY_CONTROLLER_URL=<server-local-controller-url> \
 RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN=<controller-auth-token> \
 RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID=<developer-id> \
 RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1 \
 npm run remote-live-external-canary -- --live --json
 ```
 
-The controller may use protected provisioning and server-side validation credentials, but the fake
-external child receives only the remote connection material needed for `connect-cloud` and
-`remote-acceptance`. The child must not receive Postgres access, `RECALLANT_DATABASE_URL`,
-Workbench/admin auth, raw artifacts, backups, provider secrets, private topology, raw scoped
-credentials, bootstrap token values in output, or controller auth tokens. If live server trace
-validation is disabled or unavailable, the canary reports `server_trace_validation_skipped` and
-marks the result as `not_release_pass`; that is useful diagnostics, not a release pass.
+The optional controller URL lets an operator use a server-local protected provisioning endpoint while
+the fake external child still receives only the public HTTPS server URL. The controller may use
+protected provisioning and server-side validation credentials, but the child receives only the remote
+connection material needed for `connect-cloud` and `remote-acceptance`. The child must not receive
+Postgres access, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups, provider
+secrets, private topology, raw scoped credentials, bootstrap token values in output, or controller
+auth tokens. If live server trace validation is disabled or unavailable, the canary reports
+`server_trace_validation_skipped` and marks the result as `not_release_pass`; that is useful
+diagnostics, not a release pass.
 
 The deterministic canary is the default autonomous regression net for remote-client changes. It can
 catch most client bootstrap and acceptance regressions without a human-owned laptop: missing or stale
@@ -473,7 +478,9 @@ breakage, next-session recall breakage, evidence validation failures, cleanup fa
 failure diagnostics. It is still a fixture-backed proof, not a substitute for the operator live
 canary. A release-pass live canary requires explicit server-local inputs and enabled server trace
 validation, and it must finish with semantic marker recall, next-session recall, evidence
-validation, server trace validation, cleanup, and redaction all passing.
+validation, server trace validation, cleanup, and redaction all passing. Evidence validation accepts
+both first-time redacted bootstrap commands and already-connected credential-reference projects; raw
+`--credential` or `--bootstrap-token` values remain validation failures.
 
 ### Operator Server-Side CLI Update
 
