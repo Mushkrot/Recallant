@@ -465,6 +465,16 @@ credentials, bootstrap token values in output, or controller auth tokens. If liv
 validation is disabled or unavailable, the canary reports `server_trace_validation_skipped` and
 marks the result as `not_release_pass`; that is useful diagnostics, not a release pass.
 
+The deterministic canary is the default autonomous regression net for remote-client changes. It can
+catch most client bootstrap and acceptance regressions without a human-owned laptop: missing or stale
+CLI installs, duplicate reconnect config, project-local credential-reference acceptance, missing
+evidence directories, accidental local `.recallant`/Docker/Postgres dependence, semantic recall
+breakage, next-session recall breakage, evidence validation failures, cleanup failures, and unsafe
+failure diagnostics. It is still a fixture-backed proof, not a substitute for the operator live
+canary. A release-pass live canary requires explicit server-local inputs and enabled server trace
+validation, and it must finish with semantic marker recall, next-session recall, evidence
+validation, server trace validation, cleanup, and redaction all passing.
+
 ### Operator Server-Side CLI Update
 
 When a canary fix lands, update the central server's deployed Recallant checkout before asking

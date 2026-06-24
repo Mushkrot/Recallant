@@ -209,6 +209,9 @@ mustInclude(
     "remote-live-external-canary -- --live --json",
     "server_trace_validation_skipped",
     "not_release_pass",
+    "default autonomous regression net",
+    "fixture-backed proof",
+    "release-pass live canary requires explicit server-local inputs",
     "Operator Server-Side CLI Update",
     "systemctl restart <recallant-service>",
     "restart alone is not a"
