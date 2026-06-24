@@ -203,7 +203,15 @@ mustInclude(
     "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
     "does not require Cloudflare browser",
     "The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,",
-    "Workbench/admin auth, raw artifacts, backups, or provider secrets"
+    "Workbench/admin auth, raw artifacts, backups, or provider secrets",
+    "Remote Live External Canary",
+    "npm run remote-live-external-canary:smoke",
+    "remote-live-external-canary -- --live --json",
+    "server_trace_validation_skipped",
+    "not_release_pass",
+    "Operator Server-Side CLI Update",
+    "systemctl restart <recallant-service>",
+    "restart alone is not a"
   ],
   "docs/CLIENT_SETUP.md"
 );
@@ -244,7 +252,11 @@ mustInclude(
     '[{ "kind": "all_agents", "id": null }]',
     "Synthetic non-secret marker recallant_safe_semantic_marker_example",
     "Passing `audience` as a string",
-    "raw request bodies"
+    "raw request bodies",
+    "remote-live-external-canary:smoke",
+    "RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1",
+    "server_trace_validation_skipped",
+    "not_release_pass"
   ],
   "docs/MCP_SPEC.md proof taxonomy"
 );
@@ -432,6 +444,9 @@ mustInclude(
     "Session/context ready",
     "Governed semantic recall",
     "External-machine evidence",
+    "Remote live external canary",
+    "npm run remote-live-external-canary:smoke",
+    "manual remote-client checks",
     "Local `attach --confirm`",
     "Not a remote-next-step",
     "Release-Candidate Bar"
@@ -450,7 +465,8 @@ mustInclude(
     "/api/connect/start",
     "/api/connect/poll",
     "protected `/connect/approve`",
-    "`recallant invite` and `/j/<token>` remain the advanced/admin one-time onboarding fallback"
+    "`recallant invite` and `/j/<token>` remain the advanced/admin one-time onboarding fallback",
+    "remote live external canary"
   ],
   "CONTRACT_STATUS remote connect"
 );
@@ -551,6 +567,8 @@ mustInclude(
     "governed semantic marker recall",
     "external-machine evidence bundles",
     "Remote existing-project pilot hardening",
+    "remote live external canary",
+    "before manual remote-client",
     "rollback smoke",
     "opt-in Docker-backed managed",
     "Deployment-profile",
@@ -620,6 +638,22 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run documentation-posture:smoke"),
   "smoke:core must include documentation-posture:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-live-external-canary"] ===
+    "node scripts/remote-live-external-canary.mjs",
+  "package.json must expose remote-live-external-canary"
+);
+assert(
+  packageJson.scripts?.["remote-live-external-canary:smoke"] ===
+    "node scripts/smoke-remote-live-external-canary.mjs",
+  "package.json must expose remote-live-external-canary:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
+    "npm run remote-live-external-canary:smoke"
+  ),
+  "smoke:core must include remote-live-external-canary:smoke"
 );
 
 const remoteMcpLiveReadiness = readFileSync(

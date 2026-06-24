@@ -219,6 +219,30 @@ child-process environment. With no live inputs it reports `skipped_live_remote_m
 partial or invalid inputs it fails explicitly. It must not print raw credentials, DB URLs, provider
 secrets, private paths, raw artifact paths, or backup paths.
 
+`remote-live-external-canary:smoke` is the automated remote-client regression gate before manual
+remote-client checks. It deterministically exercises controller provisioning, a scrubbed fake
+external HOME/project, `connect-cloud` bootstrap behavior, project-local credential references,
+`agent-start` `remote_mcp_ready`, `remote-acceptance --semantic-proof`, local evidence validation,
+opt-in server trace validation, and regression cases for no CLI, stale CLI, already-connected
+credential refs, missing evidence directories, reconnect idempotency, forbidden local-storage paths,
+and incomplete live inputs. The live command is operator-controlled and uses placeholder-only inputs
+in public docs:
+
+```bash
+RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL=<https-recallant-server> \
+RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN=<controller-auth-token> \
+RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID=<developer-id> \
+RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1 \
+npm run remote-live-external-canary -- --live --json
+```
+
+The controller side may call protected provisioning or validation routes, but the external child
+must not receive `RECALLANT_DATABASE_URL`, Postgres access, Workbench/admin auth, provider secrets,
+raw artifacts, backups, raw scoped credential values, bootstrap token values in output, controller
+auth tokens, or private topology. If server trace validation is not enabled, the canary reports
+`server_trace_validation_skipped` and `not_release_pass`; that is a diagnostic result, not a remote
+release gate pass.
+
 ## 4) Scope Validation
 
 Remote access must enforce strict project/developer scope:

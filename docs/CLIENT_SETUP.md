@@ -433,6 +433,58 @@ checkpoint, and recall. It does not grant the external machine Workbench/admin o
 A separate human-written report file is optional audit paperwork, not a product-readiness blocker
 after the evidence bundle or server-side trace verification has passed.
 
+### Remote Live External Canary
+
+Before asking a user to manually retry remote-client setup, maintainers should run the automated
+remote live external canary or an equivalent server-side trace gate. The deterministic smoke is safe
+for CI and local development because it uses fake controller provisioning, a scrubbed fake external
+HOME/project, generated remote client config, semantic marker recall, evidence validation, and a
+regression matrix for no-CLI, stale-CLI, credential-ref, missing-evidence-dir, reconnect, forbidden
+local path, and incomplete-input cases:
+
+```bash
+npm run remote-live-external-canary:smoke
+```
+
+For an operator-controlled central server, run the live canary only with explicit server-local
+controller inputs. Use placeholder values in shared docs and runbooks:
+
+```bash
+RECALLANT_LIVE_EXTERNAL_CANARY_SERVER_URL=<https-recallant-server> \
+RECALLANT_LIVE_EXTERNAL_CANARY_AUTH_TOKEN=<controller-auth-token> \
+RECALLANT_LIVE_EXTERNAL_CANARY_DEVELOPER_ID=<developer-id> \
+RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1 \
+npm run remote-live-external-canary -- --live --json
+```
+
+The controller may use protected provisioning and server-side validation credentials, but the fake
+external child receives only the remote connection material needed for `connect-cloud` and
+`remote-acceptance`. The child must not receive Postgres access, `RECALLANT_DATABASE_URL`,
+Workbench/admin auth, raw artifacts, backups, provider secrets, private topology, raw scoped
+credentials, bootstrap token values in output, or controller auth tokens. If live server trace
+validation is disabled or unavailable, the canary reports `server_trace_validation_skipped` and
+marks the result as `not_release_pass`; that is useful diagnostics, not a release pass.
+
+### Operator Server-Side CLI Update
+
+When a canary fix lands, update the central server's deployed Recallant checkout before asking
+remote users to retry. Keep the runbook generic in shared docs and keep server paths, environment
+files, database URLs, and controller tokens out of transcripts:
+
+```bash
+git fetch --depth 1 origin main
+npm run build
+./scripts/install-recallant-cli.sh --user
+systemctl restart <recallant-service>
+systemctl is-active <recallant-service>
+npm run remote-live-external-canary:smoke
+```
+
+Then run the operator-controlled live canary with server-local credentials. A restart alone is not a
+remote-client proof; the live canary must still show semantic marker recall, next-session recall,
+evidence validation, server trace validation, cleanup, and redaction before it counts as a release
+gate pass.
+
 If the gate fails because an old local setup left `.recallant` in the project folder, clean only
 that stale local storage marker and retry:
 

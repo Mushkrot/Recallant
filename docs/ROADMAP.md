@@ -19,7 +19,8 @@ dependable before expanding the product surface.
   `curl -fsSL https://memory.example.com/connect | bash` bootstrap, protected browser approval,
   pending connection storage, `recallant connect-cloud`, scoped remote MCP config, remote doctor,
   opt-in governed semantic marker proof, deterministic pairing/security/external-rehearsal smokes,
-  and invite provisioning kept as the advanced/admin fallback.
+  remote live external canary coverage, and invite provisioning kept as the advanced/admin
+  fallback.
 - Remote existing-project readiness gates that keep `remote_mcp_ready`, session/context readiness,
   checkpoint state, governed semantic marker recall, guided migration approval, and redacted
   external-machine evidence as separate release surfaces.
@@ -77,12 +78,14 @@ dependable before expanding the product surface.
   agent files.
 - External-host release rehearsal beyond the disposable clean-host smokes, repeating the public
   quickstart, managed install, rollback, and security checks on a non-owner environment.
-- Remote connect release hardening: repeat real separate-machine rehearsal using universal
+- Remote connect release hardening: run the remote live external canary before manual remote-client
+  checks, then repeat real separate-machine rehearsal using universal
   `curl -fsSL https://memory.example.com/connect | bash` plus the `recallant remote-acceptance`
-  redacted evidence gate, broaden old-CLI and no-CLI bootstrap coverage, exercise trusted-device
-  reconnect and headless bootstrap-token paths, and expand client transport polish without requiring
-  Docker/Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, internal paths, raw artifacts,
-  backups, provider secrets, raw scoped credentials, or private overlays on remote machines.
+  redacted evidence gate or equivalent server-side trace gate. Broaden old-CLI and no-CLI bootstrap
+  coverage, exercise trusted-device reconnect and headless bootstrap-token paths, and expand client
+  transport polish without requiring Docker/Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth,
+  internal paths, raw artifacts, backups, provider secrets, raw scoped credentials, or private
+  overlays on remote machines.
 - Remote existing-project pilot hardening: repeat the shipped proof sequence on more old projects
   and clients, using read-only inventory, risk classification, owner approval, concise governed
   memories/imports, recall verification, redacted audit rows, and external-machine evidence bundles
@@ -96,8 +99,8 @@ dependable before expanding the product surface.
   of starting from a blank custom UI.
 - Deployment-profile and connector/capability guidance that stays generic in public docs while
   supporting private environments.
-- Release-candidate tag once repeat external-host rehearsals, screenshot docs, and release packaging
-  are complete.
+- Release-candidate tag once the remote live external canary, repeat external-host rehearsals,
+  screenshot docs, and release packaging are complete.
 
 ## Codex For OSS Use
 
@@ -114,9 +117,9 @@ If selected for Codex for OSS support, Recallant will use Codex/API credits to i
 ## Later
 
 - Broader client pilot matrix.
-- Universal remote-client onboarding packages, live separate-machine rehearsal, and transport
-  polish for projects that use scoped credentials against a central Recallant server from another
-  machine.
+- Universal remote-client onboarding packages, canary-backed live separate-machine rehearsal, and
+  transport polish for projects that use scoped credentials against a central Recallant server from
+  another machine.
 - Richer source connectors.
 - Better memory conflict workflows and portable retention/export policy.
 - Export/import and portable instance migration polish.
