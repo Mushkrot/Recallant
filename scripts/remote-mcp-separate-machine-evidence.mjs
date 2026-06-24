@@ -104,10 +104,15 @@ function parseArgs(argv) {
 
 function usage() {
   process.stdout
-    .write(`Usage: node scripts/remote-mcp-separate-machine-evidence.mjs --server-url <https-url> (--credential <token> | --credential-ref <ref> [--credential-store <path>]) --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [options]
+    .write(`Usage: node scripts/remote-mcp-separate-machine-evidence.mjs --project-dir <path> [--semantic-proof] [options]
+
+Manual override:
+  node scripts/remote-mcp-separate-machine-evidence.mjs --server-url <https-url> (--credential <token> | --credential-ref <ref> [--credential-store <path>]) --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [options]
 
 Runs the external-host Recallant remote onboarding rehearsal and writes redacted evidence.
 This runner does not install Docker, Postgres, or local Recallant storage.
+If project-local remote MCP config already exists, scoped connection values are inferred from it.
+Credential-ref configs skip bootstrap automatically because the raw credential is intentionally not stored in the project.
 Use --bootstrap-mode connect_cloud when the project was provisioned through universal browser-approved remote connect.
 Use --semantic-proof to make remote-doctor create and recall a governed diagnostic marker memory.
 
@@ -370,7 +375,7 @@ async function runBootstrap(input, env) {
     return {
       command: "skipped",
       exit_code: 0,
-      stdout: "bootstrap skipped by operator",
+      stdout: input.skipBootstrapReason ?? "bootstrap skipped by operator",
       stderr: ""
     };
   }
@@ -681,7 +686,11 @@ function validateInput(input) {
   if (!String(input.credential ?? "").trim() && !String(input.credentialRef ?? "").trim()) {
     missing.push("credential or credential-ref");
   }
-  if (!input.skipBootstrap && !String(input.credential ?? "").trim()) {
+  if (
+    !input.skipBootstrap &&
+    !String(input.credential ?? "").trim() &&
+    !String(input.credentialRef ?? "").trim()
+  ) {
     missing.push("credential (required unless --skip-bootstrap)");
   }
   assert(
@@ -745,6 +754,15 @@ let exitCode = 0;
 
 try {
   const inferredInputs = await hydrateInputFromProjectConfig(input);
+  if (
+    !input.skipBootstrap &&
+    !String(input.credential ?? "").trim() &&
+    String(input.credentialRef ?? "").trim()
+  ) {
+    input.skipBootstrap = true;
+    input.skipBootstrapReason =
+      "bootstrap skipped: using existing project remote config credential reference";
+  }
   validateInput(input);
   const projectStat = await stat(projectDir);
   assert(projectStat.isDirectory(), "project-dir must be a directory");

@@ -9063,9 +9063,9 @@ function usageText(command?: string) {
   }
   if (command === "remote-acceptance") {
     return [
-      "Usage: recallant remote-acceptance --project-dir <path> [--capture-proof] [--output-dir <path>]",
+      "Usage: recallant remote-acceptance --project-dir <path> [--capture-proof|--semantic-proof] [--output-dir <path>]",
       "",
-      "Run the external-machine acceptance gate: bootstrap remote client config, remote-doctor, remote MCP session/context/write/checkpoint/recall, and redacted evidence output without local Docker/Postgres. If the project already has Recallant remote config, scoped connection values are read from it.",
+      "Run the external-machine acceptance gate: bootstrap remote client config, remote-doctor, remote MCP session/context/write/checkpoint/recall, and redacted evidence output without local Docker/Postgres. If the project already has Recallant remote config, scoped connection values are read from it; credential-ref configs skip bootstrap automatically.",
       "",
       "Advanced/manual scope override:",
       "  recallant remote-acceptance --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> --project-dir <path>",

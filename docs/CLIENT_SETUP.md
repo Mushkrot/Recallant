@@ -408,8 +408,10 @@ recallant remote-acceptance \
 
 If the project already has Recallant remote client config from bootstrap, `remote-acceptance` reads
 the scoped server URL, credential, project id, developer id, and client id from that local config.
-Operators can still pass those flags explicitly to override the config during diagnostics. The
-evidence output directory is created automatically when it does not exist.
+If that config stores only a credential reference, acceptance skips bootstrap automatically and uses
+the local credential store for doctor and bridge probes. Operators can still pass scope flags
+explicitly to override the config during diagnostics. The evidence output directory is created
+automatically when it does not exist.
 
 Validate a saved evidence file before sharing it or committing an optional internal rehearsal
 report:

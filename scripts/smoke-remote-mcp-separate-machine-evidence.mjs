@@ -383,7 +383,6 @@ try {
       inferredOutput,
       "--recallant-command",
       join(process.cwd(), "apps/cli/dist/index.js"),
-      "--skip-bootstrap",
       "--capture-proof"
     ],
     { cwd: process.cwd(), env, maxBuffer: 1024 * 1024 }
@@ -400,8 +399,13 @@ try {
   );
   assert(inferredEvidence.result.status === "pass", "inferred-input evidence did not pass");
   assert(
+    inferredEvidence.bootstrap.command === "skipped",
+    "inferred-input evidence should skip bootstrap when only credential-ref is available"
+  );
+  assert(
     inferredEvidence.inferred_inputs.includes("developerId") &&
-      inferredEvidence.inferred_inputs.includes("clientId"),
+      inferredEvidence.inferred_inputs.includes("clientId") &&
+      inferredEvidence.inferred_inputs.includes("credentialRef"),
     "evidence runner did not infer scope from project config"
   );
   const failingProject = join(temp, "failing-project");
