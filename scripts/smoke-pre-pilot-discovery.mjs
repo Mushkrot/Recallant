@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { appendFile, cp, mkdtemp, stat } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,19 @@ await appendFile(
   join(projectDir, "AGENTS.md"),
   `\n## Session Archive\n${"2025-05-01: Historical bootstrap note that should be imported selectively.\n".repeat(420)}`
 );
+await mkdir(join(projectDir, "logs"), { recursive: true });
+await mkdir(join(projectDir, "backups"), { recursive: true });
+await mkdir(join(projectDir, "artifacts"), { recursive: true });
+await mkdir(join(projectDir, "customer_data"), { recursive: true });
+await writeFile(
+  join(projectDir, "logs", "agent-history.log"),
+  "2025-01-01 old log entry\n".repeat(600)
+);
+await writeFile(join(projectDir, "backups", "project-log.bak"), "backup placeholder\n");
+await writeFile(join(projectDir, "artifacts", "raw-transcript.json"), '{"raw":true}\n');
+await writeFile(join(projectDir, "customer_data", "tickets.csv"), "ticket_id,status\nT-1,open\n");
+await writeFile(join(projectDir, "deploy.config.yml"), "service: fixture\nsecret_ref: API_KEY\n");
+await writeFile(join(projectDir, "fixture.pem"), "fixture private key placeholder\n");
 
 function runJson(args) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
@@ -76,9 +89,50 @@ for (const path of [
   "CLAUDE.md",
   "README.md",
   ".env.example",
-  "docs/RUNBOOK.md"
+  "docs/RUNBOOK.md",
+  "logs/agent-history.log",
+  "backups/project-log.bak",
+  "artifacts/raw-transcript.json",
+  "customer_data/tickets.csv",
+  "deploy.config.yml",
+  "fixture.pem"
 ]) {
   if (!byPath.has(path)) throw new Error(`Missing discovery candidate: ${path}`);
+}
+
+for (const requiredClass of [
+  "safe_source",
+  "useful_documentation",
+  "historical_handoff",
+  "large_archive_log",
+  "raw_artifact",
+  "backup",
+  "credential_bearing_file",
+  "customer_data",
+  "private_key",
+  "environment_config_risk"
+]) {
+  if (!discovery.summary.by_migration_class?.[requiredClass]) {
+    throw new Error(
+      `Discovery did not count migration class ${requiredClass}: ${serializedDiscovery}`
+    );
+  }
+}
+if (
+  discovery.migration_plan?.mode !== "review_first" ||
+  discovery.migration_plan?.owner_approval_required !== true ||
+  discovery.migration_plan?.writes_before_approval !== false ||
+  !discovery.migration_plan?.remote_mcp_tool_sequence?.includes("memory_create_agent_memory")
+) {
+  throw new Error(`Discovery migration plan missing review-first gates: ${serializedDiscovery}`);
+}
+if (
+  discovery.risk_inventory?.findings?.some((finding) => Object.hasOwn(finding, "secret_value")) ||
+  !discovery.risk_inventory?.findings?.some((finding) =>
+    finding.secret_reference_names?.includes("OPENAI_API_KEY")
+  )
+) {
+  throw new Error(`Risk inventory did not stay names-only: ${serializedDiscovery}`);
 }
 
 const agents = byPath.get("AGENTS.md");
@@ -95,6 +149,9 @@ if (
 const envExample = byPath.get(".env.example");
 if (
   envExample.result_class !== "secret_reference_names_only" ||
+  !envExample.migration_classes.includes("credential_bearing_file") ||
+  !envExample.migration_classes.includes("environment_config_risk") ||
+  envExample.migration_action !== "ask_owner" ||
   !envExample.result_classes.includes("capability_binding") ||
   !envExample.result_classes.includes("connector_account_binding") ||
   !envExample.risks.some((risk) => risk.code === "raw_secret_value_detected") ||
@@ -102,6 +159,23 @@ if (
   envExample.secret_references.some((ref) => Object.hasOwn(ref, "value"))
 ) {
   throw new Error(`Secret reference discovery failed: ${JSON.stringify(envExample)}`);
+}
+
+for (const [path, expectedClass, expectedAction] of [
+  ["logs/agent-history.log", "large_archive_log", "keep_as_reference"],
+  ["backups/project-log.bak", "backup", "skip"],
+  ["artifacts/raw-transcript.json", "raw_artifact", "skip"],
+  ["customer_data/tickets.csv", "customer_data", "skip"],
+  ["fixture.pem", "private_key", "skip"],
+  ["deploy.config.yml", "environment_config_risk", "ask_owner"]
+]) {
+  const candidate = byPath.get(path);
+  if (
+    !candidate?.migration_classes.includes(expectedClass) ||
+    candidate.migration_action !== expectedAction
+  ) {
+    throw new Error(`Migration classification failed for ${path}: ${JSON.stringify(candidate)}`);
+  }
 }
 
 const claude = byPath.get("CLAUDE.md");

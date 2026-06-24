@@ -50,6 +50,29 @@ function runJson(args, options = {}) {
   }
 }
 
+function runJsonNoDb(args, options = {}) {
+  const env = cliEnv();
+  delete env.RECALLANT_DATABASE_URL;
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: options.cwd ?? repoRoot,
+    env,
+    encoding: "utf8"
+  });
+  if (result.error) {
+    throw new Error(`Command failed to start: recallant ${args.join(" ")}\n${result.error}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`Command did not return JSON: ${error}\n${result.stdout}`);
+  }
+}
+
 function runText(args, options = {}) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: options.cwd ?? repoRoot,
@@ -218,6 +241,69 @@ assert(
   `guided attach should expose planned migration summary: ${JSON.stringify(plan.owner_report)}`
 );
 assertNoRawSecrets(plan, "guided attach plan");
+const planText = runText(["attach", sandboxDir, "--target", "codex", "--mode", "guided"]);
+assert(
+  planText.includes("Status: Plan ready; waiting for confirmation.") &&
+    planText.includes("Migration summary:") &&
+    planText.includes("Next command:"),
+  `guided attach text should be an owner approval transcript:\n${planText}`
+);
+
+const discoveryNoDb = runJsonNoDb(["discover", "--dry-run", "--project-dir", sandboxDir]);
+assert(
+  discoveryNoDb.read_only === true &&
+    discoveryNoDb.migration_plan?.owner_approval_required === true &&
+    discoveryNoDb.migration_plan?.remote_mcp_tool_sequence?.includes("memory_create_agent_memory"),
+  `remote-only discovery plan missing MCP migration guidance: ${JSON.stringify(discoveryNoDb)}`
+);
+const approvedRemoteEntry = discoveryNoDb.migration_plan.entries.find(
+  (entry) => entry.action === "summarize_to_memory" && entry.memory_candidate
+);
+assert(approvedRemoteEntry, "remote-only plan did not expose a concise memory candidate");
+const remoteMcpCreate = {
+  name: "memory_create_agent_memory",
+  arguments: {
+    ...approvedRemoteEntry.memory_candidate,
+    scope: "project",
+    audience: [{ kind: "all_agents", id: null }],
+    created_by: "agent",
+    metadata: {
+      migration_batch: "synthetic_non_owner_remote",
+      review_status: approvedRemoteEntry.memory_candidate.review_status
+    }
+  }
+};
+assert(
+  remoteMcpCreate.arguments.body.length < 700 &&
+    remoteMcpCreate.arguments.source_refs?.[0]?.source_kind === "external" &&
+    remoteMcpCreate.arguments.metadata.review_status === "needs_owner_approval",
+  `remote MCP create shape was not bounded/source-linked: ${JSON.stringify(remoteMcpCreate)}`
+);
+const syntheticRemoteStore = [];
+const createdRemoteMemory = {
+  memory_id: randomUUID(),
+  status: "accepted",
+  use_policy: "recall_allowed",
+  ...remoteMcpCreate.arguments
+};
+syntheticRemoteStore.push(createdRemoteMemory);
+const remoteRecall = syntheticRemoteStore.filter((memory) =>
+  String(memory.body).includes(approvedRemoteEntry.path)
+);
+assert(remoteRecall.length === 1, "synthetic remote MCP recall did not find approved marker");
+const remoteCheckpoint = {
+  name: "memory_set_checkpoint",
+  arguments: {
+    payload: {
+      current_status: "approved migration marker recalled",
+      current_focus: approvedRemoteEntry.path,
+      next_step: "continue reviewed migration",
+      open_questions: []
+    }
+  }
+};
+assertNoRawSecrets(remoteMcpCreate, "remote MCP memory create shape");
+assertNoRawSecrets(remoteCheckpoint, "remote MCP checkpoint shape");
 
 const attach = runJson([
   "attach",

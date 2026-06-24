@@ -38,7 +38,9 @@ function runJson(args) {
     throw new Error(`Command failed to start: recallant ${args.join(" ")}\n${result.error}`);
   }
   if (result.status !== 0) {
-    throw new Error(`Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+    throw new Error(
+      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
+    );
   }
   return JSON.parse(result.stdout);
 }
@@ -52,7 +54,10 @@ if (preview.writes_memory !== false || preview.source_ref?.path !== "AGENTS.md")
   throw new Error(`Sandbox import preview failed: ${JSON.stringify(preview)}`);
 }
 const confirmed = runJson(["import", "AGENTS.md", "--project-dir", sandboxDir]);
-if (confirmed.write_result?.status !== "created" || confirmed.write_result.memory_ids.length !== 1) {
+if (
+  confirmed.write_result?.status !== "created" ||
+  confirmed.write_result.memory_ids.length !== 1
+) {
   throw new Error(`Sandbox confirmed import failed: ${JSON.stringify(confirmed)}`);
 }
 
@@ -153,7 +158,19 @@ if (!recall.memories?.some((memory) => memory.memory_id === confirmed.write_resu
   throw new Error(`Sandbox recall did not include imported candidate: ${JSON.stringify(recall)}`);
 }
 
-const closeout = await callTool(7, "memory_closeout", {
+const migrationCheckpoint = await callTool(7, "memory_set_checkpoint", {
+  payload: {
+    current_status: "approved migration recall verified",
+    current_focus: "Imported AGENTS.md",
+    next_step: "review migrated source candidates",
+    open_questions: []
+  }
+});
+if (!migrationCheckpoint.updated_at) {
+  throw new Error(`Sandbox migration checkpoint failed: ${JSON.stringify(migrationCheckpoint)}`);
+}
+
+const closeout = await callTool(8, "memory_closeout", {
   session_id: started.session_id,
   closeout_intent: "task_complete",
   summary: "Pre-pilot sandbox workflow smoke complete.",

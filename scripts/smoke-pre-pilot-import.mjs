@@ -41,6 +41,17 @@ const envPreview = runJson(["import", "--dry-run", ".env.example", "--project-di
 if (JSON.stringify(envPreview).includes("fixture-secret-value")) {
   throw new Error(`Import dry-run leaked secret value: ${JSON.stringify(envPreview)}`);
 }
+if (
+  !envPreview.migration_classes?.includes("credential_bearing_file") ||
+  envPreview.migration_action !== "ask_owner" ||
+  envPreview.migration_review_status !== "owner_approval_required" ||
+  envPreview.migration_memory_candidate?.review_status !== "needs_owner_approval" ||
+  envPreview.migration_memory_candidate?.body?.length > 700
+) {
+  throw new Error(
+    `Import dry-run missing bounded migration candidate: ${JSON.stringify(envPreview)}`
+  );
+}
 
 const envImport = runJson(["import", ".env.example", "--project-dir", projectDir]);
 if (
@@ -48,6 +59,9 @@ if (
   envImport.write_result?.status !== "created" ||
   envImport.write_result?.chunk_ids?.length < 1 ||
   envImport.write_result?.memory_ids?.length !== 1 ||
+  envImport.migration_action !== "ask_owner" ||
+  envImport.migration_memory_candidate?.source_refs?.[0]?.metadata?.source_path !==
+    ".env.example" ||
   JSON.stringify(envImport).includes("fixture-secret-value") ||
   JSON.stringify(envImport).includes("fixture-password")
 ) {
@@ -129,6 +143,12 @@ try {
     ) {
       throw new Error(`Imported memory policy failed: ${JSON.stringify(memories)}`);
     }
+  }
+  const envMemory = memories.find((memory) =>
+    envImport.write_result.memory_ids.includes(memory.id)
+  );
+  if (envMemory?.confidence !== undefined && envMemory.confidence > 0.8) {
+    throw new Error(`Imported memory confidence was too high for reviewed migration: ${envMemory}`);
   }
 } finally {
   await client.end();

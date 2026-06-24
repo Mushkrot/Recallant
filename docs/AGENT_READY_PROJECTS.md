@@ -172,6 +172,20 @@ reference, skip, or ask the owner. Safe governed memories should be concise and 
 secrets, customer data, backups, raw artifacts, or large historical logs. A checkpoint update is a
 state fallback; it is not a substitute for governed memory recall.
 
+The read-only inventory classifies paths using migration classes that are safe to print publicly:
+`safe_source`, `useful_documentation`, `historical_handoff`, `large_archive_log`, `raw_artifact`,
+`backup`, `credential_bearing_file`, `customer_data`, `private_key`, and
+`environment_config_risk`. Risk output is path/class/count oriented. Secret references are names
+only, and private-key, customer-data, raw-artifact, and backup contents stay metadata-only unless an
+owner reviews a narrower source.
+
+For remote-only projects, the approved concise entries can be written through the configured remote
+MCP `memory_create_agent_memory` tool with source refs, then verified with
+`memory_recall_agent_memories`; the external workstation does not need local Postgres. Server-local
+projects can reuse the `importSource` review semantics behind explicit `recallant import <path>` or
+`recallant attach <project-dir> --mode guided --confirm`. After one approved safe marker is recalled,
+update checkpoint state separately.
+
 For public release validation, Recallant keeps a neutral non-owner migration smoke that attaches a
 sandbox copy of an existing-project fixture, verifies the original project is untouched, requires a
 local redacted backup, checks the migration summary, and confirms imported material stays reviewed
