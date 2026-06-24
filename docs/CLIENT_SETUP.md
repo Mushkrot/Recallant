@@ -272,12 +272,26 @@ access.
 Remote setup has several distinct readiness levels. Keep them separate when diagnosing a connected
 project:
 
+Safe remote existing-project sequence:
+
+1. reach `remote_mcp_ready` through the scoped remote MCP consent/config boundary;
+2. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
+   `recallant remote-doctor --capture-proof`;
+3. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`;
+4. prove governed semantic recall with one synthetic `memory_create_agent_memory` marker and
+   `memory_recall_agent_memories`;
+5. run read-only migration inventory, classify risk, get owner approval, write concise governed
+   memories/imports, and verify recall again.
+
 - `recallant agent-start --format json` returning `mode: "remote_mcp_ready"` proves the project has a
   remote consent/config boundary and can use the scoped remote MCP bridge. It also reports
   `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`.
 - Local `recallant doctor --project-dir .` on that remote workstation should report
   `remote-ready, local storage not attached`, not a standalone local attach failure.
+- `memory_start_session` followed by `memory_get_context_pack`, or
+  `recallant remote-doctor --capture-proof`, proves session/context readiness. It does not prove
+  checkpoint state or governed semantic recall.
 - `memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint
   state can be written and read. The response is state-only and reports
   `checkpoint_state_only: true`, `searchable_memory_created: false`, and no `memory_id`.

@@ -42,33 +42,75 @@ function assertNotCloudflareAccess(response, text, label) {
 const keys = ["RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL", "RECALLANT_LIVE_REMOTE_CONNECT_TARGET"];
 const present = keys.filter((key) => env[key]?.trim());
 
+function outputAndExit(output, exitCode = 0) {
+  process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  process.exit(exitCode);
+}
+
 if (present.length === 0) {
-  process.stdout.write(
-    JSON.stringify(
-      {
-        remote_connect_live_readiness_smoke: {
-          status: "skipped_live_remote_connect_readiness",
-          reason: "RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL not set",
-          required_for_live_pass: ["RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL"],
-          redacted: true
-        }
-      },
-      null,
-      2
-    )
-  );
-  process.exit(0);
+  outputAndExit({
+    remote_connect_live_readiness_smoke: {
+      status: "skipped_live_remote_connect_readiness",
+      reason: "RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL not set",
+      coverage_model: "operator_live_central_server",
+      deterministic_fixture: false,
+      required_for_live_pass: ["RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL"],
+      optional_env: ["RECALLANT_LIVE_REMOTE_CONNECT_TARGET"],
+      redacted: true
+    }
+  });
 }
 
 const serverUrl = env.RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL?.trim() ?? "";
 if (!serverUrl) {
-  throw new Error(
-    "partial live remote connect inputs: missing RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL"
+  outputAndExit(
+    {
+      remote_connect_live_readiness_smoke: {
+        status: "blocked_live_remote_connect_readiness_input",
+        reason:
+          "partial live remote connect inputs: missing RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL",
+        coverage_model: "operator_live_central_server",
+        deterministic_fixture: false,
+        provided_env_count: present.length,
+        required_for_live_pass: ["RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL"],
+        redacted: true
+      }
+    },
+    1
   );
 }
 
-const url = new URL(serverUrl);
-assert(url.protocol === "https:", "live remote connect server URL must use https");
+let url;
+try {
+  url = new URL(serverUrl);
+} catch {
+  outputAndExit(
+    {
+      remote_connect_live_readiness_smoke: {
+        status: "blocked_live_remote_connect_readiness_input",
+        reason: "invalid_live_remote_connect_server_url",
+        coverage_model: "operator_live_central_server",
+        deterministic_fixture: false,
+        redacted: true
+      }
+    },
+    1
+  );
+}
+if (url.protocol !== "https:") {
+  outputAndExit(
+    {
+      remote_connect_live_readiness_smoke: {
+        status: "blocked_live_remote_connect_readiness_input",
+        reason: "live remote connect server URL must use https",
+        coverage_model: "operator_live_central_server",
+        deterministic_fixture: false,
+        redacted: true
+      }
+    },
+    1
+  );
+}
 url.search = "";
 url.hash = "";
 url.pathname = url.pathname.replace(/\/+$/, "");

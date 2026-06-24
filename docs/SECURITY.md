@@ -39,6 +39,10 @@ bounded by design, and conservative about secrets.
   writes generated project config with a local credential-store reference, and does not expose
   Postgres, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw scoped
   credentials to the project.
+- Public examples may name prohibited classes such as `.env` files, raw credentials, private keys,
+  customer data, backups, raw artifacts, database URLs, and provider secrets, but they must not
+  include concrete values for those classes. Use placeholders such as
+  `<scoped-remote-mcp-credential>` or `<redacted>` when showing operator input.
 - Public Workbench readiness requires an auth-protected private origin plus authenticated edge
   access. Do not make the Workbench public by changing the default bind host.
 - Production readiness treats stopped services, disabled restart behavior, missing service env

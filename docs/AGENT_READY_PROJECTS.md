@@ -160,10 +160,13 @@ For a remote existing project, prove the connection before importing history:
    `memory_create_agent_memory` as the next startup/proof calls;
 3. verify local `recallant doctor --project-dir .` reports
    `remote-ready, local storage not attached` rather than a local attach failure;
-4. create one non-secret governed memory marker with `memory_create_agent_memory`;
-5. recall that marker with `memory_recall_agent_memories`;
-6. run a read-only inventory of candidate docs and risky paths;
-7. ask the owner to approve a migration plan before writing project memories or imports.
+4. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
+   `recallant remote-doctor --capture-proof`;
+5. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`;
+6. create one non-secret governed memory marker with `memory_create_agent_memory`;
+7. recall that marker with `memory_recall_agent_memories`;
+8. run a read-only inventory of candidate docs and risky paths;
+9. ask the owner to approve a migration plan before writing project memories or imports.
 
 The proof marker should be synthetic and concise. A safe `memory_create_agent_memory` shape is:
 

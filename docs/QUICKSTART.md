@@ -136,6 +136,8 @@ Expected remote readiness:
   `recommended_next_proof_call: "memory_create_agent_memory"`;
 - local `recallant doctor --project-dir .` reports `remote-ready, local storage not attached`
   instead of treating the remote-only project as a broken local attach;
+- session/context readiness is proven by `memory_start_session` plus `memory_get_context_pack`, or
+  by `recallant remote-doctor --capture-proof`;
 - a checkpoint can be written and read back with `memory_set_checkpoint` and
   `memory_get_checkpoint`;
 - `memory_set_checkpoint` remains state-only; use `memory_agent_checkpoint` when the checkpoint

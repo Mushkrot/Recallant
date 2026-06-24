@@ -47,6 +47,9 @@ const publicDocs = [
 const forbidden = [
   /recallant\.unicloud\.ca/i,
   /highmac/i,
+  /dish_recallant_safe_test/i,
+  /ZenDesk-AI-Assistance/i,
+  /\/Users\/vadim/i,
   /\/ai\/recallant-internal/i,
   /\/ai\/recallant(?:-data)?/i,
   /\/opt\/secure-configs/i,
@@ -54,7 +57,13 @@ const forbidden = [
   /\bPOSTGRES_PASSWORD\s*=/i,
   /\bRECALLANT_AUTH_TOKEN\s*=/i,
   /\bRECALLANT_SESSION_SECRET\s*=/i,
+  /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|RECALLANT_REMOTE_MCP_CREDENTIAL|RECALLANT_DATABASE_URL|POSTGRES_PASSWORD|PGPASSWORD|RECALLANT_AUTH_TOKEN|RECALLANT_SESSION_SECRET)\s*=\s*(?!<|\[redacted\]|redacted)[^<\s`]+/i,
   /\b[A-Z0-9_]*API_KEY\s*=\s*[^<\s]/i,
+  /\bsk-[A-Za-z0-9_-]{12,}\b/i,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
+  /\braw_artifacts?_path\s*[:=]\s*(?!<|\[redacted\]|redacted)[^<\s`]+/i,
+  /\bbackup_path\s*[:=]\s*(?!<|\[redacted\]|redacted)[^<\s`]+/i,
+  /\bcustomer_(?:email|name|phone|id)\s*[:=]\s*(?!<|\[redacted\]|redacted)[^<\s`]+/i,
   /postgres(?:ql)?:\/\/[^ <>"')]+:[^ <>"')]+@/i
 ];
 
@@ -108,6 +117,8 @@ mustInclude(
     "npm run security-review:smoke",
     "install/auth/Workbench/backups/secrets",
     "browser-facing secret redaction",
+    "Public examples may name prohibited classes",
+    "<scoped-remote-mcp-credential>",
     "redacted local backups",
     "System Activity Ledger",
     "redacted system activity ledger",
@@ -151,4 +162,33 @@ mustInclude(
   "docs/MCP_SPEC.md remote security boundary"
 );
 
-process.stdout.write("Public security smoke passed\n");
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      public_security_smoke: {
+        status: "pass",
+        docs_scanned: publicDocs.length,
+        public_code_surfaces_scanned: publicCode.length,
+        forbidden_doc_classes: [
+          "owner_specific_domains",
+          "owner_specific_paths",
+          "raw_env_assignments",
+          "raw_credentials",
+          "private_key_blocks",
+          "customer_data_values",
+          "raw_artifact_paths",
+          "backup_paths",
+          "credentialed_database_urls"
+        ],
+        required_public_boundary_markers: [
+          "public_examples_placeholder_only",
+          "remote_connect_route_boundary",
+          "remote_mcp_security_boundary"
+        ],
+        redacted: true
+      }
+    },
+    null,
+    2
+  )}\n`
+);

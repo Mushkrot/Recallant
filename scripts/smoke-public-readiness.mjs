@@ -26,6 +26,12 @@ function mustNotInclude(text, markers, label) {
   }
 }
 
+function mustNotMatch(text, patterns, label) {
+  for (const pattern of patterns) {
+    assert(!pattern.test(text), `${label} contains forbidden pattern: ${pattern}`);
+  }
+}
+
 function mustAppearBefore(text, first, second, label) {
   const firstIndex = text.indexOf(first);
   const secondIndex = text.indexOf(second);
@@ -250,6 +256,7 @@ mustInclude(
     '`recommended_next_call: "memory_get_context_pack"`',
     '`recommended_next_proof_call: "memory_create_agent_memory"`',
     "`remote-ready, local storage not attached`",
+    "session/context readiness is proven by `memory_start_session` plus `memory_get_context_pack`",
     "a checkpoint can be written and read back with `memory_set_checkpoint`",
     "governed semantic memory is proven separately",
     "Do not treat a checkpoint-only readback as semantic recall proof",
@@ -263,6 +270,11 @@ mustInclude(
   clientSetup,
   [
     "Remote Readiness Versus Recall Proof",
+    "Safe remote existing-project sequence",
+    "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
+    "optionally prove checkpoint state",
+    "prove governed semantic recall",
+    "run read-only migration inventory",
     "remote consent/config boundary",
     "`memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint",
     "`memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic",
@@ -344,6 +356,8 @@ mustInclude(
     "must not overwrite existing project docs",
     "New Project Bootstrap",
     "Existing Project Migration",
+    "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
+    "optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`",
     "Safe Recallant semantic marker",
     "recallant_safe_semantic_marker_example",
     '"audience": [{ "kind": "all_agents", "id": null }]',
@@ -533,6 +547,33 @@ mustInclude(
   "ROADMAP"
 );
 
+const remoteProofDocs = [
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/AGENT_READY_PROJECTS.md", agentReadyProjects],
+  ["docs/MCP_SPEC.md", mcpSpec],
+  ["docs/CONTRACT_STATUS.md", contractStatus],
+  ["docs/ROADMAP.md", roadmap]
+];
+const checkpointSemanticCollapsePhrases = [
+  "checkpoint readback proves semantic recall",
+  "checkpoint-only readback proves semantic recall",
+  "memory_set_checkpoint proves semantic recall",
+  "memory_get_checkpoint proves semantic recall",
+  "checkpoint state proves semantic recall",
+  "checkpoint state proof is semantic recall proof"
+];
+const checkpointSemanticCollapsePatterns = [
+  /\bcheckpoint(?:-only)?\s+readback\s+proves\s+semantic\s+recall\b/i,
+  /\bcheckpoint\s+state\s+proves\s+semantic\s+recall\b/i,
+  /\bmemory_set_checkpoint\s+proves\s+semantic\s+recall\b/i,
+  /\bmemory_get_checkpoint\s+proves\s+semantic\s+recall\b/i
+];
+for (const [label, text] of remoteProofDocs) {
+  mustNotInclude(text, checkpointSemanticCollapsePhrases, label);
+  mustNotMatch(text, checkpointSemanticCollapsePatterns, label);
+}
+
 const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 assert(
   packageJson.scripts?.["non-owner-migration:smoke"] ===
@@ -567,6 +608,37 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run documentation-posture:smoke"),
   "smoke:core must include documentation-posture:smoke"
+);
+
+const remoteMcpLiveReadiness = readFileSync(
+  join(repoRoot, "scripts", "smoke-remote-mcp-live-readiness.mjs"),
+  "utf8"
+);
+mustInclude(
+  remoteMcpLiveReadiness,
+  [
+    "skipped_live_remote_mcp_readiness",
+    "operator_live_remote_mcp_env_not_provided",
+    "failed_live_remote_mcp_readiness_input",
+    "required_env",
+    "coverage_model"
+  ],
+  "scripts/smoke-remote-mcp-live-readiness.mjs"
+);
+const remoteConnectLiveReadiness = readFileSync(
+  join(repoRoot, "scripts", "smoke-remote-connect-live-readiness.mjs"),
+  "utf8"
+);
+mustInclude(
+  remoteConnectLiveReadiness,
+  [
+    "skipped_live_remote_connect_readiness",
+    "blocked_live_remote_connect_readiness_input",
+    "RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL",
+    "coverage_model",
+    "deterministic_fixture"
+  ],
+  "scripts/smoke-remote-connect-live-readiness.mjs"
 );
 
 function runDoctorFixture(projectDir, doctorEnv, label) {
@@ -789,9 +861,41 @@ assert(
   `Runtime public-anonymous fixture failed: ${JSON.stringify(runtimeAnonymousPublic)}`
 );
 
+const remoteExistingProjectDocsSummary = {
+  "docs/QUICKSTART.md": [
+    "remote_mcp_ready",
+    "session_context_readiness",
+    "checkpoint_state_optional",
+    "governed_semantic_marker_proof",
+    "guided_migration_after_owner_approval"
+  ],
+  "docs/CLIENT_SETUP.md": [
+    "safe_remote_existing_project_sequence",
+    "capture_proof_is_session_context_only",
+    "checkpoint_state_is_not_semantic_recall",
+    "no_local_attach_confirm_as_remote_next_step"
+  ],
+  "docs/AGENT_READY_PROJECTS.md": [
+    "read_only_inventory",
+    "risk_classification",
+    "owner_approval",
+    "concise_governed_memories",
+    "recall_verification"
+  ],
+  "docs/MCP_SPEC.md": ["semantic_proof", "governed_memory_tool_ux", "checkpoint_parity_state_only"]
+};
+const publicReadinessMarkers = {
+  remote_sequence_guard: "pass",
+  checkpoint_semantic_collapse_guard: "pass",
+  live_readiness_gates_are_opt_in: "pass",
+  public_private_boundary_markers: "pass"
+};
+
 process.stdout.write(
   `${JSON.stringify(
     {
+      remote_existing_project_docs: remoteExistingProjectDocsSummary,
+      public_readiness_markers: publicReadinessMarkers,
       public_workbench_readiness: {
         not_configured: {
           status: notConfigured.status,
