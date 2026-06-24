@@ -61,11 +61,13 @@ async function exists(path) {
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-"));
 const orphanDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-orphan-"));
+const staleDir = await mkdtemp(join(tmpdir(), "recallant-local-cleanup-stale-"));
 await mkdir(join(projectDir, "docs"), { recursive: true });
 await mkdir(join(orphanDir, ".recallant"), { recursive: true });
 await mkdir(join(orphanDir, ".recallant", "hooks"), { recursive: true });
 await mkdir(join(orphanDir, ".recallant", "spool"), { recursive: true });
 await mkdir(join(orphanDir, ".codex"), { recursive: true });
+await mkdir(join(staleDir, "docs"), { recursive: true });
 await writeFile(
   join(projectDir, "AGENTS.md"),
   ["# Agent Instructions", "", "Keep local cleanup fixture rules intact.", ""].join("\n")
@@ -76,6 +78,8 @@ await writeFile(
 );
 await writeFile(join(projectDir, "docs", "README.md"), "# Fixture Docs\n");
 await writeFile(join(orphanDir, "README.md"), "# Orphan Local Fixture\n");
+await writeFile(join(staleDir, "README.md"), "# Stale Local Fixture\n");
+await writeFile(join(staleDir, "docs", "README.md"), "# Stale Fixture Docs\n");
 await writeFile(join(orphanDir, ".codex", "config.toml"), "[settings]\nmode = \"fixture\"\n");
 await writeFile(
   join(orphanDir, ".recallant", "config"),
@@ -249,6 +253,60 @@ if (
   !orphanCodex.includes("mode = \"fixture\"")
 ) {
   throw new Error(`confirmed orphan local cleanup failed: ${JSON.stringify(orphanCleanup)}`);
+}
+
+const staleAttach = runJson([
+  "attach",
+  staleDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
+if (staleAttach.status !== "attached" || !staleAttach.project_id) {
+  throw new Error(`stale fixture attach failed: ${JSON.stringify(staleAttach)}`);
+}
+const staleProjectId = randomUUID();
+await writeFile(
+  join(staleDir, ".recallant", "config"),
+  `${JSON.stringify({ project_id: staleProjectId }, null, 2)}\n`
+);
+const staleSanitize = runJson([
+  "project-sanitize",
+  "--project-dir",
+  staleDir,
+  "--mode",
+  "detach",
+  "--detach-mode",
+  "sandbox",
+  "--confirm",
+  "--format",
+  "json"
+]);
+if (
+  staleSanitize.status !== "detached" ||
+  staleSanitize.database?.target_resolution?.resolved_by !== "project_path_fallback" ||
+  staleSanitize.database?.target_resolution?.stale_project_id !== staleProjectId
+) {
+  throw new Error(`stale fixture sanitize did not use path fallback: ${JSON.stringify(staleSanitize)}`);
+}
+const staleDryRun = runJson(["local-cleanup", "--project-dir", staleDir, "--dry-run"]);
+if (
+  staleDryRun.status !== "ready_for_confirmation" ||
+  staleDryRun.target_resolution?.resolved_by !== "project_path_fallback" ||
+  staleDryRun.target_resolution?.stale_project_id !== staleProjectId ||
+  !staleDryRun.planned_changes.some((change) => change.path === ".recallant/config")
+) {
+  throw new Error(`stale local cleanup dry-run failed: ${JSON.stringify(staleDryRun)}`);
+}
+const staleCleanup = runJson(["local-cleanup", "--project-dir", staleDir, "--confirm"]);
+if (
+  staleCleanup.status !== "cleaned" ||
+  staleCleanup.target_resolution?.resolved_by !== "project_path_fallback" ||
+  (await exists(join(staleDir, ".recallant", "config")))
+) {
+  throw new Error(`confirmed stale local cleanup failed: ${JSON.stringify(staleCleanup)}`);
 }
 
 process.stdout.write("Local cleanup smoke passed\n");

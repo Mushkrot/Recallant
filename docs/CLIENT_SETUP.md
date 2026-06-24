@@ -131,6 +131,18 @@ recallant connect codex --project-dir . --dry-run
 recallant connect codex --project-dir .
 ```
 
+To install the project-local fail-soft hook kit for Codex capture targets, run:
+
+```bash
+recallant connect codex --project-dir . --install-local-hooks --dry-run
+recallant connect codex --project-dir . --install-local-hooks
+```
+
+After the MCP config and hook files already match, the same dry-run is a readiness check: JSON
+output should report `connection_status: "mcp_and_hooks_ready"`,
+`hook_status: "local_hook_kit_installed"`, and `writes_files: false`. It reports
+`mcp_and_hooks_planned` only when the project-local config or hook kit would actually need changes.
+
 Generated project-local Codex config:
 
 ```toml

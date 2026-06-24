@@ -352,6 +352,11 @@ If `.recallant/config` contains an old project id, the sanitize dry-run reports 
 when the path matches a current managed project for the same developer, resolves the active project
 by path. Confirmed purge still requires the exact token for the resolved project.
 
+The lower-level `recallant local-cleanup` command uses the same safe target resolution after the
+project is detached or sandbox-cleaned. A stale local project id should not block cleanup when the
+current managed project can be resolved by path, but cleanup remains blocked while that resolved
+project is still active.
+
 If the database project has already been removed but local Recallant artifacts remain, use the
 explicit local-only cleanup opt-in:
 

@@ -615,6 +615,26 @@ assert(
     hookConnect.writes_global_config === false,
   `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
 );
+const hookIdempotentDryRun = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--install-local-hooks",
+  "--dry-run",
+  "--format",
+  "json"
+]);
+assert(
+  hookIdempotentDryRun.hook_status === "local_hook_kit_installed" &&
+    hookIdempotentDryRun.connection_status === "mcp_and_hooks_ready" &&
+    hookIdempotentDryRun.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
+    hookIdempotentDryRun.writes_files === false &&
+    hookIdempotentDryRun.planned_changes.every((change) => change.action === "no_change"),
+  `Hook dry-run should report ready when all local hook files are already installed: ${JSON.stringify(
+    hookIdempotentDryRun
+  )}`
+);
 const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
 const promptHookScript = await readFile(`${projectDir}/.recallant/hooks/user-prompt.sh`, "utf8");
 const toolHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-result.sh`, "utf8");

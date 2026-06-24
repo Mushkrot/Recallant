@@ -1,6 +1,7 @@
 # Local editor/agent state
 .upstream/
 .claude/settings.local.json
+.codex/
 .cursor/
 .vscode/
 

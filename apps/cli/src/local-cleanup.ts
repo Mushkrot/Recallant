@@ -23,6 +23,14 @@ type LocalCleanupOptions = {
   orphanLocal?: boolean;
 };
 
+type LifecycleResolution = {
+  lifecycle: Record<string, unknown> | null;
+  projectId: string | null;
+  resolvedBy: "project_id" | "project_path" | "project_path_fallback" | "not_found" | null;
+  staleProjectId?: string | null;
+  warning?: string | null;
+};
+
 type AttachBackup = {
   root: string;
   manifest: {
@@ -69,25 +77,32 @@ async function readConfig(projectDir: string) {
   }
 }
 
-function settingValue(settings: unknown, key: string) {
-  if (!Array.isArray(settings)) return null;
-  const row = settings.find((item) => {
-    if (!item || typeof item !== "object") return false;
-    return (item as { key?: unknown }).key === key;
-  });
-  if (!row || typeof row !== "object") return null;
-  return (row as { value?: unknown }).value ?? null;
+function lifecycleObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-async function resolveLifecycle(projectId: string | null) {
+async function resolveLifecycle(
+  projectId: string | null,
+  projectDir: string
+): Promise<LifecycleResolution> {
   const database = createRecallantDbFromEnv();
-  if (!database || !projectId) return null;
+  if (!database) {
+    return { lifecycle: null, projectId, resolvedBy: null };
+  }
   try {
-    const dashboard = await database.getReviewDashboard({ project_id: projectId });
-    const lifecycle = settingValue(dashboard.settings, "project_lifecycle");
-    return lifecycle && typeof lifecycle === "object"
-      ? (lifecycle as Record<string, unknown>)
-      : null;
+    const resolved = await database.resolveProjectLifecycleForCleanup({
+      project_id: projectId,
+      project_path: projectDir
+    });
+    return {
+      lifecycle: lifecycleObject(resolved.lifecycle),
+      projectId: resolved.target_resolution.resolved_project_id ?? projectId,
+      resolvedBy: resolved.target_resolution.resolved_by,
+      staleProjectId: resolved.target_resolution.stale_project_id ?? null,
+      warning: resolved.warnings[0] ?? null
+    };
   } finally {
     await database.close();
   }
@@ -395,9 +410,17 @@ export async function cleanupLocalProject(options: LocalCleanupOptions) {
   const dryRun = options.dryRun;
   const includeBackups = options.includeBackups;
   const config = await readConfig(projectDir);
-  const projectId = config?.project_id ?? null;
-  const lifecycle =
-    options.allowWithoutDetached === true ? null : await resolveLifecycle(projectId);
+  const configuredProjectId = config?.project_id ?? null;
+  const lifecycleResolution =
+    options.allowWithoutDetached === true
+      ? ({
+          lifecycle: null,
+          projectId: configuredProjectId,
+          resolvedBy: null
+        } satisfies LifecycleResolution)
+      : await resolveLifecycle(configuredProjectId, projectDir);
+  const projectId = lifecycleResolution.projectId ?? configuredProjectId;
+  const lifecycle = lifecycleResolution.lifecycle;
   const allowed = options.allowWithoutDetached === true || lifecycleAllowsCleanup(lifecycle);
   const planned = await plannedChanges({
     projectDir,
@@ -411,6 +434,7 @@ export async function cleanupLocalProject(options: LocalCleanupOptions) {
       ? "AGENTS.md, PROJECT_LOG.md, and .gitignore are modified only when Recallant-generated content can be removed or safely restored."
       : "AGENTS.md, PROJECT_LOG.md, .gitignore, and source files are not modified by this command.",
     ".codex/config.toml is modified only to remove Recallant's own MCP section.",
+    ...(lifecycleResolution.warning ? [lifecycleResolution.warning] : []),
     ...planned.warnings
   ];
   if (options.orphanLocal === true) {
@@ -456,6 +480,14 @@ export async function cleanupLocalProject(options: LocalCleanupOptions) {
     local_only: options.orphanLocal === true,
     project_dir: projectDir,
     project_id: projectId,
+    local_config_project_id: configuredProjectId,
+    target_resolution: {
+      requested_project_id: configuredProjectId,
+      requested_project_path: projectDir,
+      resolved_project_id: projectId,
+      resolved_by: lifecycleResolution.resolvedBy,
+      stale_project_id: lifecycleResolution.staleProjectId ?? null
+    },
     lifecycle_status: lifecycle?.status ?? null,
     include_backups: includeBackups,
     include_bootstrap_files: options.includeBootstrapFiles === true,

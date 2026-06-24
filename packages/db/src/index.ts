@@ -8578,6 +8578,16 @@ export class RecallantDb {
     };
   }
 
+  async resolveProjectLifecycleForCleanup(input: ProjectManagementTarget) {
+    const resolved = await this.findProjectForManagement(input);
+    return {
+      ...resolved,
+      lifecycle: resolved.project?.project_id
+        ? await this.getProjectLifecycle(resolved.project.project_id)
+        : null
+    };
+  }
+
   private async countProjectRecords(projectId: string) {
     const result = await this.pool.query(
       `

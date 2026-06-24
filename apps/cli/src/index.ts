@@ -7598,6 +7598,7 @@ async function runConnect(argv: readonly string[]) {
       ? { action: "no_change", path: hookFile.path }
       : { action: "write_file", path: hookFile.path }
   );
+  const hookFilesNeedWrite = hookFilePlans.some((hookFile) => !hookFile.same);
   if (!dryRun && !same) {
     if (backupPath && existing !== null) {
       await mkdir(backupPath.split("/").slice(0, -1).join("/"), { recursive: true });
@@ -7629,18 +7630,21 @@ async function runConnect(argv: readonly string[]) {
       if (hookFile.executable) await chmod(hookFile.absolute_path, 0o755);
     }
   }
+  const clientConnection = await clientConnectionReadiness(dir);
+  const hookKitReady = clientConnection.hook_kit.ready;
+  const hookKitPlanned = installLocalHooks && dryRun && (hookFilesNeedWrite || !hookKitReady);
   const hookStatus = installLocalHooks
-    ? dryRun
+    ? hookKitPlanned
       ? "local_hook_kit_planned"
       : "local_hook_kit_installed"
     : localHookKitPresent
       ? "local_hook_kit_installed"
       : "not_installed";
-  const clientConnection = await clientConnectionReadiness(dir);
   const mcpConfigWillExist = clientConnection.mcp_configured || !same;
   const hookKitWillExist = hookStatus !== "not_installed";
+  const startupLayerPlanned = installLocalHooks && dryRun && (!same || hookKitPlanned);
   const mandatoryStartupLayerStatus =
-    installLocalHooks && dryRun
+    startupLayerPlanned && mcpConfigWillExist && hookKitWillExist
       ? "mcp_and_hooks_planned"
       : mcpConfigWillExist && hookKitWillExist
         ? "mcp_and_hooks_ready"
