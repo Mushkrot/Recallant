@@ -108,10 +108,12 @@ The same pilot exposed product and diagnostic gaps to fix before release candida
 - checkpoint readback and governed semantic recall are separate surfaces, and the docs/CLI should not
   let operators confuse them;
 - the baseline checkpoint parity contract is state-only: `memory_set_checkpoint` writes checkpoint
-  state, while searchable checkpoint memory requires an explicit high-level governed-memory closeout
-  action;
+  state and reports no searchable memory id, while searchable checkpoint memory uses the explicit
+  `memory_agent_checkpoint` / CLI `agent-checkpoint` high-level closeout path;
 - remote existing-project migration needs a guided, review-first path that inventories safe docs and
-  risky paths, then writes concise governed memories only after approval;
+  risky paths, groups entries as `summarize_to_memory`, `keep_as_reference`, `skip`, or `ask_owner`,
+  then writes concise governed memories only after approval; risky output is path/class/count based
+  and secret references are names-only;
 - MCP tool validation should make required fields such as `title`, `body`, and object-shaped
   `audience` easier for agents to satisfy on the first call.
 

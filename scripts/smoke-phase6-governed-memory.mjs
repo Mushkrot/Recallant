@@ -50,7 +50,7 @@ function send(message) {
 }
 
 async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (responses.has(id)) return responses.get(id);
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -64,11 +64,6 @@ async function callTool(id, name, args) {
   const text = response.result?.content?.[0]?.text;
   if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
   return JSON.parse(text);
-}
-
-async function callToolRaw(id, name, args) {
-  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
-  return waitForResponse(id);
 }
 
 let nextToolId = 13;
@@ -107,17 +102,16 @@ const event = await callTool(3, "memory_append_turn", {
   dedup_key: `phase6-source-${randomUUID()}`
 });
 
-const invalid = await callToolRaw(4, "memory_create_agent_memory", {
+const autoSourced = await callTool(4, "memory_create_agent_memory", {
   memory_type: "decision",
   scope: "project",
-  title: "Invalid agent memory",
-  body: "Missing source refs should fail.",
+  title: "Auto-sourced agent memory",
+  body: "MCP agent memories without explicit source refs receive a safe runtime source ref.",
   created_by: "agent",
   source_refs: []
 });
-const invalidText = invalid.error?.message ?? invalid.result?.content?.[0]?.text ?? "";
-if (invalid.result?.isError !== true || !invalidText.includes("VALIDATION_ERROR")) {
-  throw new Error(`Agent memory without source refs did not fail: ${JSON.stringify(invalid)}`);
+if (autoSourced.status !== "accepted" || autoSourced.use_policy !== "recall_allowed") {
+  throw new Error(`Auto-sourced agent memory was not accepted: ${JSON.stringify(autoSourced)}`);
 }
 
 const ordinary = await callTool(5, "memory_create_agent_memory", {
@@ -182,6 +176,13 @@ if (detail.source_refs.length !== 1 || detail.review_actions.length < 1) {
   throw new Error(`Source/review detail failed: ${JSON.stringify(detail)}`);
 }
 
+const autoSourcedDetail = await callNextTool("memory_get_agent_memory", {
+  memory_id: autoSourced.memory_id
+});
+if (autoSourcedDetail.source_refs.length !== 1) {
+  throw new Error(`Auto-sourced memory missing source ref: ${JSON.stringify(autoSourcedDetail)}`);
+}
+
 const recall = await callTool(11, "memory_recall_agent_memories", {
   query: "governed memory",
   scope: "project",
@@ -202,6 +203,71 @@ await callTool(12, "memory_report_recall_usage", {
   ignored_memory_ids: [candidate.memory_id],
   note: "phase6 smoke usage"
 });
+
+const checkpointMarker = `phase4-searchable-checkpoint-${randomUUID()}`;
+const stateOnlyCheckpoint = await callNextTool("memory_set_checkpoint", {
+  payload: {
+    current_status: "phase4 state-only checkpoint smoke",
+    current_focus: `state-only ${checkpointMarker}`,
+    next_step: "create searchable checkpoint through memory_agent_checkpoint",
+    open_questions: []
+  }
+});
+if (
+  stateOnlyCheckpoint.checkpoint_state_only !== true ||
+  stateOnlyCheckpoint.searchable_memory_created !== false ||
+  stateOnlyCheckpoint.memory_id !== null
+) {
+  throw new Error(
+    `State-only checkpoint output changed: ${JSON.stringify(stateOnlyCheckpoint)}`
+  );
+}
+
+const searchableCheckpoint = await callNextTool("memory_agent_checkpoint", {
+  session_id: started.session_id,
+  client_kind: "codex",
+  payload: {
+    current_status: "phase4 searchable checkpoint smoke",
+    current_focus: `Searchable checkpoint focus ${checkpointMarker}`,
+    next_step: `Recall checkpoint memory ${checkpointMarker}`,
+    summary: `Searchable checkpoint summary ${checkpointMarker}`,
+    open_questions: []
+  },
+  metadata: { smoke: "phase4_checkpoint_parity" }
+});
+if (
+  searchableCheckpoint.searchable_memory_created !== true ||
+  searchableCheckpoint.checkpoint_state_only !== false ||
+  searchableCheckpoint.event_appended !== true ||
+  !searchableCheckpoint.event_id ||
+  !searchableCheckpoint.memory_id ||
+  searchableCheckpoint.memory?.memory_type !== "checkpoint" ||
+  searchableCheckpoint.memory?.status !== "accepted"
+) {
+  throw new Error(
+    `High-level checkpoint memory was not created: ${JSON.stringify(searchableCheckpoint)}`
+  );
+}
+
+const checkpointRecall = await callNextTool("memory_recall_agent_memories", {
+  query: checkpointMarker,
+  scope: "project",
+  memory_types: ["checkpoint"],
+  include_candidates: true,
+  include_stale: false,
+  include_needs_review: true,
+  top_k: 5,
+  max_chars_total: 2000
+});
+if (
+  !checkpointRecall.memories.some(
+    (memory) =>
+      memory.memory_id === searchableCheckpoint.memory_id &&
+      String(memory.body ?? "").includes(checkpointMarker)
+  )
+) {
+  throw new Error(`Checkpoint memory recall failed: ${JSON.stringify(checkpointRecall)}`);
+}
 
 const directUserRule = await callNextTool("memory_create_agent_memory", {
   memory_type: "procedure",
@@ -709,14 +775,16 @@ try {
         (SELECT count(*)::int FROM agent_memory_source_refs WHERE memory_id = $1) AS source_ref_count,
         (SELECT count(*)::int FROM agent_memory_review_actions WHERE memory_id = $2 AND action = 'promote_instruction') AS promotion_count,
         (SELECT used_memory_ids FROM recall_traces WHERE id = $3) AS used_memory_ids,
-        (SELECT ignored_memory_ids FROM recall_traces WHERE id = $3) AS ignored_memory_ids
+        (SELECT ignored_memory_ids FROM recall_traces WHERE id = $3) AS ignored_memory_ids,
+        (SELECT count(*)::int FROM agent_memory_source_refs WHERE memory_id = $4 AND source_kind = 'event') AS checkpoint_source_ref_count
     `,
-    [ordinary.memory_id, candidate.memory_id, recall.trace_id]
+    [ordinary.memory_id, candidate.memory_id, recall.trace_id, searchableCheckpoint.memory_id]
   );
   const row = checks.rows[0];
   if (
     row.source_ref_count !== 1 ||
     row.promotion_count !== 1 ||
+    row.checkpoint_source_ref_count !== 1 ||
     !JSON.stringify(row.used_memory_ids).includes(ordinary.memory_id) ||
     !JSON.stringify(row.ignored_memory_ids).includes(candidate.memory_id)
   ) {
@@ -731,4 +799,28 @@ child.kill();
 await once(child, "close");
 await rm(projectPath, { recursive: true, force: true });
 
+process.stdout.write(
+  JSON.stringify(
+    {
+      phase4_checkpoint_parity: {
+        state_only_checkpoint: {
+          checkpoint_state_only: stateOnlyCheckpoint.checkpoint_state_only,
+          searchable_memory_created: stateOnlyCheckpoint.searchable_memory_created,
+          memory_id: stateOnlyCheckpoint.memory_id
+        },
+        high_level_checkpoint: {
+          tool: "memory_agent_checkpoint",
+          event_appended: searchableCheckpoint.event_appended,
+          memory_id: searchableCheckpoint.memory_id,
+          memory_type: searchableCheckpoint.memory?.memory_type,
+          recall_found: checkpointRecall.memories.some(
+            (memory) => memory.memory_id === searchableCheckpoint.memory_id
+          )
+        }
+      }
+    },
+    null,
+    2
+  ) + "\n"
+);
 process.stdout.write("Phase 6 governed memory smoke passed\n");

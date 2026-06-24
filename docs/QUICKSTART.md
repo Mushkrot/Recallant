@@ -138,6 +138,8 @@ Expected remote readiness:
   instead of treating the remote-only project as a broken local attach;
 - a checkpoint can be written and read back with `memory_set_checkpoint` and
   `memory_get_checkpoint`;
+- `memory_set_checkpoint` remains state-only; use `memory_agent_checkpoint` when the checkpoint
+  should also become searchable governed checkpoint memory;
 - governed semantic memory is proven separately by creating a small non-secret memory through
   `memory_create_agent_memory` and recalling it through `memory_recall_agent_memories`.
 
@@ -344,6 +346,12 @@ must not overwrite existing target files.
 `AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is a compact
 fallback/checkpoint file. Old handoffs, long history, source notes, and runbook details should be
 imported as source-linked evidence or reviewed memories rather than copied into startup context.
+Use `recallant discover --dry-run --project-dir .` before migrating an existing project. The
+inventory is read-only, classifies safe documentation and risky paths, prints secret references by
+name only, and produces a review-first migration plan. Writes happen only after owner approval:
+remote-only projects use governed MCP memory creation plus recall verification, while server-local
+projects use explicit imports or guided attach confirmation. Update checkpoint state after a safe
+approved marker recalls successfully.
 The documentation posture summary is stored in Recallant and appears in later context packs so a
 new agent can see whether the project is already documented well, needs canon links, or should be
 reviewed before docs are rewritten.

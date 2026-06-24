@@ -45,7 +45,7 @@ const clientKind = z.enum(["codex", "cursor", "windsurf", "claude_code", "unknow
 const scope = z.enum(["project", "developer", "all"]);
 const memoryScope = z.enum(["project", "developer"]);
 const sourceKind = z.enum(["event", "chunk", "raw_artifact", "edge", "checkpoint", "external"]);
-const memoryType = z.enum([
+const memoryTypeValues = [
   "decision",
   "constraint",
   "lesson",
@@ -58,7 +58,22 @@ const memoryType = z.enum([
   "environment_fact",
   "domain_fact",
   "capability_fact"
-]);
+] as const;
+const memoryType = z.enum(memoryTypeValues);
+const recallMemoryType = z.enum([...memoryTypeValues, "checkpoint"] as const);
+const checkpointPayloadSchema = z
+  .object({
+    current_status: z.string(),
+    current_focus: z.string(),
+    next_step: z.string(),
+    last_event_id: uuidString.nullable().optional(),
+    open_questions: z.array(z.string()).default([]),
+    summary: nullableString,
+    status: nullableString,
+    updated_at: nullableString,
+    source: nullableString
+  })
+  .passthrough();
 
 export type RecallantToolName =
   | "memory_start_session"
@@ -74,6 +89,7 @@ export type RecallantToolName =
   | "memory_forget"
   | "memory_get_checkpoint"
   | "memory_set_checkpoint"
+  | "memory_agent_checkpoint"
   | "memory_create_agent_memory"
   | "memory_review_agent_memory"
   | "memory_list_agent_memories"
@@ -179,6 +195,35 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
     tool,
     ...payload
   };
+}
+
+function summarizeText(text: string, max = 88) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, Math.max(0, max - 3))}...`;
+}
+
+function checkpointValue(payload: JsonObject, key: string, fallback = "") {
+  const value = payload[key];
+  return value === null || value === undefined ? fallback : String(value);
+}
+
+function checkpointEventText(payload: JsonObject) {
+  return `Checkpoint: ${checkpointValue(payload, "current_focus")} Next: ${checkpointValue(
+    payload,
+    "next_step"
+  )}`;
+}
+
+function checkpointMemoryBody(payload: JsonObject) {
+  return [
+    `Status: ${checkpointValue(payload, "status", checkpointValue(payload, "current_status", "checkpoint"))}`,
+    `Current focus: ${checkpointValue(payload, "current_focus")}`,
+    `Next step: ${checkpointValue(payload, "next_step")}`,
+    payload.summary ? `Summary: ${String(payload.summary)}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemorySourceRefInput[] {
@@ -710,15 +755,10 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_set_checkpoint",
     title: "Set Checkpoint",
-    description: "Set the current project checkpoint.",
+    description:
+      "Set the current project checkpoint state only. This does not create searchable governed memory; use memory_agent_checkpoint for searchable checkpoint closeout.",
     inputSchema: z.object({
-      payload: z.object({
-        current_status: z.string(),
-        current_focus: z.string(),
-        next_step: z.string(),
-        last_event_id: uuidString.nullable().optional(),
-        open_questions: z.array(z.string()).default([])
-      })
+      payload: checkpointPayloadSchema
     }),
     handler: async (args) => {
       const database = db();
@@ -731,12 +771,18 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
+            checkpoint_state_only: true,
+            searchable_memory_created: false,
+            memory_id: null,
             repo_sync: await syncProjectLogInContext(args.payload as JsonObject, database)
           };
         } catch (error) {
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
+            checkpoint_state_only: true,
+            searchable_memory_created: false,
+            memory_id: null,
             repo_sync: {
               status: "failed",
               reason: error instanceof Error ? error.message : String(error)
@@ -744,7 +790,127 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           };
         }
       }
-      return stubResponse("memory_set_checkpoint", { ok: true, updated_at: nowIso() });
+      return stubResponse("memory_set_checkpoint", {
+        ok: true,
+        updated_at: nowIso(),
+        checkpoint_state_only: true,
+        searchable_memory_created: false,
+        memory_id: null
+      });
+    }
+  },
+  {
+    name: "memory_agent_checkpoint",
+    title: "Create Agent Checkpoint",
+    description:
+      "Explicit high-level checkpoint closeout: update checkpoint state, append a checkpoint event when a session_id is available, and create a searchable governed checkpoint memory.",
+    inputSchema: z.object({
+      session_id: uuidString.nullable().optional(),
+      client_kind: z.string().min(1).default("mcp"),
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      payload: checkpointPayloadSchema,
+      metadata
+    }),
+    handler: async (args) => {
+      const database = db();
+      const payload = args.payload as JsonObject;
+      const context = currentRecallantToolsContext();
+      const projectId =
+        context.projectId ??
+        (typeof args.project_id === "string" ? args.project_id : null) ??
+        process.env.RECALLANT_PROJECT_ID ??
+        null;
+      const projectPath =
+        context.projectPath ??
+        (typeof args.project_path === "string" ? args.project_path : null) ??
+        process.env.RECALLANT_PROJECT_PATH ??
+        null;
+      const sessionId =
+        typeof args.session_id === "string" ? args.session_id : (context.sessionId ?? null);
+      if (database) {
+        const projectContext = projectId
+          ? { projectId }
+          : await database.ensureProject(projectPath ?? undefined);
+        const checkpoint = await database.setCheckpoint(projectContext.projectId, payload);
+        const eventText = checkpointEventText(payload);
+        const event = sessionId
+          ? await database.appendEvent({
+              session_id: sessionId,
+              client_kind: String(args.client_kind ?? "mcp"),
+              event_kind: "checkpoint",
+              text: eventText,
+              metadata: {
+                capture_kind: "memory_agent_checkpoint",
+                checkpoint_payload: payload,
+                ...(args.metadata as JsonObject)
+              },
+              raw_artifacts: []
+            })
+          : null;
+        const sourceRefs = event
+          ? [
+              {
+                source_kind: "event",
+                source_id: String(event.event_id),
+                quote: summarizeText(eventText, 500),
+                metadata: { capture_kind: "memory_agent_checkpoint" }
+              }
+            ]
+          : [
+              {
+                source_kind: "checkpoint",
+                source_id: `checkpoint:${String(checkpoint?.updated_at ?? nowIso())}`,
+                quote: summarizeText(eventText, 500),
+                metadata: {
+                  capture_kind: "memory_agent_checkpoint",
+                  event_appended: false
+                }
+              }
+            ];
+        const memory = await database.createAgentMemory({
+          project_id: projectContext.projectId,
+          project_path: projectPath,
+          memory_type: "checkpoint",
+          scope: "project",
+          scope_kind: "project",
+          title: summarizeText(`Checkpoint: ${checkpointValue(payload, "current_focus")}`, 72),
+          body: checkpointMemoryBody(payload),
+          confidence: 0.95,
+          created_by: "agent",
+          source_refs: sourceRefs,
+          metadata: {
+            created_from: "memory_agent_checkpoint",
+            searchable_checkpoint_memory: true,
+            ...(args.metadata as JsonObject)
+          }
+        });
+        return {
+          ok: true,
+          action: "memory_agent_checkpoint",
+          checkpoint_updated_at: checkpoint?.updated_at ?? nowIso(),
+          checkpoint_state_only: false,
+          searchable_memory_created: true,
+          event_appended: Boolean(event),
+          event_id: event?.event_id ?? null,
+          memory_id: memory.memory_id,
+          memory: {
+            ...memory,
+            memory_type: "checkpoint"
+          }
+        };
+      }
+      return stubResponse("memory_agent_checkpoint", {
+        ok: true,
+        action: "memory_agent_checkpoint",
+        checkpoint_updated_at: nowIso(),
+        checkpoint_state_only: false,
+        searchable_memory_created: true,
+        event_appended: false,
+        event_id: null,
+        memory_id: randomUUID(),
+        memory: { status: "accepted", use_policy: "recall_allowed", memory_type: "checkpoint" }
+      });
     }
   },
   {
@@ -895,7 +1061,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       scope: scope.default("project"),
       scope_kind: nullableString,
       audience_kind: nullableString,
-      memory_types: z.array(memoryType).default([]),
+      memory_types: z.array(recallMemoryType).default([]),
       include_candidates: z.boolean().default(false),
       include_stale: z.boolean().default(false),
       include_needs_review: z.boolean().default(false),

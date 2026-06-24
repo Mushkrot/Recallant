@@ -84,7 +84,8 @@ for (const marker of [
   "Remote project access to a central Recallant server",
   "first authenticated `POST /api/mcp`",
   "`memory_set_checkpoint` state-only by default",
-  "operators do not treat checkpoint readback as semantic recall"
+  "checkpoint readback as semantic recall",
+  "`memory_agent_checkpoint` / CLI `agent-checkpoint`"
 ]) {
   mustInclude(roadmap, marker, "docs/ROADMAP.md");
 }
@@ -94,7 +95,8 @@ for (const marker of [
   "`--semantic-proof`",
   "governed semantic-memory proof",
   "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
-  "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only"
+  "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
+  "`memory_agent_checkpoint` tool"
 ]) {
   mustInclude(mcpSpec, marker, "docs/MCP_SPEC.md proof taxonomy");
 }

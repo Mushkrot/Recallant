@@ -19,6 +19,7 @@ const expectedTools = [
   "memory_forget",
   "memory_get_checkpoint",
   "memory_set_checkpoint",
+  "memory_agent_checkpoint",
   "memory_create_agent_memory",
   "memory_review_agent_memory",
   "memory_list_agent_memories",
@@ -42,6 +43,8 @@ let cleanupError = null;
 let contextPosture = null;
 let contextCanon = null;
 let contextSectionKeys = [];
+let stateOnly = null;
+let highLevelCheckpoint = null;
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -66,6 +69,18 @@ try {
     throw new Error(`memory_search schema is missing source_id: ${JSON.stringify(searchTool)}`);
   }
 
+  const agentCheckpointTool = list.tools?.find((tool) => tool.name === "memory_agent_checkpoint");
+  const agentCheckpointProperties = agentCheckpointTool?.inputSchema?.properties ?? {};
+  for (const property of ["session_id", "client_kind", "project_id", "project_path", "payload"]) {
+    if (!Object.hasOwn(agentCheckpointProperties, property)) {
+      throw new Error(
+        `memory_agent_checkpoint schema is missing ${property}: ${JSON.stringify(
+          agentCheckpointTool
+        )}`
+      );
+    }
+  }
+
   const call = await client.callTool(
     {
       name: "memory_heartbeat",
@@ -82,6 +97,57 @@ try {
   if (heartbeat.tool !== "memory_heartbeat" && heartbeat.ok !== true) {
     throw new Error(`Unexpected tool call response: ${JSON.stringify(call)}`);
   }
+
+  const stateOnlyCall = await client.callTool(
+    {
+      name: "memory_set_checkpoint",
+      arguments: {
+        payload: {
+          current_status: "stub checkpoint state",
+          current_focus: "phase4 state-only proof",
+          next_step: "call memory_agent_checkpoint for searchable checkpoint memory"
+        }
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  stateOnly = JSON.parse(stateOnlyCall.content?.[0]?.text ?? "{}");
+  if (
+    stateOnly.checkpoint_state_only !== true ||
+    stateOnly.searchable_memory_created !== false ||
+    stateOnly.memory_id !== null
+  ) {
+    throw new Error(`memory_set_checkpoint did not report state-only output: ${JSON.stringify(stateOnly)}`);
+  }
+
+  const highLevelCheckpointCall = await client.callTool(
+    {
+      name: "memory_agent_checkpoint",
+      arguments: {
+        payload: {
+          current_status: "stub checkpoint closeout",
+          current_focus: "phase4 searchable checkpoint proof",
+          next_step: "recall checkpoint memory by focus text"
+        }
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  highLevelCheckpoint = JSON.parse(highLevelCheckpointCall.content?.[0]?.text ?? "{}");
+  if (
+    highLevelCheckpoint.searchable_memory_created !== true ||
+    highLevelCheckpoint.checkpoint_state_only !== false ||
+    highLevelCheckpoint.memory?.memory_type !== "checkpoint"
+  ) {
+    throw new Error(
+      `memory_agent_checkpoint did not report searchable checkpoint memory: ${JSON.stringify(
+        highLevelCheckpoint
+      )}`
+    );
+  }
+
   const contextCall = await client.callTool(
     {
       name: "memory_get_context_pack",
@@ -197,6 +263,11 @@ process.stdout.write(
       context_section_keys: {
         has_required_sections: true,
         count: contextSectionKeys.length
+      },
+      checkpoint_parity_stub: {
+        memory_set_checkpoint_state_only: stateOnly.checkpoint_state_only,
+        memory_agent_checkpoint_searchable: highLevelCheckpoint.searchable_memory_created,
+        high_level_memory_type: highLevelCheckpoint.memory?.memory_type
       }
     },
     null,

@@ -77,6 +77,13 @@ Agents append workflow evidence through MCP or CLI fallback commands. Recallant 
 attaches source references, chunks/indexes searchable content, and may create governed memories when
 policy allows it.
 
+Checkpoint state is deliberately separate from searchable checkpoint memory. Low-level
+`memory_set_checkpoint` updates the current project checkpoint for context-pack recovery and reports
+`checkpoint_state_only: true`; it does not create governed memory. Searchable checkpoint closeout
+uses the explicit high-level `memory_agent_checkpoint` MCP tool or the CLI `agent-checkpoint`, which
+update checkpoint state, attach a checkpoint event when a session is available, and create a governed
+`memory_type: "checkpoint"` record with source refs.
+
 Instruction-grade rules require stronger authority than ordinary agent inference. A memory can be
 useful without becoming a binding instruction.
 

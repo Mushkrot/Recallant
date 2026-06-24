@@ -232,7 +232,8 @@ mustInclude(
     "`memory_create_agent_memory` marker",
     "`memory_recall_agent_memories`",
     "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
-    "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only"
+    "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
+    "`memory_agent_checkpoint` tool"
   ],
   "docs/MCP_SPEC.md proof taxonomy"
 );
@@ -247,7 +248,8 @@ mustInclude(
     "a checkpoint can be written and read back with `memory_set_checkpoint`",
     "governed semantic memory is proven separately",
     "Do not treat a checkpoint-only readback as semantic recall proof",
-    "`memory_set_checkpoint` remains state-only"
+    "`memory_set_checkpoint` remains state-only",
+    "`memory_agent_checkpoint`"
   ],
   "docs/QUICKSTART.md remote proof taxonomy"
 );
@@ -260,7 +262,8 @@ mustInclude(
     "`memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint",
     "`memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic",
     "proof that semantic recall is populated",
-    "baseline checkpoint parity contract is state-only"
+    "baseline checkpoint parity contract is state-only",
+    "`memory_agent_checkpoint`"
   ],
   "docs/CLIENT_SETUP.md remote proof taxonomy"
 );
@@ -400,6 +403,7 @@ mustInclude(
     "session/context readiness",
     "checkpoint readback and governed semantic recall are separate surfaces",
     "baseline checkpoint parity contract is state-only",
+    "memory_agent_checkpoint",
     "Release-Candidate Bar"
   ],
   "CONTRACT_STATUS"

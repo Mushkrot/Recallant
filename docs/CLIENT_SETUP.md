@@ -279,7 +279,11 @@ project:
 - Local `recallant doctor --project-dir .` on that remote workstation should report
   `remote-ready, local storage not attached`, not a standalone local attach failure.
 - `memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint
-  state can be written and read.
+  state can be written and read. The response is state-only and reports
+  `checkpoint_state_only: true`, `searchable_memory_created: false`, and no `memory_id`.
+- `memory_agent_checkpoint` is the explicit high-level MCP checkpoint closeout path. It updates
+  checkpoint state, appends a checkpoint event when a `session_id` is available, creates a governed
+  `memory_type: "checkpoint"` record, and returns the generated `memory_id`.
 - `memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic
   memory can be written and recalled for the current project scope.
 
@@ -291,8 +295,10 @@ unless the operator explicitly wants to switch that project to the local-storage
 
 The baseline checkpoint parity contract is state-only: `memory_set_checkpoint` updates the current
 checkpoint and `memory_get_checkpoint` reads it back. Searchable checkpoint memory requires an
-explicit high-level closeout/checkpoint action that creates governed memory, rather than assuming
-checkpoint state is semantic recall.
+explicit high-level closeout/checkpoint action such as `memory_agent_checkpoint`, rather than
+assuming checkpoint state is semantic recall. Generic `memory_create_agent_memory` remains for
+ordinary governed facts, decisions, procedures, work logs, and references; use the dedicated
+checkpoint tool when the memory should represent session checkpoint closeout.
 
 ### Provision Scoped Remote Credentials
 
@@ -561,13 +567,24 @@ After `remote_mcp_ready`, a useful first proof is a small non-secret governed me
 `memory_create_agent_memory` with `scope: "project"`, `created_by: "agent"`, and
 `audience: [{ "kind": "all_agents" }]`, followed by `memory_recall_agent_memories` for the same
 marker. That proof confirms semantic memory for the scoped project. A checkpoint-only readback is a
-valid state check, but it should not be reported as semantic recall proof.
+valid state check, but it should not be reported as semantic recall proof. When an agent needs a
+checkpoint that is searchable later, use `memory_agent_checkpoint` instead of relying on
+`memory_set_checkpoint`; the low-level state call intentionally does not create governed memory.
 
 The prohibited classes are `.env`, private keys, raw credentials, customer data, provider secrets,
 database URLs, raw artifacts, and backups. Those must not be sent through Recallant memory tools,
 stored in consent receipts, or copied into project config. The local consent receipt written by
 `connect-cloud` is a non-secret reminder of the remote boundary; it stores credential references and
 redaction classes, not raw credentials or private keys.
+
+For old projects with a lot of existing context, start with `recallant discover --dry-run
+--project-dir .`. That command is a read-only migration inventory: it produces a review-first
+`migration_plan`, classifies safe docs and risky paths, and prints only paths, classes, counts, and
+secret reference names. The owner approves the concise plan before any import or governed-memory
+write. Remote-only projects may apply approved entries through `memory_create_agent_memory` and
+verify with `memory_recall_agent_memories` without local Postgres; server-local projects may use
+explicit `recallant import <path>` or guided attach confirmation. Checkpoint state is updated after
+the recall proof, not used as the proof.
 
 Cloudflare Access remains the human gate for dashboard/admin/approval surfaces. Agent runtime uses
 the scoped machine credential from the local credential store and does not require Cloudflare browser

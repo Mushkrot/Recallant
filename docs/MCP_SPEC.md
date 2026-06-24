@@ -132,9 +132,14 @@ uses `memory_type: "work_log"`, `scope: "project"`, `created_by: "agent"`,
 
 A `memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic
 memory recall. The baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only by
-default; searchable checkpoint memory requires an explicit high-level governed-memory
-closeout/checkpoint action. The deterministic diagnostic coverage is
-`npm run remote-mcp-doctor:smoke`.
+default; its output reports `checkpoint_state_only: true` and
+`searchable_memory_created: false`. Searchable checkpoint memory requires the explicit high-level
+`memory_agent_checkpoint` tool. That tool updates checkpoint state, appends a checkpoint event when
+a `session_id` is available, creates a governed `memory_type: "checkpoint"` memory with source
+refs, and returns the generated `memory_id`. Use `memory_create_agent_memory` for ordinary governed
+facts, decisions, procedures, and work logs, not for implicit checkpoint closeout. The deterministic
+diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity proof is
+`npm run phase6:smoke:governed`.
 
 ## 3c) External Rehearsal
 
