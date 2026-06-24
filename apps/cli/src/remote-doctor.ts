@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   remoteMcpBridgeEndpointUrl,
   remoteMcpBridgeFlags,
@@ -25,6 +27,7 @@ type RemoteDoctorOptions = {
   format: "json" | "text";
   timeoutMs: number;
   captureProof: boolean;
+  semanticProof: boolean;
   allowInsecureLocalhost: boolean;
 };
 
@@ -81,7 +84,8 @@ function readOptions(argv: readonly string[]): RemoteDoctorOptions {
     traceId: normalizedOptional(parseFlag(argv, remoteMcpBridgeFlags.traceId)),
     format,
     timeoutMs,
-    captureProof: hasFlag(argv, "--capture-proof"),
+    captureProof: hasFlag(argv, "--capture-proof") || hasFlag(argv, "--semantic-proof"),
+    semanticProof: hasFlag(argv, "--semantic-proof"),
     allowInsecureLocalhost: hasFlag(argv, "--allow-insecure-localhost")
   };
 }
@@ -104,6 +108,14 @@ function stage(
 
 function skippedStage(id: RemoteMcpDoctorStageId, message = "Not reached.") {
   return stage(id, "skipped", "not_reached", message);
+}
+
+function skippedProofStages(message = "Not reached.") {
+  return [
+    skippedStage("session_context_readiness", message),
+    skippedStage("checkpoint_state_proof", message),
+    skippedStage("semantic_memory_proof", message)
+  ];
 }
 
 function validationReport(options: RemoteDoctorOptions, stages: RemoteMcpDoctorStage[]) {
@@ -297,12 +309,9 @@ function toolsFromList(result: JsonRpcResult) {
 }
 
 function sessionIdFromToolCall(result: JsonRpcResult) {
-  const payload = result.json?.result as Record<string, unknown> | undefined;
-  const structuredContent =
-    payload?.structuredContent && typeof payload.structuredContent === "object"
-      ? (payload.structuredContent as Record<string, unknown>)
-      : null;
+  const structuredContent = structuredContentFromToolCall(result);
   if (typeof structuredContent?.session_id === "string") return structuredContent.session_id;
+  const payload = result.json?.result as Record<string, unknown> | undefined;
   const content = Array.isArray(payload?.content) ? payload.content : [];
   for (const item of content) {
     if (!item || typeof item !== "object") continue;
@@ -316,6 +325,26 @@ function sessionIdFromToolCall(result: JsonRpcResult) {
     }
   }
   return null;
+}
+
+function structuredContentFromToolCall(result: JsonRpcResult) {
+  const payload = result.json?.result as Record<string, unknown> | undefined;
+  return payload?.structuredContent && typeof payload.structuredContent === "object"
+    ? (payload.structuredContent as Record<string, unknown>)
+    : null;
+}
+
+function resultContains(result: JsonRpcResult, value: string) {
+  return JSON.stringify(result.json?.result ?? result.json ?? {}).includes(value);
+}
+
+function checkpointContainsMarker(result: JsonRpcResult, marker: string) {
+  const structured = structuredContentFromToolCall(result);
+  const payload =
+    structured?.payload && typeof structured.payload === "object"
+      ? (structured.payload as Record<string, unknown>)
+      : null;
+  return payload?.current_focus === marker || resultContains(result, marker);
 }
 
 async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpDoctorStage[]) {
@@ -349,7 +378,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       skippedStage("scope"),
       skippedStage("mcp_initialize"),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     ];
   }
 
@@ -378,7 +407,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       skippedStage("scope"),
       skippedStage("mcp_initialize"),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -396,7 +425,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       skippedStage("scope"),
       skippedStage("mcp_initialize"),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -422,7 +451,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       skippedStage("scope"),
       skippedStage("mcp_initialize"),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -443,7 +472,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       ),
       skippedStage("mcp_initialize"),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -457,7 +486,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
         remediation: "Check server MCP readiness after auth and scope are accepted."
       }),
       skippedStage("tools_list"),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -471,7 +500,7 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
         metadata: { error_code: errorCodeFromJson(toolsList), content_type: toolsList.contentType },
         remediation: "Check remote MCP server tool registration."
       }),
-      skippedStage("capture_recall_proof")
+      ...skippedProofStages()
     );
     return stages;
   }
@@ -484,17 +513,32 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
     })
   );
 
-  if (!options.captureProof) {
+  if (!options.captureProof && !options.semanticProof) {
     stages.push(
       stage(
-        "capture_recall_proof",
+        "session_context_readiness",
         "skipped",
         "not_requested",
-        "Capture/recall proof was not requested."
+        "Session/context readiness proof was not requested."
+      ),
+      stage(
+        "checkpoint_state_proof",
+        "skipped",
+        "not_requested",
+        "Checkpoint state proof was not requested."
+      ),
+      stage(
+        "semantic_memory_proof",
+        "skipped",
+        "not_requested",
+        "Semantic governed-memory proof was not requested."
       )
     );
     return stages;
   }
+
+  let startedSessionId: string | null = null;
+  const marker = `remote-doctor-semantic-proof:${randomUUID()}`;
 
   if (
     !toolNames.includes("memory_start_session") ||
@@ -502,93 +546,314 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
   ) {
     stages.push(
       stage(
-        "capture_recall_proof",
+        "session_context_readiness",
         "warn",
-        "capture_recall_proof_unavailable",
-        "Capture/recall proof tool is unavailable.",
+        "session_context_readiness_unavailable",
+        "Session/context readiness proof tools are unavailable.",
         {
           metadata: { required_tools: ["memory_start_session", "memory_get_context_pack"] },
           remediation:
-            "Transport is ready; enable or expose Recallant memory tools before using capture proof."
+            "Transport is ready; enable or expose memory_start_session and memory_get_context_pack before using session/context readiness proof."
+        }
+      )
+    );
+  } else {
+    const startSession = await postJsonRpc(
+      options,
+      "tools/call",
+      {
+        name: "memory_start_session",
+        arguments: {
+          client_kind: "codex",
+          client_version: "0.0.0",
+          project_path: null,
+          session_label: "remote MCP doctor session/context readiness proof",
+          resume_policy: "force_new"
+        }
+      },
+      3
+    );
+    startedSessionId = sessionIdFromToolCall(startSession);
+    if (!startSession.ok || !startedSessionId) {
+      stages.push(
+        stage(
+          "session_context_readiness",
+          "fail",
+          "session_context_readiness_failed",
+          "Session/context readiness session start failed.",
+          {
+            http_status: startSession.httpStatus,
+            metadata: { error_code: errorCodeFromJson(startSession) },
+            remediation: "Transport is ready; inspect memory_start_session readiness separately."
+          }
+        )
+      );
+    } else {
+      const proof = await postJsonRpc(
+        options,
+        "tools/call",
+        {
+          name: "memory_get_context_pack",
+          arguments: {
+            session_id: options.sessionId ?? startedSessionId,
+            task_hint: "remote MCP doctor session/context readiness proof",
+            project_id: null,
+            include_raw_evidence: "never",
+            include_recovery: false
+          }
+        },
+        4
+      );
+      if (!proof.ok) {
+        stages.push(
+          stage(
+            "session_context_readiness",
+            "fail",
+            "session_context_readiness_failed",
+            "Session/context readiness context-pack call failed.",
+            {
+              http_status: proof.httpStatus,
+              metadata: { error_code: errorCodeFromJson(proof) },
+              remediation:
+                "Transport is ready; inspect memory_get_context_pack readiness separately."
+            }
+          )
+        );
+      } else {
+        stages.push(
+          stage(
+            "session_context_readiness",
+            "pass",
+            "session_context_readiness_ok",
+            "Session/context readiness proof succeeded.",
+            {
+              http_status: proof.httpStatus,
+              metadata: {
+                tool_names: ["memory_start_session", "memory_get_context_pack"],
+                session_id_observed: true
+              }
+            }
+          )
+        );
+      }
+    }
+  }
+
+  if (!options.semanticProof) {
+    stages.push(
+      stage(
+        "checkpoint_state_proof",
+        "skipped",
+        "not_requested",
+        "Checkpoint state proof was not requested."
+      ),
+      stage(
+        "semantic_memory_proof",
+        "skipped",
+        "not_requested",
+        "Semantic governed-memory proof was not requested."
+      )
+    );
+    return stages;
+  }
+
+  if (
+    !toolNames.includes("memory_set_checkpoint") ||
+    !toolNames.includes("memory_get_checkpoint")
+  ) {
+    stages.push(
+      stage(
+        "checkpoint_state_proof",
+        "warn",
+        "checkpoint_state_proof_unavailable",
+        "Checkpoint state proof tools are unavailable.",
+        {
+          metadata: { required_tools: ["memory_set_checkpoint", "memory_get_checkpoint"] },
+          remediation:
+            "Transport is ready; expose memory_set_checkpoint and memory_get_checkpoint before using checkpoint state proof."
+        }
+      )
+    );
+  } else {
+    const checkpointPayload = {
+      current_status: "remote doctor semantic proof running",
+      current_focus: marker,
+      next_step: "Verify recall of the remote doctor semantic proof marker.",
+      open_questions: []
+    };
+    const setCheckpoint = await postJsonRpc(
+      options,
+      "tools/call",
+      { name: "memory_set_checkpoint", arguments: { payload: checkpointPayload } },
+      5
+    );
+    if (!setCheckpoint.ok) {
+      stages.push(
+        stage(
+          "checkpoint_state_proof",
+          "fail",
+          "checkpoint_state_proof_failed",
+          "Checkpoint state write failed.",
+          {
+            http_status: setCheckpoint.httpStatus,
+            metadata: { error_code: errorCodeFromJson(setCheckpoint), marker },
+            remediation:
+              "Transport is ready; inspect memory_set_checkpoint separately from semantic recall."
+          }
+        )
+      );
+    } else {
+      const getCheckpoint = await postJsonRpc(
+        options,
+        "tools/call",
+        { name: "memory_get_checkpoint", arguments: {} },
+        6
+      );
+      const markerFound = getCheckpoint.ok && checkpointContainsMarker(getCheckpoint, marker);
+      stages.push(
+        stage(
+          "checkpoint_state_proof",
+          markerFound ? "pass" : "fail",
+          markerFound ? "checkpoint_state_proof_ok" : "checkpoint_state_proof_failed",
+          markerFound
+            ? "Checkpoint state write/read proof succeeded."
+            : "Checkpoint state readback did not return the diagnostic marker.",
+          {
+            http_status: getCheckpoint.httpStatus,
+            metadata: {
+              error_code: getCheckpoint.ok ? null : errorCodeFromJson(getCheckpoint),
+              tool_names: ["memory_set_checkpoint", "memory_get_checkpoint"],
+              marker,
+              marker_found: markerFound
+            },
+            remediation: markerFound
+              ? null
+              : "Inspect checkpoint state separately; semantic governed-memory proof can still be evaluated independently."
+          }
+        )
+      );
+    }
+  }
+
+  if (
+    !toolNames.includes("memory_create_agent_memory") ||
+    !toolNames.includes("memory_recall_agent_memories")
+  ) {
+    stages.push(
+      stage(
+        "semantic_memory_proof",
+        "warn",
+        "semantic_memory_proof_unavailable",
+        "Semantic governed-memory proof tools are unavailable.",
+        {
+          metadata: {
+            required_tools: ["memory_create_agent_memory", "memory_recall_agent_memories"]
+          },
+          remediation:
+            "Transport is ready; expose governed memory create and recall tools before using semantic proof."
         }
       )
     );
     return stages;
   }
 
-  const startSession = await postJsonRpc(
+  const memoryArguments = {
+    memory_type: "work_log",
+    scope: "project",
+    scope_kind: null,
+    scope_id: null,
+    audience: [{ kind: "all_agents", id: null }],
+    title: "Remote doctor semantic marker",
+    body: marker,
+    confidence: 1,
+    source_refs: [],
+    created_by: "agent",
+    metadata: {
+      diagnostic_marker: true,
+      diagnostic_kind: "remote_doctor_semantic_proof",
+      marker_id: marker
+    }
+  };
+  const created = await postJsonRpc(
     options,
     "tools/call",
-    {
-      name: "memory_start_session",
-      arguments: {
-        client_kind: "codex",
-        client_version: "0.0.0",
-        project_path: null,
-        session_label: "remote MCP doctor capture proof",
-        resume_policy: "force_new"
-      }
-    },
-    3
+    { name: "memory_create_agent_memory", arguments: memoryArguments },
+    7
   );
-  const startedSessionId = sessionIdFromToolCall(startSession);
-  if (!startSession.ok || !startedSessionId) {
+  if (!created.ok) {
     stages.push(
       stage(
-        "capture_recall_proof",
+        "semantic_memory_proof",
         "fail",
-        "capture_recall_proof_failed",
-        "Capture/recall session start failed.",
+        "semantic_memory_proof_failed",
+        "Semantic governed-memory marker creation failed.",
         {
-          http_status: startSession.httpStatus,
-          metadata: { error_code: errorCodeFromJson(startSession) },
-          remediation: "Transport is ready; inspect memory_start_session readiness separately."
+          http_status: created.httpStatus,
+          metadata: {
+            error_code: errorCodeFromJson(created),
+            marker,
+            memory_type: memoryArguments.memory_type,
+            scope: memoryArguments.scope,
+            created_by: memoryArguments.created_by,
+            audience: memoryArguments.audience,
+            diagnostic_marker: true
+          },
+          remediation:
+            "Transport is ready; inspect memory_create_agent_memory validation and governance policy."
         }
       )
     );
     return stages;
   }
 
-  const proof = await postJsonRpc(
+  const recall = await postJsonRpc(
     options,
     "tools/call",
     {
-      name: "memory_get_context_pack",
+      name: "memory_recall_agent_memories",
       arguments: {
-        session_id: options.sessionId ?? startedSessionId,
-        task_hint: "remote MCP doctor capture proof",
-        project_id: null,
-        include_raw_evidence: "never",
-        include_recovery: false
+        query: marker,
+        scope: "project",
+        scope_kind: null,
+        audience_kind: null,
+        memory_types: ["work_log"],
+        include_candidates: true,
+        include_stale: false,
+        include_needs_review: true,
+        top_k: 5,
+        max_chars_total: 4000
       }
     },
-    4
+    8
   );
-  if (!proof.ok) {
-    stages.push(
-      stage(
-        "capture_recall_proof",
-        "fail",
-        "capture_recall_proof_failed",
-        "Capture/recall proof call failed.",
-        {
-          http_status: proof.httpStatus,
-          metadata: { error_code: errorCodeFromJson(proof) },
-          remediation: "Transport is ready; inspect capture/recall tool readiness separately."
-        }
-      )
-    );
-    return stages;
-  }
+  const markerFound = recall.ok && resultContains(recall, marker);
+  const createdStructured = structuredContentFromToolCall(created);
   stages.push(
     stage(
-      "capture_recall_proof",
-      "pass",
-      "capture_recall_proof_ok",
-      "Capture/recall proof call succeeded.",
+      "semantic_memory_proof",
+      markerFound ? "pass" : "fail",
+      markerFound ? "semantic_memory_proof_ok" : "semantic_memory_proof_failed",
+      markerFound
+        ? "Semantic governed-memory marker create/recall proof succeeded."
+        : "Semantic governed-memory recall did not return the diagnostic marker.",
       {
-        http_status: proof.httpStatus,
-        metadata: { tool_names: ["memory_start_session", "memory_get_context_pack"] }
+        http_status: recall.httpStatus,
+        metadata: {
+          error_code: recall.ok ? null : errorCodeFromJson(recall),
+          tool_names: ["memory_create_agent_memory", "memory_recall_agent_memories"],
+          marker,
+          marker_found: markerFound,
+          memory_id: createdStructured?.memory_id ?? null,
+          memory_status: createdStructured?.status ?? null,
+          memory_type: memoryArguments.memory_type,
+          scope: memoryArguments.scope,
+          created_by: memoryArguments.created_by,
+          audience: memoryArguments.audience,
+          diagnostic_marker: true
+        },
+        remediation: markerFound
+          ? null
+          : "Inspect semantic indexing/governance separately from transport and checkpoint state."
       }
     )
   );

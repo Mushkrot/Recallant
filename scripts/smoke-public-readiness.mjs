@@ -227,6 +227,8 @@ mustInclude(
   mcpSpec,
   [
     "session/context readiness evidence",
+    "`--semantic-proof`",
+    "governed semantic-memory proof",
     "`memory_create_agent_memory` marker",
     "`memory_recall_agent_memories`",
     "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
@@ -238,7 +240,7 @@ mustInclude(
 mustInclude(
   quickstart,
   [
-    "`recallant agent-start --format json` reports `mode: \"remote_mcp_ready\"`",
+    '`recallant agent-start --format json` reports `mode: "remote_mcp_ready"`',
     "a checkpoint can be written and read back with `memory_set_checkpoint`",
     "governed semantic memory is proven separately",
     "Do not treat a checkpoint-only readback as semantic recall proof",
@@ -390,7 +392,7 @@ mustInclude(
     "npm run phase8:smoke:backup",
     "Workbench migration review queue",
     "Current Remote Existing-Project Findings",
-    "`mode: \"remote_mcp_ready\"`",
+    '`mode: "remote_mcp_ready"`',
     "session/context readiness",
     "checkpoint readback and governed semantic recall are separate surfaces",
     "baseline checkpoint parity contract is state-only",

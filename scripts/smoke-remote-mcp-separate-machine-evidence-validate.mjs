@@ -66,7 +66,7 @@ function baseEvidence(overrides = {}) {
         stages: [
           { id: "mcp_initialize", status: "pass", code: "mcp_initialize_ok" },
           { id: "tools_list", status: "pass", code: "tools_list_ok" },
-          { id: "capture_recall_proof", status: "pass", code: "capture_recall_proof_ok" }
+          { id: "semantic_memory_proof", status: "pass", code: "semantic_memory_proof_ok" }
         ]
       }
     },
@@ -125,7 +125,11 @@ function baseEvidence(overrides = {}) {
     },
     capture_recall: {
       requested: true,
-      doctor_stage: { id: "capture_recall_proof", status: "pass", code: "capture_recall_proof_ok" }
+      doctor_stage: {
+        id: "semantic_memory_proof",
+        status: "pass",
+        code: "semantic_memory_proof_ok"
+      }
     },
     forbidden_artifacts: {
       status: "pass",
@@ -194,7 +198,11 @@ await writeFile(
     baseEvidence({
       capture_recall: {
         requested: true,
-        doctor_stage: { id: "capture_recall_proof", status: "fail", code: "capture_not_active" }
+        doctor_stage: {
+          id: "semantic_memory_proof",
+          status: "fail",
+          code: "semantic_memory_proof_failed"
+        }
       },
       result: { status: "fail" }
     }),
@@ -221,7 +229,10 @@ await writeFile(
 const pass = await runValidator(passPath, 0);
 assert(pass.report?.status === "pass", "valid evidence did not pass");
 const dirty = await runValidator(dirtyPath, 1);
-assert(dirty.stderr.includes("client_config.forbidden.recallant_local_storage"), "dirty evidence reason missing");
+assert(
+  dirty.stderr.includes("client_config.forbidden.recallant_local_storage"),
+  "dirty evidence reason missing"
+);
 const transportOnly = await runValidator(transportOnlyPath, 1);
 assert(transportOnly.stderr.includes("capture/recall"), "transport-only evidence reason missing");
 const leaked = await runValidator(leakedPath, 1);

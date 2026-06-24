@@ -171,9 +171,11 @@ curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash
 
 The invite is short-lived and one-time. It is not the primary beginner remote UX. The invite
 bootstrap redeems it for a scoped remote MCP credential, installs only the remote bridge CLI, writes
-project-local client config, and runs `remote-doctor` with capture proof. It does not require local
-Docker, Postgres, `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or
-provider secrets. The acceptance proof command after bootstrap is:
+project-local client config, and runs `remote-doctor` with session/context readiness proof. Strict
+semantic proof is available with `recallant remote-doctor --semantic-proof`, which creates and
+recalls one synthetic governed diagnostic marker. The bootstrap does not require local Docker,
+Postgres, `RECALLANT_DATABASE_URL`, internal server paths, raw artifacts, backups, or provider
+secrets. The acceptance proof command after bootstrap is:
 
 ```bash
 recallant remote-acceptance \

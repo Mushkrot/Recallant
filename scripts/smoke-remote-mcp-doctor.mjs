@@ -110,12 +110,20 @@ function authOrScopeError(headers, body) {
 
 async function startFixture() {
   const requests = [];
+  let checkpointPayload = null;
+  const agentMemories = [];
   const server = createServer(async (request, response) => {
     try {
       const rawBody = await readBody(request);
       const body = JSON.parse(rawBody || "{}");
       const trace = request.headers["x-recallant-trace-id"] ?? "";
-      requests.push({ url: request.url, method: body.method, trace });
+      requests.push({
+        url: request.url,
+        method: body.method,
+        trace,
+        tool: body.params?.name ?? null,
+        arguments: body.params?.arguments ?? null
+      });
 
       if (trace === "edge-denied") {
         response.writeHead(403, { "content-type": "text/html" });
@@ -185,11 +193,23 @@ async function startFixture() {
         const tools =
           trace === "capture-missing"
             ? [{ name: "memory_heartbeat" }]
-            : [
-                { name: "memory_start_session" },
-                { name: "memory_get_context_pack" },
-                { name: "memory_heartbeat" }
-              ];
+            : trace === "semantic-missing"
+              ? [
+                  { name: "memory_start_session" },
+                  { name: "memory_get_context_pack" },
+                  { name: "memory_set_checkpoint" },
+                  { name: "memory_get_checkpoint" },
+                  { name: "memory_heartbeat" }
+                ]
+              : [
+                  { name: "memory_start_session" },
+                  { name: "memory_get_context_pack" },
+                  { name: "memory_set_checkpoint" },
+                  { name: "memory_get_checkpoint" },
+                  { name: "memory_create_agent_memory" },
+                  { name: "memory_recall_agent_memories" },
+                  { name: "memory_heartbeat" }
+                ];
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools } }));
         return;
@@ -206,6 +226,69 @@ async function startFixture() {
           );
           return;
         }
+        const toolName = body.params?.name;
+        const args = body.params?.arguments ?? {};
+        if (trace === "checkpoint-fail" && toolName === "memory_set_checkpoint") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify(
+              jsonRpcError(body.id, -32081, "checkpoint unavailable", 200, {
+                code: "checkpoint_unavailable"
+              }).payload
+            )
+          );
+          return;
+        }
+        let structuredContent;
+        if (toolName === "memory_start_session") {
+          structuredContent = {
+            ok: true,
+            session_id: "00000000-0000-4000-8000-000000000001"
+          };
+        } else if (toolName === "memory_get_context_pack") {
+          structuredContent = {
+            ok: true,
+            context_pack_id: "doctor-context-pack",
+            session_id: args.session_id ?? "00000000-0000-4000-8000-000000000001"
+          };
+        } else if (toolName === "memory_set_checkpoint") {
+          checkpointPayload = args.payload ?? null;
+          structuredContent = { ok: true, updated_at: "2026-06-24T00:00:00.000Z" };
+        } else if (toolName === "memory_get_checkpoint") {
+          structuredContent = {
+            payload: checkpointPayload,
+            updated_at: "2026-06-24T00:00:00.000Z"
+          };
+        } else if (toolName === "memory_create_agent_memory") {
+          const memory = {
+            memory_id: `doctor-memory-${agentMemories.length + 1}`,
+            memory_type: args.memory_type,
+            title: args.title,
+            body: args.body,
+            status: "accepted",
+            use_policy: "recall_allowed"
+          };
+          agentMemories.push(memory);
+          structuredContent = {
+            memory_id: memory.memory_id,
+            status: memory.status,
+            use_policy: memory.use_policy
+          };
+        } else if (toolName === "memory_recall_agent_memories") {
+          structuredContent = {
+            trace_id: "doctor-recall-trace",
+            memories:
+              trace === "semantic-recall-miss"
+                ? []
+                : agentMemories.filter((memory) => String(memory.body).includes(args.query)),
+            truncated: false
+          };
+        } else {
+          structuredContent = {
+            ok: true,
+            echoed: args.message ?? "doctor-tool-ok"
+          };
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -213,11 +296,7 @@ async function startFixture() {
             id: body.id,
             result: {
               content: [{ type: "text", text: "capture proof ok" }],
-              structuredContent: {
-                ok: true,
-                session_id: "00000000-0000-4000-8000-000000000001",
-                redaction_fixture: "Bearer should-not-appear"
-              }
+              structuredContent
             }
           })
         );
@@ -292,7 +371,8 @@ function baseArgs(fixture, overrides = {}) {
     "--format",
     overrides.format ?? "json",
     ...(overrides.traceId ? ["--trace-id", overrides.traceId] : []),
-    ...(overrides.captureProof ? ["--capture-proof"] : [])
+    ...(overrides.captureProof ? ["--capture-proof"] : []),
+    ...(overrides.semanticProof ? ["--semantic-proof"] : [])
   ];
 }
 
@@ -358,8 +438,11 @@ try {
   const success = parseJsonOutput(await runDoctor(baseArgs(fixture)));
   assert(stageCode(success, "mcp_initialize") === "pass:initialize_ok", "initialize did not pass");
   assert(stageCode(success, "tools_list") === "pass:tools_list_ok", "tools/list did not pass");
+  assert(stageCode(success, "session_context_readiness") === "skipped:not_requested");
+  assert(stageCode(success, "checkpoint_state_proof") === "skipped:not_requested");
+  assert(stageCode(success, "semantic_memory_proof") === "skipped:not_requested");
   assert(
-    success.stages.find((stage) => stage.id === "tools_list").metadata.tool_names.length === 3
+    success.stages.find((stage) => stage.id === "tools_list").metadata.tool_names.length === 7
   );
   assertNoLeak("success-json", JSON.stringify(success));
   summary.push({ scenario: "success-json", ok: true });
@@ -505,8 +588,12 @@ try {
   const capturePass = parseJsonOutput(
     await runDoctor(baseArgs(fixture, { traceId: "capture-pass", captureProof: true }))
   );
-  assert(stageCode(capturePass, "capture_recall_proof") === "pass:capture_recall_proof_ok");
-  const capturePassStage = stageById(capturePass, "capture_recall_proof");
+  assert(
+    stageCode(capturePass, "session_context_readiness") === "pass:session_context_readiness_ok"
+  );
+  assert(stageCode(capturePass, "checkpoint_state_proof") === "skipped:not_requested");
+  assert(stageCode(capturePass, "semantic_memory_proof") === "skipped:not_requested");
+  const capturePassStage = stageById(capturePass, "session_context_readiness");
   assert(
     capturePassStage.metadata.tool_names.join(",") ===
       "memory_start_session,memory_get_context_pack",
@@ -525,10 +612,11 @@ try {
     await runDoctor(baseArgs(fixture, { traceId: "capture-missing", captureProof: true }))
   );
   assert(
-    stageCode(captureMissing, "capture_recall_proof") === "warn:capture_recall_proof_unavailable"
+    stageCode(captureMissing, "session_context_readiness") ===
+      "warn:session_context_readiness_unavailable"
   );
   assert(
-    stageById(captureMissing, "capture_recall_proof").metadata.required_tools.join(",") ===
+    stageById(captureMissing, "session_context_readiness").metadata.required_tools.join(",") ===
       "memory_start_session,memory_get_context_pack",
     "capture-proof unavailable remediation must name only session/context readiness tools"
   );
@@ -540,9 +628,91 @@ try {
       expectExit: 1
     })
   );
-  assert(stageCode(captureFailure, "capture_recall_proof") === "fail:capture_recall_proof_failed");
+  assert(
+    stageCode(captureFailure, "session_context_readiness") ===
+      "fail:session_context_readiness_failed"
+  );
   assert(stageCode(captureFailure, "tools_list") === "pass:tools_list_ok");
   summary.push({ scenario: "capture-failure", ok: true });
+
+  const semanticPass = parseJsonOutput(
+    await runDoctor(baseArgs(fixture, { traceId: "semantic-pass", semanticProof: true }))
+  );
+  assert(
+    stageCode(semanticPass, "session_context_readiness") === "pass:session_context_readiness_ok"
+  );
+  assert(stageCode(semanticPass, "checkpoint_state_proof") === "pass:checkpoint_state_proof_ok");
+  assert(stageCode(semanticPass, "semantic_memory_proof") === "pass:semantic_memory_proof_ok");
+  const semanticStage = stageById(semanticPass, "semantic_memory_proof");
+  assert(semanticStage.metadata.marker_found === true, "semantic marker was not recalled");
+  assert(semanticStage.metadata.memory_type === "work_log", "semantic marker memory type changed");
+  assert(semanticStage.metadata.scope === "project", "semantic marker scope changed");
+  assert(semanticStage.metadata.created_by === "agent", "semantic marker created_by changed");
+  assert(
+    JSON.stringify(semanticStage.metadata.audience) ===
+      JSON.stringify([{ kind: "all_agents", id: null }]),
+    "semantic marker audience shape changed"
+  );
+  const semanticCreateCalls = fixture.requests.filter(
+    (request) => request.trace === "semantic-pass" && request.tool === "memory_create_agent_memory"
+  );
+  assert(semanticCreateCalls.length === 1, "semantic proof should create exactly one memory");
+  const semanticCreateArgs = semanticCreateCalls[0].arguments;
+  assert(
+    semanticCreateArgs.memory_type === "work_log" &&
+      semanticCreateArgs.scope === "project" &&
+      semanticCreateArgs.created_by === "agent" &&
+      JSON.stringify(semanticCreateArgs.audience) ===
+        JSON.stringify([{ kind: "all_agents", id: null }]) &&
+      /^remote-doctor-semantic-proof:[0-9a-f-]{36}$/.test(semanticCreateArgs.body) &&
+      semanticCreateArgs.metadata?.diagnostic_marker === true,
+    `semantic marker arguments were unsafe or malformed: ${JSON.stringify(semanticCreateArgs)}`
+  );
+  assertNoLeak("semantic-pass", JSON.stringify(semanticPass));
+  summary.push({ scenario: "semantic-pass", ok: true });
+
+  const semanticMissing = parseJsonOutput(
+    await runDoctor(baseArgs(fixture, { traceId: "semantic-missing", semanticProof: true }))
+  );
+  assert(
+    stageCode(semanticMissing, "semantic_memory_proof") === "warn:semantic_memory_proof_unavailable"
+  );
+  assert(
+    stageById(semanticMissing, "semantic_memory_proof").metadata.required_tools.join(",") ===
+      "memory_create_agent_memory,memory_recall_agent_memories",
+    "semantic proof missing-tools remediation should name create and recall tools"
+  );
+  summary.push({ scenario: "semantic-missing", ok: true });
+
+  const checkpointFailure = parseJsonOutput(
+    await runDoctor(baseArgs(fixture, { traceId: "checkpoint-fail", semanticProof: true }), {
+      expectExit: 1
+    })
+  );
+  assert(
+    stageCode(checkpointFailure, "checkpoint_state_proof") === "fail:checkpoint_state_proof_failed"
+  );
+  assert(
+    stageCode(checkpointFailure, "semantic_memory_proof") === "pass:semantic_memory_proof_ok",
+    "semantic proof should still pass independently when checkpoint state proof fails"
+  );
+  summary.push({ scenario: "checkpoint-failure-semantic-pass", ok: true });
+
+  const semanticFailure = parseJsonOutput(
+    await runDoctor(baseArgs(fixture, { traceId: "semantic-recall-miss", semanticProof: true }), {
+      expectExit: 1
+    })
+  );
+  assert(stageCode(semanticFailure, "mcp_initialize") === "pass:initialize_ok");
+  assert(stageCode(semanticFailure, "checkpoint_state_proof") === "pass:checkpoint_state_proof_ok");
+  assert(
+    stageCode(semanticFailure, "semantic_memory_proof") === "fail:semantic_memory_proof_failed"
+  );
+  assert(
+    stageById(semanticFailure, "semantic_memory_proof").metadata.marker_found === false,
+    "semantic failure should report marker_found=false"
+  );
+  summary.push({ scenario: "semantic-failure-not-transport", ok: true });
 
   assert(!process.env.RECALLANT_DATABASE_URL, "remote doctor smoke restored DB env too early");
 

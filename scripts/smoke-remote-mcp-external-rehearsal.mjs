@@ -205,6 +205,8 @@ function authOrScopeError(headers, body) {
 
 async function startHttpsFixture(cert) {
   const requests = [];
+  let checkpointPayload = null;
+  const agentMemories = [];
   const server = createServer({ key: cert.key, cert: cert.cert }, async (request, response) => {
     try {
       const rawBody = await readBody(request);
@@ -260,6 +262,10 @@ async function startHttpsFixture(cert) {
             : [
                 { name: "memory_start_session" },
                 { name: "memory_get_context_pack" },
+                { name: "memory_set_checkpoint" },
+                { name: "memory_get_checkpoint" },
+                { name: "memory_create_agent_memory" },
+                { name: "memory_recall_agent_memories" },
                 { name: "memory_heartbeat" }
               ];
         response.writeHead(200, { "content-type": "application/json" });
@@ -279,27 +285,58 @@ async function startHttpsFixture(cert) {
           return;
         }
         const toolName = body.params?.name;
-        const structuredContent =
-          toolName === "memory_start_session"
-            ? {
-                session_id: expectedScope.sessionId,
-                project_id: expectedScope.projectId,
-                checkpoint: { payload: null, updated_at: null },
-                previous_unclosed_session: null,
-                recommended_next_calls: ["memory_get_context_pack"]
-              }
-            : toolName === "memory_get_context_pack"
-              ? {
-                  context_pack_id: "external-rehearsal-context-pack",
-                  project_id: expectedScope.projectId,
-                  session_id: body.params?.arguments?.session_id ?? expectedScope.sessionId,
-                  sections: { working_memories: [] },
-                  truncated: false
-                }
-              : {
-                  ok: true,
-                  echoed: body.params?.arguments?.message ?? "capture-proof-ok"
-                };
+        const args = body.params?.arguments ?? {};
+        let structuredContent;
+        if (toolName === "memory_start_session") {
+          structuredContent = {
+            session_id: expectedScope.sessionId,
+            project_id: expectedScope.projectId,
+            checkpoint: { payload: null, updated_at: null },
+            previous_unclosed_session: null,
+            recommended_next_calls: ["memory_get_context_pack"]
+          };
+        } else if (toolName === "memory_get_context_pack") {
+          structuredContent = {
+            context_pack_id: "external-rehearsal-context-pack",
+            project_id: expectedScope.projectId,
+            session_id: args.session_id ?? expectedScope.sessionId,
+            sections: { working_memories: [] },
+            truncated: false
+          };
+        } else if (toolName === "memory_set_checkpoint") {
+          checkpointPayload = args.payload ?? null;
+          structuredContent = { ok: true, updated_at: "2026-06-24T00:00:00.000Z" };
+        } else if (toolName === "memory_get_checkpoint") {
+          structuredContent = {
+            payload: checkpointPayload,
+            updated_at: "2026-06-24T00:00:00.000Z"
+          };
+        } else if (toolName === "memory_create_agent_memory") {
+          const memory = {
+            memory_id: `external-rehearsal-memory-${agentMemories.length + 1}`,
+            memory_type: args.memory_type,
+            body: args.body,
+            status: "accepted",
+            use_policy: "recall_allowed"
+          };
+          agentMemories.push(memory);
+          structuredContent = {
+            memory_id: memory.memory_id,
+            status: memory.status,
+            use_policy: memory.use_policy
+          };
+        } else if (toolName === "memory_recall_agent_memories") {
+          structuredContent = {
+            trace_id: "external-rehearsal-recall-trace",
+            memories: agentMemories.filter((memory) => String(memory.body).includes(args.query)),
+            truncated: false
+          };
+        } else {
+          structuredContent = {
+            ok: true,
+            echoed: args.message ?? "capture-proof-ok"
+          };
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
@@ -385,7 +422,8 @@ function doctorArgs(fixture, overrides = {}) {
     "2000",
     "--format",
     "json",
-    ...(overrides.captureProof ? ["--capture-proof"] : [])
+    ...(overrides.captureProof ? ["--capture-proof"] : []),
+    ...(overrides.semanticProof ? ["--semantic-proof"] : [])
   ];
 }
 
@@ -834,8 +872,8 @@ try {
       "doctor_capture_pass",
       { traceId: "capture-pass", captureProof: true },
       0,
-      "capture_recall_proof",
-      "pass:capture_recall_proof_ok"
+      "session_context_readiness",
+      "pass:session_context_readiness_ok"
     ),
     await runDoctorScenario(
       fixture,
@@ -843,8 +881,8 @@ try {
       "doctor_capture_missing",
       { traceId: "capture-missing", captureProof: true },
       0,
-      "capture_recall_proof",
-      "warn:capture_recall_proof_unavailable"
+      "session_context_readiness",
+      "warn:session_context_readiness_unavailable"
     ),
     await runDoctorScenario(
       fixture,
@@ -852,8 +890,17 @@ try {
       "doctor_capture_failure",
       { traceId: "capture-fail", captureProof: true },
       1,
-      "capture_recall_proof",
-      "fail:capture_recall_proof_failed"
+      "session_context_readiness",
+      "fail:session_context_readiness_failed"
+    ),
+    await runDoctorScenario(
+      fixture,
+      externalEnv,
+      "doctor_semantic_pass",
+      { traceId: "semantic-pass", semanticProof: true },
+      0,
+      "semantic_memory_proof",
+      "pass:semantic_memory_proof_ok"
     )
   ];
 

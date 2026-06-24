@@ -18,8 +18,8 @@ dependable before expanding the product surface.
 - Remote project access to a central Recallant server / universal remote connect, with first authenticated `POST /api/mcp`, public
   `curl -fsSL https://memory.example.com/connect | bash` bootstrap, protected browser approval,
   pending connection storage, `recallant connect-cloud`, scoped remote MCP config, remote doctor,
-  deterministic pairing/security/external-rehearsal smokes, and invite provisioning kept as the
-  advanced/admin fallback.
+  opt-in governed semantic marker proof, deterministic pairing/security/external-rehearsal smokes,
+  and invite provisioning kept as the advanced/admin fallback.
 - Clean-host dry-run, CLI-wrapper validation, rollback smoke, and opt-in Docker-backed managed
   install smoke.
 - Public quickstart smoke for installed-wrapper onboarding, capture-active proof, and ask recall in
@@ -80,12 +80,12 @@ dependable before expanding the product surface.
   reconnect and headless bootstrap-token paths, and expand client transport polish without requiring
   Docker/Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, internal paths, raw artifacts,
   backups, provider secrets, raw scoped credentials, or private overlays on remote machines.
-- Remote existing-project diagnostics polish: make remote `doctor` and `connect` distinguish
-  `remote_mcp_ready`, checkpoint readback, and governed semantic-memory recall; add a safe semantic
-  marker proof to remote onboarding/doctor output; explain when local `attach --confirm` is the wrong
-  next step for a remote project; improve MCP tool schema hints for required `title`, `body`, and
-  object-shaped `audience`; and report raw-secret findings as paths/classes without implying that
-  secret values should be imported.
+- Remote existing-project diagnostics polish: make remote `connect`, local `doctor`, and agent
+  startup consistently distinguish `remote_mcp_ready`, checkpoint readback, and governed
+  semantic-memory recall; explain when local `attach --confirm` is the wrong next step for a remote
+  project; improve MCP tool schema hints for required `title`, `body`, and object-shaped `audience`;
+  and report raw-secret findings as paths/classes without implying that secret values should be
+  imported.
 - Checkpoint parity: keep MCP `memory_set_checkpoint` state-only by default, then add an explicit
   high-level governed-memory closeout/checkpoint action for searchable checkpoint memory like CLI
   `agent-checkpoint`; make the Workbench, doctor, context packs, and docs use the same terms so

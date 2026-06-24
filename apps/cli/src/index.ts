@@ -8986,9 +8986,11 @@ function usageText(command?: string) {
   }
   if (command === "remote-doctor") {
     return [
-      "Usage: recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--format json|text]",
+      "Usage: recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--semantic-proof] [--format json|text]",
       "",
-      "Diagnose HTTPS /api/mcp reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize, tools/list, and optional capture proof without local database access.",
+      "Diagnose HTTPS /api/mcp reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize, tools/list, optional session/context readiness proof, and optional governed semantic marker proof without local database access.",
+      "",
+      "--capture-proof proves session/context readiness only. --semantic-proof also proves checkpoint state and governed memory create+recall with one synthetic marker.",
       "",
       "Example: recallant remote-doctor --server-url https://recallant.example.com --credential <scoped-token> --project-id <project-id> --developer-id <developer-id> --client-id <client-id> --format json",
       ""

@@ -358,8 +358,18 @@ try {
   assert(evidence.remote_doctor.exit_code === 0, "remote doctor did not pass");
   assert(evidence.remote_mcp.status === "pass", "remote MCP bridge did not pass");
   assert(evidence.capture_recall.requested === true, "capture proof was not requested");
+  assert(
+    evidence.capture_recall.doctor_stage?.id === "semantic_memory_proof" &&
+      evidence.capture_recall.doctor_stage?.code === "semantic_memory_proof_ok",
+    `remote doctor did not record semantic proof stage: ${JSON.stringify(
+      evidence.capture_recall.doctor_stage
+    )}`
+  );
   assert(evidence.forbidden_artifacts.status === "pass", "forbidden artifact check failed");
-  assert(evidence.client_config.recallant_codex_config_entries === 1, "Codex config not idempotent");
+  assert(
+    evidence.client_config.recallant_codex_config_entries === 1,
+    "Codex config not idempotent"
+  );
   assert(
     fixture.requests.some((request) => request.method === "tools/call"),
     "evidence runner did not call a remote MCP tool"
@@ -380,7 +390,10 @@ try {
     ],
     { cwd: process.cwd(), env, maxBuffer: 1024 * 1024 }
   );
-  assert(!inferredResult.stdout.includes(credential), "inferred-input summary leaked raw credential");
+  assert(
+    !inferredResult.stdout.includes(credential),
+    "inferred-input summary leaked raw credential"
+  );
   const inferredFiles = await (await import("node:fs/promises")).readdir(inferredOutput);
   const inferredEvidenceFile = inferredFiles.find((file) => file.endsWith(".evidence.json"));
   assert(inferredEvidenceFile, "inferred-input evidence JSON was not written");
@@ -425,7 +438,10 @@ try {
     throw new Error("dirty project rehearsal unexpectedly passed");
   } catch (error) {
     assert(Number(error.code ?? 0) !== 0, "dirty project did not exit non-zero");
-    assert(!String(error.stdout ?? "").includes(credential), "dirty project output leaked credential");
+    assert(
+      !String(error.stdout ?? "").includes(credential),
+      "dirty project output leaked credential"
+    );
   }
   const cleanup = await execFileAsync(
     process.execPath,

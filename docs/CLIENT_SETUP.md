@@ -324,7 +324,8 @@ create/rotate/revoke/list workflow where Workbench is available. Its generated c
 
 Use `recallant remote-doctor` from the remote host to distinguish network reachability, HTTPS/TLS
 posture, edge/access denial, scoped credential auth, project/developer/client scope, MCP
-`initialize`, MCP `tools/list`, and optional capture/recall proof.
+`initialize`, MCP `tools/list`, session/context readiness, checkpoint state, and governed semantic
+memory recall proof.
 
 ```bash
 recallant remote-doctor \
@@ -337,13 +338,18 @@ recallant remote-doctor \
 ```
 
 Add `--capture-proof` only when the remote MCP tools should also prove session/context readiness.
-In the current diagnostic slice, this proves remote session/context-pack readiness, not full
-governed semantic-memory recall. Strict end-to-end memory proof still requires a governed memory
-write and recall, covered by `remote-acceptance` and by agent/client startup flows that call
-`memory_create_agent_memory` and `memory_recall_agent_memories`. The command prints redacted JSON by
-default with `--format json` or an operator-readable stage summary with `--format text`. It does not
-need local Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups,
-provider secrets, internal server paths, or private deployment context on the remote machine.
+That stage uses `memory_start_session` and `memory_get_context_pack`; it does not prove checkpoint
+state or semantic recall. Add `--semantic-proof` when the operator wants the stricter diagnostic:
+`remote-doctor` separately proves checkpoint state with `memory_set_checkpoint` /
+`memory_get_checkpoint`, then creates exactly one small governed diagnostic memory through
+`memory_create_agent_memory` and recalls it with `memory_recall_agent_memories`. The synthetic marker
+memory is scoped to the project, typed as `work_log`, created by `agent`, addressed to
+`[{ "kind": "all_agents", "id": null }]`, and marked with `diagnostic_marker: true`.
+
+The command prints redacted JSON by default with `--format json` or an operator-readable stage
+summary with `--format text`. It does not need local Postgres, `RECALLANT_DATABASE_URL`,
+Workbench/admin auth, raw artifacts, backups, provider secrets, internal server paths, or private
+deployment context on the remote machine.
 
 The deterministic coverage for this shipped diagnostic path is `npm run remote-mcp-doctor:smoke`.
 
@@ -359,9 +365,9 @@ npm run remote-mcp-external-rehearsal:smoke
 That smoke starts a local HTTPS `/api/mcp` fixture, runs `recallant connect-remote`,
 `recallant remote-bridge`, and `recallant remote-doctor` from a scrubbed child-process environment,
 and proves initialize, tools/list, tools/call, wrong/revoked/rotated credential failures, wrong
-project/developer/client failures, capture proof pass/missing/failure, and no DB/admin/provider/raw
-artifact/backup leakage. It is deterministic external-like coverage, not a claim that a physical
-second machine has been rehearsed.
+project/developer/client failures, session/context readiness proof pass/missing/failure, semantic
+marker proof pass, and no DB/admin/provider/raw artifact/backup leakage. It is deterministic
+external-like coverage, not a claim that a physical second machine has been rehearsed.
 
 For a real separate-machine rehearsal, use the CLI acceptance gate from the external host with
 operator-provided live inputs. It bootstraps the remote client config, runs `remote-doctor`, opens

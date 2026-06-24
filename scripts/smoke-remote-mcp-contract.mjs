@@ -91,6 +91,8 @@ for (const marker of [
 
 for (const marker of [
   "session/context readiness evidence",
+  "`--semantic-proof`",
+  "governed semantic-memory proof",
   "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
   "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only"
 ]) {

@@ -89,7 +89,7 @@ function doctorArgs(input) {
     "5000",
     "--format",
     "json",
-    ...(input.captureProof ? ["--capture-proof"] : [])
+    ...(input.captureProof ? ["--semantic-proof"] : [])
   ];
   if (input.sessionId) args.push("--session-id", input.sessionId);
   if (input.traceId) args.push("--trace-id", input.traceId);
@@ -217,7 +217,10 @@ const input = {
 let endpointUrl;
 try {
   endpointUrl = remoteMcpBridgeEndpointUrl(input.serverUrl);
-  assert(new URL(input.serverUrl).protocol === "https:", "live readiness requires HTTPS server URL");
+  assert(
+    new URL(input.serverUrl).protocol === "https:",
+    "live readiness requires HTTPS server URL"
+  );
 } catch (error) {
   outputAndExit(
     {
@@ -239,12 +242,18 @@ const doctor = await runCli(doctorArgs(input), childEnv, 0);
 assert(!doctor.stdout.includes(input.credential), "remote doctor leaked live credential");
 assert(!doctor.stderr.includes(input.credential), "remote doctor stderr leaked live credential");
 const doctorReport = JSON.parse(doctor.stdout);
-assert(stageCode(doctorReport, "mcp_initialize") === "pass:initialize_ok", "live initialize did not pass");
-assert(stageCode(doctorReport, "tools_list") === "pass:tools_list_ok", "live tools/list did not pass");
+assert(
+  stageCode(doctorReport, "mcp_initialize") === "pass:initialize_ok",
+  "live initialize did not pass"
+);
+assert(
+  stageCode(doctorReport, "tools_list") === "pass:tools_list_ok",
+  "live tools/list did not pass"
+);
 if (input.captureProof) {
   assert(
-    stageCode(doctorReport, "capture_recall_proof") === "pass:capture_recall_proof_ok",
-    "live capture proof did not pass"
+    stageCode(doctorReport, "semantic_memory_proof") === "pass:semantic_memory_proof_ok",
+    "live semantic memory proof did not pass"
   );
 }
 
@@ -268,13 +277,13 @@ outputAndExit(
         "remote_doctor_tools_list",
         "remote_bridge_initialize",
         "remote_bridge_tools_list",
-        ...(input.captureProof ? ["remote_doctor_capture_proof"] : [])
+        ...(input.captureProof ? ["remote_doctor_semantic_memory_proof"] : [])
       ],
       doctor: {
         initialize: stageCode(doctorReport, "mcp_initialize"),
         tools_list: stageCode(doctorReport, "tools_list"),
-        capture_recall_proof: input.captureProof
-          ? stageCode(doctorReport, "capture_recall_proof")
+        semantic_memory_proof: input.captureProof
+          ? stageCode(doctorReport, "semantic_memory_proof")
           : "skipped:not_requested"
       },
       bridge: {

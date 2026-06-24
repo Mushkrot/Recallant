@@ -3,16 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  access,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rm,
-  stat,
-  writeFile
-} from "node:fs/promises";
+import { access, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { hostname, platform, release, tmpdir, type as osType } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -20,12 +11,20 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const requiredFlags = ["serverUrl", "credential", "projectId", "developerId", "clientId"];
+const requiredFlags = ["serverUrl", "projectId", "developerId", "clientId"];
+const inferableRemoteConfigKeys = [
+  ...requiredFlags,
+  "credential",
+  "credentialRef",
+  "credentialStorePath"
+];
 const forbiddenOutputPattern =
   /"RECALLANT_DATABASE_URL"\s*[:=]|RECALLANT_DATABASE_URL\s*=|DATABASE_URL\s*=|postgres:\/\/|pgvector|recallant-postgres|\/ai\//i;
 const remoteConfigEnvMap = {
   serverUrl: "RECALLANT_REMOTE_MCP_URL",
   credential: "RECALLANT_REMOTE_MCP_CREDENTIAL",
+  credentialRef: "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
+  credentialStorePath: "RECALLANT_REMOTE_MCP_CREDENTIAL_STORE",
   projectId: "RECALLANT_PROJECT_ID",
   developerId: "RECALLANT_DEVELOPER_ID",
   clientId: "RECALLANT_REMOTE_MCP_CLIENT_ID"
@@ -36,6 +35,8 @@ function parseArgs(argv) {
     mode: "run",
     serverUrl: process.env.RECALLANT_EXTERNAL_REHEARSAL_SERVER_URL ?? "",
     credential: process.env.RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL ?? "",
+    credentialRef: process.env.RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL_REF ?? "",
+    credentialStorePath: process.env.RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL_STORE ?? "",
     projectId: process.env.RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID ?? "",
     developerId: process.env.RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID ?? "",
     clientId: process.env.RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID ?? "",
@@ -48,6 +49,7 @@ function parseArgs(argv) {
     bootstrapMode: process.env.RECALLANT_EXTERNAL_REHEARSAL_BOOTSTRAP_MODE ?? "scoped_credential",
     recallantCommand: process.env.RECALLANT_EXTERNAL_REHEARSAL_RECALLANT_CMD ?? "recallant",
     captureProof: process.env.RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF === "1",
+    semanticProof: process.env.RECALLANT_EXTERNAL_REHEARSAL_SEMANTIC_PROOF === "1",
     skipBootstrap: false,
     confirm: false
   };
@@ -60,6 +62,8 @@ function parseArgs(argv) {
     const next = argv[index + 1];
     if (arg === "--server-url") values.serverUrl = next ?? "";
     else if (arg === "--credential") values.credential = next ?? "";
+    else if (arg === "--credential-ref") values.credentialRef = next ?? "";
+    else if (arg === "--credential-store") values.credentialStorePath = next ?? "";
     else if (arg === "--project-id") values.projectId = next ?? "";
     else if (arg === "--developer-id") values.developerId = next ?? "";
     else if (arg === "--client-id") values.clientId = next ?? "";
@@ -72,6 +76,7 @@ function parseArgs(argv) {
     else if (arg === "--bootstrap-mode") values.bootstrapMode = next ?? "";
     else if (arg === "--recallant-command") values.recallantCommand = next ?? "";
     else if (arg === "--capture-proof") values.captureProof = true;
+    else if (arg === "--semantic-proof") values.semanticProof = true;
     else if (arg === "--skip-bootstrap") values.skipBootstrap = true;
     else if (arg === "--confirm") values.confirm = true;
     else if (arg === "--help" || arg === "-h") {
@@ -82,7 +87,14 @@ function parseArgs(argv) {
     }
     if (
       arg.startsWith("--") &&
-      !["--capture-proof", "--skip-bootstrap", "--confirm", "--help", "-h"].includes(arg)
+      ![
+        "--capture-proof",
+        "--semantic-proof",
+        "--skip-bootstrap",
+        "--confirm",
+        "--help",
+        "-h"
+      ].includes(arg)
     ) {
       index += 1;
     }
@@ -91,11 +103,13 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: node scripts/remote-mcp-separate-machine-evidence.mjs --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [options]
+  process.stdout
+    .write(`Usage: node scripts/remote-mcp-separate-machine-evidence.mjs --server-url <https-url> (--credential <token> | --credential-ref <ref> [--credential-store <path>]) --project-id <id> --developer-id <id> --client-id <id> --project-dir <path> [options]
 
 Runs the external-host Recallant remote onboarding rehearsal and writes redacted evidence.
 This runner does not install Docker, Postgres, or local Recallant storage.
 Use --bootstrap-mode connect_cloud when the project was provisioned through universal browser-approved remote connect.
+Use --semantic-proof to make remote-doctor create and recall a governed diagnostic marker memory.
 
 Cleanup stale local storage artifacts before retrying:
   node scripts/remote-mcp-separate-machine-evidence.mjs cleanup --project-dir <path> --confirm\n`);
@@ -113,6 +127,8 @@ function redact(text, input) {
   let output = String(text ?? "");
   const replacements = [
     [input.credential, "[REDACTED_CREDENTIAL]"],
+    [input.credentialRef, "[REDACTED_CREDENTIAL_REF]"],
+    [input.credentialStorePath, "[REDACTED_CREDENTIAL_STORE]"],
     [input.projectDir, "[PROJECT_DIR]"],
     [resolve(input.projectDir), "[PROJECT_DIR]"],
     [process.cwd(), "[REPO_ROOT]"]
@@ -144,13 +160,17 @@ async function projectSnapshot(projectDir) {
     type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other"
   }));
   const codexConfigPath = join(projectDir, ".codex", "config.toml");
-  const codexConfig = (await exists(codexConfigPath)) ? await readFile(codexConfigPath, "utf8") : "";
+  const codexConfig = (await exists(codexConfigPath))
+    ? await readFile(codexConfigPath, "utf8")
+    : "";
   const recallantConfigCount = (codexConfig.match(/\[mcp_servers\.recallant\]/g) ?? []).length;
   const names = entries.map((entry) => entry.name);
   const forbidden = {
     recallant_local_storage: names.includes(".recallant"),
     docker_compose: names.some((name) => /^docker-compose(?:\..+)?\.ya?ml$/i.test(name)),
-    postgres_hint: /postgres|pgvector|recallant-postgres/i.test(`${names.join("\n")}\n${codexConfig}`),
+    postgres_hint: /postgres|pgvector|recallant-postgres/i.test(
+      `${names.join("\n")}\n${codexConfig}`
+    ),
     database_url_hint: /RECALLANT_DATABASE_URL|DATABASE_URL|postgres:\/\//i.test(codexConfig)
   };
   return {
@@ -178,9 +198,7 @@ async function readRemoteConfigValues(projectDir) {
   const codexConfigPath = join(projectDir, ".codex", "config.toml");
   if (!(await exists(codexConfigPath))) return {};
   const config = await readFile(codexConfigPath, "utf8");
-  const sectionMatch = config.match(
-    /\[mcp_servers\.recallant\]([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/
-  );
+  const sectionMatch = config.match(/\[mcp_servers\.recallant\]([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/);
   if (!sectionMatch) return {};
   const section = sectionMatch[1] ?? "";
   const envBlockMatch = section.match(/env\s*=\s*\{([\s\S]*?)\}/);
@@ -197,7 +215,7 @@ async function readRemoteConfigValues(projectDir) {
 async function hydrateInputFromProjectConfig(input) {
   const configValues = await readRemoteConfigValues(input.projectDir);
   const inferred = [];
-  for (const key of requiredFlags) {
+  for (const key of inferableRemoteConfigKeys) {
     if (!String(input[key] ?? "").trim() && String(configValues[key] ?? "").trim()) {
       input[key] = configValues[key];
       inferred.push(key);
@@ -329,8 +347,6 @@ function remoteArgs(input) {
   const args = [
     "--server-url",
     input.serverUrl,
-    "--credential",
-    input.credential,
     "--project-id",
     input.projectId,
     "--developer-id",
@@ -338,6 +354,13 @@ function remoteArgs(input) {
     "--client-id",
     input.clientId
   ];
+  if (input.credential) {
+    args.splice(2, 0, "--credential", input.credential);
+  } else if (input.credentialRef) {
+    args.splice(2, 0, "--credential-ref", input.credentialRef);
+    if (input.credentialStorePath)
+      args.splice(4, 0, "--credential-store", input.credentialStorePath);
+  }
   if (input.traceId) args.push("--trace-id", input.traceId);
   return args;
 }
@@ -352,7 +375,8 @@ async function runBootstrap(input, env) {
     };
   }
   const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-  const script = input.bootstrapScript || join(repoRoot, "scripts", "install-recallant-client-bootstrap.sh");
+  const script =
+    input.bootstrapScript || join(repoRoot, "scripts", "install-recallant-client-bootstrap.sh");
   const args = [
     script,
     "--server-url",
@@ -376,15 +400,21 @@ async function runBootstrap(input, env) {
 }
 
 async function runDoctor(input, env) {
+  const semanticProof = input.semanticProof || input.captureProof;
   const invocation = recallantInvocation(input, "remote-doctor", [
     ...remoteArgs(input),
     "--timeout-ms",
     "5000",
     "--format",
     "json",
-    ...(input.captureProof ? ["--capture-proof"] : [])
+    ...(semanticProof ? ["--semantic-proof"] : input.captureProof ? ["--capture-proof"] : [])
   ]);
-  const result = await runProcess(invocation.command, invocation.args, { cwd: process.cwd(), env }, input);
+  const result = await runProcess(
+    invocation.command,
+    invocation.args,
+    { cwd: process.cwd(), env },
+    input
+  );
   let parsed = null;
   try {
     parsed = JSON.parse(result.stdout);
@@ -423,7 +453,10 @@ async function runBridgeProbe(input, env) {
       "memory_recall_agent_memories"
     ];
     const missingTools = requiredTools.filter((tool) => !toolNames.includes(tool));
-    assert(missingTools.length === 0, `remote MCP missing required tools: ${missingTools.join(", ")}`);
+    assert(
+      missingTools.length === 0,
+      `remote MCP missing required tools: ${missingTools.join(", ")}`
+    );
     const marker = `remote acceptance ${input.traceId}`;
     const start = await client.callTool(
       {
@@ -570,7 +603,9 @@ async function runBridgeProbe(input, env) {
     await transport.close().catch(() => undefined);
     const recalledText = JSON.stringify(recall.structuredContent ?? recall.content ?? {});
     const recallFound = recalledText.includes(marker);
-    const nextRecalledText = JSON.stringify(nextRecall.structuredContent ?? nextRecall.content ?? {});
+    const nextRecalledText = JSON.stringify(
+      nextRecall.structuredContent ?? nextRecall.content ?? {}
+    );
     const nextRecallFound = nextRecalledText.includes(marker);
     return redactJson(
       {
@@ -643,14 +678,24 @@ async function runBridgeProbe(input, env) {
 
 function validateInput(input) {
   const missing = requiredFlags.filter((key) => !String(input[key] ?? "").trim());
-  assert(missing.length === 0, `missing required inputs: ${missing.map((key) => `--${key}`).join(", ")}`);
+  if (!String(input.credential ?? "").trim() && !String(input.credentialRef ?? "").trim()) {
+    missing.push("credential or credential-ref");
+  }
+  if (!input.skipBootstrap && !String(input.credential ?? "").trim()) {
+    missing.push("credential (required unless --skip-bootstrap)");
+  }
+  assert(
+    missing.length === 0,
+    `missing required inputs: ${missing.map((key) => `--${key}`).join(", ")}`
+  );
   const url = new URL(input.serverUrl);
   assert(url.protocol === "https:", "server URL must be HTTPS");
 }
 
 function assertNoEvidenceLeaks(evidence, input) {
   const serialized = JSON.stringify(evidence);
-  assert(!serialized.includes(input.credential), "evidence leaked raw credential");
+  if (input.credential)
+    assert(!serialized.includes(input.credential), "evidence leaked raw credential");
   const forbiddenMatch = serialized.match(forbiddenOutputPattern);
   assert(
     !forbiddenMatch,
@@ -689,6 +734,7 @@ const runId = randomUUID();
 const outputDir = resolve(input.outputDir);
 const projectDir = resolve(input.projectDir);
 input.projectDir = projectDir;
+await mkdir(outputDir, { recursive: true });
 
 let evidence;
 let exitCode = 0;
@@ -699,7 +745,6 @@ try {
   const projectStat = await stat(projectDir);
   assert(projectStat.isDirectory(), "project-dir must be a directory");
   const projectRealpath = await realpath(projectDir);
-  await mkdir(outputDir, { recursive: true });
   const env = clientEnv();
   if (input.recallantCommand.endsWith(".js") && !isAbsolute(input.recallantCommand)) {
     input.recallantCommand = resolve(input.recallantCommand);
@@ -750,8 +795,11 @@ try {
     remote_doctor: remoteDoctor,
     remote_mcp: remoteMcp,
     capture_recall: {
-      requested: input.captureProof,
-      doctor_stage: remoteDoctor.json?.stages?.find?.((stage) => stage.id === "capture_recall_proof") ?? null
+      requested: input.captureProof || input.semanticProof,
+      doctor_stage:
+        remoteDoctor.json?.stages?.find?.((stage) => stage.id === "semantic_memory_proof") ??
+        remoteDoctor.json?.stages?.find?.((stage) => stage.id === "session_context_readiness") ??
+        null
     },
     forbidden_artifacts: {
       status: Object.values(afterBootstrap.forbidden).every((value) => value === false)
@@ -770,9 +818,10 @@ try {
   const doctorPassed = remoteDoctor.exit_code === 0;
   const bridgePassed = remoteMcp.status === "pass" && remoteMcp.call_is_error === false;
   const capturePassed =
-    !input.captureProof ||
+    !(input.captureProof || input.semanticProof) ||
     evidence.capture_recall.doctor_stage?.status === "pass" ||
-    evidence.capture_recall.doctor_stage?.code === "capture_recall_proof_ok";
+    evidence.capture_recall.doctor_stage?.code === "semantic_memory_proof_ok" ||
+    evidence.capture_recall.doctor_stage?.code === "session_context_readiness_ok";
   const allPassed =
     bootstrap.exit_code === 0 &&
     doctorPassed &&

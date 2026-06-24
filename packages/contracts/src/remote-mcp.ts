@@ -293,7 +293,9 @@ export const remoteMcpDoctorStageIds = [
   "scope",
   "mcp_initialize",
   "tools_list",
-  "capture_recall_proof"
+  "session_context_readiness",
+  "checkpoint_state_proof",
+  "semantic_memory_proof"
 ] as const;
 
 export const remoteMcpDoctorResultCodes = {
@@ -307,9 +309,16 @@ export const remoteMcpDoctorResultCodes = {
     "scope_ok",
     "initialize_ok",
     "tools_list_ok",
-    "capture_recall_proof_ok"
+    "session_context_readiness_ok",
+    "checkpoint_state_proof_ok",
+    "semantic_memory_proof_ok"
   ],
-  warn: ["insecure_localhost_allowed", "capture_recall_proof_unavailable"],
+  warn: [
+    "insecure_localhost_allowed",
+    "session_context_readiness_unavailable",
+    "checkpoint_state_proof_unavailable",
+    "semantic_memory_proof_unavailable"
+  ],
   fail: [
     "missing_required_input",
     "invalid_server_url",
@@ -326,7 +335,9 @@ export const remoteMcpDoctorResultCodes = {
     "client_scope_mismatch",
     "initialize_failed",
     "tools_list_failed",
-    "capture_recall_proof_failed",
+    "session_context_readiness_failed",
+    "checkpoint_state_proof_failed",
+    "semantic_memory_proof_failed",
     "forbidden_diagnostic_surface"
   ]
 } as const;

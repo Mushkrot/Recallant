@@ -102,7 +102,7 @@ function baseEvidence(firstSessionId, nextSessionId, memoryId) {
         stages: [
           { id: "mcp_initialize", status: "pass", code: "mcp_initialize_ok" },
           { id: "tools_list", status: "pass", code: "tools_list_ok" },
-          { id: "capture_recall_proof", status: "pass", code: "capture_recall_proof_ok" }
+          { id: "semantic_memory_proof", status: "pass", code: "semantic_memory_proof_ok" }
         ]
       }
     },
@@ -160,7 +160,11 @@ function baseEvidence(firstSessionId, nextSessionId, memoryId) {
     },
     capture_recall: {
       requested: true,
-      doctor_stage: { id: "capture_recall_proof", status: "pass", code: "capture_recall_proof_ok" }
+      doctor_stage: {
+        id: "semantic_memory_proof",
+        status: "pass",
+        code: "semantic_memory_proof_ok"
+      }
     },
     forbidden_artifacts: {
       status: "pass",

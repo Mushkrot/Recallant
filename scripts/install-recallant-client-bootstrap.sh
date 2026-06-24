@@ -78,7 +78,7 @@ Options:
   --target <name>              Alias for --client, matching server-generated packages.
   --session-id <id>            Optional remote MCP session id.
   --trace-id <id>              Optional remote MCP trace id.
-  --capture-proof              Ask remote-doctor to prove capture/recall through remote MCP.
+  --capture-proof              Ask remote-doctor to prove session/context readiness through remote MCP.
   --skip-doctor                Write config without running remote-doctor.
   --dry-run                    Install CLI and preview config/doctor command without writing files.
   --ref <git-branch-or-tag>    Git ref to fetch. Default: main.
