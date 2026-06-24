@@ -233,7 +233,12 @@ mustInclude(
     "`memory_recall_agent_memories`",
     "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
     "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
-    "`memory_agent_checkpoint` tool"
+    "`memory_agent_checkpoint` tool",
+    "Governed Memory Tool UX",
+    '[{ "kind": "all_agents", "id": null }]',
+    "Synthetic non-secret marker recallant_safe_semantic_marker_example",
+    "Passing `audience` as a string",
+    "raw request bodies"
   ],
   "docs/MCP_SPEC.md proof taxonomy"
 );
@@ -339,6 +344,10 @@ mustInclude(
     "must not overwrite existing project docs",
     "New Project Bootstrap",
     "Existing Project Migration",
+    "Safe Recallant semantic marker",
+    "recallant_safe_semantic_marker_example",
+    '"audience": [{ "kind": "all_agents", "id": null }]',
+    'Recall it with `query: "recallant_safe_semantic_marker_example"`',
     "Agent Session Contract",
     "Sources, Capabilities, And Secret References",
     "Cross-Project Examples",

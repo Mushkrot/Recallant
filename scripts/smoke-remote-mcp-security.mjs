@@ -39,6 +39,9 @@ requireMarkers(contractOutput, "remote-mcp-contract:smoke", [
   "initialize_happy_path",
   "tools_list_happy_path",
   "tools_call_memory_heartbeat_happy_path",
+  "tools_call_memory_create_agent_memory_wrong_audience_validation",
+  "tools_call_memory_create_agent_memory_missing_title_validation",
+  "tools_call_memory_create_agent_memory_missing_body_validation",
   "audit_rows"
 ]);
 

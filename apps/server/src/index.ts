@@ -1931,15 +1931,56 @@ async function finishRemoteMcpAudit(input: {
 }
 
 function remoteMcpToolList() {
+  function fieldDescription(schema: unknown) {
+    if (!schema || typeof schema !== "object") return null;
+    const description = (schema as { description?: unknown }).description;
+    return typeof description === "string" && description.trim() ? description : null;
+  }
+
+  function requiredInputFields(toolName: string) {
+    if (toolName === "memory_create_agent_memory") {
+      return ["memory_type", "scope", "title", "body", "created_by", "audience"];
+    }
+    if (toolName === "memory_recall_agent_memories") return ["query"];
+    return [];
+  }
+
   return createRecallantTools().map((tool) => ({
     name: tool.name,
     title: tool.title,
     description: tool.description,
+    examples: tool.examples ?? [],
     input_schema: {
       type: "object",
       properties: Object.fromEntries(
-        Object.keys(tool.inputSchema.shape).map((name) => [name, { title: name }])
-      )
+        Object.entries(tool.inputSchema.shape).map(([name, schema]) => {
+          const description = fieldDescription(schema);
+          return [
+            name,
+            {
+              title: name,
+              ...(description ? { description } : {})
+            }
+          ];
+        })
+      ),
+      required: requiredInputFields(tool.name)
+    },
+    inputSchema: {
+      type: "object",
+      properties: Object.fromEntries(
+        Object.entries(tool.inputSchema.shape).map(([name, schema]) => {
+          const description = fieldDescription(schema);
+          return [
+            name,
+            {
+              title: name,
+              ...(description ? { description } : {})
+            }
+          ];
+        })
+      ),
+      required: requiredInputFields(tool.name)
     }
   }));
 }

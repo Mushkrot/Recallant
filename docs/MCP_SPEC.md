@@ -141,7 +141,57 @@ facts, decisions, procedures, and work logs, not for implicit checkpoint closeou
 diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity proof is
 `npm run phase6:smoke:governed`.
 
-## 3c) External Rehearsal
+## 3c) Governed Memory Tool UX
+
+`tools/list` must make governed memory creation usable without trial-and-error. The
+`memory_create_agent_memory` description and schema expose `title`, `body`, `created_by`, and the
+recommended project-wide audience shape:
+
+```json
+[{ "kind": "all_agents", "id": null }]
+```
+
+Safe semantic marker proof uses a tiny synthetic memory, not project contents:
+
+```json
+{
+  "memory_type": "work_log",
+  "scope": "project",
+  "audience": [{ "kind": "all_agents", "id": null }],
+  "title": "Safe Recallant semantic marker",
+  "body": "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  "confidence": 1,
+  "source_refs": [],
+  "created_by": "agent",
+  "metadata": {
+    "diagnostic_marker": true,
+    "contains_raw_secret": false
+  }
+}
+```
+
+The matching recall query is similarly bounded:
+
+```json
+{
+  "query": "recallant_safe_semantic_marker_example",
+  "scope": "project",
+  "memory_types": ["work_log"],
+  "include_candidates": true,
+  "include_needs_review": true,
+  "top_k": 5,
+  "max_chars_total": 4000
+}
+```
+
+Validation errors must be actionable and redacted. Passing `audience` as a string returns a
+`VALIDATION_ERROR` that says the expected shape is an array of objects like
+`[{ "kind": "all_agents", "id": null }]`. Missing `title` or `body` returns a field-specific
+required-field message. These messages must not echo raw request bodies, raw secrets, credentials,
+customer data, private keys, backups, raw artifacts, large logs, database URLs, auth headers, or
+provider keys.
+
+## 3d) External Rehearsal
 
 `remote-mcp-external-rehearsal:smoke` proves the shipped remote client path from a scrubbed
 external-like child-process environment. It uses HTTPS `/api/mcp`, `recallant connect-remote`,

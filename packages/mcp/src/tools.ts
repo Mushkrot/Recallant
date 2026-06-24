@@ -74,6 +74,45 @@ const checkpointPayloadSchema = z
     source: nullableString
   })
   .passthrough();
+const governedMemoryAudienceExample = [{ kind: "all_agents", id: null }] as const;
+const governedMemoryForbiddenClasses =
+  "raw secrets, credentials, customer data, private keys, backups, raw artifacts, and large logs";
+export const safeSemanticMarkerMemoryExample = {
+  memory_type: "work_log",
+  scope: "project",
+  audience: governedMemoryAudienceExample,
+  title: "Safe Recallant semantic marker",
+  body: "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  confidence: 1,
+  source_refs: [],
+  created_by: "agent",
+  metadata: {
+    diagnostic_marker: true,
+    contains_raw_secret: false
+  }
+} as const;
+export const safeSemanticMarkerRecallExample = {
+  query: "recallant_safe_semantic_marker_example",
+  scope: "project",
+  memory_types: ["work_log"],
+  include_candidates: true,
+  include_needs_review: true,
+  top_k: 5,
+  max_chars_total: 4000
+} as const;
+const createAgentMemoryDescription = [
+  "Create a governed structured memory record.",
+  'Required fields: memory_type, scope, title, body, created_by, and audience; use audience [{ "kind": "all_agents", "id": null }] for normal project-wide agent recall.',
+  `Safe semantic marker example: ${JSON.stringify(safeSemanticMarkerMemoryExample)}.`,
+  `Never store ${governedMemoryForbiddenClasses}.`
+].join(" ");
+const recallAgentMemoriesDescription = [
+  "Return bounded governed memories relevant to the current task.",
+  `Safe recall query example after creating a marker: ${JSON.stringify(
+    safeSemanticMarkerRecallExample
+  )}.`,
+  "Recall returns governed memory records; checkpoint state readback alone is not semantic recall proof."
+].join(" ");
 
 export type RecallantToolName =
   | "memory_start_session"
@@ -104,6 +143,7 @@ export type RecallantToolDefinition = {
   title: string;
   description: string;
   inputSchema: z.ZodObject<z.ZodRawShape>;
+  examples?: readonly unknown[];
   handler: (
     args: Record<string, unknown>
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -916,43 +956,99 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_create_agent_memory",
     title: "Create Agent Memory",
-    description: "Create a governed structured memory record.",
+    description: createAgentMemoryDescription,
+    examples: [safeSemanticMarkerMemoryExample],
     inputSchema: z.object({
-      memory_type: memoryType,
-      scope: memoryScope,
-      scope_kind: nullableString,
-      scope_id: nullableString,
+      memory_type: memoryType.describe(
+        'Required governed memory type. For a safe diagnostic marker use "work_log"; for project facts use "environment_fact" or another listed type, not "fact".'
+      ),
+      scope: memoryScope.describe(
+        'Required governed scope. Use "project" for project-specific memory.'
+      ),
+      scope_kind: nullableString.describe(
+        'Optional scope label. Use "project" or omit/null for normal project-scoped memory.'
+      ),
+      scope_id: nullableString.describe(
+        "Optional explicit scope id. Omit/null for the current project context."
+      ),
       audience: z
         .array(
-          z.object({
-            kind: z.enum([
-              "all_agents",
-              "specific_client",
-              "context_pack",
-              "background_worker",
-              "review_ui",
-              "human_owner",
-              "import_pipeline",
-              "connector"
-            ]),
-            id: nullableString
-          })
+          z
+            .object({
+              kind: z
+                .enum([
+                  "all_agents",
+                  "specific_client",
+                  "context_pack",
+                  "background_worker",
+                  "review_ui",
+                  "human_owner",
+                  "import_pipeline",
+                  "connector"
+                ])
+                .describe('Audience kind. Use "all_agents" for project-wide agent recall.'),
+              id: nullableString.describe('Audience id. Use null with "all_agents".')
+            })
+            .describe('Audience object, for example { "kind": "all_agents", "id": null }.'),
+          {
+            error:
+              'audience must be an array of objects, for example [{ "kind": "all_agents", "id": null }].'
+          }
+        )
+        .describe(
+          'Required audience list. For normal project memory use [{ "kind": "all_agents", "id": null }], not a string.'
         )
         .default([]),
-      title: z.string().min(1),
-      body: z.string().min(1),
-      confidence: z.number().min(0).max(1).nullable().optional(),
+      title: z
+        .string({
+          error: "title is required; provide a short non-secret memory title."
+        })
+        .min(1, "title is required; provide a short non-secret memory title.")
+        .describe("Required short non-secret title for this governed memory."),
+      body: z
+        .string({
+          error:
+            "body is required; provide concise governed memory text without raw secrets or customer data."
+        })
+        .min(
+          1,
+          "body is required; provide concise governed memory text without raw secrets or customer data."
+        )
+        .describe(
+          `Required concise governed memory text. Do not include ${governedMemoryForbiddenClasses}.`
+        ),
+      confidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .nullable()
+        .optional()
+        .describe("Optional confidence between 0 and 1."),
       source_refs: z
         .array(
-          z.object({
-            source_kind: sourceKind,
-            source_id: z.string().min(1),
-            quote: nullableString
-          })
+          z
+            .object({
+              source_kind: sourceKind.describe("Source reference kind."),
+              source_id: z
+                .string()
+                .min(1)
+                .describe("Source identifier or path reference; never paste credential values."),
+              quote: nullableString.describe("Optional short non-secret quote or null.")
+            })
+            .describe("Source reference object. Keep it bounded and non-secret.")
+        )
+        .describe(
+          "Optional source references. Remote agent-created memories get a safe external source ref when omitted."
         )
         .default([]),
-      created_by: z.enum(["agent", "user", "system", "import"]),
-      metadata
+      created_by: z
+        .enum(["agent", "user", "system", "import"], {
+          error: 'created_by is required; agents should normally use "agent".'
+        })
+        .describe('Required creator kind. Agents should normally use "agent".'),
+      metadata: metadata.describe(
+        "Optional non-secret metadata, for example diagnostic_marker: true."
+      )
     }),
     handler: async (args) => {
       const database = db();
@@ -1054,9 +1150,13 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_recall_agent_memories",
     title: "Recall Agent Memories",
-    description: "Return bounded governed memories relevant to the current task.",
+    description: recallAgentMemoriesDescription,
+    examples: [safeSemanticMarkerRecallExample],
     inputSchema: z.object({
-      query: z.string().min(1),
+      query: z
+        .string()
+        .min(1)
+        .describe("Required search text. For marker proof, use the same synthetic marker string."),
       source_id: uuidString.nullable().optional(),
       scope: scope.default("project"),
       scope_kind: nullableString,

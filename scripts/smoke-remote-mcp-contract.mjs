@@ -96,7 +96,11 @@ for (const marker of [
   "governed semantic-memory proof",
   "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
   "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
-  "`memory_agent_checkpoint` tool"
+  "`memory_agent_checkpoint` tool",
+  "Governed Memory Tool UX",
+  '[{ "kind": "all_agents", "id": null }]',
+  "Synthetic non-secret marker recallant_safe_semantic_marker_example",
+  "Passing `audience` as a string"
 ]) {
   mustInclude(mcpSpec, marker, "docs/MCP_SPEC.md proof taxonomy");
 }
@@ -178,6 +182,8 @@ const sessionId = "33333333-3333-4333-8333-333333333333";
 const token = ["remote", "smoke", "token"].join("-");
 const wrongToken = ["wrong", "token"].join("-");
 const forbiddenDbUrl = ["postgres", "://", "secret"].join("");
+const safeSemanticMarker = "recallant_safe_semantic_marker_example";
+const validationSecretFixture = "sk-phase6-remote-validation-secret";
 const credential = {
   id: "44444444-4444-4444-8444-444444444444",
   project_id: projectId,
@@ -416,6 +422,20 @@ function assertError(result, status, code, label) {
   assert(result.body?.jsonrpc === "2.0", `${label} missing JSON-RPC version`);
 }
 
+function assertValidationErrorMessage(result, label, markers) {
+  assert(result.status === 400, `${label} expected HTTP 400: ${result.text}`);
+  assert(
+    result.body?.error?.data?.code === "VALIDATION_ERROR",
+    `${label} expected VALIDATION_ERROR: ${result.text}`
+  );
+  const message = String(result.body?.error?.message ?? "");
+  for (const marker of markers) {
+    mustInclude(message, marker, label);
+  }
+  mustNotContain(result.text, validationSecretFixture, label);
+  mustNotContain(result.text, "RECALLANT_DATABASE_URL", label);
+}
+
 function assertRemoteMcpAuditRowSafe(row, label) {
   assert(row.surface === "remote_mcp", `${label} audit row surface mismatch`);
   assert(row.operation?.startsWith("remote_mcp."), `${label} audit row operation mismatch`);
@@ -499,6 +519,45 @@ try {
   assert(
     result.body?.result?.tools?.some((tool) => tool.name === "memory_heartbeat"),
     "tools/list missing memory_heartbeat"
+  );
+  const createMemoryTool = result.body?.result?.tools?.find(
+    (tool) => tool.name === "memory_create_agent_memory"
+  );
+  assert(createMemoryTool, "tools/list missing memory_create_agent_memory");
+  const createMemoryToolText = JSON.stringify(createMemoryTool);
+  for (const marker of [
+    "Required fields",
+    "all_agents",
+    "id",
+    "title",
+    "body",
+    "created_by",
+    "audience",
+    "Safe semantic marker example",
+    safeSemanticMarker,
+    "raw secrets",
+    "credentials",
+    "customer data",
+    "private keys",
+    "backups",
+    "raw artifacts",
+    "large logs"
+  ]) {
+    mustInclude(createMemoryToolText, marker, "tools/list memory_create_agent_memory excerpt");
+  }
+  const recallMemoryTool = result.body?.result?.tools?.find(
+    (tool) => tool.name === "memory_recall_agent_memories"
+  );
+  assert(recallMemoryTool, "tools/list missing memory_recall_agent_memories");
+  mustInclude(
+    JSON.stringify(recallMemoryTool),
+    "Safe recall query example",
+    "tools/list memory_recall_agent_memories excerpt"
+  );
+  mustInclude(
+    JSON.stringify(recallMemoryTool),
+    safeSemanticMarker,
+    "tools/list memory_recall_agent_memories excerpt"
   );
   endpointCases.push("tools_list_happy_path");
 
@@ -624,6 +683,89 @@ try {
   );
   mustNotContain(result.text, "RECALLANT_DATABASE_URL", "invalid memory_type response");
   endpointCases.push("tools_call_memory_create_agent_memory_invalid_type_validation");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "create-agent-memory-wrong-audience",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "work_log",
+        scope: "project",
+        scope_kind: "project",
+        scope_id: null,
+        audience: "all_agents",
+        title: "Wrong audience shape",
+        body: `Synthetic non-secret marker ${safeSemanticMarker}. ${validationSecretFixture}`,
+        confidence: 1,
+        source_refs: [],
+        created_by: "agent",
+        metadata: { smoke: true, secret_like_fixture: validationSecretFixture }
+      }
+    }
+  });
+  assertValidationErrorMessage(result, "wrong audience validation", [
+    "audience",
+    "array of objects",
+    '"kind": "all_agents"',
+    '"id": null'
+  ]);
+  endpointCases.push("tools_call_memory_create_agent_memory_wrong_audience_validation");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "create-agent-memory-missing-title",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "work_log",
+        scope: "project",
+        scope_kind: "project",
+        scope_id: null,
+        audience: [{ kind: "all_agents", id: null }],
+        body: `Synthetic non-secret marker ${safeSemanticMarker}. ${validationSecretFixture}`,
+        confidence: 1,
+        source_refs: [],
+        created_by: "agent",
+        metadata: { smoke: true, secret_like_fixture: validationSecretFixture }
+      }
+    }
+  });
+  assertValidationErrorMessage(result, "missing title validation", [
+    "title",
+    "required",
+    "short non-secret"
+  ]);
+  endpointCases.push("tools_call_memory_create_agent_memory_missing_title_validation");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "create-agent-memory-missing-body",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "work_log",
+        scope: "project",
+        scope_kind: "project",
+        scope_id: null,
+        audience: [{ kind: "all_agents", id: null }],
+        title: "Missing body shape",
+        confidence: 1,
+        source_refs: [],
+        created_by: "agent",
+        metadata: { smoke: true, secret_like_fixture: validationSecretFixture }
+      }
+    }
+  });
+  assertValidationErrorMessage(result, "missing body validation", [
+    "body",
+    "required",
+    "raw secrets"
+  ]);
+  endpointCases.push("tools_call_memory_create_agent_memory_missing_body_validation");
 
   result = await rpc(baseUrl, {
     jsonrpc: "2.0",

@@ -165,6 +165,29 @@ For a remote existing project, prove the connection before importing history:
 6. run a read-only inventory of candidate docs and risky paths;
 7. ask the owner to approve a migration plan before writing project memories or imports.
 
+The proof marker should be synthetic and concise. A safe `memory_create_agent_memory` shape is:
+
+```json
+{
+  "memory_type": "work_log",
+  "scope": "project",
+  "audience": [{ "kind": "all_agents", "id": null }],
+  "title": "Safe Recallant semantic marker",
+  "body": "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  "confidence": 1,
+  "source_refs": [],
+  "created_by": "agent",
+  "metadata": {
+    "diagnostic_marker": true,
+    "contains_raw_secret": false
+  }
+}
+```
+
+Recall it with `query: "recallant_safe_semantic_marker_example"`, `scope: "project"`, and
+`memory_types: ["work_log"]`. Do not use real customer data, raw credentials, private keys, `.env`
+values, backups, raw artifacts, or large historical logs for a proof marker.
+
 The migration plan should group sources by action: summarize into governed memory, keep as a source
 reference, skip, or ask the owner. Safe governed memories should be concise and typed, for example
 `environment_fact`, `procedure`, `decision`, `constraint`, `artifact_reference`, or

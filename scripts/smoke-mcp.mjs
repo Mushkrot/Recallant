@@ -30,6 +30,31 @@ const expectedTools = [
   "memory_closeout"
 ];
 
+const safeSemanticMarker = "recallant_safe_semantic_marker_example";
+const validationSecretFixture = "sk-phase6-local-validation-secret";
+const forbiddenOutputFixtures = [
+  validationSecretFixture,
+  "postgres://phase6:secret@example.invalid/recallant",
+  "BEGIN PRIVATE KEY",
+  "customer@example.invalid"
+];
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function mustInclude(text, markers, label) {
+  for (const marker of markers) {
+    assert(text.includes(marker), `${label} missing marker: ${marker}`);
+  }
+}
+
+function mustNotContain(text, markers, label) {
+  for (const marker of markers) {
+    assert(!text.includes(marker), `${label} leaked forbidden fixture: ${marker}`);
+  }
+}
+
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 const client = new Client({
   name: "recallant-smoke",
@@ -45,6 +70,9 @@ let contextCanon = null;
 let contextSectionKeys = [];
 let stateOnly = null;
 let highLevelCheckpoint = null;
+let governedMemoryToolsListExcerpt = null;
+let governedMemoryValidationErrors = {};
+let governedMemoryExamples = {};
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -80,6 +108,146 @@ try {
       );
     }
   }
+
+  const createMemoryTool = list.tools?.find((tool) => tool.name === "memory_create_agent_memory");
+  const recallMemoryTool = list.tools?.find((tool) => tool.name === "memory_recall_agent_memories");
+  assert(createMemoryTool, "tools/list missing memory_create_agent_memory");
+  assert(recallMemoryTool, "tools/list missing memory_recall_agent_memories");
+  const createProperties = createMemoryTool.inputSchema?.properties ?? {};
+  const recallProperties = recallMemoryTool.inputSchema?.properties ?? {};
+  const createToolExcerptText = JSON.stringify(
+    {
+      description: createMemoryTool.description,
+      properties: {
+        title: createProperties.title,
+        body: createProperties.body,
+        created_by: createProperties.created_by,
+        audience: createProperties.audience
+      }
+    },
+    null,
+    2
+  );
+  mustInclude(
+    createToolExcerptText,
+    [
+      "Required fields",
+      "all_agents",
+      "id",
+      "title",
+      "body",
+      "created_by",
+      "audience",
+      "Safe semantic marker example",
+      safeSemanticMarker,
+      "raw secrets",
+      "credentials",
+      "customer data",
+      "private keys",
+      "backups",
+      "raw artifacts",
+      "large logs"
+    ],
+    "memory_create_agent_memory tools/list excerpt"
+  );
+  mustInclude(
+    JSON.stringify(recallMemoryTool),
+    ["Safe recall query example", safeSemanticMarker, "memory_types", "work_log"],
+    "memory_recall_agent_memories tools/list excerpt"
+  );
+  mustInclude(
+    JSON.stringify(recallProperties.query ?? {}),
+    ["marker", "synthetic"],
+    "memory_recall_agent_memories query schema"
+  );
+  governedMemoryToolsListExcerpt = {
+    name: createMemoryTool.name,
+    description: createMemoryTool.description,
+    required: createMemoryTool.inputSchema?.required ?? [],
+    properties: {
+      title: createProperties.title,
+      body: createProperties.body,
+      created_by: createProperties.created_by,
+      audience: createProperties.audience
+    }
+  };
+  governedMemoryExamples = {
+    safe_marker_memory: {
+      memory_type: "work_log",
+      scope: "project",
+      audience: [{ kind: "all_agents", id: null }],
+      title: "Safe Recallant semantic marker",
+      body: `Synthetic non-secret marker ${safeSemanticMarker} for create+recall proof.`,
+      confidence: 1,
+      source_refs: [],
+      created_by: "agent",
+      metadata: { diagnostic_marker: true, contains_raw_secret: false }
+    },
+    safe_recall_query: {
+      query: safeSemanticMarker,
+      scope: "project",
+      memory_types: ["work_log"],
+      include_candidates: true,
+      include_needs_review: true,
+      top_k: 5,
+      max_chars_total: 4000
+    }
+  };
+
+  async function expectCreateMemoryValidationError(label, args, markers) {
+    let sawValidationError = false;
+    let output = "";
+    try {
+      const result = await client.callTool(
+        {
+          name: "memory_create_agent_memory",
+          arguments: args
+        },
+        undefined,
+        { timeout: 5_000 }
+      );
+      output = JSON.stringify(result);
+      sawValidationError = Boolean(result.isError);
+    } catch (error) {
+      sawValidationError = true;
+      output = error instanceof Error ? error.message : String(error);
+    }
+    assert(sawValidationError, `${label} should have failed validation`);
+    mustInclude(output, markers, label);
+    mustNotContain(output, forbiddenOutputFixtures, label);
+    return output.slice(0, 1000);
+  }
+
+  const validCreateMemoryArgs = {
+    memory_type: "work_log",
+    scope: "project",
+    scope_kind: "project",
+    scope_id: null,
+    audience: [{ kind: "all_agents", id: null }],
+    title: "Safe local MCP schema UX marker",
+    body: `Synthetic non-secret marker ${safeSemanticMarker}. ${validationSecretFixture}`,
+    confidence: 1,
+    source_refs: [],
+    created_by: "agent",
+    metadata: { smoke: true }
+  };
+  governedMemoryValidationErrors = {
+    wrong_audience: await expectCreateMemoryValidationError(
+      "wrong audience validation",
+      { ...validCreateMemoryArgs, audience: "all_agents" },
+      ["audience", "array of objects", "all_agents", "id"]
+    ),
+    missing_title: await expectCreateMemoryValidationError(
+      "missing title validation",
+      { ...validCreateMemoryArgs, title: undefined },
+      ["title", "required", "short non-secret"]
+    ),
+    missing_body: await expectCreateMemoryValidationError(
+      "missing body validation",
+      { ...validCreateMemoryArgs, body: undefined },
+      ["body", "required", "raw secrets"]
+    )
+  };
 
   const call = await client.callTool(
     {
@@ -118,7 +286,9 @@ try {
     stateOnly.searchable_memory_created !== false ||
     stateOnly.memory_id !== null
   ) {
-    throw new Error(`memory_set_checkpoint did not report state-only output: ${JSON.stringify(stateOnly)}`);
+    throw new Error(
+      `memory_set_checkpoint did not report state-only output: ${JSON.stringify(stateOnly)}`
+    );
   }
 
   const highLevelCheckpointCall = await client.callTool(
@@ -268,6 +438,12 @@ process.stdout.write(
         memory_set_checkpoint_state_only: stateOnly.checkpoint_state_only,
         memory_agent_checkpoint_searchable: highLevelCheckpoint.searchable_memory_created,
         high_level_memory_type: highLevelCheckpoint.memory?.memory_type
+      },
+      governed_memory_schema_ux: {
+        tools_list_excerpt: governedMemoryToolsListExcerpt,
+        invalid_call_errors: governedMemoryValidationErrors,
+        safe_examples: governedMemoryExamples,
+        forbidden_secret_values_leaked: false
       }
     },
     null,
