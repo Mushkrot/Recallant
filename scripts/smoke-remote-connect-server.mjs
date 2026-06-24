@@ -494,7 +494,7 @@ try {
     project_fingerprint: "fingerprint-redacted",
     project_path_hint_redacted: "path-hash-only",
     trusted_device_registration: {
-      device_name: "Vadim MacBook Air",
+      device_name: "Example Laptop",
       device_key_prefix: trustedDevicePrefix,
       public_key_fingerprint: trustedDeviceFingerprint,
       public_key_material: trustedDevicePublicKey,
@@ -521,7 +521,7 @@ try {
   const approvalHtml = await approvalPage.text();
   assert(approvalPage.status === 200, "authenticated approval page failed");
   assert(approvalHtml.includes("New Mac project"), "approval page did not show project metadata");
-  assert(approvalHtml.includes("Vadim MacBook Air"), "approval page did not show device name");
+  assert(approvalHtml.includes("Example Laptop"), "approval page did not show device name");
   assert(approvalHtml.includes("up to 90 days"), "approval page did not show trust duration");
   assert(
     approvalHtml.includes("does not grant Workbench, admin"),

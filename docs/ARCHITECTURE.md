@@ -163,10 +163,10 @@ are in `docs/REMOTE_CONNECT_PLAN.md`. The endpoint behavior is gated by
 `remote-mcp-security:smoke`, and `remote-mcp-external-rehearsal:smoke` cover the bridge,
 provisioning, invite redemption, diagnostics, security matrix, deterministic isolated
 external-client rehearsal, and `remote-mcp-separate-machine-evidence:smoke` covers the redacted
-evidence bundle shape for the real external-host gate. A real external Mac rehearsal passed on
-2026-06-20 with redacted evidence run `c01ae9a7-a60c-4e12-bedf-d4be222c58b0` and strict server-side
-verification of next-session recall, Workbench readiness, and redacted audit rows; repeat
-rehearsals and broader transport/client support remain near-term work.
+evidence bundle shape for the external-host gate. External-host rehearsal outcomes should stay
+redacted in public docs; do not publish owner-specific device names, project paths, trace ids, raw
+evidence ids, or private topology. Repeat rehearsals and broader transport/client support remain
+near-term work.
 
 ## Why This Is Different From Plain Logs Or RAG
 

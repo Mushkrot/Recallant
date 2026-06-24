@@ -62,13 +62,13 @@ const requireCaptureBefore = runCliRaw([
   "json"
 ]);
 assert(
-  requireCaptureBefore.status === 2,
-  `doctor --require-capture should fail before capture: ${requireCaptureBefore.stdout} ${requireCaptureBefore.stderr}`
+  requireCaptureBefore.status === 0,
+  `doctor --require-capture should pass after attach startup smoke: ${requireCaptureBefore.stdout} ${requireCaptureBefore.stderr}`
 );
 assert(
-  requireCaptureBefore.json?.capture_readiness?.ready === false &&
+  requireCaptureBefore.json?.capture_readiness?.ready === true &&
     requireCaptureBefore.json?.capture_readiness?.required === true,
-  `doctor --require-capture missing failed readiness: ${JSON.stringify(requireCaptureBefore.json)}`
+  `doctor --require-capture missing attach startup proof: ${JSON.stringify(requireCaptureBefore.json)}`
 );
 assert(
   requireCaptureBefore.json?.client_connection?.status === "mcp_only" &&
@@ -77,12 +77,12 @@ assert(
   `doctor should report MCP-only before hook installation: ${JSON.stringify(requireCaptureBefore.json?.client_connection)}`
 );
 assert(
-  requireCaptureBefore.json?.owner_summary?.status === "configured_not_recording" &&
-    requireCaptureBefore.json?.owner_summary?.actually_recording === false &&
+  requireCaptureBefore.json?.owner_summary?.status === "recording" &&
+    requireCaptureBefore.json?.owner_summary?.actually_recording === true &&
     requireCaptureBefore.json?.owner_summary?.client_configured === true &&
     requireCaptureBefore.json?.owner_summary?.hook_capture_ready === false &&
-    requireCaptureBefore.json?.owner_summary?.headline.includes("not proven"),
-  `doctor owner summary should explain configured-but-not-recording state: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
+    requireCaptureBefore.json?.owner_summary?.headline.includes("capture is active"),
+  `doctor owner summary should explain attach startup capture proof: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
 );
 
 const legacyOnlyDir = `${projectDir}-legacy-only`;

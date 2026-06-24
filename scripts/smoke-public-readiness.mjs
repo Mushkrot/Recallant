@@ -147,6 +147,8 @@ mustInclude(
     "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
     "recallant onboard /path/to/project",
+    "recallant connect /path/to/project",
+    "recallant connect /path/to/project --server-url https://memory.example.com",
     "Capture active: yes",
     "documentation posture summary",
     "Documentation posture: empty | healthy |",
@@ -186,6 +188,9 @@ mustInclude(
   clientSetup,
   [
     "curl -fsSL https://memory.example.com/connect | bash",
+    "recallant connect <project>",
+    "recallant connect <project> --server-url https://memory.example.com",
+    "recallant connect .",
     "It works even when `recallant` is missing or old",
     "Advanced/admin fallback",
     "not the universal first-run command",
@@ -215,6 +220,44 @@ mustInclude(
     "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected"
   ],
   "docs/REMOTE_CONNECT_PLAN.md"
+);
+
+const mcpSpec = await read("docs/MCP_SPEC.md");
+mustInclude(
+  mcpSpec,
+  [
+    "session/context readiness evidence",
+    "`memory_create_agent_memory` marker",
+    "`memory_recall_agent_memories`",
+    "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
+    "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only"
+  ],
+  "docs/MCP_SPEC.md proof taxonomy"
+);
+
+mustInclude(
+  quickstart,
+  [
+    "`recallant agent-start --format json` reports `mode: \"remote_mcp_ready\"`",
+    "a checkpoint can be written and read back with `memory_set_checkpoint`",
+    "governed semantic memory is proven separately",
+    "Do not treat a checkpoint-only readback as semantic recall proof",
+    "`memory_set_checkpoint` remains state-only"
+  ],
+  "docs/QUICKSTART.md remote proof taxonomy"
+);
+
+mustInclude(
+  clientSetup,
+  [
+    "Remote Readiness Versus Recall Proof",
+    "remote consent/config boundary",
+    "`memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint",
+    "`memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic",
+    "proof that semantic recall is populated",
+    "baseline checkpoint parity contract is state-only"
+  ],
+  "docs/CLIENT_SETUP.md remote proof taxonomy"
 );
 
 const remoteBeginnerDocs = [
@@ -346,6 +389,11 @@ mustInclude(
     "npm run system-audit:report-smoke",
     "npm run phase8:smoke:backup",
     "Workbench migration review queue",
+    "Current Remote Existing-Project Findings",
+    "`mode: \"remote_mcp_ready\"`",
+    "session/context readiness",
+    "checkpoint readback and governed semantic recall are separate surfaces",
+    "baseline checkpoint parity contract is state-only",
     "Release-Candidate Bar"
   ],
   "CONTRACT_STATUS"

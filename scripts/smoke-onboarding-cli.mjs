@@ -206,6 +206,14 @@ assert(
   `missing storage did not describe spool as fail-soft fallback: ${JSON.stringify(missingPayload.storage)}`
 );
 assert(
+  missingPayload.storage?.setup_choices?.some(
+    (choice) => choice.id === "connect_existing_server"
+  ) &&
+    missingPayload.storage?.remote_connect?.command ===
+      "curl -fsSL http://127.0.0.1:3005/connect | bash",
+  `missing storage did not offer remote central-server connect: ${JSON.stringify(missingPayload.storage)}`
+);
+assert(
   !JSON.stringify(missingPayload).includes("recallant_dev_password") &&
     !JSON.stringify(missingPayload).includes(databaseUrl),
   "missing storage output leaked database credentials"
@@ -224,6 +232,7 @@ assert(
 assert(
   (missingStorageText.stdout.match(/^Next action:/gm) ?? []).length === 1 &&
     missingStorageText.stdout.includes("Rerun command: recallant onboard") &&
+    missingStorageText.stdout.includes("curl -fsSL http://127.0.0.1:3005/connect | bash") &&
     !missingStorageText.stdout.includes("--client codex") &&
     !missingStorageText.stdout.includes("--verify") &&
     !missingStorageText.stdout.includes("--install-local-hooks") &&
@@ -245,6 +254,44 @@ for (const forbidden of [
     `missing storage text output leaked forbidden command ${forbidden}:\n${missingStorageText.stdout}`
   );
 }
+
+const universalMissingStorage = runRaw(
+  recallant,
+  ["connect", missingStorageProject, "--yes", "--format", "json"],
+  {
+    cwd: missingStorageProject,
+    omitDatabaseUrl: true,
+    env: {
+      RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env"),
+      RECALLANT_CONNECT_SERVER_URL: "",
+      RECALLANT_REMOTE_CONNECT_SERVER_URL: "",
+      RECALLANT_REMOTE_MCP_URL: "",
+      RECALLANT_PUBLIC_WORKBENCH_URL: "",
+      RECALLANT_SERVER_URL: ""
+    }
+  }
+);
+assert(
+  universalMissingStorage.status === 2,
+  `universal missing storage should exit 2: ${universalMissingStorage.stderr}\n${universalMissingStorage.stdout}`
+);
+const universalMissingPayload = JSON.parse(universalMissingStorage.stdout);
+assert(
+  universalMissingPayload.action === "connect" &&
+    universalMissingPayload.status === "choice_required" &&
+    universalMissingPayload.choices?.some((choice) => choice.id === "existing_central_server") &&
+    universalMissingPayload.choices?.some((choice) => choice.id === "local_storage"),
+  `universal missing storage should require explicit route choice: ${JSON.stringify(
+    universalMissingPayload
+  )}`
+);
+assert(
+  String(universalMissingPayload.remote_command).includes("--server-url <https-url>") &&
+    String(universalMissingPayload.local_command).includes("--local"),
+  `universal missing storage did not print both route commands: ${JSON.stringify(
+    universalMissingPayload
+  )}`
+);
 
 const defaultEnvRoot = await mkdtemp(join(tmpdir(), "recallant-onboarding-default-env-"));
 const defaultEnvHome = join(defaultEnvRoot, "home");
@@ -701,6 +748,25 @@ assert(
     oneCommand.verify?.stages?.recall?.status === "done" &&
     oneCommand.verify?.capture_active === true,
   `one-command structured proof stages incomplete: ${JSON.stringify(oneCommand.verify)}`
+);
+
+const universalLocalProject = await mkdtemp(join(tmpdir(), "recallant-universal-local-"));
+await writeFile(join(universalLocalProject, "README.md"), "# Universal local connect proof\n");
+const universalLocal = runJson(
+  recallant,
+  ["connect", universalLocalProject, "--yes", "--format", "json"],
+  {
+    cwd: universalLocalProject
+  }
+);
+assert(
+  universalLocal.action === "onboard" &&
+    universalLocal.status === "completed" &&
+    universalLocal.connected?.status === "connected" &&
+    universalLocal.verify?.status === "passed",
+  `universal connect did not route same-host project through onboarding: ${JSON.stringify(
+    universalLocal
+  )}`
 );
 assert(
   oneCommand.verify?.evidence?.context_read === true &&

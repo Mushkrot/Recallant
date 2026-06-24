@@ -160,7 +160,44 @@ const tempHome = await mkdtemp(join(tmpdir(), "recallant-connect-home-"));
 const approvedServer = await connectServer("approved-after-pending");
 const trustedServer = await connectServer("trusted-approved");
 const bootstrapServer = await connectServer("bootstrap-approved");
+const universalServer = await connectServer("universal-approved");
+const universalProject = await mkdtemp(join(tmpdir(), "recallant-connect-universal-"));
+const universalHome = await mkdtemp(join(tmpdir(), "recallant-connect-universal-home-"));
 try {
+  const universal = await runCli(
+    [
+      "connect",
+      universalProject,
+      "--server-url",
+      universalServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: universalHome }
+    }
+  );
+  assert(universal.status === 0, `universal connect failed: ${universal.stderr}`);
+  const universalJson = JSON.parse(universal.stdout);
+  assert(universalJson.action === "connect_cloud", "universal connect did not route to remote");
+  assert(universalJson.status === "connected", "universal connect did not finish remote connect");
+  assert(
+    universalServer.state.startBodies.length === 1,
+    "universal connect did not start remote request once"
+  );
+  const universalConfig = await readFile(join(universalProject, ".codex", "config.toml"), "utf8");
+  assert(
+    universalConfig.includes("remote-bridge") &&
+      universalConfig.includes("RECALLANT_REMOTE_MCP_CREDENTIAL_REF"),
+    "universal connect did not write remote bridge config"
+  );
+
   const approved = await runCli(
     [
       "connect-cloud",
@@ -398,9 +435,12 @@ try {
   approvedServer.server.close();
   trustedServer.server.close();
   bootstrapServer.server.close();
+  universalServer.server.close();
   await rm(tempProject, { recursive: true, force: true });
   await rm(secondProject, { recursive: true, force: true });
   await rm(tempHome, { recursive: true, force: true });
+  await rm(universalProject, { recursive: true, force: true });
+  await rm(universalHome, { recursive: true, force: true });
 }
 
 for (const mode of ["denied", "expired"]) {

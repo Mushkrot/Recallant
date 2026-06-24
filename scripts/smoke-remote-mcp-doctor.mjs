@@ -323,9 +323,14 @@ function parseJsonOutput(result) {
 }
 
 function stageCode(report, id) {
-  const stage = report.stages.find((entry) => entry.id === id);
-  assert(stage, `missing stage ${id}`);
-  return `${stage.status}:${stage.code}`;
+  const stageEntry = stageById(report, id);
+  return `${stageEntry.status}:${stageEntry.code}`;
+}
+
+function stageById(report, id) {
+  const stageEntry = report.stages.find((entry) => entry.id === id);
+  assert(stageEntry, `missing stage ${id}`);
+  return stageEntry;
 }
 
 function assertNoLeak(name, output) {
@@ -501,6 +506,18 @@ try {
     await runDoctor(baseArgs(fixture, { traceId: "capture-pass", captureProof: true }))
   );
   assert(stageCode(capturePass, "capture_recall_proof") === "pass:capture_recall_proof_ok");
+  const capturePassStage = stageById(capturePass, "capture_recall_proof");
+  assert(
+    capturePassStage.metadata.tool_names.join(",") ===
+      "memory_start_session,memory_get_context_pack",
+    "capture-proof must remain session/context readiness only until semantic proof is added"
+  );
+  assert(
+    !JSON.stringify(capturePassStage.metadata).includes("memory_create_agent_memory") &&
+      !JSON.stringify(capturePassStage.metadata).includes("memory_recall_agent_memories") &&
+      !JSON.stringify(capturePassStage.metadata).includes("memory_set_checkpoint"),
+    "capture-proof metadata must not imply semantic recall or checkpoint proof"
+  );
   assertNoLeak("capture-pass", JSON.stringify(capturePass));
   summary.push({ scenario: "capture-pass", ok: true });
 
@@ -509,6 +526,11 @@ try {
   );
   assert(
     stageCode(captureMissing, "capture_recall_proof") === "warn:capture_recall_proof_unavailable"
+  );
+  assert(
+    stageById(captureMissing, "capture_recall_proof").metadata.required_tools.join(",") ===
+      "memory_start_session,memory_get_context_pack",
+    "capture-proof unavailable remediation must name only session/context readiness tools"
   );
   assert(stageCode(captureMissing, "tools_list") === "pass:tools_list_ok");
   summary.push({ scenario: "capture-missing", ok: true });

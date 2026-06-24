@@ -66,6 +66,11 @@ const contractStatus = await read("docs/CONTRACT_STATUS.md");
 for (const marker of [
   "Working endpoint, scoped credential, provisioning UX, stdio-to-HTTPS bridge, CLI-first diagnostics",
   "Remote project access to a central server",
+  "Current Remote Existing-Project Findings",
+  "remote_mcp_ready",
+  "session/context readiness",
+  "checkpoint readback and governed semantic recall are separate surfaces",
+  "baseline checkpoint parity contract is state-only",
   "remote-mcp-contract:smoke",
   "remote-mcp-provisioning:smoke",
   "remote-mcp-bridge:smoke",
@@ -77,9 +82,19 @@ for (const marker of [
 const roadmap = await read("docs/ROADMAP.md");
 for (const marker of [
   "Remote project access to a central Recallant server",
-  "first authenticated `POST /api/mcp`"
+  "first authenticated `POST /api/mcp`",
+  "`memory_set_checkpoint` state-only by default",
+  "operators do not treat checkpoint readback as semantic recall"
 ]) {
   mustInclude(roadmap, marker, "docs/ROADMAP.md");
+}
+
+for (const marker of [
+  "session/context readiness evidence",
+  "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
+  "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only"
+]) {
+  mustInclude(mcpSpec, marker, "docs/MCP_SPEC.md proof taxonomy");
 }
 
 mustInclude(mcpSpec, [remoteMcpEndpointPath], "docs/MCP_SPEC.md endpoint");
@@ -543,7 +558,7 @@ try {
   );
   endpointCases.push("tools_call_memory_get_context_pack_scoped_project");
 
-  const remoteMemoryFact = "remote onboarding test from Vadim Mac Resume passed on 2026-06-20";
+  const remoteMemoryFact = "remote onboarding synthetic semantic memory passed";
   result = await rpc(baseUrl, {
     jsonrpc: "2.0",
     id: "create-agent-memory",
@@ -556,7 +571,7 @@ try {
         scope_kind: "project",
         scope_id: null,
         audience: [{ kind: "all_agents", id: null }],
-        title: "Remote onboarding Mac test passed",
+        title: "Remote onboarding smoke test passed",
         body: remoteMemoryFact,
         confidence: 1,
         source_refs: [],

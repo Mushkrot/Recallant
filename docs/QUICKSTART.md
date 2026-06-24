@@ -43,6 +43,20 @@ From anywhere:
 recallant onboard /path/to/project
 ```
 
+The universal beginner command is:
+
+```bash
+recallant connect /path/to/project
+```
+
+With reachable local storage, `connect` runs the local onboarding flow. Without local storage, it
+asks for an existing central Recallant server URL or lets the owner choose local storage. Automation
+can provide the server URL up front:
+
+```bash
+recallant connect /path/to/project --server-url https://memory.example.com
+```
+
 The one-command flow checks storage readiness, offers local single-user storage setup when needed,
 attaches the project, analyzes documentation posture, prepares thin local agent configuration for
 Codex, installs local hooks when supported, proves capture and recall, and prints the private
@@ -95,9 +109,17 @@ the external project folder:
 curl -fsSL https://memory.example.com/connect | bash
 ```
 
-That command works even when `recallant` is missing or old on the external machine. It starts a
-device-style pairing request, asks the owner to approve the project through the protected central
-server, then writes only remote MCP client config locally. See
+If the Recallant CLI is already installed on the workstation, use the same universal command:
+
+```bash
+recallant connect .
+```
+
+When it asks for the central server URL, enter `https://memory.example.com`. For automation, pass
+`--server-url https://memory.example.com`. This works even when `recallant` is missing or old on the
+external machine. It starts a device-style pairing request,
+asks the owner to approve the project through the protected central server, then writes only remote
+MCP client config locally. See
 [`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md).
 
 On the first approved connect from a workstation, the flow registers a local trusted-device key.
@@ -106,6 +128,21 @@ Later projects from the same workstation can use signed device challenges throug
 Cloudflare email-code browser approval. The project credential is stored in the user's local
 Recallant credential store; generated project config contains a credential reference, not the raw
 secret.
+
+Expected remote readiness:
+
+- `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+- a checkpoint can be written and read back with `memory_set_checkpoint` and
+  `memory_get_checkpoint`;
+- governed semantic memory is proven separately by creating a small non-secret memory through
+  `memory_create_agent_memory` and recalling it through `memory_recall_agent_memories`.
+
+Do not treat a checkpoint-only readback as semantic recall proof. Do not run local `attach
+--confirm` on a remote workstation unless the operator explicitly wants the local-storage attach
+path instead of the scoped remote MCP path.
+
+For baseline parity, `memory_set_checkpoint` remains state-only. Use an explicit governed-memory or
+high-level closeout/checkpoint action when a searchable checkpoint memory is required.
 
 For headless servers or CI-like hosts, use a short-lived one-time bootstrap token created from a
 protected admin/human surface:
@@ -147,9 +184,9 @@ recallant remote-acceptance \
 That acceptance command reads the scoped remote connection from the project-local client config
 written by bootstrap, then writes redacted evidence for bootstrap, remote-doctor, remote MCP
 session/context/write/checkpoint/recall, next-session recall, and forbidden local-artifact checks.
-One real external Mac rehearsal passed this gate on 2026-06-20, with central-server verification of
-Workbench readiness and redacted audit rows; keep invite provisioning operator-led while universal
-connect remains the beginner remote command.
+External-host rehearsal outcomes should be published only as redacted summaries, without
+owner-specific device names, project paths, trace ids, raw evidence ids, or private topology. Keep
+invite provisioning operator-led while universal connect remains the beginner remote command.
 
 For strict Capture/Recall Acceptance, validate that evidence on the central Recallant server:
 

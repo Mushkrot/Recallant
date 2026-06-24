@@ -101,7 +101,7 @@ Diagnostic stages are intentionally separate:
 - Project/developer/client scope.
 - MCP `initialize`.
 - MCP `tools/list`.
-- Optional capture/recall proof through remote MCP `tools/call`.
+- Optional capture/readiness proof through remote MCP `tools/call`.
 
 Use placeholder-only commands in docs and runbooks:
 
@@ -119,9 +119,15 @@ recallant remote-doctor \
 The explicit `--credential <scoped-remote-mcp-credential>` form remains available for
 advanced/debug workflows where the operator intentionally provides the raw secret boundary.
 
-Add `--capture-proof` only when the operator wants remote MCP memory readiness evidence. Capture
-proof is reported separately from transport, auth, and scope. The deterministic diagnostic coverage
-is `npm run remote-mcp-doctor:smoke`.
+Add `--capture-proof` only when the operator wants remote MCP session/context readiness evidence.
+This diagnostic stage is reported separately from transport, auth, and scope. It does not replace
+the stricter governed-memory proof used by acceptance flows: create a non-secret
+`memory_create_agent_memory` marker, then recall it with `memory_recall_agent_memories`. A
+`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic
+memory recall. The baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only by
+default; searchable checkpoint memory requires an explicit high-level governed-memory
+closeout/checkpoint action. The deterministic diagnostic coverage is
+`npm run remote-mcp-doctor:smoke`.
 
 ## 3c) External Rehearsal
 
@@ -230,8 +236,8 @@ project/developer/client scope, forbidden payload blocking, required remote MCP 
 credential fixture leakage outside the operator-provided Authorization/env boundary.
 `remote-mcp-doctor:smoke` covers remote doctor JSON and human output, non-HTTPS and unreachable
 endpoints, edge/access denial, invalid JSON/wrong endpoint, missing/invalid/expired/revoked/rotated
-credentials, wrong project/developer/client scope, initialize/tools-list failure, capture proof
-pass/warn/fail states, no DB URL dependency, and no raw fixture leakage in outputs.
+credentials, wrong project/developer/client scope, initialize/tools-list failure, session/context
+capture proof pass/warn/fail states, no DB URL dependency, and no raw fixture leakage in outputs.
 `remote-mcp-security:smoke` aggregates the shipped contract, credential, bridge, provisioning, and
 doctor smokes into one end-to-end security matrix covering unauthorized and missing Authorization,
 wrong token, expired/revoked/rotated credentials, wrong project/developer/client, forbidden

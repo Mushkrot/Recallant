@@ -291,10 +291,20 @@ type OnboardStorageStep = {
     complete_onboarding: false;
   };
   setup_choices: Array<{
-    id: "single_user_storage" | "existing_private_profile" | "stop_without_changes";
+    id:
+      | "connect_existing_server"
+      | "single_user_storage"
+      | "existing_private_profile"
+      | "stop_without_changes";
     label: string;
     description: string;
   }>;
+  remote_connect: {
+    available: boolean;
+    server_url: string | null;
+    command: string | null;
+    description: string;
+  };
 };
 
 type OnboardVerifyEvidence = {
@@ -1736,6 +1746,20 @@ async function promptYesNo(question: string, defaultAnswer: boolean) {
   });
 }
 
+async function promptLine(question: string) {
+  process.stdout.write(question);
+  return await new Promise<string>((resolvePrompt) => {
+    const wasRaw = process.stdin.isRaw;
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("data", (chunk) => {
+      if (wasRaw) process.stdin.setRawMode?.(true);
+      process.stdin.pause();
+      resolvePrompt(String(chunk).trim());
+    });
+  });
+}
+
 function initializedGitStep(projectDir: string, choices: OnboardVersionControlStep["choices"]) {
   const initialized = runGit(projectDir, ["init"]);
   if (initialized.status !== 0) {
@@ -1909,6 +1933,12 @@ function offlineSpoolFallback() {
 function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
   return [
     {
+      id: "connect_existing_server",
+      label: "Connect to an existing Recallant server",
+      description:
+        "Use the remote client flow for a workstation or server that should write memory to a central Recallant instance."
+    },
+    {
       id: "single_user_storage",
       label: "Set up local single-user storage",
       description:
@@ -1926,6 +1956,44 @@ function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
       description: "Leave project files untouched until storage is ready."
     }
   ];
+}
+
+function normalizeRemoteConnectServerUrl(value: string | undefined | null) {
+  const raw = value?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    url.pathname = url.pathname.replace(/\/(?:api\/mcp|review)\/?$/, "/");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return raw.replace(/\/(?:api\/mcp|review)\/?$/, "").replace(/\/$/, "");
+  }
+}
+
+function remoteConnectServerUrlFromEnv() {
+  return (
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_CONNECT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_CONNECT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_MCP_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_PUBLIC_WORKBENCH_URL)
+  );
+}
+
+function remoteConnectHint(): OnboardStorageStep["remote_connect"] {
+  const serverUrl =
+    remoteConnectServerUrlFromEnv() ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_MCP_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_PUBLIC_WORKBENCH_URL);
+  return {
+    available: true,
+    server_url: serverUrl,
+    command: serverUrl ? `curl -fsSL ${serverUrl}/connect | bash` : null,
+    description:
+      "If this project should connect to an existing central Recallant server, use the remote client flow instead of creating local single-user storage."
+  };
 }
 
 function recallantHomeDir() {
@@ -1966,7 +2034,8 @@ function blockedStorageStep(input: {
     message: input.message,
     error_code: "storage_blocked",
     offline_spool: offlineSpoolFallback(),
-    setup_choices: storageSetupChoices()
+    setup_choices: storageSetupChoices(),
+    remote_connect: remoteConnectHint()
   };
 }
 
@@ -1988,7 +2057,8 @@ async function readyStorageStep(): Promise<OnboardStorageStep | null> {
         : "Recallant storage is ready from the current environment.",
       error_code: null,
       offline_spool: offlineSpoolFallback(),
-      setup_choices: []
+      setup_choices: [],
+      remote_connect: remoteConnectHint()
     };
   } catch {
     return null;
@@ -2003,7 +2073,12 @@ async function maybeRunInteractiveStorageSetup(options: OnboardOptions) {
   const installerPath = await singleUserStorageInstallerPath();
   if (!installerPath) return null;
   const setupStorage = await promptYesNo(
-    "Recallant storage is not configured. Set up local single-user storage now?",
+    [
+      "Recallant storage is not configured.",
+      "Use local single-user storage only when this machine should host its own private Recallant storage.",
+      "If this project should connect to an existing central Recallant server, stop here and run that server's remote connect command instead.",
+      "Set up local single-user storage now?"
+    ].join("\n"),
     true
   );
   if (!setupStorage) return null;
@@ -2460,9 +2535,22 @@ function onboardHumanReport(result: {
     for (const choice of result.storage.setup_choices) {
       lines.push(`- ${choice.label}: ${choice.description}`);
     }
+    if (result.storage.remote_connect?.command) {
+      lines.push(
+        "",
+        "Remote server option:",
+        `- Existing central server: ${result.storage.remote_connect.command}`
+      );
+    } else if (result.storage.remote_connect?.available) {
+      lines.push(
+        "",
+        "Remote server option:",
+        "- If this project should use an existing central Recallant server, run that server's `curl -fsSL <server>/connect | bash` command from the project folder instead of setting up local storage."
+      );
+    }
     lines.push(
       "",
-      "Next action: Prepare private Recallant storage, then rerun this same onboarding command.",
+      "Next action: choose local private storage or the remote central-server connect path, then rerun the appropriate command.",
       `Rerun command: ${result.next_command}`
     );
   } else if (
@@ -7057,7 +7145,219 @@ function remoteCredentialProvisioningHumanReport(input: {
   );
 }
 
+function connectTargetToken(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!normalized) return null;
+  if (normalized === "claude-code") return "claude_code";
+  return normalized;
+}
+
+function isSupportedConnectTarget(value: string | undefined) {
+  const normalized = connectTargetToken(value);
+  return Boolean(
+    normalized && supportedClientKinds.includes(normalized as (typeof supportedClientKinds)[number])
+  );
+}
+
+function shouldUseUniversalConnect(argv: readonly string[]) {
+  const firstPositional = positionalArgs(argv)[0];
+  return Boolean(
+    parseFlag(argv, "--server-url") ||
+    argv.includes("--remote") ||
+    argv.includes("--local") ||
+    argv.includes("--auto") ||
+    (firstPositional && !isSupportedConnectTarget(firstPositional))
+  );
+}
+
+function universalConnectProjectDir(argv: readonly string[]) {
+  const firstPositional = positionalArgs(argv)[0];
+  return resolve(
+    parseFlag(argv, "--project-dir") ??
+      (firstPositional && !isSupportedConnectTarget(firstPositional)
+        ? firstPositional
+        : process.cwd())
+  );
+}
+
+function universalConnectTarget(argv: readonly string[]) {
+  return parseFlag(argv, "--client") ?? parseFlag(argv, "--target") ?? "codex";
+}
+
+function appendFlagIfPresent(args: string[], argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (value) args.push(name, value);
+}
+
+function appendBooleanFlagIfPresent(args: string[], argv: readonly string[], name: string) {
+  if (argv.includes(name)) args.push(name);
+}
+
+function buildConnectCloudArgv(input: {
+  argv: readonly string[];
+  projectDir: string;
+  target: string;
+  serverUrl: string;
+}) {
+  const connectCloudArgv = [
+    input.argv[0] ?? "node",
+    input.argv[1] ?? "recallant",
+    "connect-cloud",
+    input.projectDir
+  ];
+  connectCloudArgv.push("--server-url", input.serverUrl, "--client", input.target);
+  for (const flag of ["--bootstrap-token", "--poll-timeout-ms", "--poll-interval-ms", "--format"]) {
+    appendFlagIfPresent(connectCloudArgv, input.argv, flag);
+  }
+  for (const flag of ["--skip-doctor", "--yes", "--non-interactive", "--dry-run", "--json"]) {
+    appendBooleanFlagIfPresent(connectCloudArgv, input.argv, flag);
+  }
+  return connectCloudArgv;
+}
+
+function universalConnectChoiceReport(result: {
+  project_dir: string;
+  client: string;
+  remote_command: string;
+  local_command: string;
+}) {
+  return (
+    [
+      "Recallant connect",
+      "",
+      "Status: choice_required",
+      `Project: ${result.project_dir}`,
+      `Agent client: ${result.client}`,
+      "",
+      "Recallant could not determine whether this project should use local storage or an existing central server.",
+      "",
+      "Use the same universal command interactively to choose:",
+      `  ${result.local_command}`,
+      "",
+      "Or provide the central server URL explicitly for automation:",
+      `  ${result.remote_command}`,
+      ""
+    ].join("\n") + "\n"
+  );
+}
+
+function emitUniversalConnectChoiceRequired(input: {
+  projectDir: string;
+  target: string;
+  format: "text" | "json";
+}) {
+  const payload = {
+    ok: false,
+    action: "connect",
+    status: "choice_required",
+    project_dir: input.projectDir,
+    client: input.target,
+    local_storage: {
+      reachable: false
+    },
+    choices: [
+      {
+        id: "existing_central_server",
+        label: "Connect to an existing Recallant server",
+        command: `recallant connect ${input.projectDir} --server-url <https-url>`
+      },
+      {
+        id: "local_storage",
+        label: "Set up or use local Recallant storage on this machine",
+        command: `recallant connect ${input.projectDir} --local`
+      }
+    ],
+    next_command: `recallant connect ${input.projectDir}`,
+    remote_command: `recallant connect ${input.projectDir} --server-url <https-url>`,
+    local_command: `recallant connect ${input.projectDir} --local`,
+    message:
+      "Run the same command in an interactive terminal to choose, or pass --server-url for an existing central Recallant server."
+  };
+  process.stdout.write(
+    input.format === "json"
+      ? `${JSON.stringify(payload, null, 2)}\n`
+      : universalConnectChoiceReport({
+          project_dir: input.projectDir,
+          client: input.target,
+          remote_command: payload.remote_command,
+          local_command: payload.local_command
+        })
+  );
+  process.exitCode = 2;
+}
+
+async function runUniversalConnect(argv: readonly string[]) {
+  const projectDir = universalConnectProjectDir(argv);
+  const target = universalConnectTarget(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const explicitServerUrl = normalizeRemoteConnectServerUrl(parseFlag(argv, "--server-url"));
+  const envServerUrl = remoteConnectServerUrlFromEnv();
+  const localOnly = argv.includes("--local");
+  const remoteOnly = argv.includes("--remote");
+  const shouldCheckLocalStorage = localOnly || (!remoteOnly && !explicitServerUrl);
+  const localStorageReady = shouldCheckLocalStorage ? await readyStorageStep() : null;
+  let serverUrl = explicitServerUrl ?? (!localStorageReady ? envServerUrl : null);
+
+  if (!localOnly && !remoteOnly && !serverUrl && !localStorageReady) {
+    if (format === "text" && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+      const answer = await promptLine(
+        [
+          "Recallant connect did not find local storage.",
+          "Enter an existing central Recallant server URL to connect remotely, or press Enter to set up/use local storage on this machine.",
+          "Server URL: "
+        ].join("\n")
+      );
+      serverUrl = normalizeRemoteConnectServerUrl(answer);
+    } else {
+      emitUniversalConnectChoiceRequired({ projectDir, target, format });
+      return;
+    }
+  }
+
+  if ((remoteOnly || serverUrl) && !localOnly) {
+    if (!serverUrl) {
+      throw new Error(
+        "VALIDATION_ERROR: recallant connect --remote requires --server-url or RECALLANT_CONNECT_SERVER_URL"
+      );
+    }
+    return runConnectCloud(buildConnectCloudArgv({ argv, projectDir, target, serverUrl }));
+  }
+
+  const onboardArgv = [
+    argv[0] ?? "node",
+    argv[1] ?? "recallant",
+    "onboard",
+    projectDir,
+    "--client",
+    target
+  ];
+  for (const flag of ["--format"]) {
+    appendFlagIfPresent(onboardArgv, argv, flag);
+  }
+  for (const flag of [
+    "--install-local-hooks",
+    "--hook-kit",
+    "--no-install-local-hooks",
+    "--no-local-hooks",
+    "--verify",
+    "--no-verify",
+    "--dry-run",
+    "--yes",
+    "-y",
+    "--cancel",
+    "--init-git",
+    "--skip-vcs-safety",
+    "--json"
+  ]) {
+    appendBooleanFlagIfPresent(onboardArgv, argv, flag);
+  }
+  return runOnboard(onboardArgv);
+}
+
 async function runConnect(argv: readonly string[]) {
+  if (shouldUseUniversalConnect(argv)) return runUniversalConnect(argv);
+
   const dir = projectDir(argv);
   const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
   const dryRun = argv.includes("--dry-run");
@@ -8650,9 +8950,12 @@ function usageText(command?: string) {
   }
   if (command === "connect") {
     return [
-      "Usage: recallant connect <client> --project-dir <project-dir> [--install-local-hooks] [--dry-run] [--global] [--format json]",
+      "Usage: recallant connect <project-dir> [--server-url <https-url>] [--client codex|cursor|claude-code|generic] [--yes] [--format json]",
+      "       recallant connect <client> --project-dir <project-dir> [--install-local-hooks] [--dry-run] [--global] [--format json]",
       "",
-      "Configure a supported agent client to call `recallant mcp-server` for an attached project.",
+      "Beginner universal flow. With reachable local storage, runs local onboarding for the project. Without local storage, asks for an existing central server URL or local storage choice before changing project files. Automation can pass --server-url to choose the remote path up front.",
+      "",
+      "Advanced local client flow: configure a supported agent client to call `recallant mcp-server` for an attached project.",
       ""
     ].join("\n");
   }

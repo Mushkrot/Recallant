@@ -153,6 +153,21 @@ Recallant should treat those files as migration inputs:
 Historical material is evidence by default. It should not become an instruction-grade rule unless a
 trusted import path, explicit owner action, or review policy allows it.
 
+For a remote existing project, prove the connection before importing history:
+
+1. verify `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+2. create one non-secret governed memory marker with `memory_create_agent_memory`;
+3. recall that marker with `memory_recall_agent_memories`;
+4. run a read-only inventory of candidate docs and risky paths;
+5. ask the owner to approve a migration plan before writing project memories or imports.
+
+The migration plan should group sources by action: summarize into governed memory, keep as a source
+reference, skip, or ask the owner. Safe governed memories should be concise and typed, for example
+`environment_fact`, `procedure`, `decision`, `constraint`, `artifact_reference`, or
+`open_question`. They should cite source paths in metadata or source refs without copying raw
+secrets, customer data, backups, raw artifacts, or large historical logs. A checkpoint update is a
+state fallback; it is not a substitute for governed memory recall.
+
 For public release validation, Recallant keeps a neutral non-owner migration smoke that attaches a
 sandbox copy of an existing-project fixture, verifies the original project is untouched, requires a
 local redacted backup, checks the migration summary, and confirms imported material stays reviewed

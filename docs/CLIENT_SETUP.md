@@ -32,6 +32,20 @@ For projects on a machine that already has a local Recallant install and storage
 recallant onboard <project>
 ```
 
+The universal beginner command is:
+
+```bash
+recallant connect <project>
+```
+
+It routes to local onboarding when private storage is reachable. If local storage is missing, it
+asks for an existing central Recallant server URL or lets the owner choose local storage. Automation
+can provide the server URL up front:
+
+```bash
+recallant connect <project> --server-url https://memory.example.com
+```
+
 Onboarding defaults to the Codex beginner flow: attach, client connection, local hooks when
 supported, capture proof, readiness proof, and recall proof. The project is not capture active until
 context read, memory write, checkpoint, and recall evidence are present.
@@ -47,11 +61,19 @@ For a remote workstation, the beginner flow is:
 curl -fsSL https://memory.example.com/connect | bash
 ```
 
-It works even when `recallant` is missing or old on the remote machine. The remote machine
-starts a pending connection request and the owner approves it in the protected browser flow. That
-first approval registers a local trusted-device key on the workstation. Later projects from the same
-trusted workstation can reconnect with the same `curl .../connect | bash` / `connect-cloud` path
-using signed device challenges instead of another Cloudflare email-code browser approval.
+If the Recallant CLI is already installed on the workstation, use the same universal command:
+
+```bash
+recallant connect .
+```
+
+When it asks for the central server URL, enter `https://memory.example.com`. For automation, pass
+`--server-url https://memory.example.com`. It works even when `recallant` is missing or old through
+the `curl .../connect | bash` path. The remote machine starts a pending connection request and the
+owner approves it in the protected browser flow. That first approval registers a local trusted-device
+key on the workstation. Later projects from the same trusted workstation can reconnect with the same
+`curl .../connect | bash` / `connect-cloud` path using signed device challenges instead of another
+Cloudflare email-code browser approval.
 
 For headless servers or CI-like hosts where no browser approval is practical, an administrator can
 create a short-lived one-time bootstrap token through the protected central server API. The remote
@@ -245,6 +267,29 @@ bash` is the simple path for remote projects attached to a central server. Invit
 the advanced/admin fallback for maintainers, automation, pre-known projects, and directed one-time
 access.
 
+### Remote Readiness Versus Recall Proof
+
+Remote setup has several distinct readiness levels. Keep them separate when diagnosing a connected
+project:
+
+- `recallant agent-start --format json` returning `mode: "remote_mcp_ready"` proves the project has a
+  remote consent/config boundary and can use the scoped remote MCP bridge.
+- `memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint
+  state can be written and read.
+- `memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic
+  memory can be written and recalled for the current project scope.
+
+Checkpoint state and governed semantic memory are intentionally different surfaces. A checkpoint that
+can be read back is not, by itself, proof that semantic recall is populated. Existing-project context
+migration should therefore start with a safe governed-memory marker proof, then continue with a
+reviewed import or summarization plan. Do not run local `attach --confirm` on a remote workstation
+unless the operator explicitly wants to switch that project to the local-storage attach flow.
+
+The baseline checkpoint parity contract is state-only: `memory_set_checkpoint` updates the current
+checkpoint and `memory_get_checkpoint` reads it back. Searchable checkpoint memory requires an
+explicit high-level closeout/checkpoint action that creates governed memory, rather than assuming
+checkpoint state is semantic recall.
+
 ### Provision Scoped Remote Credentials
 
 Provisioning is CLI-first. An operator creates or rotates a scoped credential on the central
@@ -291,12 +336,14 @@ recallant remote-doctor \
   --format json
 ```
 
-Add `--capture-proof` only when the remote MCP tools should also prove Recallant memory readiness.
-Capture proof is a separate stage: it may pass, warn, or fail without changing the network/auth/scope
-diagnosis. The command prints redacted JSON by default with `--format json` or an operator-readable
-stage summary with `--format text`. It does not need local Postgres, `RECALLANT_DATABASE_URL`,
-Workbench/admin auth, raw artifacts, backups, provider secrets, internal server paths, or private
-deployment context on the remote machine.
+Add `--capture-proof` only when the remote MCP tools should also prove session/context readiness.
+In the current diagnostic slice, this proves remote session/context-pack readiness, not full
+governed semantic-memory recall. Strict end-to-end memory proof still requires a governed memory
+write and recall, covered by `remote-acceptance` and by agent/client startup flows that call
+`memory_create_agent_memory` and `memory_recall_agent_memories`. The command prints redacted JSON by
+default with `--format json` or an operator-readable stage summary with `--format text`. It does not
+need local Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups,
+provider secrets, internal server paths, or private deployment context on the remote machine.
 
 The deterministic coverage for this shipped diagnostic path is `npm run remote-mcp-doctor:smoke`.
 
@@ -396,9 +443,10 @@ reuse it.
 The evidence JSON and summary redact the credential, host name, project path, repository root,
 database/admin/provider/raw-artifact/backup surfaces, and local private paths. This is the preferred
 gate for deciding whether the remote existing-server path is ready for a beginner-facing command.
-One real external Mac rehearsal passed this gate on 2026-06-20 with evidence run
-`c01ae9a7-a60c-4e12-bedf-d4be222c58b0`; the central server trace check confirmed next-session
-recall, Workbench readiness evidence, and redacted audit rows.
+External-host rehearsals should be reported with redacted summaries only; public docs should not
+publish owner-specific device names, project paths, trace ids, raw evidence ids, or private topology.
+The central-server trace check should confirm next-session recall, Workbench readiness evidence, and
+redacted audit rows without exposing those raw values.
 
 The older live-input smoke remains useful for transport/security matrix checks:
 
@@ -496,6 +544,12 @@ the external Recallant consent boundary before agent work continues: destination
 `/api/mcp` endpoint, project / developer / client credential scope, allowed context classes,
 prohibited data classes, and the recommended next call. Text mode prints the same boundary for
 humans.
+
+After `remote_mcp_ready`, a useful first proof is a small non-secret governed memory marker:
+`memory_create_agent_memory` with `scope: "project"`, `created_by: "agent"`, and
+`audience: [{ "kind": "all_agents" }]`, followed by `memory_recall_agent_memories` for the same
+marker. That proof confirms semantic memory for the scoped project. A checkpoint-only readback is a
+valid state check, but it should not be reported as semantic recall proof.
 
 The prohibited classes are `.env`, private keys, raw credentials, customer data, provider secrets,
 database URLs, raw artifacts, and backups. Those must not be sent through Recallant memory tools,
