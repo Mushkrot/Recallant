@@ -98,7 +98,7 @@ A 2026-06-23 remote existing-project pilot confirmed that the remote MCP path ca
 `memory_create_agent_memory`, and recall that memory through `memory_recall_agent_memories` without
 local Postgres or `RECALLANT_DATABASE_URL` on the remote workstation.
 
-The same pilot exposed product and diagnostic gaps to fix before release candidate:
+The same pilot drove the release gates now used for remote existing-project readiness:
 
 - local `doctor` now reports remote-only projects as
   `remote-ready, local storage not attached`, while local attach/onboard failures remain distinct;
@@ -114,12 +114,28 @@ The same pilot exposed product and diagnostic gaps to fix before release candida
   risky paths, groups entries as `summarize_to_memory`, `keep_as_reference`, `skip`, or `ask_owner`,
   then writes concise governed memories only after approval; risky output is path/class/count based
   and secret references are names-only;
-- MCP tool validation should make required fields such as `title`, `body`, and object-shaped
+- MCP tool validation now makes required fields such as `title`, `body`, and object-shaped
   `audience` easier for agents to satisfy on the first call.
 
 These are UX and acceptance-flow improvements rather than evidence that the scoped remote MCP core is
 broken. The release gate should still require repeat external-host rehearsals and strict
 capture/recall evidence with redacted outputs.
+
+## Remote Existing-Project Release Gate Matrix
+
+Remote existing-project readiness is a sequence of proof surfaces, not one boolean:
+
+| Gate | Required For Release Readiness | Proof Surface | Notes |
+|------|--------------------------------|---------------|-------|
+| Remote MCP ready | Yes | `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` | Confirms remote consent/config and scoped bridge guidance. |
+| Session/context ready | Yes | `memory_start_session` + `memory_get_context_pack`, or `recallant remote-doctor --capture-proof` | Proves startup context, not checkpoint state or semantic recall. |
+| Checkpoint state | Optional diagnostic | `memory_set_checkpoint` + `memory_get_checkpoint` | State-only parity check; not semantic recall proof. |
+| Governed semantic recall | Yes | synthetic `memory_create_agent_memory` marker + `memory_recall_agent_memories` | Must use non-secret marker content and project scope. |
+| Existing-project migration | Yes before importing old history | read-only inventory, risk classification, owner approval, concise governed memories/imports, recall verification | Risk output is path/class/count oriented and secret references are names-only. |
+| External-machine evidence | Yes before release-candidate remote claims | `recallant remote-acceptance` evidence bundle plus validator or equivalent server-side trace verification | The remote machine must not receive Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups, or provider secrets. |
+| Searchable checkpoint memory | Optional closeout | `memory_agent_checkpoint` or CLI `agent-checkpoint` | Use only when the checkpoint itself should become governed searchable memory. |
+| Live central-server readiness smoke | Optional operator gate | `remote-mcp-live-readiness:smoke` / `remote-connect-live-readiness:smoke` with operator env vars | Skips safely without live inputs and must not be treated as a deterministic fixture. |
+| Local `attach --confirm` | Not a remote-next-step | explicit local/server-local attach or import path only | Do not tell remote-only clients to run local attach after `remote_mcp_ready`. |
 
 ## What Is Not Ready Yet
 

@@ -208,6 +208,31 @@ function assertNoRawSecrets(value, label) {
   }
 }
 
+const migrationRiskClassNames = new Set([
+  "large_archive_log",
+  "raw_artifact",
+  "backup",
+  "credential_bearing_file",
+  "customer_data",
+  "private_key",
+  "environment_config_risk"
+]);
+
+function migrationEntryRiskClasses(entry) {
+  if (Array.isArray(entry?.classes) && entry.classes.length > 0) {
+    return entry.classes.map(String).filter((item) => migrationRiskClassNames.has(item));
+  }
+  const legacyClass = String(
+    entry?.risk_class ??
+      entry?.path_class ??
+      entry?.source_class ??
+      entry?.classification ??
+      entry?.class ??
+      ""
+  );
+  return migrationRiskClassNames.has(legacyClass) ? [legacyClass] : [];
+}
+
 const originalDir = await mkdtemp(join(tmpdir(), "recallant-non-owner-original-"));
 const sandboxDir = await mkdtemp(join(tmpdir(), "recallant-non-owner-sandbox-"));
 await writeExistingProjectFixture(originalDir);
@@ -381,6 +406,7 @@ assert(
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
+let dbSummary = null;
 try {
   const checks = await client.query(
     `
@@ -395,6 +421,14 @@ try {
     [attach.project_id]
   );
   const row = checks.rows[0];
+  dbSummary = {
+    project_count: row.project_count,
+    import_events: row.import_events,
+    starter_memories: row.starter_memories,
+    instruction_grade: row.instruction_grade,
+    leaked_chunks: row.leaked_chunks,
+    leaked_raw_artifacts: row.leaked_raw_artifacts
+  };
   if (
     row.project_count !== 1 ||
     row.import_events < 6 ||
@@ -409,4 +443,40 @@ try {
   await client.end();
 }
 
-process.stdout.write("Non-owner migration smoke passed\n");
+const migrationEntries = discoveryNoDb.migration_plan?.entries ?? [];
+const skippedRiskClasses = [
+  ...new Set(
+    migrationEntries
+      .filter((entry) => ["skip", "ask_owner"].includes(String(entry.action ?? "")))
+      .flatMap(migrationEntryRiskClasses)
+      .sort()
+  )
+];
+
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      guided_migration_pilot_summary: {
+        status: "pass",
+        original_project_unchanged: true,
+        owner_approval_required: true,
+        read_only_inventory_before_write: true,
+        selected_imports: summary.selected_imports,
+        imported_sources: summary.imported_sources,
+        review_needed: summary.review_needed,
+        raw_secret_findings: summary.raw_secret_findings,
+        local_backup_created: summary.local_backup_created,
+        skipped_risk_classes: skippedRiskClasses,
+        remote_only_plan: {
+          memory_create_agent_memory_planned: true,
+          recall_verification_planned: true,
+          checkpoint_after_recall: true
+        },
+        database_checks: dbSummary,
+        leaked_secret_values: false
+      }
+    },
+    null,
+    2
+  )}\n`
+);

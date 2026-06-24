@@ -15,6 +15,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     RECALLANT_DEVELOPER_ID: randomUUID(),
     RECALLANT_PROJECT_ID: randomUUID(),
     RECALLANT_PROJECT_PATH: process.cwd(),
+    RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS: "20",
     RECALLANT_MCP_RATE_LIMIT_PER_MINUTE: "2"
   },
   stdio: ["pipe", "pipe", "pipe"]
@@ -74,23 +75,21 @@ send({
 await waitForResponse(1);
 send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 
-const invalidMemory = parseToolError(
-  await callToolRaw(2, "memory_create_agent_memory", {
-    memory_type: "decision",
-    scope: "project",
-    title: "Invalid source-free memory",
-    body: "This should be rejected with a structured validation error.",
-    created_by: "agent",
-    source_refs: []
+const invalidEvent = parseToolError(
+  await callToolRaw(2, "memory_append_event", {
+    session_id: "00000000-0000-4000-8000-000000000001",
+    client_kind: "codex",
+    event_kind: "other",
+    text: "This workflow evidence body intentionally exceeds the configured smoke limit."
   })
 );
 if (
-  invalidMemory.ok !== false ||
-  invalidMemory.error?.code !== "VALIDATION_ERROR" ||
-  invalidMemory.error?.retryable !== false ||
-  invalidMemory.tool !== "memory_create_agent_memory"
+  invalidEvent.ok !== false ||
+  invalidEvent.error?.code !== "VALIDATION_ERROR" ||
+  invalidEvent.error?.retryable !== false ||
+  invalidEvent.tool !== "memory_append_event"
 ) {
-  throw new Error(`Structured validation error failed: ${JSON.stringify(invalidMemory)}`);
+  throw new Error(`Structured validation error failed: ${JSON.stringify(invalidEvent)}`);
 }
 
 await callToolRaw(3, "memory_heartbeat", {

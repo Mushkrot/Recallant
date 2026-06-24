@@ -164,17 +164,21 @@ if (secondSync.synced_count !== 0) {
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
 try {
+  const syncedEventIds = Object.values(firstSync.mappings).map((mapping) =>
+    typeof mapping === "string" ? mapping : mapping.server_event_id
+  );
   const checks = await client.query(
     `
       SELECT
         (SELECT count(*)::int FROM events WHERE project_id = $1) AS event_count,
+        (SELECT count(*)::int FROM events WHERE project_id = $1 AND id = ANY($4::uuid[])) AS synced_event_count,
         (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND sha256 = $2) AS raw_artifact_count,
         (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND text LIKE $3) AS chunk_count
     `,
-    [projectId, artifactSha, `%${token}%`]
+    [projectId, artifactSha, `%${token}%`, syncedEventIds]
   );
   const row = checks.rows[0];
-  if (row.event_count !== 2 || row.raw_artifact_count !== 1 || row.chunk_count < 1) {
+  if (row.synced_event_count !== 2 || row.raw_artifact_count !== 1 || row.chunk_count < 1) {
     throw new Error(`Spool sync DB checks failed: ${JSON.stringify(row)}`);
   }
 } finally {

@@ -376,7 +376,7 @@ if (
   !doctorText.stdout.includes("- Recallant CLI: installed") ||
   !doctorText.stdout.includes("- Database: available") ||
   !doctorText.stdout.includes("- Local model:") ||
-  !doctorText.stdout.includes("- Current project: attached") ||
+  !doctorText.stdout.includes("- Current project: local storage attached") ||
   !doctorText.stdout.includes("- Agent capture configured:") ||
   !doctorText.stdout.includes("Next command:") ||
   !doctorText.stdout.includes("recallant doctor --format json")

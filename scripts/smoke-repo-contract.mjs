@@ -105,7 +105,7 @@ const client = new Client({
   name: "recallant-repo-contract-smoke",
   version: "0.0.0"
 });
-const server = createRecallantMcpServer();
+const server = createRecallantMcpServer({ projectId });
 
 let checkpointSet;
 let checkpointGet;

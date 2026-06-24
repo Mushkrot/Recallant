@@ -172,6 +172,15 @@ process.stdout.write(
           "remote-mcp-doctor:smoke"
         ],
         matrix,
+        redacted_audit_summary: {
+          system_activity_events: "covered_by_contract_credentials_provisioning_doctor_smokes",
+          remote_mcp_success_and_failure_rows: true,
+          credential_lifecycle_rows: true,
+          request_bodies_redacted: true,
+          authorization_headers_redacted: true,
+          raw_credentials_redacted: true,
+          database_urls_redacted: true
+        },
         no_database_url_env: !childEnv.RECALLANT_DATABASE_URL,
         forbidden_output_leak: false
       }

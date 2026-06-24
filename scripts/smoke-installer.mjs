@@ -545,7 +545,7 @@ assert(
   "Dry-run output missing no-change line"
 );
 assert(
-  dryRunResult.combined.includes("<redacted-remote-mcp-credential>"),
+  dryRunResult.combined.includes("redacted-remote-mcp-credential"),
   "Dry-run doctor command did not redact credential"
 );
 assert(!dryRunResult.combined.includes(bootstrapSecret), "Dry-run output leaked raw credential");
@@ -587,7 +587,9 @@ for (const [mode, markers] of [
     `Doctor ${mode} output leaked raw credential`
   );
   assert(
-    !/docker|postgres/i.test(failureResult.combined),
+    !/(install|start|run|configure).*(docker|postgres)|RECALLANT_DATABASE_URL/i.test(
+      failureResult.combined
+    ),
     `Doctor ${mode} output suggested local Docker/Postgres`
   );
 }

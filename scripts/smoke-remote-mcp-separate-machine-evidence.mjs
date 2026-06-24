@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
@@ -311,7 +310,6 @@ try {
     NODE_EXTRA_CA_CERTS: cert.certPath,
     RECALLANT_CLIENT_BOOTSTRAP_RECALLANT_CMD: wrapper
   };
-  const runId = randomUUID();
   const result = await execFileAsync(
     process.execPath,
     [
@@ -461,13 +459,24 @@ try {
     JSON.stringify(
       {
         status: "ok",
-        run_id: runId,
+        external_machine_evidence_summary: {
+          run_id_redacted: true,
+          remote_mcp_ready: true,
+          session_context_ready: true,
+          checkpoint_state_proof: true,
+          semantic_marker_recall: true,
+          next_session_recall: true,
+          no_local_db_or_storage_on_remote: true,
+          redacted_human_summary: true,
+          redacted_evidence_json: true
+        },
         checks: [
           "redacted_evidence_json",
           "redacted_human_summary",
           "bootstrap_config_written",
           "remote_doctor_capture_proof",
           "remote_bridge_tools_call",
+          "next_session_recall",
           "forbidden_artifact_failure"
         ]
       },

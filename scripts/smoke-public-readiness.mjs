@@ -427,6 +427,13 @@ mustInclude(
     "checkpoint readback and governed semantic recall are separate surfaces",
     "baseline checkpoint parity contract is state-only",
     "memory_agent_checkpoint",
+    "Remote Existing-Project Release Gate Matrix",
+    "Remote MCP ready",
+    "Session/context ready",
+    "Governed semantic recall",
+    "External-machine evidence",
+    "Local `attach --confirm`",
+    "Not a remote-next-step",
     "Release-Candidate Bar"
   ],
   "CONTRACT_STATUS"
@@ -539,6 +546,11 @@ mustInclude(
     "One-command beginner onboarding hardening",
     "recallant onboard <project>",
     "Autonomous attach polish",
+    "Remote existing-project readiness gates",
+    "session/context readiness",
+    "governed semantic marker recall",
+    "external-machine evidence bundles",
+    "Remote existing-project pilot hardening",
     "rollback smoke",
     "opt-in Docker-backed managed",
     "Deployment-profile",
@@ -890,12 +902,29 @@ const publicReadinessMarkers = {
   live_readiness_gates_are_opt_in: "pass",
   public_private_boundary_markers: "pass"
 };
+const releaseGateMatrix = {
+  mandatory: [
+    "remote_mcp_ready",
+    "session_context_ready",
+    "governed_semantic_marker_recall",
+    "read_only_inventory_owner_approval",
+    "redacted_external_machine_evidence",
+    "public_readiness_and_security_smokes"
+  ],
+  optional: [
+    "checkpoint_state_proof",
+    "searchable_checkpoint_memory",
+    "live_central_server_readiness_smokes",
+    "local_attach_confirm_for_server_local_projects"
+  ]
+};
 
 process.stdout.write(
   `${JSON.stringify(
     {
       remote_existing_project_docs: remoteExistingProjectDocsSummary,
       public_readiness_markers: publicReadinessMarkers,
+      release_gate_matrix: releaseGateMatrix,
       public_workbench_readiness: {
         not_configured: {
           status: notConfigured.status,
