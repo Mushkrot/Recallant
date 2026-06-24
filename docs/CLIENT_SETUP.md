@@ -67,7 +67,8 @@ If the Recallant CLI is already installed on the workstation, use the same unive
 recallant connect .
 ```
 
-When it asks for the central server URL, enter `https://memory.example.com`. For automation, pass
+When it asks for the central server URL, enter `https://memory.example.com` or the bare host name
+`memory.example.com`; Recallant normalizes bare public hosts to HTTPS. For automation, pass
 `--server-url https://memory.example.com`. It works even when `recallant` is missing or old through
 the `curl .../connect | bash` path. The remote machine starts a pending connection request and the
 owner approves it in the protected browser flow. That first approval registers a local trusted-device

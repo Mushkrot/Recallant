@@ -1759,12 +1759,21 @@ async function promptLine(question: string) {
   process.stdout.write(question);
   return await new Promise<string>((resolvePrompt) => {
     const wasRaw = process.stdin.isRaw;
-    process.stdin.setRawMode?.(false);
-    process.stdin.resume();
-    process.stdin.once("data", (chunk) => {
+    let settled = false;
+    const finish = (value: string) => {
+      if (settled) return;
+      settled = true;
+      process.stdin.off("end", onEnd);
       if (wasRaw) process.stdin.setRawMode?.(true);
       process.stdin.pause();
-      resolvePrompt(String(chunk).trim());
+      resolvePrompt(value);
+    };
+    const onEnd = () => finish("");
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("end", onEnd);
+    process.stdin.once("data", (chunk) => {
+      finish(String(chunk).trim());
     });
   });
 }
@@ -1967,17 +1976,29 @@ function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
   ];
 }
 
+function hasUrlScheme(value: string) {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+}
+
+function withDefaultServerUrlScheme(value: string) {
+  const raw = value.trim();
+  if (!raw || hasUrlScheme(raw)) return raw;
+  if (/^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i.test(raw)) return `http://${raw}`;
+  return `https://${raw}`;
+}
+
 function normalizeRemoteConnectServerUrl(value: string | undefined | null) {
   const raw = value?.trim();
   if (!raw) return null;
+  const normalized = withDefaultServerUrlScheme(raw);
   try {
-    const url = new URL(raw);
+    const url = new URL(normalized);
     url.pathname = url.pathname.replace(/\/(?:api\/mcp|review)\/?$/, "/");
     url.search = "";
     url.hash = "";
     return url.toString().replace(/\/$/, "");
   } catch {
-    return raw.replace(/\/(?:api\/mcp|review)\/?$/, "").replace(/\/$/, "");
+    return normalized.replace(/\/(?:api\/mcp|review)\/?$/, "").replace(/\/$/, "");
   }
 }
 
@@ -6537,20 +6558,18 @@ async function confirmRemoteConnectLocalFolder(
 ) {
   if (argv.includes("--yes") || argv.includes("--non-interactive")) return "explicit_yes";
   if (!process.stdin.isTTY) return "skipped_non_tty";
-  process.stdout.write(
+  const answer = await promptLine(
     [
       "Recallant will request a scoped remote project credential for this local folder.",
       `Project: ${projectDir}`,
       `Path hint: ${pathHint}`,
-      "Type yes to continue: "
+      "Type yes to continue, or press Enter to cancel: "
     ].join("\n")
   );
-  const answer = await new Promise<string>((resolveAnswer) => {
-    process.stdin.setEncoding("utf8");
-    process.stdin.once("data", (chunk) => resolveAnswer(String(chunk).trim()));
-  });
   if (!["y", "yes"].includes(answer.toLowerCase())) {
-    throw new Error("VALIDATION_ERROR: local folder confirmation declined");
+    throw new Error(
+      "VALIDATION_ERROR: local folder confirmation declined. No remote project credential was requested."
+    );
   }
   return "confirmed_tty";
 }
@@ -7118,7 +7137,14 @@ function remoteCredentialProvisioningBridgeClientId(
 }
 
 function normalizeInviteServerUrl(raw: string) {
-  const parsed = new URL(raw);
+  let parsed: URL;
+  try {
+    parsed = new URL(withDefaultServerUrlScheme(raw));
+  } catch {
+    throw new Error(
+      "VALIDATION_ERROR: server URL must be a valid Recallant server URL, for example https://memory.example.com"
+    );
+  }
   if (
     parsed.protocol !== "https:" &&
     parsed.hostname !== "127.0.0.1" &&

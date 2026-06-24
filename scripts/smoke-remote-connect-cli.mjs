@@ -161,7 +161,9 @@ const approvedServer = await connectServer("approved-after-pending");
 const trustedServer = await connectServer("trusted-approved");
 const bootstrapServer = await connectServer("bootstrap-approved");
 const universalServer = await connectServer("universal-approved");
+const schemelessServer = await connectServer("schemeless-approved");
 const universalProject = await mkdtemp(join(tmpdir(), "recallant-connect-universal-"));
+const schemelessProject = await mkdtemp(join(tmpdir(), "recallant-connect-schemeless-"));
 const universalHome = await mkdtemp(join(tmpdir(), "recallant-connect-universal-home-"));
 try {
   const universal = await runCli(
@@ -196,6 +198,33 @@ try {
     universalConfig.includes("remote-bridge") &&
       universalConfig.includes("RECALLANT_REMOTE_MCP_CREDENTIAL_REF"),
     "universal connect did not write remote bridge config"
+  );
+  const schemelessUrl = schemelessServer.baseUrl.replace(/^http:\/\//, "");
+  const schemeless = await runCli(
+    [
+      "connect-cloud",
+      schemelessProject,
+      "--server-url",
+      schemelessUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: universalHome }
+    }
+  );
+  assert(schemeless.status === 0, `schemeless connect-cloud failed: ${schemeless.stderr}`);
+  const schemelessJson = JSON.parse(schemeless.stdout);
+  assert(
+    schemelessServer.state.startBodies.length === 1 &&
+      schemelessJson.approve_url === "http://127.0.0.1/approve/schemeless-approved",
+    `schemeless localhost URL did not reach the intended server: ${schemeless.stdout}`
   );
 
   const approved = await runCli(
@@ -550,10 +579,12 @@ try {
   trustedServer.server.close();
   bootstrapServer.server.close();
   universalServer.server.close();
+  schemelessServer.server.close();
   await rm(tempProject, { recursive: true, force: true });
   await rm(secondProject, { recursive: true, force: true });
   await rm(tempHome, { recursive: true, force: true });
   await rm(universalProject, { recursive: true, force: true });
+  await rm(schemelessProject, { recursive: true, force: true });
   await rm(universalHome, { recursive: true, force: true });
 }
 
