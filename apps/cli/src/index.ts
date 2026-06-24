@@ -604,12 +604,18 @@ function remoteAgentConsentScope(input: {
     allowed_context: [...remoteAgentAllowedContext],
     redaction_boundary: [...remoteAgentSecretClasses],
     not_sent: [...remoteAgentSecretClasses],
-    recommended_next_call: "memory_get_context_pack"
+    recommended_next_call: "memory_get_context_pack",
+    recommended_next_proof_call: "memory_create_agent_memory",
+    recommended_next_proof_followup_call: "memory_recall_agent_memories"
   };
 }
 
 function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
   if (!scope) return {};
+  const recommendedNextProofCall =
+    scope.recommended_next_proof_call ?? "memory_create_agent_memory";
+  const recommendedNextProofFollowupCall =
+    scope.recommended_next_proof_followup_call ?? "memory_recall_agent_memories";
   return {
     destination: scope.destination,
     credential_scope: scope.credential_scope,
@@ -621,8 +627,10 @@ function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
     redaction_boundary: scope.redaction_boundary,
     not_sent: scope.not_sent,
     recommended_next_call: scope.recommended_next_call,
+    recommended_next_proof_call: recommendedNextProofCall,
+    recommended_next_proof_followup_call: recommendedNextProofFollowupCall,
     recommended_next_action:
-      "Use memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth."
+      "Use memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
   };
 }
 
@@ -645,6 +653,7 @@ function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
     ...scope.not_sent.map((item) => `  - ${item}`),
     "",
     "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
+    "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
     "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
   ].join("\n")}\n`;
 }
@@ -2278,47 +2287,64 @@ function doctorOwnerSummary(input: {
   postgres: { configured: boolean; reachable: boolean };
   captureReadiness: Awaited<ReturnType<typeof checkCaptureReadiness>>;
   clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  remoteConsentScope: RemoteAgentConsentScope | null;
   requireCapture: boolean;
 }) {
   const attached = Boolean(input.captureReadiness.project_config.present);
+  const remoteReady = input.remoteConsentScope !== null;
+  const remoteOnly = remoteReady && !attached;
   const captureReady = input.captureReadiness.ready === true;
   const hookKit = objectValue(input.clientConnection.hook_kit);
-  const configured =
+  const localConfigured =
     attached &&
     (input.clientConnection.mcp_configured === true ||
       hookKit.ready === true ||
       input.clientConnection.status === "mcp_and_hooks_ready");
+  const configured = remoteOnly || localConfigured;
   const hookCaptureReady = hookKit.ready === true;
   const clientConfigured = input.clientConnection.mcp_configured === true;
   const connectionStatus =
     typeof input.clientConnection.status === "string"
       ? input.clientConnection.status
       : "not_configured";
-  const status = captureReady
-    ? "recording"
-    : attached
-      ? configured
-        ? "configured_not_recording"
-        : "not_configured"
-      : "not_attached";
+  const status = remoteOnly
+    ? "remote_ready_local_storage_not_attached"
+    : captureReady
+      ? "recording"
+      : attached
+        ? configured
+          ? "configured_not_recording"
+          : "not_configured"
+        : "not_attached";
   const headline = captureReady
     ? "Recallant capture is active for this project."
-    : status === "configured_not_recording"
-      ? "Recallant is configured, but active capture is not proven yet."
-      : status === "not_configured"
-        ? "Project is attached, but the agent client is not fully connected yet."
-        : "Project is not attached to Recallant yet.";
+    : status === "remote_ready_local_storage_not_attached"
+      ? "remote-ready, local storage not attached."
+      : status === "configured_not_recording"
+        ? "Recallant is configured, but active capture is not proven yet."
+        : status === "not_configured"
+          ? "Project is attached, but the agent client is not fully connected yet."
+          : "Project is not attached to Recallant yet.";
   const nextStep = captureReady
     ? "No startup-layer action is required. Continue normal work and close out the session when done."
-    : !attached
-      ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
-      : input.clientConnection.status !== "mcp_and_hooks_ready"
-        ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks --dry-run, then install after review.`
-        : "Start an agent session through Recallant, read context, write memory, and checkpoint; then rerun doctor --require-capture.";
+    : remoteOnly
+      ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
+      : !attached
+        ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
+        : input.clientConnection.status !== "mcp_and_hooks_ready"
+          ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks --dry-run, then install after review.`
+          : "Start an agent session through Recallant, read context, write memory, and checkpoint; then rerun doctor --require-capture.";
   return {
     status,
     headline,
     project_attached: attached,
+    remote_mcp_ready: remoteReady,
+    local_storage_status: remoteOnly
+      ? "remote-ready, local storage not attached"
+      : attached
+        ? "local storage attached"
+        : "not attached",
+    remote_destination: input.remoteConsentScope?.destination ?? null,
     client_configured: clientConfigured,
     hook_capture_ready: hookCaptureReady,
     connection_status: connectionStatus,
@@ -2384,7 +2410,8 @@ function doctorHumanReport(result: {
     `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
     `- Semantic indexing: ${semanticIndexingStatus}`,
     `- Service env profile: ${result.service_env_profile.status}`,
-    `- Current project: ${summary.project_attached ? "attached" : "not attached"}`,
+    `- Current project: ${summary.local_storage_status}`,
+    `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
     `- Agent capture active: ${okNo(summary.actually_recording)}`,
     `- Local spool: ${spool.status}, ${spool.unsynced_count} pending`,
@@ -2393,6 +2420,9 @@ function doctorHumanReport(result: {
     "",
     "Details:",
     `- Project config: ${result.project_config.present ? result.project_config.path : "not found"}`,
+    summary.remote_destination
+      ? `- Remote destination: ${summary.remote_destination.server_url}${summary.remote_destination.endpoint_path}`
+      : "- Remote destination: not configured",
     `- Client connection: ${summary.connection_status}`,
     `- Capture status: ${result.capture_readiness.status}`,
     `- Embedding recovery: ${result.pending_embeddings.recommendation}`,
@@ -4134,6 +4164,7 @@ async function runDoctor(argv: readonly string[]) {
     }
     const captureReadiness = await checkCaptureReadiness({ projectDir, database });
     const clientConnection = await clientConnectionReadiness(projectDir);
+    const remoteConsentScope = await readRemoteAgentConsentScope(projectDir);
     const localSpoolStatus = await getLocalSpoolStatus(argv);
     const serviceEnvProfile = await checkServiceEnvProfile();
     const productionEnv = await productionReadinessEnvSnapshot();
@@ -4146,6 +4177,7 @@ async function runDoctor(argv: readonly string[]) {
         postgres,
         captureReadiness,
         clientConnection,
+        remoteConsentScope,
         requireCapture
       }),
       postgres,
@@ -4158,6 +4190,14 @@ async function runDoctor(argv: readonly string[]) {
         required: requireCapture
       },
       client_connection: clientConnection,
+      remote_project: remoteConsentScope
+        ? {
+            status: "remote_mcp_ready",
+            ...remoteAgentConsentOutput(remoteConsentScope)
+          }
+        : {
+            status: "not_configured"
+          },
       local_spool_status: localSpoolStatus,
       local_model: await checkOllama(),
       pending_embeddings: pendingEmbeddingStatus,
@@ -6271,7 +6311,9 @@ function remoteConnectHumanReport(result: {
   writes_files?: boolean;
   setup_hint: string;
   rendered_config: string;
+  next_agent_steps?: string[];
 }) {
+  const nextAgentSteps = result.next_agent_steps ?? remoteConnectNextAgentSteps();
   return (
     [
       "Recallant connect-remote",
@@ -6285,9 +6327,21 @@ function remoteConnectHumanReport(result: {
       result.writes_files === true
         ? "Remote MCP config written. The rendered config is omitted from text output because it may contain a scoped credential; use --format json only for trusted automation."
         : result.rendered_config.trimEnd(),
+      "",
+      "Next agent steps:",
+      ...nextAgentSteps.map((step) => `- ${step}`),
       ""
     ].join("\n") + "\n"
   );
+}
+
+function remoteConnectNextAgentSteps() {
+  return [
+    'Run `recallant agent-start --format json`; remote-only projects should report `mode: "remote_mcp_ready"`.',
+    "Read startup context with `memory_get_context_pack` through the configured Recallant MCP bridge.",
+    "For semantic proof, run `recallant remote-doctor --semantic-proof` or create one safe governed marker with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`.",
+    "Use the local-storage attach path only when intentionally switching this project away from remote MCP."
+  ];
 }
 
 function remoteConnectCloudHumanReport(result: {
@@ -6309,7 +6363,9 @@ function remoteConnectCloudHumanReport(result: {
   writesFiles: boolean;
   doctorStatus: string;
   status: string;
+  nextAgentSteps?: string[];
 }) {
+  const nextAgentSteps = result.nextAgentSteps ?? remoteConnectNextAgentSteps();
   const approvalCopy =
     result.browserApprovalRequired === false
       ? result.approvalMode === "bootstrap_token"
@@ -6342,6 +6398,9 @@ function remoteConnectCloudHumanReport(result: {
       result.consentReceiptPath ? `Consent receipt: ${result.consentReceiptPath}` : null,
       `Writes files: ${result.writesFiles ? "yes" : "no"}`,
       `Remote doctor: ${result.doctorStatus}`,
+      "",
+      "Next agent steps:",
+      ...nextAgentSteps.map((step) => `- ${step}`),
       "",
       "First browser approval can register a trusted device key; later projects from that trusted device use signed nonce reconnect. Headless servers should use a one-time bootstrap token.",
       "This flow does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, or provider secrets.",
@@ -6642,7 +6701,8 @@ async function runConnectRemote(argv: readonly string[]) {
       exposes_workbench_or_admin_auth: false,
       exposes_raw_artifacts_or_backups: false,
       exposes_provider_secrets: false
-    }
+    },
+    next_agent_steps: remoteConnectNextAgentSteps()
   };
   process.stdout.write(
     format === "json" ? `${JSON.stringify(result, null, 2)}\n` : remoteConnectHumanReport(result)
@@ -7001,7 +7061,8 @@ async function runConnectCloud(argv: readonly string[]) {
       exposes_workbench_or_admin_auth: false,
       exposes_raw_artifacts_or_backups: false,
       exposes_provider_secrets: false
-    }
+    },
+    next_agent_steps: remoteConnectNextAgentSteps()
   };
   process.stdout.write(
     format === "json"

@@ -273,7 +273,11 @@ Remote setup has several distinct readiness levels. Keep them separate when diag
 project:
 
 - `recallant agent-start --format json` returning `mode: "remote_mcp_ready"` proves the project has a
-  remote consent/config boundary and can use the scoped remote MCP bridge.
+  remote consent/config boundary and can use the scoped remote MCP bridge. It also reports
+  `recommended_next_call: "memory_get_context_pack"` and
+  `recommended_next_proof_call: "memory_create_agent_memory"`.
+- Local `recallant doctor --project-dir .` on that remote workstation should report
+  `remote-ready, local storage not attached`, not a standalone local attach failure.
 - `memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint
   state can be written and read.
 - `memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic
@@ -548,8 +552,10 @@ not visible in Recallant, the project is configured but not yet capture active.
 For remote projects, `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` and
 the external Recallant consent boundary before agent work continues: destination server, HTTPS
 `/api/mcp` endpoint, project / developer / client credential scope, allowed context classes,
-prohibited data classes, and the recommended next call. Text mode prints the same boundary for
-humans.
+prohibited data classes, the recommended context-pack call, and the recommended semantic proof call.
+Text mode prints the same boundary for humans. Local `recallant doctor` should describe this as
+`remote-ready, local storage not attached` so agents do not run local `attach --confirm` unless the
+operator explicitly chooses the local-storage path.
 
 After `remote_mcp_ready`, a useful first proof is a small non-secret governed memory marker:
 `memory_create_agent_memory` with `scope: "project"`, `created_by: "agent"`, and

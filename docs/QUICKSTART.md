@@ -132,6 +132,10 @@ secret.
 Expected remote readiness:
 
 - `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+- the same JSON reports `recommended_next_call: "memory_get_context_pack"` and
+  `recommended_next_proof_call: "memory_create_agent_memory"`;
+- local `recallant doctor --project-dir .` reports `remote-ready, local storage not attached`
+  instead of treating the remote-only project as a broken local attach;
 - a checkpoint can be written and read back with `memory_set_checkpoint` and
   `memory_get_checkpoint`;
 - governed semantic memory is proven separately by creating a small non-secret memory through

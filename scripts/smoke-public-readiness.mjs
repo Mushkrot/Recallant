@@ -241,6 +241,9 @@ mustInclude(
   quickstart,
   [
     '`recallant agent-start --format json` reports `mode: "remote_mcp_ready"`',
+    '`recommended_next_call: "memory_get_context_pack"`',
+    '`recommended_next_proof_call: "memory_create_agent_memory"`',
+    "`remote-ready, local storage not attached`",
     "a checkpoint can be written and read back with `memory_set_checkpoint`",
     "governed semantic memory is proven separately",
     "Do not treat a checkpoint-only readback as semantic recall proof",
@@ -393,6 +396,7 @@ mustInclude(
     "Workbench migration review queue",
     "Current Remote Existing-Project Findings",
     '`mode: "remote_mcp_ready"`',
+    "`remote-ready, local storage not attached`",
     "session/context readiness",
     "checkpoint readback and governed semantic recall are separate surfaces",
     "baseline checkpoint parity contract is state-only",

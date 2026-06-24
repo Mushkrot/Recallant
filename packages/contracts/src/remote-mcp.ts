@@ -215,6 +215,8 @@ export type RemoteAgentConsentScope = {
   redaction_boundary: string[];
   not_sent: string[];
   recommended_next_call: "memory_get_context_pack" | "recallant context";
+  recommended_next_proof_call: "memory_create_agent_memory";
+  recommended_next_proof_followup_call: "memory_recall_agent_memories";
 };
 
 export const remoteMcpTransport = "mcp_streamable_http" as const;

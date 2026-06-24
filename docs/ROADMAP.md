@@ -82,10 +82,11 @@ dependable before expanding the product surface.
   backups, provider secrets, raw scoped credentials, or private overlays on remote machines.
 - Remote existing-project diagnostics polish: make remote `connect`, local `doctor`, and agent
   startup consistently distinguish `remote_mcp_ready`, checkpoint readback, and governed
-  semantic-memory recall; explain when local `attach --confirm` is the wrong next step for a remote
-  project; improve MCP tool schema hints for required `title`, `body`, and object-shaped `audience`;
-  and report raw-secret findings as paths/classes without implying that secret values should be
-  imported.
+  semantic-memory recall; keep successful remote connect output pointed at context packs and
+  semantic marker proof; explain when local `attach --confirm` is the wrong next step for a remote
+  project; improve MCP tool schema hints for required `title`, `body`, and object-shaped
+  `audience`; and report raw-secret findings as paths/classes without implying that secret values
+  should be imported.
 - Checkpoint parity: keep MCP `memory_set_checkpoint` state-only by default, then add an explicit
   high-level governed-memory closeout/checkpoint action for searchable checkpoint memory like CLI
   `agent-checkpoint`; make the Workbench, doctor, context packs, and docs use the same terms so

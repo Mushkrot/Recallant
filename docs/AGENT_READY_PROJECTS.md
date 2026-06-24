@@ -156,10 +156,14 @@ trusted import path, explicit owner action, or review policy allows it.
 For a remote existing project, prove the connection before importing history:
 
 1. verify `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
-2. create one non-secret governed memory marker with `memory_create_agent_memory`;
-3. recall that marker with `memory_recall_agent_memories`;
-4. run a read-only inventory of candidate docs and risky paths;
-5. ask the owner to approve a migration plan before writing project memories or imports.
+2. verify the same JSON recommends `memory_get_context_pack` and
+   `memory_create_agent_memory` as the next startup/proof calls;
+3. verify local `recallant doctor --project-dir .` reports
+   `remote-ready, local storage not attached` rather than a local attach failure;
+4. create one non-secret governed memory marker with `memory_create_agent_memory`;
+5. recall that marker with `memory_recall_agent_memories`;
+6. run a read-only inventory of candidate docs and risky paths;
+7. ask the owner to approve a migration plan before writing project memories or imports.
 
 The migration plan should group sources by action: summarize into governed memory, keep as a source
 reference, skip, or ask the owner. Safe governed memories should be concise and typed, for example

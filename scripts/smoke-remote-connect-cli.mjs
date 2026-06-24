@@ -301,6 +301,13 @@ try {
     parsedConsentReceipt.consent_scope?.destination?.endpoint_path === "/api/mcp",
     "remote consent receipt missing MCP endpoint"
   );
+  assert(
+    parsedConsentReceipt.consent_scope?.recommended_next_proof_call ===
+      "memory_create_agent_memory" &&
+      parsedConsentReceipt.consent_scope?.recommended_next_proof_followup_call ===
+        "memory_recall_agent_memories",
+    "remote consent receipt missing semantic proof call guidance"
+  );
   for (const secretClass of [
     ".env",
     "private keys",
@@ -322,6 +329,65 @@ try {
   );
   assert(!consentReceipt.includes("PRIVATE KEY"), "remote consent receipt leaked private key text");
   assert(!approved.stdout.includes("credential_hash"), "approved output exposed credential hash");
+  const remoteStart = await runCli(
+    ["agent-start", "--project-dir", tempProject, "--format", "json"],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(remoteStart.status === 0, `remote agent-start failed: ${remoteStart.stderr}`);
+  const remoteStartJson = JSON.parse(remoteStart.stdout);
+  assert(
+    remoteStartJson.mode === "remote_mcp_ready",
+    `remote agent-start did not report remote_mcp_ready: ${remoteStart.stdout}`
+  );
+  assert(
+    remoteStartJson.recommended_next_call === "memory_get_context_pack",
+    "remote agent-start did not recommend context pack startup"
+  );
+  assert(
+    remoteStartJson.recommended_next_proof_call === "memory_create_agent_memory" &&
+      remoteStartJson.recommended_next_proof_followup_call === "memory_recall_agent_memories",
+    "remote agent-start did not recommend governed semantic proof calls"
+  );
+  assert(
+    !String(remoteStartJson.recommended_next_action ?? "").includes("attach --confirm"),
+    "remote agent-start should not point to local attach"
+  );
+  const remoteDoctor = await runCli(["doctor", "--project-dir", tempProject, "--format", "json"], {
+    env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" }
+  });
+  assert(remoteDoctor.status === 0, `remote local doctor failed: ${remoteDoctor.stderr}`);
+  const remoteDoctorJson = JSON.parse(remoteDoctor.stdout);
+  assert(
+    remoteDoctorJson.owner_summary?.status === "remote_ready_local_storage_not_attached" &&
+      remoteDoctorJson.owner_summary?.local_storage_status ===
+        "remote-ready, local storage not attached",
+    `local doctor did not report remote-ready local-storage status: ${remoteDoctor.stdout}`
+  );
+  assert(
+    remoteDoctorJson.remote_project?.status === "remote_mcp_ready",
+    "local doctor did not expose remote_project readiness"
+  );
+  assert(
+    !String(remoteDoctorJson.owner_summary?.next_step ?? "").includes("attach --confirm"),
+    "remote-ready local doctor should not recommend attach --confirm"
+  );
+  const remoteDoctorText = await runCli(
+    ["doctor", "--project-dir", tempProject, "--format", "text"],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(
+    remoteDoctorText.status === 0,
+    `remote local doctor text failed: ${remoteDoctorText.stderr}`
+  );
+  assert(
+    remoteDoctorText.stdout.includes("remote-ready, local storage not attached") &&
+      remoteDoctorText.stdout.includes("Remote MCP: ready"),
+    `local doctor text missing remote-ready wording: ${remoteDoctorText.stdout}`
+  );
+  assert(
+    !remoteDoctorText.stdout.includes("Project is not attached to Recallant yet."),
+    "local doctor text still reports standalone not-attached headline"
+  );
 
   const trusted = await runCli(
     [
@@ -372,6 +438,54 @@ try {
     "trusted reconnect leaked private key"
   );
   assert(!trusted.stdout.includes("/connect/approve"), "trusted reconnect printed approve URL");
+
+  const connectRemoteTextProject = await mkdtemp(join(tmpdir(), "recallant-connect-remote-text-"));
+  const connectRemoteTextHome = await mkdtemp(
+    join(tmpdir(), "recallant-connect-remote-text-home-")
+  );
+  try {
+    const connectRemoteText = await runCli(
+      [
+        "connect-remote",
+        "codex",
+        "--server-url",
+        "https://recallant.example.com",
+        "--credential",
+        "rcl_mcp_connect_text_secret",
+        "--project-id",
+        "11111111-1111-4111-8111-111111111111",
+        "--developer-id",
+        "22222222-2222-4222-8222-222222222222",
+        "--client-id",
+        "remote-cli-smoke-text",
+        "--project-dir",
+        connectRemoteTextProject,
+        "--write",
+        "--format",
+        "text"
+      ],
+      { env: { HOME: connectRemoteTextHome, RECALLANT_DATABASE_URL: "" } }
+    );
+    assert(
+      connectRemoteText.status === 0,
+      `connect-remote text failed: ${connectRemoteText.stderr}`
+    );
+    assert(
+      connectRemoteText.stdout.includes("Next agent steps:") &&
+        connectRemoteText.stdout.includes("memory_get_context_pack") &&
+        connectRemoteText.stdout.includes("remote-doctor --semantic-proof") &&
+        connectRemoteText.stdout.includes("memory_create_agent_memory") &&
+        connectRemoteText.stdout.includes("memory_recall_agent_memories"),
+      `connect-remote text did not name context pack and semantic proof: ${connectRemoteText.stdout}`
+    );
+    assert(
+      !connectRemoteText.stdout.includes("attach --confirm"),
+      "connect-remote success text should not point to attach --confirm"
+    );
+  } finally {
+    await rm(connectRemoteTextProject, { recursive: true, force: true });
+    await rm(connectRemoteTextHome, { recursive: true, force: true });
+  }
 
   const bootstrapProject = await mkdtemp(join(tmpdir(), "recallant-connect-bootstrap-"));
   const bootstrapHome = await mkdtemp(join(tmpdir(), "recallant-connect-bootstrap-home-"));
