@@ -120,7 +120,15 @@ mustInclude(
     "recallant onboard /path/to/project",
     "storage_blocked",
     "Workbench link",
+    "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+    "`configured`: client/MCP access exists, but memory is not proven yet.",
+    "`context_ready`: an agent read the startup Context Pack.",
+    "`semantic_memory_ready`: a safe governed memory marker or agent-authored memory was created and",
     "capture active",
+    "`ingestion_approved`: the owner separately approved import or summarization",
+    "`remote_mcp_ready`",
+    "means scoped access is configured; it is not capture active",
+    "last semantic proof",
     "System activity ledger",
     "redacted system activity audit reports",
     "docs/AGENT_READY_PROJECTS.md",
@@ -132,6 +140,21 @@ mustInclude(
     "CONTRIBUTING.md"
   ],
   "README.md"
+);
+
+const readinessContractSource = await read("packages/contracts/src/readiness-status.ts");
+mustInclude(
+  readinessContractSource,
+  [
+    "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+    '"configured"',
+    '"context_ready"',
+    '"semantic_memory_ready"',
+    '"capture_active"',
+    '"ingestion_approved"',
+    "remote_mcp_ready means scoped remote MCP access is configured; it is not semantic memory proof"
+  ],
+  "packages/contracts/src/readiness-status.ts"
 );
 
 const quickstart = await read("docs/QUICKSTART.md");
@@ -251,6 +274,9 @@ mustInclude(
     "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
     "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
     "`memory_agent_checkpoint` tool",
+    "agents must use the MCP",
+    "memory lifecycle by default",
+    "Bulk project import, raw logs, customer data, raw artifacts",
     "Governed Memory Tool UX",
     '[{ "kind": "all_agents", "id": null }]',
     "Synthetic non-secret marker recallant_safe_semantic_marker_example",
@@ -285,7 +311,11 @@ mustInclude(
   clientSetup,
   [
     "Remote Readiness Versus Recall Proof",
+    "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
     "Safe remote existing-project sequence",
+    "mandatory context-pack call",
+    "mandatory semantic proof call",
+    "behavior is mandatory by",
     "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
     "optionally prove checkpoint state",
     "prove governed semantic recall",
@@ -338,13 +368,16 @@ mustInclude(
   [
     "Agent-Ready Projects",
     "Product Contract",
+    "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+    "`semantic_memory_ready`",
+    "automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the",
     "Beginner Onboarding Contract",
     "recallant onboard <project>",
     "Database not configured",
     "advanced/debug APIs",
     "recallant attach .",
     "recallant connect codex --project-dir .",
-    "recallant doctor --project-dir . --require-capture",
+    "recallant doctor --project-dir . --require-capture --semantic-proof",
     "recallant agent-start",
     "Documentation Posture And Context Packs",
     "`documentation_posture`",
@@ -495,6 +528,11 @@ mustInclude(
     "OpenMemory variants",
     "MF0.ai / MF0-1984",
     "Odysseus",
+    "From AgentMemory,",
+    "From OB1,",
+    "From Kortix/Suna,",
+    "Recallant does not become a broad autonomous-agent",
+    "workspace: it stays focused on governed coding-agent memory",
     "What Is Different",
     "Honest Status"
   ],

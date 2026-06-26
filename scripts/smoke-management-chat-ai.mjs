@@ -103,9 +103,33 @@ const baseDashboard = {
     detach_command: `recallant detach --project-id ${currentProjectId} --dry-run`
   },
   project_readiness: {
+    project_registered: true,
     last_context_read_at: "2026-06-01T00:00:00Z",
     last_memory_write_at: "2026-06-01T00:01:00Z",
     checkpoint_updated_at: "2026-06-01T00:02:00Z",
+    last_semantic_recall_proof_at: "2026-06-01T00:03:00Z",
+    semantic_memory_ready: true,
+    readiness_status: "capture_active",
+    readiness_contract: {
+      primary_state: "capture_active",
+      configured: true,
+      context_ready: true,
+      semantic_memory_ready: true,
+      capture_active: true,
+      evidence: {
+        last_context_read_at: "2026-06-01T00:00:00Z",
+        last_memory_write_at: "2026-06-01T00:01:00Z",
+        last_checkpoint_at: "2026-06-01T00:02:00Z",
+        last_semantic_recall_proof_at: "2026-06-01T00:03:00Z"
+      }
+    },
+    review_state_counts: {
+      accepted: 3,
+      pending_review: 0,
+      rejected: 0,
+      stale: 0,
+      conflict: 0
+    },
     capture_event_count: 4,
     captured_decision_count: 1
   },
@@ -587,7 +611,7 @@ try {
         "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
       ) &&
       String(concreteOnboarding.proposed_actions[2]?.command).includes(
-        "recallant doctor --project-dir /ai/new_project --require-capture"
+        "recallant doctor --project-dir /ai/new_project --require-capture --semantic-proof"
       ),
     `Concrete onboarding did not produce attach/connect/doctor plan: ${JSON.stringify(concreteOnboarding)}`
   );
@@ -726,10 +750,60 @@ try {
       connectionCheck.intent === "connection_check" &&
       connectionCheck.result_type === "read_only_answer" &&
       connectionCheck.facts.capture_ready === true &&
-      String(connectionCheck.answer).includes("уже пишет рабочую память") &&
+      connectionCheck.facts.semantic_memory_ready === true &&
+      connectionCheck.facts.readiness_status === "capture_active" &&
+      String(connectionCheck.answer).includes("capture-active evidence") &&
       String(connectionCheck.answer).includes("Последний context read") &&
-      String(connectionCheck.answer).includes("Последняя запись памяти"),
+      String(connectionCheck.answer).includes("Последняя запись памяти") &&
+      String(connectionCheck.answer).includes("Последний semantic proof"),
     `Connection check did not explain capture readiness: ${JSON.stringify(connectionCheck)}`
+  );
+
+  queuedResponses.push({
+    language: "en",
+    intent: "connection_check",
+    confidence: 0.9,
+    summary: "Owner asks whether a configured-only project is actually active.",
+    target_hint: "current",
+    destructive_or_sensitive: false,
+    global_rule_request: false
+  });
+  const configuredOnlyDashboard = JSON.parse(JSON.stringify(baseDashboard));
+  configuredOnlyDashboard.project_readiness = {
+    project_registered: true,
+    readiness_status: "configured",
+    semantic_memory_ready: false,
+    configured_but_not_capture_active: true,
+    readiness_contract: {
+      primary_state: "configured",
+      configured: true,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      evidence: {}
+    },
+    review_state_counts: {
+      accepted: 0,
+      pending_review: 0,
+      rejected: 0,
+      stale: 0,
+      conflict: 0
+    },
+    capture_event_count: 0,
+    captured_decision_count: 0
+  };
+  const configuredOnly = await buildManagementChatResponse({
+    message: "Is this project connected and actually writing memory?",
+    dashboard: configuredOnlyDashboard
+  });
+  assert(
+    configuredOnly.intent === "connection_check" &&
+      configuredOnly.result_type === "read_only_answer" &&
+      configuredOnly.facts.capture_ready === false &&
+      configuredOnly.facts.semantic_memory_ready === false &&
+      configuredOnly.facts.readiness_status === "configured" &&
+      String(configuredOnly.answer).includes("configured is not capture active"),
+    `Configured-only connection check overclaimed readiness: ${JSON.stringify(configuredOnly)}`
   );
 
   queuedResponses.push({
@@ -890,7 +964,7 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 19, `Unexpected mock AI call count: ${seenRequests.length}`);
+  assert(seenRequests.length === 20, `Unexpected mock AI call count: ${seenRequests.length}`);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

@@ -5,7 +5,28 @@ the same context by hand in every session. The public product goal is broader th
 Recallant should help a new or existing project become an agent-ready workspace with governed
 onboarding, capture, recall, review, and safety boundaries.
 
+Recallant also supports multi-agent continuity. Agents may share governed memories, source
+references, and checkpoints through the same server, but recovery remains scoped to the current
+project and task. A previous unfinished session is a handoff signal to review, not a warning that the
+current task is blocked or that old context should override the user's request.
+
 ## Product Contract
+
+Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+
+Recallant reports project readiness as separate states:
+
+- `configured`: scoped MCP/client config or local attach config exists. This proves access only.
+- `context_ready`: an agent session read a context pack for the project.
+- `semantic_memory_ready`: Recallant created and recalled a safe governed memory marker or
+  equivalent agent-authored memory.
+- `capture_active`: Recallant observed the working loop: context read, memory write, and checkpoint.
+- `ingestion_approved`: the owner separately approved import or summarization of existing project
+  files/history.
+
+Config-only is not active memory. When Recallant is configured and consent allows agent-authored
+memory, automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the
+default behavior inside the consent boundary, while project import remains approval-gated.
 
 An agent-ready project has three layers:
 
@@ -47,7 +68,7 @@ The lower-level commands remain advanced/debug APIs for automation and contribut
 ```bash
 recallant attach .
 recallant connect codex --project-dir .
-recallant doctor --project-dir . --require-capture
+recallant doctor --project-dir . --require-capture --semantic-proof
 recallant agent-start --task-hint "<task>"
 ```
 
@@ -233,8 +254,24 @@ After onboarding, agents should follow the same session loop:
 5. write meaningful decisions, actions, tests, and checkpoints;
 6. close out when the task pauses or finishes.
 
+For Codex, Claude Code, Cursor, and generic MCP clients, the hook/skill layer should map lifecycle
+events onto that same loop:
+
+- session start: `memory_start_session` then `memory_get_context_pack`;
+- meaningful work: concise `memory_append_event` or `memory_create_agent_memory` for decisions,
+  actions, and tests;
+- before compaction or pause: checkpoint;
+- stop/closeout: closeout summary and next step;
+- diagnostics: one synthetic non-secret marker create+recall proof.
+
 If MCP is unavailable, the CLI fallback can still record work and write local spool records for
 later sync.
+
+If `memory_start_session` reports `previous_session_recovery` or `previous_unclosed_session`, agents
+should first decide whether the prior session is fresh parallel work or stale recovery material. Fresh
+sessions require care before two agents edit the same project. Stale sessions should be recovered
+from the latest checkpoint/events only when relevant to the user's current request, then closed out at
+the next clear pause or completion point.
 
 ## Sources, Capabilities, And Secret References
 

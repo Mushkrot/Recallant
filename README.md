@@ -62,18 +62,33 @@ onboarding state. If the project looks production-sensitive, onboarding shows th
 backup behavior, import/review behavior, and an interactive continue/cancel prompt before changing
 files.
 
-The important state is not "installed" or "configured". The important state is **capture active**:
-Recallant has observed real context reads, memory writes, checkpoints, and recall proof for the
-project. The success output also includes a private Workbench link for review.
+The important state is not just "installed" or "configured". Recallant uses one public readiness
+contract:
+
+> Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+
+Status is intentionally split:
+
+- `configured`: client/MCP access exists, but memory is not proven yet.
+- `context_ready`: an agent read the startup Context Pack.
+- `semantic_memory_ready`: a safe governed memory marker or agent-authored memory was created and
+  recalled.
+- `capture active`: Recallant has observed context reads, memory writes, checkpoints, and semantic
+  proof for the project.
+- `ingestion_approved`: the owner separately approved import or summarization of existing project
+  files/history.
+
+The success output also includes a private Workbench link showing last context read, last memory
+write, last semantic proof, last checkpoint, and review-state counts.
 
 Lower-level CLI commands such as attach, connect, doctor, project-sanitize, agent capture, demo
 capture, and ask remain available for maintainers and automation. They are advanced/debug APIs, not
 the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
-Remote project access to an existing central Recallant server is a separate path. It has a first
-authenticated MCP/bridge slice plus a remote client bootstrap for operator-provided credentials, but
-real separate-machine capture/recall rehearsal is still required before treating it as the beginner
-default; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
+Remote project access to an existing central Recallant server is a separate path. `remote_mcp_ready`
+means scoped access is configured; it is not capture active. A remote project is active only after
+context read, governed create+recall proof, memory write, and checkpoint evidence are visible; see
+[Client setup](docs/CLIENT_SETUP.md#remote-project-access).
 
 ## Product Shape
 

@@ -76,7 +76,7 @@ const checkpointPayloadSchema = z
   .passthrough();
 const governedMemoryAudienceExample = [{ kind: "all_agents", id: null }] as const;
 const governedMemoryForbiddenClasses =
-  "raw secrets, credentials, customer data, private keys, backups, raw artifacts, and large logs";
+  "raw secrets, credentials, customer data, private keys, database URLs, provider tokens, backups, raw artifacts, and large logs";
 export const safeSemanticMarkerMemoryExample = {
   memory_type: "work_log",
   scope: "project",
@@ -102,16 +102,19 @@ export const safeSemanticMarkerRecallExample = {
 } as const;
 const createAgentMemoryDescription = [
   "Create a governed structured memory record.",
+  "When Recallant is configured and consent allows agent-authored memory, agents must use this for concise decisions, actions, tests, checkpoints, closeout summaries, and safe synthetic proof markers.",
+  "This is not an import tool: bulk project history, raw logs, customer data, artifacts, and file summaries require separate owner approval.",
   'Required fields: memory_type, scope, title, body, created_by, and audience; use audience [{ "kind": "all_agents", "id": null }] for normal project-wide agent recall.',
   `Safe semantic marker example: ${JSON.stringify(safeSemanticMarkerMemoryExample)}.`,
   `Never store ${governedMemoryForbiddenClasses}.`
 ].join(" ");
 const recallAgentMemoriesDescription = [
   "Return bounded governed memories relevant to the current task.",
+  "Use this after creating a diagnostic marker to prove semantic memory; checkpoint state readback alone is not semantic memory proof.",
   `Safe recall query example after creating a marker: ${JSON.stringify(
     safeSemanticMarkerRecallExample
   )}.`,
-  "Recall returns governed memory records; checkpoint state readback alone is not semantic recall proof."
+  "Recall returns governed memory records."
 ].join(" ");
 
 export type RecallantToolName =
@@ -422,6 +425,11 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           randomUUID(),
         checkpoint: { payload: null, updated_at: null },
         previous_unclosed_session: null,
+        previous_session_recovery: {
+          status: "none",
+          agent_message:
+            "No previous unfinished agent session was found for this project. Start from the context pack."
+        },
         recommended_next_calls: ["memory_get_context_pack"]
       });
     }

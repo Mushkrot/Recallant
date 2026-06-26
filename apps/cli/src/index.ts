@@ -41,7 +41,9 @@ import {
   renderRemoteClientTargetConfig
 } from "./client-targets.js";
 import {
+  buildRecallantReadinessContract,
   remoteMcpEndpointPath,
+  recallantReadinessInvariant,
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig,
   type RemoteAgentConsentScope
@@ -56,14 +58,29 @@ const recallantCliVersion = "0.0.0";
 
 const memorySection = `## Memory (Recallant)
 
-- At session start: call \`memory_start_session\`; if it reports an unclosed previous session, recover from checkpoint/captured events before asking the owner to repeat context.
+- If Recallant is configured and consent allows agent-authored memory, you must use Recallant by
+  default inside the allowed boundary. Configuration proves access; proof proves memory;
+  capture-active proves Recallant is doing its job.
+- At session start: call \`memory_start_session\`. If it reports \`previous_session_recovery\` or
+  \`previous_unclosed_session\`, treat that as recovery context for this project, not an alarm and
+  not a fresh instruction. Review checkpoint/captured events before asking the owner to repeat
+  context.
 - Before non-trivial work after session start: call \`memory_get_context_pack\` with the current task hint.
 - Use \`memory_search\` for raw evidence/chunks only when the context pack says more evidence is needed or the task changes.
 - Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
-- After meaningful progress: write meaningful events/memories through \`memory_append_event\` or \`memory_create_agent_memory\`, then call \`memory_set_checkpoint\`; Recallant syncs the compact \`PROJECT_LOG.md\` fallback when it exists.
-- On clear pause/exit/closeout intent: call \`memory_closeout\`; rely on its repo-sync result instead of editing \`PROJECT_LOG.md\` by hand.
+- Automatic inside consent: session start, context read, concise decisions, actions, tests,
+  checkpoints, closeout, and one synthetic proof marker when running diagnostics.
+- After meaningful progress: write concise agent-authored events/memories through
+  \`memory_append_event\` or \`memory_create_agent_memory\`, then call
+  \`memory_set_checkpoint\`; Recallant syncs the compact \`PROJECT_LOG.md\` fallback when it exists.
+- On clear pause/exit/closeout intent, or when meaningful work is complete: call
+  \`memory_closeout\`; rely on its repo-sync result instead of editing \`PROJECT_LOG.md\` by hand.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
-- Never paste secrets into memory tools.
+- Approval required: attach/import/onboard existing project history, bulk file summaries, raw logs,
+  customer data, or artifacts. Do not import or summarize project files without owner approval.
+- Forbidden: secrets, \`.env\`, private keys, raw credentials, database URLs, provider tokens,
+  customer data, raw artifacts, backups, and private deployment notes. Never paste them into memory
+  tools.
 - If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
   \`recallant agent-event\`, \`recallant agent-checkpoint\`, and \`recallant agent-closeout\`.
   If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
@@ -629,6 +646,14 @@ function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
     recommended_next_call: scope.recommended_next_call,
     recommended_next_proof_call: recommendedNextProofCall,
     recommended_next_proof_followup_call: recommendedNextProofFollowupCall,
+    readiness_contract: buildRecallantReadinessContract({
+      configured: true,
+      remote_mcp_ready: true,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      ingestion_approved: false
+    }),
     recommended_next_action:
       "Use memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
   };
@@ -640,6 +665,8 @@ function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
     "Recallant agent-start",
     "",
     "Mode: remote_mcp_ready",
+    "Readiness: configured/access-ready only; semantic memory is not proven yet.",
+    recallantReadinessInvariant,
     `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
     `Project scope: ${credentialScope.project_id ?? "unknown"}`,
     `Developer scope: ${credentialScope.developer_id ?? "unknown"}`,
@@ -654,6 +681,7 @@ function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
     "",
     "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
     "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
+    "Do not call this capture-active until context read, memory write/recall, and checkpoint evidence exist.",
     "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
   ].join("\n")}\n`;
 }
@@ -752,6 +780,7 @@ function agentStartHumanReport(input: {
   spoolPath?: string | null;
   warning?: string | null;
   previousUnclosedSession?: unknown;
+  previousSessionRecovery?: unknown;
   consentScope: RemoteAgentConsentScope | null;
 }) {
   const lines = [
@@ -765,8 +794,11 @@ function agentStartHumanReport(input: {
     `State file: ${input.statePath}`,
     input.spoolPath ? `Spool file: ${input.spoolPath}` : null,
     input.warning ? `Warning: ${input.warning}` : null,
+    input.previousSessionRecovery
+      ? `Previous session recovery: ${JSON.stringify(input.previousSessionRecovery)}`
+      : null,
     input.previousUnclosedSession
-      ? `Previous unclosed session: ${JSON.stringify(input.previousUnclosedSession)}`
+      ? `Previous unfinished session details: ${JSON.stringify(input.previousUnclosedSession)}`
       : null
   ];
   if (input.consentScope) {
@@ -1615,6 +1647,12 @@ function objectValue(value: unknown) {
     : {};
 }
 
+function stringValue(value: unknown) {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (value instanceof Date) return value.toISOString();
+  return null;
+}
+
 function runLocalCliSubcommand(args: readonly string[], parseJson = true) {
   const entrypoint = process.argv[1];
   if (!entrypoint) throw new Error("Internal error: CLI entrypoint path is not available.");
@@ -2303,6 +2341,273 @@ async function checkCaptureReadiness(input: {
   };
 }
 
+function readinessContractForDoctor(input: {
+  captureReadiness: Awaited<ReturnType<typeof checkCaptureReadiness>>;
+  clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  remoteConsentScope: RemoteAgentConsentScope | null;
+  semanticProof: LocalDoctorSemanticProofResult;
+}) {
+  const remoteConfigured = input.remoteConsentScope !== null;
+  const localState = objectValue(input.captureReadiness.local_state);
+  const databaseReadiness = objectValue(input.captureReadiness.database_readiness);
+  const hookKit = objectValue(input.clientConnection.hook_kit);
+  const configured = Boolean(
+    remoteConfigured ||
+    input.captureReadiness.project_config.present ||
+    input.clientConnection.mcp_configured === true ||
+    hookKit.ready === true
+  );
+  const lastContextReadAt =
+    stringValue(databaseReadiness.last_context_read_at) ||
+    stringValue(localState.last_context_read_at) ||
+    null;
+  const lastMemoryWriteAt =
+    stringValue(databaseReadiness.last_memory_write_at) ||
+    stringValue(localState.last_memory_write_at) ||
+    null;
+  const lastCheckpointAt =
+    stringValue(databaseReadiness.checkpoint_updated_at) ||
+    stringValue(localState.last_checkpoint_at) ||
+    null;
+
+  return buildRecallantReadinessContract({
+    configured,
+    remote_mcp_ready: remoteConfigured,
+    context_ready: Boolean(lastContextReadAt),
+    semantic_memory_ready: input.semanticProof.ok === true,
+    capture_active: input.captureReadiness.ready === true,
+    ingestion_approved: false,
+    last_context_read_at: lastContextReadAt,
+    last_memory_write_at: lastMemoryWriteAt,
+    last_checkpoint_at: lastCheckpointAt,
+    last_semantic_recall_proof_at: input.semanticProof.completed_at,
+    ingestion_approval_ref: null
+  });
+}
+
+type LocalDoctorSemanticProofResult = {
+  requested: boolean;
+  ok: boolean;
+  status: "not_requested" | "pass" | "fail";
+  code: string;
+  message: string;
+  marker: string | null;
+  session_id: string | null;
+  context_pack_id: string | null;
+  checkpoint_updated_at: string | null;
+  completed_at: string | null;
+  semantic_memory_proof: {
+    ok: boolean;
+    memory_id: string | null;
+    memory_status: string | null;
+    memory_type: "work_log" | null;
+    created_by: "agent" | null;
+    diagnostic_marker: boolean;
+    marker_found: boolean;
+    tool_names: ["memory_create_agent_memory", "memory_recall_agent_memories"] | [];
+  };
+  checkpoint_state_proof: {
+    ok: boolean;
+    checkpoint_state_only: boolean;
+    marker_found: boolean;
+  };
+};
+
+function semanticProofNotRequested(): LocalDoctorSemanticProofResult {
+  return {
+    requested: false,
+    ok: false,
+    status: "not_requested",
+    code: "not_requested",
+    message: "Local semantic memory proof was not requested.",
+    marker: null,
+    session_id: null,
+    context_pack_id: null,
+    checkpoint_updated_at: null,
+    completed_at: null,
+    semantic_memory_proof: {
+      ok: false,
+      memory_id: null,
+      memory_status: null,
+      memory_type: null,
+      created_by: null,
+      diagnostic_marker: false,
+      marker_found: false,
+      tool_names: []
+    },
+    checkpoint_state_proof: {
+      ok: false,
+      checkpoint_state_only: true,
+      marker_found: false
+    }
+  };
+}
+
+function semanticProofUnavailable(message: string): LocalDoctorSemanticProofResult {
+  return {
+    ...semanticProofNotRequested(),
+    requested: true,
+    status: "fail",
+    code: "semantic_proof_unavailable",
+    message
+  };
+}
+
+async function runLocalDoctorSemanticProof(input: {
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>;
+  argv: readonly string[];
+  projectDir: string;
+}): Promise<LocalDoctorSemanticProofResult> {
+  const marker = `local-doctor-semantic-proof:${randomUUID()}`;
+  const proofArgv = [
+    "node",
+    "recallant",
+    "agent-start",
+    "--project-dir",
+    input.projectDir,
+    "--task-hint",
+    `Recallant local doctor semantic proof ${marker}`,
+    "--session-label",
+    "recallant-local-doctor-semantic-proof"
+  ];
+  const started = await startAgentSession(input.database, proofArgv);
+  const checkpointPayload: JsonObject = {
+    schema_version: 1,
+    status: "semantic_proof_running",
+    current_focus: marker,
+    next_step: "Recall the synthetic semantic proof marker.",
+    open_questions: [],
+    updated_at: new Date().toISOString(),
+    source: "recallant-doctor-semantic-proof"
+  };
+  const checkpoint = await input.database.setCheckpoint(
+    started.state.project_id,
+    checkpointPayload
+  );
+  const checkpointReadback = await input.database.getCheckpoint(started.state.project_id);
+  const checkpointStateText = JSON.stringify(checkpointReadback?.payload ?? {});
+  const checkpointMarkerFound = checkpointStateText.includes(marker);
+  const event = await input.database.appendEvent({
+    session_id: started.state.session_id,
+    client_kind: started.state.client_kind,
+    event_kind: "other",
+    text: `Synthetic non-secret semantic proof marker: ${marker}`,
+    metadata: {
+      capture_kind: "doctor_semantic_proof",
+      diagnostic_marker: true,
+      contains_raw_secret: false,
+      project_dir: input.projectDir
+    },
+    raw_artifacts: [],
+    dedup_key: dedupHash("doctor-semantic-proof", {
+      project_id: started.state.project_id,
+      marker
+    })
+  });
+  const memory = await input.database.createAgentMemory({
+    project_id: started.state.project_id,
+    project_path: input.projectDir,
+    memory_type: "work_log",
+    scope: "project",
+    scope_kind: "project",
+    audience: [{ kind: "all_agents", id: null }],
+    title: "Local doctor semantic marker",
+    body: marker,
+    confidence: 1,
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "event",
+        source_id: String(event.event_id),
+        quote: marker,
+        metadata: {
+          capture_kind: "doctor_semantic_proof",
+          diagnostic_marker: true
+        }
+      }
+    ],
+    metadata: {
+      diagnostic_marker: true,
+      diagnostic_kind: "local_doctor_semantic_proof",
+      marker_id: marker,
+      contains_raw_secret: false
+    }
+  });
+  const recall = await input.database.recallAgentMemories({
+    project_id: started.state.project_id,
+    query: marker,
+    scope: "project",
+    memory_types: ["work_log"],
+    include_candidates: true,
+    include_needs_review: true,
+    top_k: 5,
+    max_chars_total: 4000
+  });
+  const markerFound = recall.memories.some(
+    (item: Record<string, unknown>) =>
+      String(item.body ?? "").includes(marker) || String(item.title ?? "").includes(marker)
+  );
+  const completedAt = new Date().toISOString();
+  const closeoutPayload: JsonObject = {
+    ...checkpointPayload,
+    status: markerFound ? "semantic_proof_complete" : "semantic_proof_failed",
+    summary: markerFound
+      ? "Local doctor created and recalled the synthetic semantic proof marker."
+      : "Local doctor created a synthetic marker but recall did not return it.",
+    updated_at: completedAt
+  };
+  const closeout = await input.database.closeout(
+    started.state.session_id,
+    closeoutPayload,
+    "closeout",
+    await getLocalSpoolStatus(input.argv),
+    {
+      diagnostic_marker: true,
+      marker_found: markerFound,
+      memory_id: memory.memory_id,
+      contains_raw_secret: false
+    }
+  );
+  await writeAgentSessionState(input.projectDir, {
+    ...started.state,
+    status: "closed",
+    updated_at: completedAt,
+    last_memory_write_at: completedAt,
+    last_checkpoint_at: completedAt,
+    last_event_id: String(event.event_id),
+    last_memory_id: String(memory.memory_id)
+  });
+  return {
+    requested: true,
+    ok: markerFound,
+    status: markerFound ? "pass" : "fail",
+    code: markerFound ? "semantic_memory_proof_ok" : "semantic_memory_proof_failed",
+    message: markerFound
+      ? "Local semantic governed-memory marker create/recall proof succeeded."
+      : "Local semantic governed-memory recall did not return the diagnostic marker.",
+    marker,
+    session_id: started.state.session_id,
+    context_pack_id: started.state.context_pack_id ?? null,
+    checkpoint_updated_at: stringValue(closeout.updated_at) ?? stringValue(checkpoint.updated_at),
+    completed_at: completedAt,
+    semantic_memory_proof: {
+      ok: markerFound,
+      memory_id: String(memory.memory_id),
+      memory_status: String(memory.status ?? ""),
+      memory_type: "work_log",
+      created_by: "agent",
+      diagnostic_marker: true,
+      marker_found: markerFound,
+      tool_names: ["memory_create_agent_memory", "memory_recall_agent_memories"]
+    },
+    checkpoint_state_proof: {
+      ok: checkpointMarkerFound,
+      checkpoint_state_only: true,
+      marker_found: checkpointMarkerFound
+    }
+  };
+}
+
 function doctorOwnerSummary(input: {
   projectDir: string;
   postgres: { configured: boolean; reachable: boolean };
@@ -2385,9 +2690,11 @@ function okNo(value: boolean) {
 
 function doctorHumanReport(result: {
   owner_summary: ReturnType<typeof doctorOwnerSummary>;
+  readiness_contract: ReturnType<typeof readinessContractForDoctor>;
   postgres: { configured: boolean; reachable: boolean };
   project_config: { path: string; present: boolean };
   capture_readiness: Awaited<ReturnType<typeof checkCaptureReadiness>> & { required: boolean };
+  semantic_memory_proof: LocalDoctorSemanticProofResult;
   client_connection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
   local_spool_status: Awaited<ReturnType<typeof getLocalSpoolStatus>>;
   local_model: Awaited<ReturnType<typeof checkOllama>>;
@@ -2423,6 +2730,8 @@ function doctorHumanReport(result: {
     "Recallant doctor",
     "",
     `Status: ${summary.headline}`,
+    `Readiness state: ${result.readiness_contract.primary_state}`,
+    recallantReadinessInvariant,
     "",
     "Checks:",
     `- Recallant CLI: installed`,
@@ -2435,6 +2744,11 @@ function doctorHumanReport(result: {
     `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
     `- Agent capture active: ${okNo(summary.actually_recording)}`,
+    `- Semantic memory proof: ${
+      result.semantic_memory_proof.requested
+        ? `${result.semantic_memory_proof.status} (${result.semantic_memory_proof.code})`
+        : "not requested"
+    }`,
     `- Local spool: ${spool.status}, ${spool.unsynced_count} pending`,
     "",
     `Next command: ${summary.next_step}`,
@@ -4175,6 +4489,7 @@ async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const requireCapture = argv.includes("--require-capture");
+  const semanticProofRequested = argv.includes("--semantic-proof");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
   let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
@@ -4187,14 +4502,29 @@ async function runDoctor(argv: readonly string[]) {
         postgres = { configured: true, reachable: false };
       }
     }
-    const captureReadiness = await checkCaptureReadiness({ projectDir, database });
     const clientConnection = await clientConnectionReadiness(projectDir);
     const remoteConsentScope = await readRemoteAgentConsentScope(projectDir);
+    const semanticProof = semanticProofRequested
+      ? database
+        ? await runLocalDoctorSemanticProof({ database, argv, projectDir })
+        : semanticProofUnavailable(
+            remoteConsentScope
+              ? "Local database is unavailable; run recallant remote-doctor --project-dir . --semantic-proof for remote MCP proof."
+              : "Local semantic proof requires RECALLANT_DATABASE_URL or an attached Recallant project."
+          )
+      : semanticProofNotRequested();
+    const captureReadiness = await checkCaptureReadiness({ projectDir, database });
     const localSpoolStatus = await getLocalSpoolStatus(argv);
     const serviceEnvProfile = await checkServiceEnvProfile();
     const productionEnv = await productionReadinessEnvSnapshot();
     const deploymentProfile = await checkDeploymentProfile(productionEnv.values);
     const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(database, projectDir);
+    const readinessContract = readinessContractForDoctor({
+      captureReadiness,
+      clientConnection,
+      remoteConsentScope,
+      semanticProof
+    });
     const result = {
       ...describeCliBoundary(),
       owner_summary: doctorOwnerSummary({
@@ -4205,6 +4535,7 @@ async function runDoctor(argv: readonly string[]) {
         remoteConsentScope,
         requireCapture
       }),
+      readiness_contract: readinessContract,
       postgres,
       project_config: {
         path: join(projectDir, ".recallant", "config"),
@@ -4214,6 +4545,7 @@ async function runDoctor(argv: readonly string[]) {
         ...captureReadiness,
         required: requireCapture
       },
+      semantic_memory_proof: semanticProof,
       client_connection: clientConnection,
       remote_project: remoteConsentScope
         ? {
@@ -5113,6 +5445,7 @@ async function runAgentStart(argv: readonly string[]) {
       context_pack_id: result.state.context_pack_id,
       state_path: currentSessionPathFor(result.state.project_dir),
       previous_unclosed_session: result.start_result.previous_unclosed_session,
+      previous_session_recovery: result.start_result.previous_session_recovery,
       recommended_next_action:
         consentScope !== null
           ? "Use memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth. Then use recallant agent-event after meaningful decisions/actions/tests."
@@ -5129,6 +5462,7 @@ async function runAgentStart(argv: readonly string[]) {
             contextPackId: result.state.context_pack_id,
             statePath: currentSessionPathFor(result.state.project_dir),
             previousUnclosedSession: result.start_result.previous_unclosed_session,
+            previousSessionRecovery: result.start_result.previous_session_recovery,
             consentScope
           })
     );
@@ -9124,6 +9458,19 @@ function usageText(command?: string) {
       "  recallant remote-cleanup --project-dir .",
       "  recallant remote-cleanup --project-dir . --confirm",
       "  recallant remote-cleanup --project-dir . --remove-cli-wrapper --confirm",
+      ""
+    ].join("\n");
+  }
+  if (command === "doctor") {
+    return [
+      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--semantic-proof] [--format json|text]",
+      "",
+      "Diagnose local Recallant setup. --require-capture gates on context read + memory write + checkpoint evidence. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
+      "",
+      "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+      "",
+      "Example:",
+      "  recallant doctor --project-dir . --require-capture --semantic-proof",
       ""
     ].join("\n");
   }

@@ -650,6 +650,15 @@ const editable = await db.createAgentMemory({
   created_by: "agent",
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "editable memory" }]
 });
+const semanticProofMarker = await db.createAgentMemory({
+  memory_type: "work_log",
+  scope: "project",
+  title: "Review UI safe semantic proof marker",
+  body: `review-ui-semantic-proof:${randomUUID()}`,
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "semantic proof marker" }],
+  metadata: { diagnostic_marker: true, contains_raw_secret: false }
+});
 const duplicate = await db.createAgentMemory({
   memory_type: "decision",
   scope: "project",
@@ -847,8 +856,17 @@ try {
     "Workbench status snapshot",
     "Needs attention",
     "Memory capture",
+    "Semantic proof",
+    "Semantic memory ready",
+    "Configured but not capture active",
     "Documentation posture",
     "needs review",
+    "last semantic proof",
+    "pending review",
+    "accepted",
+    "rejected",
+    "stale",
+    "conflict",
     "service app",
     "Top missing / risk signals",
     "Documentation strategy",
@@ -959,7 +977,7 @@ try {
     "source-linked",
     "Session starts and context reads prove the agent is entering Recallant.",
     "These records show what Recallant captured as usable working memory.",
-    "Capture active. Checkpoint is still missing.",
+    "Readiness: semantic memory ready",
     "last context read",
     "last memory write",
     "unclosed active session",
@@ -1271,6 +1289,22 @@ try {
       (item) => item.path === "README.md" && item.role === "canonical_doc"
     ) ||
     json.project_readiness?.project_registered !== true ||
+    json.project_readiness?.readiness_status !== "semantic_memory_ready" ||
+    json.project_readiness?.configured_but_not_capture_active !== true ||
+    json.project_readiness?.semantic_memory_ready !== true ||
+    !json.project_readiness?.last_semantic_recall_proof_at ||
+    json.project_readiness?.readiness_contract?.primary_state !== "semantic_memory_ready" ||
+    json.project_readiness?.readiness_contract?.evidence?.last_semantic_recall_proof_at !==
+      new Date(json.project_readiness.last_semantic_recall_proof_at).toISOString() ||
+    Number(json.project_readiness?.review_state_counts?.accepted ?? 0) < 1 ||
+    Number(json.project_readiness?.review_state_counts?.pending_review ?? 0) < 1 ||
+    Number(json.project_readiness?.review_state_counts?.conflict ?? 0) < 1 ||
+    !json.recent_activity.some(
+      (row) =>
+        row.activity_kind === "memory_write" &&
+        String(row.body ?? "").includes("Review UI safe semantic proof marker")
+    ) ||
+    !json.rules.every((memory) => memory.memory_id !== semanticProofMarker.memory_id) ||
     Number(json.migration_review?.total_imported ?? 0) < 3 ||
     Number(json.migration_review?.review_required ?? 0) < 3 ||
     Number(json.migration_review?.conflicts_or_duplicates ?? 0) < 1 ||
@@ -2130,7 +2164,7 @@ try {
       "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
     ) ||
     !String(onboardingConcreteJson.proposed_actions[2]?.command).includes(
-      "recallant doctor --project-dir /ai/new_project --require-capture"
+      "recallant doctor --project-dir /ai/new_project --require-capture --semantic-proof"
     )
   ) {
     throw new Error(`Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`);

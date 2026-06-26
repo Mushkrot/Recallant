@@ -48,6 +48,14 @@ Recallant borrows ideas at the pattern level:
 - from maintainer practice: release gates, security review, source references, and rollback;
 - from self-hosted tools: private defaults, explicit install profiles, and local data ownership.
 
+The product contract is intentionally narrower than the reference projects. From AgentMemory,
+Recallant borrows lifecycle hooks, capture-active diagnostics, and the idea that a connected agent
+should actually write and recall memory. From OB1, it borrows the Postgres/pgvector, MCP,
+source-ref, review-state, and recall-trace posture. From Kortix/Suna, it borrows visible agent
+workbench and review-gated change patterns. Recallant does not become a broad autonomous-agent
+workspace: it stays focused on governed coding-agent memory, provenance, scoped recall, review, and
+safe promotion of agent-authored memories.
+
 ## What Is Different
 
 Recallant treats memory as a governed product surface, not just a retrieval index.

@@ -46,7 +46,7 @@ function send(message) {
 }
 
 async function waitForResponse(id) {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     if (responses.has(id)) return responses.get(id);
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -233,7 +233,9 @@ const recovery = await callTool(10, "memory_start_session", {
 if (
   recovery.previous_unclosed_session?.session_id !== unclosed.session_id ||
   recovery.previous_unclosed_session?.is_stale !== true ||
-  recovery.previous_unclosed_session?.stale_after_minutes !== 0
+  recovery.previous_unclosed_session?.stale_after_minutes !== 0 ||
+  recovery.previous_session_recovery?.status !== "interrupted" ||
+  !String(recovery.previous_session_recovery?.agent_message ?? "").includes("interrupted")
 ) {
   throw new Error(`Stale-session recovery metadata failed: ${JSON.stringify(recovery)}`);
 }

@@ -66,6 +66,15 @@ async function callTool(id, name, args) {
   return JSON.parse(text);
 }
 
+async function callToolError(id, name, args) {
+  send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  const response = await waitForResponse(id);
+  const text = response.result?.content?.[0]?.text ?? response.error?.message ?? "";
+  const failed = response.result?.isError === true || Boolean(response.error);
+  if (!failed) throw new Error(`Expected ${name} to fail: ${JSON.stringify(response)}`);
+  return text;
+}
+
 let nextToolId = 13;
 async function callNextTool(name, args) {
   const response = await callTool(nextToolId, name, args);
@@ -125,6 +134,21 @@ const ordinary = await callTool(5, "memory_create_agent_memory", {
 });
 if (ordinary.status !== "accepted" || ordinary.use_policy !== "recall_allowed") {
   throw new Error(`Ordinary governed memory policy failed: ${JSON.stringify(ordinary)}`);
+}
+
+const forbiddenMemoryError = await callToolError(12, "memory_create_agent_memory", {
+  memory_type: "work_log",
+  scope: "project",
+  title: "Forbidden raw database URL",
+  body: "RECALLANT_DATABASE_URL=postgres://user:secret@example.invalid:5432/db",
+  created_by: "agent",
+  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "forbidden payload" }]
+});
+if (
+  !forbiddenMemoryError.includes("VALIDATION_ERROR") ||
+  !forbiddenMemoryError.includes("database URLs")
+) {
+  throw new Error(`Forbidden governed memory payload was not rejected clearly: ${forbiddenMemoryError}`);
 }
 
 const candidate = await callTool(6, "memory_create_agent_memory", {

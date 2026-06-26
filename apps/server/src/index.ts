@@ -3743,10 +3743,26 @@ function attentionSnapshot(data: ReviewDashboardData) {
 function renderFirstScreenSnapshot(data: ReviewDashboardData) {
   const project = currentProject(data);
   const capture = captureState(project);
+  const readiness = asRecord(data.project_readiness);
+  const contract = asRecord(readiness.readiness_contract);
   const sources = currentProjectSources(data);
   const sourceCounts = sourceHealthCounts(sources);
   const attention = attentionSnapshot(data);
-  const captureReady = capture.className === "active";
+  const captureReady =
+    typeof contract.capture_active === "boolean"
+      ? contract.capture_active
+      : capture.className === "active";
+  const semanticMemoryReady =
+    readiness.semantic_memory_ready === true || contract.semantic_memory_ready === true;
+  const readinessStatus = String(
+    readiness.readiness_status ?? contract.primary_state ?? "configured"
+  );
+  const readinessWarning = String(
+    readiness.readiness_warning ??
+      (readiness.configured_but_not_capture_active
+        ? "Configured but not capture active."
+        : "Capture proof is not complete yet.")
+  );
   const sourceLabel =
     sourceCounts.active === 0
       ? "No sources"
@@ -3767,8 +3783,17 @@ function renderFirstScreenSnapshot(data: ReviewDashboardData) {
     </article>
     <article class="${captureReady ? "ready" : "needs-work"}">
       <span>Memory capture</span>
-      <strong>${escapeHtml(capture.label)}</strong>
-      <p>${escapeHtml(captureReady ? "Agents are recording memory." : "Capture proof is not complete yet.")}</p>
+      <strong>${escapeHtml(readinessStatus.replaceAll("_", " "))}</strong>
+      <p>${escapeHtml(captureReady ? "Capture-active evidence is present." : readinessWarning)}</p>
+    </article>
+    <article class="${semanticMemoryReady ? "ready" : "needs-work"}">
+      <span>Semantic proof</span>
+      <strong>${escapeHtml(semanticMemoryReady ? "Semantic memory ready" : "Not proven yet")}</strong>
+      <p>${escapeHtml(
+        semanticMemoryReady
+          ? "Last create+recall proof is recorded."
+          : "Create and recall a governed marker before calling memory proven."
+      )}</p>
     </article>
     <article class="${sourceCounts.needsAttention > 0 || sourceCounts.needsSetup > 0 ? "needs-work" : "ready"}">
       <span>Sources</span>
@@ -4577,50 +4602,73 @@ function renderCurrentSignals(data: ReviewDashboardData) {
 
 function renderReadiness(data: ReviewDashboardData) {
   const readiness = asRecord(data.project_readiness);
+  const contract = asRecord(readiness.readiness_contract);
+  const evidence = asRecord(contract.evidence);
+  const reviewCounts = asRecord(readiness.review_state_counts);
   const registered = Boolean(readiness.project_registered);
-  const checkpointUpdatedAt = readiness.checkpoint_updated_at;
-  const lastContextReadAt = readiness.last_context_read_at;
-  const lastMemoryWriteAt = readiness.last_memory_write_at;
+  const checkpointUpdatedAt = readiness.checkpoint_updated_at ?? evidence.last_checkpoint_at;
+  const lastContextReadAt = readiness.last_context_read_at ?? evidence.last_context_read_at;
+  const lastMemoryWriteAt = readiness.last_memory_write_at ?? evidence.last_memory_write_at;
+  const lastSemanticRecallProofAt =
+    readiness.last_semantic_recall_proof_at ?? evidence.last_semantic_recall_proof_at;
   const activeSessions = Number(readiness.active_sessions ?? 0);
   const interruptedSessions = Number(readiness.interrupted_sessions ?? 0);
   const captureEvents = Number(readiness.capture_event_count ?? 0);
   const capturedDecisions = Number(readiness.captured_decision_count ?? 0);
-  const reviewMemories = Number(readiness.review_memory_count ?? 0);
+  const reviewMemories = Number(reviewCounts.pending_review ?? readiness.review_memory_count ?? 0);
+  const acceptedMemories = Number(reviewCounts.accepted ?? readiness.accepted_memory_count ?? 0);
+  const rejectedMemories = Number(reviewCounts.rejected ?? readiness.rejected_memory_count ?? 0);
+  const staleMemories = Number(reviewCounts.stale ?? readiness.stale_memory_count ?? 0);
+  const conflictMemories = Number(reviewCounts.conflict ?? readiness.conflict_memory_count ?? 0);
   const captureActive =
-    registered &&
-    interruptedSessions === 0 &&
-    lastContextReadAt !== null &&
-    lastContextReadAt !== undefined &&
-    lastMemoryWriteAt !== null &&
-    lastMemoryWriteAt !== undefined &&
-    checkpointUpdatedAt !== null &&
-    checkpointUpdatedAt !== undefined;
-  const statusText = !registered
-    ? "Project is not registered."
-    : captureActive
-      ? "Agent capture active."
-      : !lastContextReadAt
-        ? "Registered only. Agent context has not been read yet."
-        : !lastMemoryWriteAt
-          ? "Capture started. No memory write has been recorded yet."
-          : !checkpointUpdatedAt
-            ? "Capture active. Checkpoint is still missing."
-            : "Capture needs attention.";
+    typeof contract.capture_active === "boolean"
+      ? contract.capture_active
+      : registered &&
+        interruptedSessions === 0 &&
+        lastContextReadAt !== null &&
+        lastContextReadAt !== undefined &&
+        lastMemoryWriteAt !== null &&
+        lastMemoryWriteAt !== undefined &&
+        checkpointUpdatedAt !== null &&
+        checkpointUpdatedAt !== undefined;
+  const readinessStatus = String(readiness.readiness_status ?? contract.primary_state ?? "");
+  const warning = String(readiness.readiness_warning ?? "");
+  const statusText = warning
+    ? warning
+    : !registered
+      ? "Project is not registered."
+      : captureActive
+        ? "Agent capture active."
+        : !lastContextReadAt
+          ? "Registered only. Agent context has not been read yet."
+          : !lastMemoryWriteAt
+            ? "Capture started. No memory write has been recorded yet."
+            : !checkpointUpdatedAt
+              ? "Capture active. Checkpoint is still missing."
+              : "Capture needs attention.";
   const note =
     activeSessions > 0
       ? `${activeSessions} active session${activeSessions === 1 ? "" : "s"} still open.`
       : "No active agent sessions are open.";
   const readinessDate = (value: unknown) => formatDate(value) || "Not yet";
   return `<div class="readiness ${captureActive ? "ready" : "needs-work"}">
-    <strong>${escapeHtml(statusText)}</strong>
+    <strong>${escapeHtml(
+      readinessStatus ? `Readiness: ${readinessStatus.replaceAll("_", " ")}` : statusText
+    )}</strong>
+    <p>${escapeHtml(statusText)}</p>
     <p>${escapeHtml(note)}</p>
     <div class="summary-grid">
       <span><strong>${escapeHtml(readinessDate(lastContextReadAt))}</strong> last context read</span>
       <span><strong>${escapeHtml(readinessDate(lastMemoryWriteAt))}</strong> last memory write</span>
       <span><strong>${escapeHtml(readinessDate(checkpointUpdatedAt))}</strong> last checkpoint</span>
+      <span><strong>${escapeHtml(readinessDate(lastSemanticRecallProofAt))}</strong> last semantic proof</span>
       <span><strong>${escapeHtml(captureEvents)}</strong> capture events</span>
       <span><strong>${escapeHtml(capturedDecisions)}</strong> captured decisions</span>
-      <span><strong>${escapeHtml(reviewMemories)}</strong> needs review</span>
+      <span><strong>${escapeHtml(reviewMemories)}</strong> pending review</span>
+      <span><strong>${escapeHtml(acceptedMemories)}</strong> accepted</span>
+      <span><strong>${escapeHtml(rejectedMemories)}</strong> rejected</span>
+      <span><strong>${escapeHtml(staleMemories)}</strong> stale</span>
+      <span><strong>${escapeHtml(conflictMemories)}</strong> conflict</span>
     </div>
     <p class="readiness-note">Last session: ${escapeHtml(formatDate(readiness.last_session_at))}</p>
   </div>`;

@@ -117,11 +117,18 @@ export type ManagementChatResponse = {
     pending_paid_approvals: number;
     interrupted_sessions: number;
     capture_ready: boolean;
+    semantic_memory_ready: boolean;
+    readiness_status: string;
     last_context_read_at: string;
     last_memory_write_at: string;
     last_checkpoint_at: string;
+    last_semantic_recall_proof_at: string;
     capture_events: number;
     captured_decisions: number;
+    accepted_memories: number;
+    rejected_memories: number;
+    stale_memories: number;
+    conflict_memories: number;
     memory_count: number;
     source_count: number;
     source_ready_count: number;
@@ -1207,10 +1214,22 @@ function dashboardFacts(
   const currentProject = dashboard.current_project ?? {};
   const critical = dashboard.critical ?? {};
   const readiness = dashboard.project_readiness ?? {};
+  const contract = asRecord(readiness.readiness_contract);
+  const evidence = asRecord(contract.evidence);
+  const reviewCounts = asRecord(readiness.review_state_counts);
   const lastContextRead = stringValue(readiness.last_context_read_at);
   const lastMemoryWrite = stringValue(readiness.last_memory_write_at);
   const lastCheckpoint = stringValue(readiness.checkpoint_updated_at);
-  const captureReady = Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
+  const lastSemanticRecallProof = stringValue(readiness.last_semantic_recall_proof_at);
+  const captureReady =
+    typeof contract.capture_active === "boolean"
+      ? contract.capture_active
+      : Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
+  const semanticMemoryReady =
+    readiness.semantic_memory_ready === true || contract.semantic_memory_ready === true;
+  const readinessStatus = String(
+    readiness.readiness_status ?? contract.primary_state ?? "configured"
+  );
   const sourceFilters = dashboard.source_filters ?? {};
   const sources = asRows(sourceFilters.sources);
   const sourceHealth = sources.map((source) => asRecord(asRecord(source).source_health));
@@ -1243,11 +1262,23 @@ function dashboardFacts(
     pending_paid_approvals: asNumber(critical.pending_paid_approvals),
     interrupted_sessions: asNumber(critical.interrupted_sessions),
     capture_ready: captureReady,
-    last_context_read_at: lastContextRead || "not yet",
-    last_memory_write_at: lastMemoryWrite || "not yet",
-    last_checkpoint_at: lastCheckpoint || "not yet",
+    semantic_memory_ready: semanticMemoryReady,
+    readiness_status: readinessStatus,
+    last_context_read_at:
+      lastContextRead || stringValue(evidence.last_context_read_at) || "not yet",
+    last_memory_write_at:
+      lastMemoryWrite || stringValue(evidence.last_memory_write_at) || "not yet",
+    last_checkpoint_at: lastCheckpoint || stringValue(evidence.last_checkpoint_at) || "not yet",
+    last_semantic_recall_proof_at:
+      lastSemanticRecallProof || stringValue(evidence.last_semantic_recall_proof_at) || "not yet",
     capture_events: asNumber(readiness.capture_event_count),
     captured_decisions: asNumber(readiness.captured_decision_count),
+    accepted_memories: asNumber(
+      reviewCounts.accepted ?? readiness.accepted_memory_count ?? currentProject.memory_count
+    ),
+    rejected_memories: asNumber(reviewCounts.rejected ?? readiness.rejected_memory_count),
+    stale_memories: asNumber(reviewCounts.stale ?? readiness.stale_memory_count),
+    conflict_memories: asNumber(reviewCounts.conflict ?? readiness.conflict_memory_count),
     memory_count: asNumber(currentProject.memory_count),
     source_count: sources.length,
     source_ready_count: sourceReadyCount,
@@ -1419,11 +1450,11 @@ function analyzeWorkflowRequest(
     ? [
         `recallant attach ${projectDir} --sandbox --dry-run`,
         `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture`
+        `recallant doctor --project-dir ${projectDir} --require-capture --semantic-proof`
       ]
     : [
         `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture`
+        `recallant doctor --project-dir ${projectDir} --require-capture --semantic-proof`
       ];
   return {
     operation: wantsAttach ? "attach_project" : "connect_capture",
@@ -2038,7 +2069,7 @@ function answerRu(
   memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
-  const baseline = `${targetLineRu(facts)} На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
+  const baseline = `${targetLineRu(facts)} Статус памяти: ${facts.readiness_status.replaceAll("_", " ")}. На проверке: ${facts.pending_review}, импорт-кандидатов: ${facts.import_candidates}, конфликтов/дубликатов: ${facts.conflicts_or_duplicates}, активных правил: ${facts.active_rules}.`;
   if (policyBlockReason) {
     return `${baseline}\n\n${policyBlockReason}`;
   }
@@ -2123,20 +2154,22 @@ function answerRu(
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nЯ понял это как подключение проекта или обязательного startup/capture слоя, но не хватает данных: ${workflowRequest.missing.join(", ")}. Уточни путь к папке проекта. Я не буду угадывать путь, потому что attach/connect меняет локальные файлы проекта.`;
       }
-      return `${baseline}\n\nЯ понял это как подключение Recallant к проекту и агентскому клиенту. Безопасная цепочка: сначала attach/connect dry-run, затем установка project-local hook targets, затем doctor --require-capture. Полная готовность считается доказанной только после context read, memory write и checkpoint.`;
+      return `${baseline}\n\nЯ понял это как подключение Recallant к проекту и агентскому клиенту. Безопасная цепочка: сначала attach/connect dry-run, затем установка project-local hook targets, затем doctor --require-capture --semantic-proof. Полная готовность считается доказанной только после context read, create+recall semantic memory proof, memory write и checkpoint.`;
     case "pilot_qa":
       return `${baseline}\n\nЯ понял это как QA/pilot запрос. Безопасный порядок: product acceptance smoke, pilot report smoke, затем browser QA для Workbench. Эти проверки должны дать отчет: что подключено, что запомнилось, что вспомнилось позже, что было отцеплено, и какие оригиналы не были тронуты.`;
     case "connection_check":
       return `${baseline}\n\nПроверка подключения: ${
         facts.capture_ready
-          ? "проект не просто зарегистрирован, а уже пишет рабочую память через Recallant."
-          : "проект зарегистрирован, но полный capture loop еще не доказан."
-      }\n\nПоследний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
+          ? "проект не просто зарегистрирован, а имеет capture-active evidence через Recallant."
+          : facts.semantic_memory_ready
+            ? "semantic memory proof есть, но полный capture loop еще не доказан."
+            : "проект зарегистрирован, но configured is not capture active: semantic proof и полный capture loop еще не доказаны."
+      }\n\nПоследний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nВот что Recallant нашел в governed memory по запросу “${memoryLookupResult.query}”:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
       }
-      return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
+      return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Принято: ${facts.accepted_memories}, отклонено: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nЯ нашел возможные связанные правила/память по запросу “${memoryLookupResult.query}”. Диагностика ниже показывает, применяется ли каждая запись как binding rule и почему.\n\n${formatRuleDiagnosticsRu(memoryLookupResult)}`;
@@ -2147,7 +2180,7 @@ function answerRu(
       if (interpretation.source === "local_ai" && interpretation.answer) {
         return `${baseline}\n\n${interpretation.answer}`;
       }
-      return `${baseline}\n\nСистема готова для управляемой проверки этого проекта. Если хочешь действовать безопасно, сначала разбираем review/конфликты, потом проверяем старт агента через context pack.`;
+      return `${baseline}\n\nСистема готова для управляемой проверки этого проекта. Если хочешь действовать безопасно, сначала разбираем review/конфликты, потом проверяем старт агента через context pack и semantic proof.`;
   }
 }
 
@@ -2163,7 +2196,7 @@ function answerEn(
   memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
-  const baseline = `${targetLineEn(facts)} Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
+  const baseline = `${targetLineEn(facts)} Memory status: ${facts.readiness_status.replaceAll("_", " ")}. Pending review: ${facts.pending_review}, import candidates: ${facts.import_candidates}, conflicts/duplicates: ${facts.conflicts_or_duplicates}, active rules: ${facts.active_rules}.`;
   if (policyBlockReason) {
     return `${baseline}\n\n${policyBlockReason}`;
   }
@@ -2248,20 +2281,22 @@ function answerEn(
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nI understood this as project onboarding or mandatory startup/capture setup, but I need more detail: ${workflowRequest.missing.join(", ")}. Provide the project folder path. I will not guess the path because attach/connect changes local project files.`;
       }
-      return `${baseline}\n\nI understood this as connecting Recallant to a project and agent client. Safe sequence: attach/connect dry-run first, then project-local hook targets, then doctor --require-capture. Full readiness is proven only after context read, memory write, and checkpoint evidence exist.`;
+      return `${baseline}\n\nI understood this as connecting Recallant to a project and agent client. Safe sequence: attach/connect dry-run first, then project-local hook targets, then doctor --require-capture --semantic-proof. Full readiness is proven only after context read, create+recall semantic memory proof, memory write, and checkpoint evidence exist.`;
     case "pilot_qa":
       return `${baseline}\n\nI understood this as a QA/pilot request. Safe order: product acceptance smoke, pilot report smoke, then Workbench browser QA. These checks should report what was attached, what was remembered, what was recalled later, what was detached, and which originals stayed untouched.`;
     case "connection_check":
       return `${baseline}\n\nConnection check: ${
         facts.capture_ready
-          ? "this project is not merely registered; it has recorded working memory through Recallant."
-          : "this project is registered, but the full capture loop is not proven yet."
-      }\n\nLast context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
+          ? "this project is not merely configured; it has capture-active evidence through Recallant."
+          : facts.semantic_memory_ready
+            ? "semantic memory proof exists, but the full capture loop is not proven yet."
+            : "this project is configured/registered, but configured is not capture active; semantic proof and the full capture loop are not proven yet."
+      }\n\nLast context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nHere is what Recallant found in governed memory for “${memoryLookupResult.query}”:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
       }
-      return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
+      return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Accepted: ${facts.accepted_memories}, rejected: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nI found possibly related rules/memory for “${memoryLookupResult.query}”. The diagnostics below show whether each record applies as a binding rule and why.\n\n${formatRuleDiagnosticsEn(memoryLookupResult)}`;
@@ -2272,7 +2307,7 @@ function answerEn(
       if (interpretation.source === "local_ai" && interpretation.answer) {
         return `${baseline}\n\n${interpretation.answer}`;
       }
-      return `${baseline}\n\nThis project is ready for managed review. The safe order is review/conflicts first, then verify agent startup through the context pack.`;
+      return `${baseline}\n\nThis project is ready for managed review. The safe order is review/conflicts first, then verify agent startup through the context pack and semantic proof.`;
   }
 }
 
@@ -2533,12 +2568,12 @@ function actionsForIntent(
             ? "Сначала dry-run"
             : index === 1
               ? "Затем connect/hooks dry-run"
-              : "Проверить capture readiness"
+              : "Проверить semantic proof"
           : index === 0
             ? "Dry-run first"
             : index === 1
               ? "Then connect/hooks dry-run"
-              : "Verify capture readiness",
+              : "Verify semantic proof",
       kind: index < commands.length - 1 ? "dry_run" : "read_only",
       command,
       reason:

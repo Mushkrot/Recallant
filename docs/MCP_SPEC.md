@@ -126,6 +126,12 @@ it with `memory_recall_agent_memories`. The diagnostic marker body is synthetic;
 uses `memory_type: "work_log"`, `scope: "project"`, `created_by: "agent"`,
 `audience: [{ "kind": "all_agents", "id": null }]`, and `diagnostic_marker: true` metadata.
 
+`memory_start_session` reports unfinished prior work as session recovery, not checkpoint failure. The
+legacy-compatible `previous_unclosed_session` field contains diagnostic details, while
+`previous_session_recovery` contains the plain guidance an agent should show or follow. The agent
+should review current-project checkpoint/events for continuity, check for fresh parallel work, and
+avoid presenting stale recovery context as an error.
+
 A `memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic
 memory recall. The baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only by
 default; its output reports `checkpoint_state_only: true` and
@@ -136,6 +142,13 @@ refs, and returns the generated `memory_id`. Use `memory_create_agent_memory` fo
 facts, decisions, procedures, and work logs, not for implicit checkpoint closeout. The deterministic
 diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity proof is
 `npm run phase6:smoke:governed`.
+
+When Recallant is configured and consent allows agent-authored memory, agents must use the MCP
+memory lifecycle by default: start a session, read `memory_get_context_pack`, write concise governed
+decisions/actions/tests/work logs, checkpoint with `memory_agent_checkpoint` for searchable
+closeout, and prove semantic memory with `memory_create_agent_memory` followed by
+`memory_recall_agent_memories`. Bulk project import, raw logs, customer data, raw artifacts,
+database URLs, provider secrets, and existing-file summarization remain approval-gated.
 
 ## 3c) Governed Memory Tool UX
 

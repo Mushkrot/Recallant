@@ -282,8 +282,22 @@ access.
 
 ### Remote Readiness Versus Recall Proof
 
+Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+
 Remote setup has several distinct readiness levels. Keep them separate when diagnosing a connected
 project:
+
+Use these names consistently in client setup and diagnostics:
+
+- `configured`: scoped remote MCP access or local client config exists; no memory proof yet.
+- `context_ready`: the agent read `memory_get_context_pack`.
+- `semantic_memory_ready`: a safe synthetic or agent-authored governed memory was created and
+  recalled.
+- `capture_active`: context read, memory write, and checkpoint evidence are present.
+- `ingestion_approved`: the owner separately approved import/summarization of existing files or
+  history.
+
+Do not treat `remote_mcp_ready` as `capture_active`; it maps only to `configured`.
 
 Safe remote existing-project sequence:
 
@@ -300,6 +314,8 @@ Safe remote existing-project sequence:
   remote consent/config boundary and can use the scoped remote MCP bridge. It also reports
   `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`.
+  Those JSON field names are backward-compatible hints; for agents the behavior is mandatory by
+  default when consent allows agent-authored memory.
 - Local `recallant doctor --project-dir .` on that remote workstation should report
   `remote-ready, local storage not attached`, not a standalone local attach failure.
 - `memory_start_session` followed by `memory_get_context_pack`, or
@@ -319,6 +335,13 @@ can be read back is not, by itself, proof that semantic recall is populated. Exi
 migration should therefore start with a safe governed-memory marker proof, then continue with a
 reviewed import or summarization plan. Do not run local `attach --confirm` on a remote workstation
 unless the operator explicitly wants to switch that project to the local-storage attach flow.
+
+Session recovery is a separate surface again. `memory_start_session` may return
+`previous_unclosed_session` when a previous agent session for the same project is still active in
+storage, plus `previous_session_recovery` with user-facing guidance. Agents should treat this as a
+recovery hint for the scoped project, not as an error and not as new task instructions. If the
+previous session is stale, recover from the latest checkpoint/events only as needed; if it is fresh,
+check whether another agent is actively working before continuing.
 
 The baseline checkpoint parity contract is state-only: `memory_set_checkpoint` updates the current
 checkpoint and `memory_get_checkpoint` reads it back. Searchable checkpoint memory requires an
@@ -615,6 +638,10 @@ managed Recallant server remains the memory source of truth. That path should:
   capture-not-active states;
 - preserve the same startup contract: `memory_start_session`, `memory_get_context_pack`, meaningful
   evidence/checkpoints, and closeout.
+- give Codex, Claude Code, Cursor, and generic MCP clients the same hook/skill posture: on session
+  start recall context, during meaningful work write concise agent-authored decisions/actions/tests,
+  before compaction checkpoint, on stop close out, and during diagnostics create+recall one synthetic
+  non-secret marker.
 - keep validating `/api/mcp` endpoint behavior through `remote-mcp-contract:smoke`,
   `remote-mcp-credentials:smoke`, `remote-mcp-bridge:smoke`, and
   `remote-mcp-provisioning:smoke`; keep validating remote diagnostics through
@@ -653,10 +680,17 @@ The first agent session after connect should:
 That startup contract is what turns a registered project into an agent-ready project. If the loop is
 not visible in Recallant, the project is configured but not yet capture active.
 
+When the session start response includes `previous_session_recovery`, display that guidance in plain
+language. Avoid saying "old unclosed checkpoint": the checkpoint is the latest compact project state,
+while the unfinished item is the previous agent session. This distinction keeps multi-agent work
+calm: agents can share project memory across clients and projects, but each agent still scopes
+recovery to the current project and the user's current task.
+
 For remote projects, `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` and
 the external Recallant consent boundary before agent work continues: destination server, HTTPS
 `/api/mcp` endpoint, project / developer / client credential scope, allowed context classes,
-prohibited data classes, the recommended context-pack call, and the recommended semantic proof call.
+prohibited data classes, the mandatory context-pack call, and the mandatory semantic proof call when
+consent allows agent-authored memory.
 Text mode prints the same boundary for humans. Local `recallant doctor` should describe this as
 `remote-ready, local storage not attached` so agents do not run local `attach --confirm` unless the
 operator explicitly chooses the local-storage path.
