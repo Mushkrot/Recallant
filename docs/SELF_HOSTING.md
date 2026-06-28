@@ -97,8 +97,14 @@ because Recallant cannot prove recall or Workbench review without storage.
 After install:
 
 ```bash
+recallant --version
 recallant doctor
 ```
+
+`recallant --version` should print the CLI package version with git build metadata, for example
+`recallant 0.1.0-dev.0+<git-sha>` from a checkout install. If it reports `recallant 0.0.0`, refresh
+the installed CLI wrapper before treating the host as current. The root monorepo package version is
+not the installed CLI version.
 
 For production service profiles, configure the CLI runtime and the service manager to use the same
 private storage profile. `recallant doctor --format json` exposes a redacted

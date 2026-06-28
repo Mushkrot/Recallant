@@ -70,6 +70,11 @@ If the Recallant CLI is already installed on the workstation, use the same unive
 recallant connect .
 ```
 
+After the CLI is installed or refreshed, `recallant --version` should report the CLI package version
+plus git build metadata, such as `recallant 0.1.0-dev.0+<git-sha>`. A `recallant 0.0.0` output means
+the user-local wrapper still needs to be updated; the root monorepo package version is not the
+installed CLI version.
+
 When it asks for the central server URL, enter `https://memory.example.com` or the bare host name
 `memory.example.com`; Recallant normalizes bare public hosts to HTTPS. For automation, pass
 `--server-url https://memory.example.com`. It works even when `recallant` is missing or old through

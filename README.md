@@ -51,6 +51,15 @@ Then onboard a project from anywhere:
 recallant onboard /path/to/project
 ```
 
+After install or update, the CLI should report the CLI package version plus checkout metadata:
+
+```bash
+recallant --version
+# recallant 0.1.0-dev.0+<git-sha>
+```
+
+The root monorepo package version is not the installed CLI version.
+
 This local self-host path creates local storage and may require Docker/Postgres. It is not the path
 for connecting a workstation project to an existing central Recallant server.
 
@@ -147,6 +156,8 @@ Current strengths:
 - Codex-first MCP workflow with generic MCP client posture;
 - private-by-default Workbench and server defaults;
 - redacted system activity audit reports in the CLI and Workbench;
+- installed CLI version reporting with git build metadata and smoke coverage that rejects
+  `recallant 0.0.0`;
 - explicit security and cost governance design;
 - public/private boundary guards across docs and runtime/install defaults;
 - smoke coverage for the core capture/recall path.

@@ -33,7 +33,12 @@ Verify the CLI:
 
 ```bash
 recallant --version
+# recallant 0.1.0-dev.0+<git-sha>
 ```
+
+`recallant --version` reports the CLI package version with git build metadata when installed from a
+checkout. It should not report `recallant 0.0.0`. The repository root package version is a
+monorepo/workspace placeholder and is not the installed CLI version.
 
 ## 2. Make A Project Agent-Ready
 
