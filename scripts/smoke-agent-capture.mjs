@@ -243,6 +243,31 @@ try {
   const projectLog = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
   assert(projectLog.includes(marker), "PROJECT_LOG was not updated with checkpoint marker");
 
+  const semanticDoctor = await cli(onlineProject, [
+    "doctor",
+    "--require-capture",
+    "--semantic-proof",
+    "--format",
+    "json"
+  ]);
+  assert(
+    semanticDoctor.readiness_contract?.semantic_memory_ready === true &&
+      semanticDoctor.readiness_contract?.capture_active === true &&
+      semanticDoctor.semantic_memory_proof?.semantic_memory_proof?.marker_found === true,
+    `semantic doctor did not prove semantic/capture readiness: ${JSON.stringify(semanticDoctor)}`
+  );
+
+  const defaultDoctor = await cli(onlineProject, ["doctor", "--format", "json"]);
+  assert(
+    defaultDoctor.readiness_contract?.semantic_memory_ready === true &&
+      defaultDoctor.readiness_contract?.capture_active === true,
+    `default doctor did not read persisted semantic/capture readiness: ${JSON.stringify(defaultDoctor)}`
+  );
+  assert(
+    defaultDoctor.pending_embeddings?.project_id === attach.project_id,
+    `default doctor did not use configured project id for project-scoped checks: ${JSON.stringify(defaultDoctor.pending_embeddings)}`
+  );
+
   const detachDryRun = await cli(onlineProject, [
     "detach",
     "--project-id",

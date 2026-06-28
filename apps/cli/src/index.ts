@@ -2578,6 +2578,42 @@ function readinessContractForDoctor(input: {
   });
 }
 
+function readinessContractFromPersistentStatus(
+  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
+) {
+  const contract = readiness?.readiness_contract;
+  return contract && typeof contract === "object"
+    ? (contract as ReturnType<typeof buildRecallantReadinessContract>)
+    : null;
+}
+
+function mergeDoctorReadinessContract(
+  fallback: ReturnType<typeof buildRecallantReadinessContract>,
+  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
+) {
+  const persistent = readinessContractFromPersistentStatus(readiness);
+  if (!persistent) return fallback;
+  return buildRecallantReadinessContract({
+    configured: persistent.configured || fallback.configured,
+    remote_mcp_ready: persistent.remote_mcp_ready || fallback.remote_mcp_ready,
+    context_ready: persistent.context_ready || fallback.context_ready,
+    semantic_memory_ready: persistent.semantic_memory_ready || fallback.semantic_memory_ready,
+    capture_active: persistent.capture_active || fallback.capture_active,
+    ingestion_approved: persistent.ingestion_approved || fallback.ingestion_approved,
+    last_context_read_at:
+      persistent.evidence.last_context_read_at ?? fallback.evidence.last_context_read_at,
+    last_memory_write_at:
+      persistent.evidence.last_memory_write_at ?? fallback.evidence.last_memory_write_at,
+    last_checkpoint_at:
+      persistent.evidence.last_checkpoint_at ?? fallback.evidence.last_checkpoint_at,
+    last_semantic_recall_proof_at:
+      persistent.evidence.last_semantic_recall_proof_at ??
+      fallback.evidence.last_semantic_recall_proof_at,
+    ingestion_approval_ref:
+      persistent.evidence.ingestion_approval_ref ?? fallback.evidence.ingestion_approval_ref
+  });
+}
+
 type LocalDoctorSemanticProofResult = {
   requested: boolean;
   ok: boolean;
@@ -4724,12 +4760,25 @@ async function runDoctor(argv: readonly string[]) {
       projectDir,
       projectConfig?.project_id
     );
-    const readinessContract = readinessContractForDoctor({
+    const fallbackReadinessContract = readinessContractForDoctor({
       captureReadiness,
       clientConnection,
       remoteConsentScope,
       semanticProof
     });
+    const persistentReadiness =
+      database && projectConfig?.project_id
+        ? await database
+            .getProjectReadiness({
+              project_id: projectConfig.project_id,
+              remote_mcp_ready: Boolean(remoteConsentScope)
+            })
+            .catch(() => null)
+        : null;
+    const readinessContract = mergeDoctorReadinessContract(
+      fallbackReadinessContract,
+      persistentReadiness
+    );
     const result = {
       ...describeCliBoundary(),
       owner_summary: doctorOwnerSummary({
