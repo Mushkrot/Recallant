@@ -297,7 +297,12 @@ Use these names consistently in client setup and diagnostics:
 - `ingestion_approved`: the owner separately approved import/summarization of existing files or
   history.
 
-Do not treat `remote_mcp_ready` as `capture_active`; it maps only to `configured`.
+Do not treat `remote_mcp_ready` as `capture_active`; it maps only to `configured`. Remote
+`agent-start` reads bounded readiness through `memory_get_readiness_status` when the project has
+remote consent/config. Before proof, the primary state remains `configured`; after
+`recallant remote-doctor --semantic-proof`, a repeated `agent-start` should report
+`readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` remains false
+until the normal context/memory/checkpoint capture loop has actually run.
 
 Safe remote existing-project sequence:
 
@@ -315,7 +320,9 @@ Safe remote existing-project sequence:
   `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`.
   Those JSON field names are backward-compatible hints; for agents the behavior is mandatory by
-  default when consent allows agent-authored memory.
+  default when consent allows agent-authored memory. The same output includes the bounded
+  `readiness_contract`; configuration-only projects stay `configured`, and post-semantic-proof
+  projects report `semantic_memory_ready`.
 - Local `recallant doctor --project-dir .` on that remote workstation should report
   `remote-ready, local storage not attached`, not a standalone local attach failure.
 - `memory_start_session` followed by `memory_get_context_pack`, or

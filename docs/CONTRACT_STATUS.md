@@ -118,6 +118,9 @@ The same pilot drove the release gates now used for remote existing-project read
   memory write and recall;
 - checkpoint readback and governed semantic recall are separate surfaces, and the docs/CLI should not
   let operators confuse them;
+- `memory_get_readiness_status` now exposes persistent bounded readiness evidence, so a repeated
+  remote `agent-start` stays `configured` after checkpoint-only/capture proof and reports
+  `semantic_memory_ready` only after the governed semantic marker proof;
 - the baseline checkpoint parity contract is state-only: `memory_set_checkpoint` writes checkpoint
   state and reports no searchable memory id, while searchable checkpoint memory uses the explicit
   `memory_agent_checkpoint` / CLI `agent-checkpoint` high-level closeout path;

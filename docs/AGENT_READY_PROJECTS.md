@@ -28,6 +28,11 @@ Config-only is not active memory. When Recallant is configured and consent allow
 memory, automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the
 default behavior inside the consent boundary, while project import remains approval-gated.
 
+Remote MCP readiness uses the same contract. `remote_mcp_ready` is a transport/config state, not a
+memory state. `memory_get_readiness_status` exposes the bounded readiness evidence that Workbench and
+`agent-start` use: checkpoint-only evidence stays non-semantic, semantic proof stays non-capture, and
+`capture_active` requires the real working loop.
+
 An agent-ready project has three layers:
 
 - **Thin project files:** `AGENTS.md`, `PROJECT_LOG.md`, and client-local MCP configuration tell
@@ -177,15 +182,20 @@ trusted import path, explicit owner action, or review policy allows it.
 For a remote existing project, prove the connection before importing history:
 
 1. verify `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
-2. verify the same JSON recommends `memory_get_context_pack` and
+2. verify the same JSON reports `readiness_contract.primary_state: "configured"` until proof exists,
+   and recommends `memory_get_context_pack` and
    `memory_create_agent_memory` as the next startup/proof calls;
 3. verify local `recallant doctor --project-dir .` reports
    `remote-ready, local storage not attached` rather than a local attach failure;
 4. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
    `recallant remote-doctor --capture-proof`;
-5. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`;
-6. create one non-secret governed memory marker with `memory_create_agent_memory`;
-7. recall that marker with `memory_recall_agent_memories`;
+5. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`, but
+   keep that as checkpoint-only evidence;
+6. run `recallant remote-doctor --semantic-proof`, or create one non-secret governed memory marker
+   with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`;
+7. rerun `recallant agent-start --format json` and verify
+   `readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` is still false
+   unless a full capture loop has run;
 8. run a read-only inventory of candidate docs and risky paths;
 9. ask the owner to approve a migration plan before writing project memories or imports.
 

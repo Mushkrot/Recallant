@@ -86,9 +86,12 @@ capture, and ask remain available for maintainers and automation. They are advan
 the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 Remote project access to an existing central Recallant server is a separate path. `remote_mcp_ready`
-means scoped access is configured; it is not capture active. A remote project is active only after
-context read, governed create+recall proof, memory write, and checkpoint evidence are visible; see
-[Client setup](docs/CLIENT_SETUP.md#remote-project-access).
+maps to `configured`: scoped access exists, but memory is not proven by access alone.
+`recallant remote-doctor --semantic-proof` creates and recalls one safe governed marker; the server
+persists readiness evidence, and a later `recallant agent-start` reads that evidence through the
+bounded readiness status. Checkpoint-only readback and capture-proof do not imply
+`semantic_memory_ready`, and semantic proof does not imply `capture_active` without the full capture
+loop; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
 
 ## Product Shape
 

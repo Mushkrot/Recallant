@@ -132,6 +132,8 @@ secret.
 Expected remote readiness:
 
 - `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+- the same JSON includes a bounded `readiness_contract`; before proof its primary state remains
+  `configured`;
 - the same JSON reports `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`;
 - local `recallant doctor --project-dir .` reports `remote-ready, local storage not attached`
@@ -144,6 +146,9 @@ Expected remote readiness:
   should also become searchable governed checkpoint memory;
 - governed semantic memory is proven separately by creating a small non-secret memory through
   `memory_create_agent_memory` and recalling it through `memory_recall_agent_memories`.
+- after `recallant remote-doctor --semantic-proof`, rerun `recallant agent-start --format json`; it
+  should read persisted remote readiness evidence and report `semantic_memory_ready` without implying
+  `capture_active`.
 
 Do not treat a checkpoint-only readback as semantic recall proof. Do not run local `attach
 --confirm` on a remote workstation unless the operator explicitly wants the local-storage attach

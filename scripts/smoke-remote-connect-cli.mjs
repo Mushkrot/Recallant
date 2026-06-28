@@ -10,6 +10,80 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+const CHECKPOINT_ONLY_AT = "2026-06-27T00:00:00.000Z";
+const CONTEXT_READ_AT = "2026-06-27T00:30:00.000Z";
+const MEMORY_WRITE_AT = "2026-06-27T01:01:00.000Z";
+const SEMANTIC_PROOF_AT = "2026-06-27T01:02:03.000Z";
+
+function stageCode(report, id) {
+  const stage = report.stages?.find((entry) => entry.id === id);
+  return stage ? `${stage.status}:${stage.code}` : "missing";
+}
+
+function readinessContract(state = {}) {
+  const semanticProofAt = state.semanticProofAt ?? null;
+  const lastContextReadAt = state.lastContextReadAt ?? null;
+  const lastMemoryWriteAt = state.lastMemoryWriteAt ?? null;
+  const lastCheckpointAt = state.lastCheckpointAt ?? CHECKPOINT_ONLY_AT;
+  return {
+    version: 1,
+    invariant:
+      "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+    primary_state: semanticProofAt
+      ? "semantic_memory_ready"
+      : lastContextReadAt
+        ? "context_ready"
+        : "configured",
+    configured: true,
+    context_ready: Boolean(lastContextReadAt),
+    semantic_memory_ready: Boolean(semanticProofAt),
+    capture_active: false,
+    ingestion_approved: false,
+    remote_mcp_ready: true,
+    evidence: {
+      last_context_read_at: lastContextReadAt,
+      last_memory_write_at: lastMemoryWriteAt,
+      last_checkpoint_at: lastCheckpointAt,
+      last_semantic_recall_proof_at: semanticProofAt,
+      ingestion_approval_ref: null
+    },
+    notes: {
+      remote_mcp_ready:
+        "remote_mcp_ready means scoped remote MCP access is configured; it is not semantic memory proof.",
+      ingestion_approved:
+        "ingestion_approved is separate owner approval for import or bulk summarization; agent-authored work memory does not imply ingestion approval."
+    }
+  };
+}
+
+function readinessStatus(state = {}) {
+  const contract = readinessContract(state);
+  return {
+    ok: true,
+    project_id: "11111111-1111-4111-8111-111111111111",
+    configured: contract.configured,
+    context_ready: contract.context_ready,
+    semantic_memory_ready: contract.semantic_memory_ready,
+    capture_active: contract.capture_active,
+    ingestion_approved: contract.ingestion_approved,
+    remote_mcp_ready: contract.remote_mcp_ready,
+    readiness_status: contract.primary_state,
+    evidence: contract.evidence,
+    readiness_contract: contract,
+    last_context_read_at: contract.evidence.last_context_read_at,
+    last_memory_write_at: contract.evidence.last_memory_write_at,
+    checkpoint_updated_at: contract.evidence.last_checkpoint_at,
+    last_semantic_recall_proof_at: contract.evidence.last_semantic_recall_proof_at,
+    review_state_counts: {
+      pending_review: 0,
+      accepted: contract.semantic_memory_ready ? 1 : 0,
+      rejected: 0,
+      stale: 0,
+      conflict: 0
+    }
+  };
+}
+
 async function listen(handler) {
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -26,8 +100,141 @@ async function readJson(request) {
 function connectServer(mode) {
   let pollCount = 0;
   const startBodies = [];
-  const serverState = { startBodies };
+  const serverState = {
+    startBodies,
+    semanticProofAt: null,
+    lastContextReadAt: null,
+    lastMemoryWriteAt: null,
+    lastCheckpointAt: CHECKPOINT_ONLY_AT,
+    checkpointPayload: {
+      current_status: "checkpoint-only proof exists before semantic governed memory proof",
+      current_focus: "checkpoint-only-proof",
+      next_step: "Run governed semantic marker create/recall before semantic_memory_ready.",
+      open_questions: []
+    },
+    agentMemories: []
+  };
   const listener = listen(async (request, response) => {
+    if (request.method === "POST" && request.url === "/api/mcp") {
+      const body = await readJson(request);
+      if (body.method === "initialize") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              serverInfo: { name: "recallant-connect-cli-smoke", version: "0.0.0" }
+            }
+          })
+        );
+        return;
+      }
+      if (body.method === "tools/list") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              tools: [
+                { name: "memory_start_session" },
+                { name: "memory_get_context_pack" },
+                { name: "memory_set_checkpoint" },
+                { name: "memory_get_checkpoint" },
+                { name: "memory_create_agent_memory" },
+                { name: "memory_recall_agent_memories" },
+                { name: "memory_get_readiness_status" },
+                { name: "memory_heartbeat" }
+              ]
+            }
+          })
+        );
+        return;
+      }
+      if (body.method === "tools/call") {
+        const toolName = body.params?.name;
+        const args = body.params?.arguments ?? {};
+        let structuredContent;
+        if (toolName === "memory_get_readiness_status") {
+          structuredContent = readinessStatus(serverState);
+        } else if (toolName === "memory_start_session") {
+          structuredContent = {
+            ok: true,
+            session_id: "00000000-0000-4000-8000-000000000001"
+          };
+        } else if (toolName === "memory_get_context_pack") {
+          serverState.lastContextReadAt = CONTEXT_READ_AT;
+          structuredContent = {
+            ok: true,
+            context_pack_id: "connect-cli-context-pack",
+            session_id: args.session_id ?? "00000000-0000-4000-8000-000000000001"
+          };
+        } else if (toolName === "memory_set_checkpoint") {
+          serverState.checkpointPayload = args.payload ?? null;
+          serverState.lastCheckpointAt = CHECKPOINT_ONLY_AT;
+          structuredContent = { ok: true, updated_at: serverState.lastCheckpointAt };
+        } else if (toolName === "memory_get_checkpoint") {
+          structuredContent = {
+            payload: serverState.checkpointPayload,
+            updated_at: serverState.lastCheckpointAt
+          };
+        } else if (toolName === "memory_create_agent_memory") {
+          const memory = {
+            memory_id: `connect-cli-memory-${serverState.agentMemories.length + 1}`,
+            memory_type: args.memory_type,
+            title: args.title,
+            body: args.body,
+            metadata: args.metadata ?? {},
+            status: "accepted",
+            use_policy: "recall_allowed"
+          };
+          serverState.agentMemories.push(memory);
+          serverState.lastMemoryWriteAt = MEMORY_WRITE_AT;
+          if (memory.metadata?.diagnostic_marker === true) {
+            serverState.semanticProofAt = SEMANTIC_PROOF_AT;
+          }
+          structuredContent = {
+            memory_id: memory.memory_id,
+            status: memory.status,
+            use_policy: memory.use_policy
+          };
+        } else if (toolName === "memory_recall_agent_memories") {
+          structuredContent = {
+            trace_id: "connect-cli-recall-trace",
+            memories: serverState.agentMemories.filter((memory) =>
+              String(memory.body).includes(String(args.query ?? ""))
+            ),
+            truncated: false
+          };
+        } else {
+          structuredContent = { ok: true };
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(structuredContent) }],
+              structuredContent
+            }
+          })
+        );
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          error: { code: -32601, message: `unsupported method ${body.method}` }
+        })
+      );
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/connect/start") {
       startBodies.push(await readJson(request));
       response.writeHead(200, { "content-type": "application/json" });
@@ -81,6 +288,7 @@ function connectServer(mode) {
     }
     if (request.method === "POST" && request.url === "/api/connect/poll") {
       await readJson(request);
+      const requestOrigin = `http://${request.headers.host}`;
       pollCount += 1;
       response.writeHead(200, { "content-type": "application/json" });
       if (mode === "pending" || (mode === "approved-after-pending" && pollCount === 1)) {
@@ -106,7 +314,7 @@ function connectServer(mode) {
           request_id: `${mode}-request`,
           one_time_secret: "rcl_mcp_connect_secret",
           bootstrap: {
-            server_url: "https://recallant.example.com",
+            server_url: requestOrigin,
             credential: "rcl_mcp_connect_secret",
             project_id: "11111111-1111-4111-8111-111111111111",
             developer_id: "22222222-2222-4222-8222-222222222222",
@@ -369,6 +577,15 @@ try {
     `remote agent-start did not report remote_mcp_ready: ${remoteStart.stdout}`
   );
   assert(
+    remoteStartJson.remote_readiness_status === "read" &&
+      remoteStartJson.readiness_contract?.primary_state === "configured" &&
+      remoteStartJson.readiness_contract?.semantic_memory_ready === false &&
+      remoteStartJson.readiness_contract?.capture_active === false &&
+      remoteStartJson.readiness_contract?.evidence?.last_checkpoint_at === CHECKPOINT_ONLY_AT &&
+      remoteStartJson.readiness_contract?.evidence?.last_semantic_recall_proof_at === null,
+    `remote agent-start did not keep checkpoint-only readiness non-semantic: ${remoteStart.stdout}`
+  );
+  assert(
     remoteStartJson.recommended_next_call === "memory_get_context_pack",
     "remote agent-start did not recommend context pack startup"
   );
@@ -380,6 +597,109 @@ try {
   assert(
     !String(remoteStartJson.recommended_next_action ?? "").includes("attach --confirm"),
     "remote agent-start should not point to local attach"
+  );
+  const captureProof = await runCli(
+    [
+      "remote-doctor",
+      "--project-dir",
+      tempProject,
+      "--capture-proof",
+      "--allow-insecure-localhost",
+      "--format",
+      "json"
+    ],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(captureProof.status === 0, `remote capture proof failed: ${captureProof.stderr}`);
+  const captureProofJson = JSON.parse(captureProof.stdout);
+  assert(
+    stageCode(captureProofJson, "session_context_readiness") ===
+      "pass:session_context_readiness_ok" &&
+      stageCode(captureProofJson, "checkpoint_state_proof") === "skipped:not_requested" &&
+      stageCode(captureProofJson, "semantic_memory_proof") === "skipped:not_requested",
+    `remote capture proof should not imply checkpoint or semantic proof: ${captureProof.stdout}`
+  );
+  const remoteStartAfterCaptureProof = await runCli(
+    ["agent-start", "--project-dir", tempProject, "--format", "json"],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(
+    remoteStartAfterCaptureProof.status === 0,
+    `post-capture-proof remote agent-start failed: ${remoteStartAfterCaptureProof.stderr}`
+  );
+  const remoteStartAfterCaptureProofJson = JSON.parse(remoteStartAfterCaptureProof.stdout);
+  assert(
+    remoteStartAfterCaptureProofJson.readiness_contract?.semantic_memory_ready === false &&
+      remoteStartAfterCaptureProofJson.readiness_contract?.capture_active === false &&
+      remoteStartAfterCaptureProofJson.readiness_contract?.evidence
+        ?.last_semantic_recall_proof_at === null,
+    `capture proof should not become semantic or capture-active readiness: ${remoteStartAfterCaptureProof.stdout}`
+  );
+  const semanticProof = await runCli(
+    [
+      "remote-doctor",
+      "--project-dir",
+      tempProject,
+      "--semantic-proof",
+      "--allow-insecure-localhost",
+      "--format",
+      "json"
+    ],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(semanticProof.status === 0, `remote semantic proof failed: ${semanticProof.stderr}`);
+  const semanticProofJson = JSON.parse(semanticProof.stdout);
+  assert(
+    stageCode(semanticProofJson, "session_context_readiness") ===
+      "pass:session_context_readiness_ok" &&
+      stageCode(semanticProofJson, "checkpoint_state_proof") ===
+        "pass:checkpoint_state_proof_ok" &&
+      stageCode(semanticProofJson, "semantic_memory_proof") ===
+        "pass:semantic_memory_proof_ok",
+    `remote semantic proof did not pass all proof stages: ${semanticProof.stdout}`
+  );
+  assert(
+    approvedServer.state.semanticProofAt === SEMANTIC_PROOF_AT,
+    "remote semantic proof did not persist semantic readiness evidence"
+  );
+  const remoteStartAfterProof = await runCli(
+    ["agent-start", "--project-dir", tempProject, "--format", "json"],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(
+    remoteStartAfterProof.status === 0,
+    `post-proof remote agent-start failed: ${remoteStartAfterProof.stderr}`
+  );
+  const remoteStartAfterProofJson = JSON.parse(remoteStartAfterProof.stdout);
+  assert(
+    remoteStartAfterProofJson.mode === "remote_mcp_ready" &&
+      remoteStartAfterProofJson.readiness_contract?.primary_state === "semantic_memory_ready" &&
+      remoteStartAfterProofJson.readiness_contract?.semantic_memory_ready === true &&
+      remoteStartAfterProofJson.readiness_contract?.capture_active === false &&
+      remoteStartAfterProofJson.readiness_contract?.ingestion_approved === false &&
+      remoteStartAfterProofJson.readiness_contract?.evidence
+        ?.last_semantic_recall_proof_at === SEMANTIC_PROOF_AT,
+    `post-proof remote agent-start did not read semantic readiness: ${remoteStartAfterProof.stdout}`
+  );
+  assert(
+    !String(remoteStartAfterProofJson.recommended_next_action ?? "").includes("attach") &&
+      !String(remoteStartAfterProofJson.recommended_next_action ?? "").includes("import") &&
+      !String(remoteStartAfterProofJson.recommended_next_action ?? "").includes("onboard"),
+    "post-proof remote agent-start should not recommend attach/import/onboard"
+  );
+  const remoteStartAfterProofText = await runCli(
+    ["agent-start", "--project-dir", tempProject, "--format", "text"],
+    { env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(
+    remoteStartAfterProofText.status === 0,
+    `post-proof remote agent-start text failed: ${remoteStartAfterProofText.stderr}`
+  );
+  assert(
+    remoteStartAfterProofText.stdout.includes("semantic_memory_ready") &&
+      remoteStartAfterProofText.stdout.includes(SEMANTIC_PROOF_AT) &&
+      !remoteStartAfterProofText.stdout.includes("semantic memory is not proven yet"),
+    `post-proof text output did not describe semantic readiness: ${remoteStartAfterProofText.stdout}`
   );
   const remoteDoctor = await runCli(["doctor", "--project-dir", tempProject, "--format", "json"], {
     env: { HOME: tempHome, RECALLANT_DATABASE_URL: "" }
@@ -667,6 +987,8 @@ process.stdout.write(
         bootstrap_token: "headless_redeem_without_browser_or_trusted_device",
         credential_store: "project_config_ref_local_store_secret",
         consent_receipt: "project_local_non_secret_remote_boundary",
+        agent_start_readiness:
+          "configured_checkpoint_only_then_capture_proof_non_semantic_then_semantic_memory_ready_without_capture_active",
         doctor: "runs_by_default_skip_flag_honored",
         denied: "clear_error",
         expired: "clear_error",

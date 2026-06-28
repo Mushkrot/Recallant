@@ -7614,6 +7614,133 @@ export class RecallantDb {
     });
   }
 
+  async getProjectReadiness(input?: {
+    project_id?: string | null;
+    remote_mcp_ready?: boolean;
+    ingestion_approved?: boolean;
+    ingestion_approval_ref?: string | null;
+  }) {
+    const context = input?.project_id ? null : await this.ensureProject();
+    const projectId = input?.project_id ?? context?.projectId;
+    const readiness = await this.pool.query(
+      `
+        SELECT
+          EXISTS (SELECT 1 FROM projects WHERE id = $1) AS project_registered,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active') AS active_sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'closed') AS closed_sessions,
+          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
+          (SELECT count(*)::int FROM events WHERE project_id = $1) AS event_count,
+          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL) AS active_chunk_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'accepted') AS accepted_memory_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_memory_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'rejected') AS rejected_memory_count,
+          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'stale') AS stale_memory_count,
+          (
+            SELECT count(*)::int
+            FROM agent_memories
+            WHERE project_id = $1
+              AND status NOT IN ('rejected', 'archived', 'superseded')
+              AND (
+                metadata::text ILIKE '%possible_conflict%'
+                OR metadata::text ILIKE '%conflict%'
+              )
+          ) AS conflict_memory_count,
+          (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
+          (SELECT max(created_at) FROM events WHERE project_id = $1 AND payload->'metadata'->>'capture_kind' = 'context_read') AS last_context_read_at,
+          (
+            SELECT max(activity_at)
+            FROM (
+              SELECT max(created_at) AS activity_at
+              FROM events
+              WHERE project_id = $1
+                AND (
+                  payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+                  OR kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
+                )
+              UNION ALL
+              SELECT max(updated_at) AS activity_at
+              FROM agent_memories
+              WHERE project_id = $1
+            ) AS memory_activity
+          ) AS last_memory_write_at,
+          (
+            SELECT max(updated_at)
+            FROM agent_memories
+            WHERE project_id = $1
+              AND created_by = 'agent'
+              AND metadata->>'diagnostic_marker' = 'true'
+              AND status NOT IN ('rejected', 'archived', 'superseded')
+              AND use_policy <> 'do_not_use'
+          ) AS last_semantic_recall_proof_at,
+          (
+            SELECT count(*)::int
+            FROM events
+            WHERE project_id = $1
+              AND (
+                payload->'metadata'->>'capture_kind' = 'context_read'
+                OR payload->'metadata'->>'capture_kind' LIKE 'agent_%'
+              )
+          ) AS capture_event_count,
+          (
+            SELECT count(*)::int
+            FROM agent_memories
+            WHERE project_id = $1
+              AND metadata->>'created_from' = 'recallant_agent_event'
+          ) AS captured_decision_count,
+          (SELECT max(last_seen_at) FROM sessions WHERE project_id = $1) AS last_session_at
+      `,
+      [projectId]
+    );
+    const readinessRow = readiness.rows[0] ?? {};
+    const lastContextReadAt = nullableIso(readinessRow.last_context_read_at);
+    const lastMemoryWriteAt = nullableIso(readinessRow.last_memory_write_at);
+    const checkpointUpdatedAt = nullableIso(readinessRow.checkpoint_updated_at);
+    const lastSemanticRecallProofAt = nullableIso(readinessRow.last_semantic_recall_proof_at);
+    const operationalCaptureActive =
+      Boolean(readinessRow.project_registered) &&
+      Number(readinessRow.interrupted_sessions ?? 0) === 0 &&
+      Boolean(lastContextReadAt) &&
+      Boolean(lastMemoryWriteAt) &&
+      Boolean(checkpointUpdatedAt);
+    const readinessContract = buildRecallantReadinessContract({
+      configured: Boolean(readinessRow.project_registered),
+      context_ready: Boolean(lastContextReadAt),
+      semantic_memory_ready: Boolean(lastSemanticRecallProofAt),
+      capture_active: operationalCaptureActive,
+      ingestion_approved: input?.ingestion_approved === true,
+      remote_mcp_ready: input?.remote_mcp_ready === true,
+      last_context_read_at: lastContextReadAt,
+      last_memory_write_at: lastMemoryWriteAt,
+      last_checkpoint_at: checkpointUpdatedAt,
+      last_semantic_recall_proof_at: lastSemanticRecallProofAt,
+      ingestion_approval_ref: input?.ingestion_approval_ref ?? null
+    });
+    const reviewStateCounts = {
+      pending_review: Number(readinessRow.review_memory_count ?? 0),
+      accepted: Number(readinessRow.accepted_memory_count ?? 0),
+      rejected: Number(readinessRow.rejected_memory_count ?? 0),
+      stale: Number(readinessRow.stale_memory_count ?? 0),
+      conflict: Number(readinessRow.conflict_memory_count ?? 0)
+    };
+    return {
+      ...readinessRow,
+      last_context_read_at: readinessRow.last_context_read_at,
+      last_memory_write_at: readinessRow.last_memory_write_at,
+      checkpoint_updated_at: readinessRow.checkpoint_updated_at,
+      last_semantic_recall_proof_at: readinessRow.last_semantic_recall_proof_at,
+      semantic_memory_ready: readinessContract.semantic_memory_ready,
+      configured_but_not_capture_active:
+        readinessContract.configured && !readinessContract.capture_active,
+      readiness_contract: readinessContract,
+      readiness_status: readinessContract.primary_state,
+      readiness_warning:
+        readinessContract.configured && !readinessContract.capture_active
+          ? "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active."
+          : null,
+      review_state_counts: reviewStateCounts
+    };
+  }
+
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
@@ -7984,123 +8111,7 @@ export class RecallantDb {
       `,
       [dashboardProjectId]
     );
-    const readiness = await this.pool.query(
-      `
-        SELECT
-          EXISTS (SELECT 1 FROM projects WHERE id = $1) AS project_registered,
-          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'active') AS active_sessions,
-          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'closed') AS closed_sessions,
-          (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND status = 'interrupted') AS interrupted_sessions,
-          (SELECT count(*)::int FROM events WHERE project_id = $1) AS event_count,
-          (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND archived_at IS NULL) AS active_chunk_count,
-          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'accepted') AS accepted_memory_count,
-          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_memory_count,
-          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'rejected') AS rejected_memory_count,
-          (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status = 'stale') AS stale_memory_count,
-          (
-            SELECT count(*)::int
-            FROM agent_memories
-            WHERE project_id = $1
-              AND status NOT IN ('rejected', 'archived', 'superseded')
-              AND (
-                metadata::text ILIKE '%possible_conflict%'
-                OR metadata::text ILIKE '%conflict%'
-              )
-          ) AS conflict_memory_count,
-          (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
-          (SELECT max(created_at) FROM events WHERE project_id = $1 AND payload->'metadata'->>'capture_kind' = 'context_read') AS last_context_read_at,
-          (
-            SELECT max(activity_at)
-            FROM (
-              SELECT max(created_at) AS activity_at
-              FROM events
-              WHERE project_id = $1
-                AND (
-                  payload->'metadata'->>'capture_kind' LIKE 'agent_%'
-                  OR kind IN ('turn_user', 'turn_assistant', 'tool_result', 'file_change', 'checkpoint')
-                )
-              UNION ALL
-              SELECT max(updated_at) AS activity_at
-              FROM agent_memories
-              WHERE project_id = $1
-            ) AS memory_activity
-          ) AS last_memory_write_at,
-          (
-            SELECT max(updated_at)
-            FROM agent_memories
-            WHERE project_id = $1
-              AND created_by = 'agent'
-              AND metadata->>'diagnostic_marker' = 'true'
-              AND status NOT IN ('rejected', 'archived', 'superseded')
-              AND use_policy <> 'do_not_use'
-          ) AS last_semantic_recall_proof_at,
-          (
-            SELECT count(*)::int
-            FROM events
-            WHERE project_id = $1
-              AND (
-                payload->'metadata'->>'capture_kind' = 'context_read'
-                OR payload->'metadata'->>'capture_kind' LIKE 'agent_%'
-              )
-          ) AS capture_event_count,
-          (
-            SELECT count(*)::int
-            FROM agent_memories
-            WHERE project_id = $1
-              AND metadata->>'created_from' = 'recallant_agent_event'
-          ) AS captured_decision_count,
-          (SELECT max(last_seen_at) FROM sessions WHERE project_id = $1) AS last_session_at
-      `,
-      [dashboardProjectId]
-    );
-    const readinessRow = readiness.rows[0] ?? {};
-    const lastContextReadAt = nullableIso(readinessRow.last_context_read_at);
-    const lastMemoryWriteAt = nullableIso(readinessRow.last_memory_write_at);
-    const checkpointUpdatedAt = nullableIso(readinessRow.checkpoint_updated_at);
-    const lastSemanticRecallProofAt = nullableIso(readinessRow.last_semantic_recall_proof_at);
-    const operationalCaptureActive =
-      Boolean(readinessRow.project_registered) &&
-      Number(readinessRow.interrupted_sessions ?? 0) === 0 &&
-      Boolean(lastContextReadAt) &&
-      Boolean(lastMemoryWriteAt) &&
-      Boolean(checkpointUpdatedAt);
-    const readinessContract = buildRecallantReadinessContract({
-      configured: Boolean(readinessRow.project_registered),
-      context_ready: Boolean(lastContextReadAt),
-      semantic_memory_ready: Boolean(lastSemanticRecallProofAt),
-      capture_active: operationalCaptureActive,
-      ingestion_approved: false,
-      remote_mcp_ready: false,
-      last_context_read_at: lastContextReadAt,
-      last_memory_write_at: lastMemoryWriteAt,
-      last_checkpoint_at: checkpointUpdatedAt,
-      last_semantic_recall_proof_at: lastSemanticRecallProofAt,
-      ingestion_approval_ref: null
-    });
-    const reviewStateCounts = {
-      pending_review: Number(readinessRow.review_memory_count ?? 0),
-      accepted: Number(readinessRow.accepted_memory_count ?? 0),
-      rejected: Number(readinessRow.rejected_memory_count ?? 0),
-      stale: Number(readinessRow.stale_memory_count ?? 0),
-      conflict: Number(readinessRow.conflict_memory_count ?? 0)
-    };
-    const projectReadiness = {
-      ...readinessRow,
-      last_context_read_at: readinessRow.last_context_read_at,
-      last_memory_write_at: readinessRow.last_memory_write_at,
-      checkpoint_updated_at: readinessRow.checkpoint_updated_at,
-      last_semantic_recall_proof_at: readinessRow.last_semantic_recall_proof_at,
-      semantic_memory_ready: readinessContract.semantic_memory_ready,
-      configured_but_not_capture_active:
-        readinessContract.configured && !readinessContract.capture_active,
-      readiness_contract: readinessContract,
-      readiness_status: readinessContract.primary_state,
-      readiness_warning:
-        readinessContract.configured && !readinessContract.capture_active
-          ? "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active."
-          : null,
-      review_state_counts: reviewStateCounts
-    };
+    const projectReadiness = await this.getProjectReadiness({ project_id: dashboardProjectId });
     const activitySourceClauses: string[] = [];
     const activitySourceValues: unknown[] = [dashboardProjectId];
     this.addSourceFilterClause(activitySourceClauses, activitySourceValues, sourceFilter, "m");

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isAbsolute, join, relative } from "node:path";
+import { buildRecallantReadinessContract } from "@recallant/contracts";
 import {
   createRecallantDbFromEnv,
   emptyCanonCapabilityContext,
@@ -120,6 +121,7 @@ const recallAgentMemoriesDescription = [
 export type RecallantToolName =
   | "memory_start_session"
   | "memory_heartbeat"
+  | "memory_get_readiness_status"
   | "memory_get_context_pack"
   | "memory_append_turn"
   | "memory_append_event"
@@ -238,6 +240,54 @@ function stubResponse(tool: RecallantToolName, payload: Record<string, unknown>)
     tool,
     ...payload
   };
+}
+
+function readinessStatusOutput(readiness: Record<string, unknown>) {
+  const contract =
+    readiness.readiness_contract && typeof readiness.readiness_contract === "object"
+      ? (readiness.readiness_contract as Record<string, unknown>)
+      : buildRecallantReadinessContract({ configured: false });
+  return {
+    ok: true,
+    project_id: currentRecallantToolsContext().projectId,
+    configured: contract.configured === true,
+    context_ready: contract.context_ready === true,
+    semantic_memory_ready: contract.semantic_memory_ready === true,
+    capture_active: contract.capture_active === true,
+    ingestion_approved: contract.ingestion_approved === true,
+    remote_mcp_ready: contract.remote_mcp_ready === true,
+    readiness_status: readiness.readiness_status ?? contract.primary_state,
+    evidence: contract.evidence ?? {},
+    readiness_contract: contract,
+    last_context_read_at: readiness.last_context_read_at ?? null,
+    last_memory_write_at: readiness.last_memory_write_at ?? null,
+    checkpoint_updated_at: readiness.checkpoint_updated_at ?? null,
+    last_semantic_recall_proof_at: readiness.last_semantic_recall_proof_at ?? null,
+    review_state_counts: readiness.review_state_counts ?? {
+      pending_review: 0,
+      accepted: 0,
+      rejected: 0,
+      stale: 0,
+      conflict: 0
+    }
+  };
+}
+
+function stubReadinessStatusOutput() {
+  const context = currentRecallantToolsContext();
+  const remoteReady = Boolean(context.projectId && context.developerId && context.clientId);
+  const contract = buildRecallantReadinessContract({
+    configured: Boolean(context.projectId),
+    remote_mcp_ready: remoteReady,
+    context_ready: false,
+    semantic_memory_ready: false,
+    capture_active: false,
+    ingestion_approved: false
+  });
+  return readinessStatusOutput({
+    readiness_status: contract.primary_state,
+    readiness_contract: contract
+  });
 }
 
 function summarizeText(text: string, max = 88) {
@@ -473,6 +523,25 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         last_seen_at: nowIso(),
         last_heartbeat_at: nowIso()
       });
+    }
+  },
+  {
+    name: "memory_get_readiness_status",
+    title: "Get Readiness Status",
+    description:
+      "Return the bounded Recallant readiness contract for the current scoped project. This is a status tool, not an import tool: it returns configuration/proof/capture gates and timestamps only, never raw memories, project files, credentials, artifacts, backups, or bulk summaries.",
+    inputSchema: z.object({}),
+    handler: async () => {
+      const context = currentRecallantToolsContext();
+      const database = db();
+      if (database) {
+        const readiness = await database.getProjectReadiness({
+          project_id: context.projectId ?? undefined,
+          remote_mcp_ready: Boolean(context.projectId && context.developerId && context.clientId)
+        });
+        return readinessStatusOutput(readiness);
+      }
+      return stubResponse("memory_get_readiness_status", stubReadinessStatusOutput());
     }
   },
   {

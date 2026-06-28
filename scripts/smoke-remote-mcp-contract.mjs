@@ -27,7 +27,8 @@ const {
   remoteMcpRateLimits,
   remoteMcpPayloadLimits,
   remoteMcpAuthSchemes,
-  remoteMcpForbiddenSurfaces
+  remoteMcpForbiddenSurfaces,
+  buildRecallantReadinessContract
 } = await import("../packages/contracts/dist/index.js");
 
 const mcpSpec = await read("docs/MCP_SPEC.md");
@@ -195,6 +196,7 @@ const credential = {
 let bindingDeveloperId = developerId;
 const activityRows = [];
 const agentMemories = [];
+const checkpointOnlyAt = "2026-06-27T00:00:00.000Z";
 
 const fakeDb = {
   async verifyRemoteMcpCredential(input) {
@@ -326,8 +328,10 @@ const fakeDb = {
       memory_type: input.memory_type,
       title: input.title,
       body: input.body,
+      metadata: input.metadata ?? {},
       status: "accepted",
       use_policy: "recall_allowed",
+      updated_at: new Date().toISOString(),
       source_refs: input.source_refs
     };
     agentMemories.push(memory);
@@ -347,6 +351,62 @@ const fakeDb = {
       trace_id: "remote-recall-trace",
       memories: agentMemories.filter((memory) => memory.body.includes(input.query)),
       truncated: false
+    };
+  },
+  async getProjectReadiness(input) {
+    assert(
+      input.project_id === projectId,
+      "remote memory_get_readiness_status did not use scoped project_id"
+    );
+    const semanticMarker = agentMemories.find(
+      (memory) => memory.metadata?.diagnostic_marker === true
+    );
+    const lastSemanticRecallProofAt = semanticMarker?.updated_at ?? null;
+    const contract = buildRecallantReadinessContract({
+      configured: true,
+      remote_mcp_ready: input.remote_mcp_ready === true,
+      context_ready: false,
+      semantic_memory_ready: Boolean(lastSemanticRecallProofAt),
+      capture_active: false,
+      ingestion_approved: false,
+      last_context_read_at: null,
+      last_memory_write_at: null,
+      last_checkpoint_at: checkpointOnlyAt,
+      last_semantic_recall_proof_at: lastSemanticRecallProofAt,
+      ingestion_approval_ref: null
+    });
+    return {
+      project_registered: true,
+      active_sessions: 0,
+      closed_sessions: 0,
+      interrupted_sessions: 0,
+      event_count: 0,
+      active_chunk_count: 0,
+      accepted_memory_count: agentMemories.length,
+      review_memory_count: 0,
+      rejected_memory_count: 0,
+      stale_memory_count: 0,
+      conflict_memory_count: 0,
+      checkpoint_updated_at: checkpointOnlyAt,
+      last_context_read_at: null,
+      last_memory_write_at: null,
+      last_semantic_recall_proof_at: lastSemanticRecallProofAt,
+      capture_event_count: 0,
+      captured_decision_count: 0,
+      last_session_at: null,
+      semantic_memory_ready: contract.semantic_memory_ready,
+      configured_but_not_capture_active: true,
+      readiness_contract: contract,
+      readiness_status: contract.primary_state,
+      readiness_warning:
+        "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active.",
+      review_state_counts: {
+        pending_review: 0,
+        accepted: agentMemories.length,
+        rejected: 0,
+        stale: 0,
+        conflict: 0
+      }
     };
   },
   async heartbeat(requestSessionId, status, note, metadata) {
@@ -559,6 +619,25 @@ try {
     safeSemanticMarker,
     "tools/list memory_recall_agent_memories excerpt"
   );
+  const readinessTool = result.body?.result?.tools?.find(
+    (tool) => tool.name === "memory_get_readiness_status"
+  );
+  assert(readinessTool, "tools/list missing memory_get_readiness_status");
+  const readinessToolText = JSON.stringify(readinessTool);
+  for (const marker of [
+    "bounded Recallant readiness contract",
+    "not an import tool",
+    "configuration",
+    "proof",
+    "capture",
+    "timestamps",
+    "never raw memories",
+    "credentials",
+    "artifacts",
+    "backups"
+  ]) {
+    mustInclude(readinessToolText, marker, "tools/list memory_get_readiness_status excerpt");
+  }
   endpointCases.push("tools_list_happy_path");
 
   result = await rpc(baseUrl, {
@@ -624,6 +703,38 @@ try {
   const remoteMemoryFact = "remote onboarding synthetic semantic memory passed";
   result = await rpc(baseUrl, {
     jsonrpc: "2.0",
+    id: "readiness-before-marker",
+    method: "tools/call",
+    params: {
+      name: "memory_get_readiness_status",
+      arguments: {}
+    }
+  });
+  assert(result.status === 200, "memory_get_readiness_status expected HTTP 200");
+  const readinessBefore = result.body?.result?.structuredContent;
+  assert(readinessBefore?.configured === true, "readiness status did not report configured");
+  assert(readinessBefore?.remote_mcp_ready === true, "readiness status did not report remote MCP");
+  assert(
+    readinessBefore?.semantic_memory_ready === false,
+    "checkpoint-only readiness must not imply semantic memory"
+  );
+  assert(
+    readinessBefore?.capture_active === false,
+    "checkpoint-only readiness must not imply capture active"
+  );
+  assert(
+    readinessBefore?.evidence?.last_checkpoint_at === checkpointOnlyAt,
+    "readiness status did not expose checkpoint evidence timestamp"
+  );
+  assert(
+    readinessBefore?.evidence?.last_semantic_recall_proof_at === null,
+    "readiness status should not expose semantic proof before marker"
+  );
+  mustNotContain(result.text, "RECALLANT_DATABASE_URL", "memory_get_readiness_status response");
+  endpointCases.push("tools_call_memory_get_readiness_status_checkpoint_only_not_semantic");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
     id: "create-agent-memory",
     method: "tools/call",
     params: {
@@ -639,7 +750,7 @@ try {
         confidence: 1,
         source_refs: [],
         created_by: "agent",
-        metadata: { smoke: true }
+        metadata: { smoke: true, diagnostic_marker: true }
       }
     }
   });
@@ -650,6 +761,41 @@ try {
   );
   mustNotContain(result.text, "RECALLANT_DATABASE_URL", "memory_create_agent_memory response");
   endpointCases.push("tools_call_memory_create_agent_memory_scoped_project");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "readiness-after-marker",
+    method: "tools/call",
+    params: {
+      name: "memory_get_readiness_status",
+      arguments: {}
+    }
+  });
+  assert(result.status === 200, "post-marker memory_get_readiness_status expected HTTP 200");
+  const readinessAfter = result.body?.result?.structuredContent;
+  assert(
+    readinessAfter?.semantic_memory_ready === true,
+    "diagnostic marker did not set semantic memory readiness"
+  );
+  assert(
+    readinessAfter?.readiness_status === "semantic_memory_ready",
+    "readiness status did not promote to semantic_memory_ready"
+  );
+  assert(
+    readinessAfter?.capture_active === false,
+    "semantic proof must not imply capture active"
+  );
+  assert(
+    readinessAfter?.ingestion_approved === false,
+    "semantic proof must not imply ingestion approval"
+  );
+  assert(
+    Boolean(readinessAfter?.evidence?.last_semantic_recall_proof_at),
+    "post-marker readiness missing semantic proof timestamp"
+  );
+  mustNotContain(result.text, remoteMemoryFact, "post-marker readiness response");
+  mustNotContain(result.text, "RECALLANT_DATABASE_URL", "post-marker readiness response");
+  endpointCases.push("tools_call_memory_get_readiness_status_semantic_proof");
 
   result = await rpc(baseUrl, {
     jsonrpc: "2.0",

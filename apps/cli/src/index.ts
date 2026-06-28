@@ -43,7 +43,10 @@ import {
 import {
   buildRecallantReadinessContract,
   remoteMcpEndpointPath,
+  remoteMcpBridgeEndpointUrl,
+  remoteMcpBridgeHeaders,
   recallantReadinessInvariant,
+  resolveRemoteMcpStoredCredential,
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig,
   type RemoteAgentConsentScope
@@ -584,6 +587,20 @@ type RemoteAgentConsentReceipt = {
   no_raw_credentials_or_private_keys: true;
 };
 
+type RemoteAgentConnection = {
+  scope: RemoteAgentConsentScope;
+  credential_ref: string | null;
+  credential_store_path: string | null;
+  credential: string | null;
+};
+
+type RemoteAgentReadinessStatus = {
+  ok: boolean;
+  readiness_contract?: ReturnType<typeof buildRecallantReadinessContract> | null;
+  readiness_status?: string | null;
+  warning?: string | null;
+};
+
 function projectDir(argv: readonly string[]) {
   return resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
 }
@@ -627,12 +644,42 @@ function remoteAgentConsentScope(input: {
   };
 }
 
-function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
+function defaultRemoteAgentReadinessContract() {
+  return buildRecallantReadinessContract({
+    configured: true,
+    remote_mcp_ready: true,
+    context_ready: false,
+    semantic_memory_ready: false,
+    capture_active: false,
+    ingestion_approved: false
+  });
+}
+
+function remoteAgentReadinessContract(readiness: RemoteAgentReadinessStatus | null) {
+  return readiness?.readiness_contract ?? defaultRemoteAgentReadinessContract();
+}
+
+function remoteAgentReadinessSummary(readiness: RemoteAgentReadinessStatus | null) {
+  const contract = remoteAgentReadinessContract(readiness);
+  const semanticProofAt = contract.evidence.last_semantic_recall_proof_at;
+  if (contract.capture_active) return "capture_active";
+  if (contract.semantic_memory_ready && semanticProofAt) {
+    return `semantic_memory_ready; semantic proof evidence at ${semanticProofAt}.`;
+  }
+  if (contract.context_ready) return "context_ready; semantic memory proof is not proven yet.";
+  return "configured/access-ready only; semantic memory is not proven yet.";
+}
+
+function remoteAgentConsentOutput(
+  scope: RemoteAgentConsentScope | null,
+  readiness: RemoteAgentReadinessStatus | null = null
+) {
   if (!scope) return {};
   const recommendedNextProofCall =
     scope.recommended_next_proof_call ?? "memory_create_agent_memory";
   const recommendedNextProofFollowupCall =
     scope.recommended_next_proof_followup_call ?? "memory_recall_agent_memories";
+  const readinessContract = remoteAgentReadinessContract(readiness);
   return {
     destination: scope.destination,
     credential_scope: scope.credential_scope,
@@ -646,26 +693,27 @@ function remoteAgentConsentOutput(scope: RemoteAgentConsentScope | null) {
     recommended_next_call: scope.recommended_next_call,
     recommended_next_proof_call: recommendedNextProofCall,
     recommended_next_proof_followup_call: recommendedNextProofFollowupCall,
-    readiness_contract: buildRecallantReadinessContract({
-      configured: true,
-      remote_mcp_ready: true,
-      context_ready: false,
-      semantic_memory_ready: false,
-      capture_active: false,
-      ingestion_approved: false
-    }),
-    recommended_next_action:
-      "Use memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
+    readiness_contract: readinessContract,
+    remote_readiness_status: readiness?.ok === true ? "read" : "not_read",
+    remote_readiness_warning: readiness?.warning ?? null,
+    recommended_next_action: readinessContract.semantic_memory_ready
+      ? "Semantic memory proof is present. Continue normal Recallant startup with memory_get_context_pack and write checkpoints/actions/tests/closeout as work proceeds. Agent runtime does not require Cloudflare browser auth."
+      : "Use memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
   };
 }
 
-function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
+function remoteAgentStartReadyHumanReport(
+  scope: RemoteAgentConsentScope,
+  readiness: RemoteAgentReadinessStatus | null = null
+) {
   const credentialScope = scope.credential_scope;
+  const readinessContract = remoteAgentReadinessContract(readiness);
+  const semanticProofAt = readinessContract.evidence.last_semantic_recall_proof_at;
   return `${[
     "Recallant agent-start",
     "",
     "Mode: remote_mcp_ready",
-    "Readiness: configured/access-ready only; semantic memory is not proven yet.",
+    `Readiness: ${remoteAgentReadinessSummary(readiness)}`,
     recallantReadinessInvariant,
     `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
     `Project scope: ${credentialScope.project_id ?? "unknown"}`,
@@ -680,10 +728,15 @@ function remoteAgentStartReadyHumanReport(scope: RemoteAgentConsentScope) {
     ...scope.not_sent.map((item) => `  - ${item}`),
     "",
     "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
-    "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
+    semanticProofAt
+      ? `Proof: semantic governed-memory marker evidence was last seen at ${semanticProofAt}.`
+      : "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
+    readiness?.warning ? `Readiness warning: ${readiness.warning}` : null,
     "Do not call this capture-active until context read, memory write/recall, and checkpoint evidence exist.",
     "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
-  ].join("\n")}\n`;
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n")}\n`;
 }
 
 function remoteAgentConfigValue(content: string, key: string) {
@@ -694,13 +747,39 @@ function remoteAgentConfigValue(content: string, key: string) {
   return bare?.[1]?.trim().replace(/^['"]|['"]$/g, "") ?? null;
 }
 
-async function readRemoteAgentConsentScope(projectDir: string) {
+function resolveRemoteAgentCredential(input: {
+  credential?: string | null;
+  credentialRef?: string | null;
+  credentialStorePath?: string | null;
+}) {
+  try {
+    return resolveRemoteMcpStoredCredential({
+      credential: input.credential,
+      credentialRef: input.credentialRef,
+      credentialStorePath: input.credentialStorePath
+    });
+  } catch {
+    return input.credential ?? null;
+  }
+}
+
+async function readRemoteAgentConnection(
+  projectDir: string
+): Promise<RemoteAgentConnection | null> {
   const receipt = await readOptional(remoteAgentConsentReceiptPath(projectDir));
   if (receipt) {
     try {
       const parsed = JSON.parse(receipt) as Partial<RemoteAgentConsentReceipt>;
       if (parsed.kind === "recallant_remote_agent_consent" && parsed.consent_scope) {
-        return parsed.consent_scope;
+        return {
+          scope: parsed.consent_scope,
+          credential_ref: parsed.credential_ref ?? null,
+          credential_store_path: parsed.credential_store_path ?? null,
+          credential: resolveRemoteAgentCredential({
+            credentialRef: parsed.credential_ref,
+            credentialStorePath: parsed.credential_store_path
+          })
+        };
       }
     } catch {
       // Ignore malformed local receipts and fall back to client config discovery.
@@ -720,19 +799,133 @@ async function readRemoteAgentConsentScope(projectDir: string) {
     }
     const serverUrl = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_URL");
     if (!serverUrl) continue;
-    return remoteAgentConsentScope({
+    const credentialRef = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_REF");
+    const credentialStorePath = remoteAgentConfigValue(
+      content,
+      "RECALLANT_REMOTE_MCP_CREDENTIAL_STORE"
+    );
+    const credential = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL");
+    const scope = remoteAgentConsentScope({
       serverUrl,
       projectId: remoteAgentConfigValue(content, "RECALLANT_PROJECT_ID"),
       developerId: remoteAgentConfigValue(content, "RECALLANT_DEVELOPER_ID"),
       clientId: remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CLIENT_ID"),
-      credentialPrefix:
-        remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_REF") ??
-        (remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL")
-          ? "inline-redacted"
-          : null)
+      credentialPrefix: credentialRef ?? (credential ? "inline-redacted" : null)
     });
+    return {
+      scope,
+      credential_ref: credentialRef,
+      credential_store_path: credentialStorePath,
+      credential: resolveRemoteAgentCredential({
+        credential,
+        credentialRef,
+        credentialStorePath
+      })
+    };
   }
   return null;
+}
+
+async function readRemoteAgentConsentScope(projectDir: string) {
+  return (await readRemoteAgentConnection(projectDir))?.scope ?? null;
+}
+
+function remoteAgentReadinessUnavailable(reason: string): RemoteAgentReadinessStatus {
+  return {
+    ok: false,
+    readiness_contract: defaultRemoteAgentReadinessContract(),
+    readiness_status: "configured",
+    warning: reason
+  };
+}
+
+function readinessContractFromRemotePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const contract = record.readiness_contract;
+  if (!contract || typeof contract !== "object") return null;
+  return contract as ReturnType<typeof buildRecallantReadinessContract>;
+}
+
+async function readRemoteAgentReadinessStatus(
+  connection: RemoteAgentConnection | null
+): Promise<RemoteAgentReadinessStatus> {
+  if (!connection) {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read because remote consent is not configured."
+    );
+  }
+  const scope = connection.scope;
+  const projectId = scope.credential_scope.project_id;
+  const developerId = scope.credential_scope.developer_id;
+  const clientId = scope.credential_scope.client_id;
+  if (!connection.credential || !projectId || !developerId || !clientId) {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read because scoped credential or scope fields are unavailable; continuing with configured/access-ready state."
+    );
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const endpointUrl = remoteMcpBridgeEndpointUrl(scope.destination.server_url);
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: remoteMcpBridgeHeaders({
+        serverUrl: scope.destination.server_url,
+        credential: connection.credential,
+        projectId,
+        developerId,
+        clientId
+      }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `agent-start-readiness-${randomUUID()}`,
+        method: "tools/call",
+        params: {
+          name: "memory_get_readiness_status",
+          arguments: {}
+        }
+      }),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return remoteAgentReadinessUnavailable(
+        `Remote readiness status was not read (HTTP ${response.status}); continuing with configured/access-ready state.`
+      );
+    }
+    const json = JSON.parse(text) as Record<string, unknown>;
+    const result = json.result && typeof json.result === "object" ? json.result : null;
+    const structuredContent =
+      result && "structuredContent" in result
+        ? (result as Record<string, unknown>).structuredContent
+        : null;
+    const contract = readinessContractFromRemotePayload(structuredContent);
+    if (!contract) {
+      return remoteAgentReadinessUnavailable(
+        "Remote readiness status response did not include a readiness contract; continuing with configured/access-ready state."
+      );
+    }
+    const status =
+      structuredContent && typeof structuredContent === "object"
+        ? String(
+            (structuredContent as Record<string, unknown>).readiness_status ??
+              contract.primary_state
+          )
+        : contract.primary_state;
+    return {
+      ok: true,
+      readiness_contract: contract,
+      readiness_status: status,
+      warning: null
+    };
+  } catch {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read; continuing with configured/access-ready state."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function writeRemoteAgentConsentReceipt(input: {
@@ -5384,10 +5577,12 @@ async function loadActiveAgentState(argv: readonly string[]) {
 async function runAgentStart(argv: readonly string[]) {
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "json");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
-  const consentScope = await readRemoteAgentConsentScope(projectDir(argv));
-  const consentOutput = remoteAgentConsentOutput(consentScope);
+  const remoteConnection = await readRemoteAgentConnection(projectDir(argv));
+  const consentScope = remoteConnection?.scope ?? null;
   const database = createRecallantDbFromEnv();
   if (!database && consentScope) {
+    const remoteReadiness = await readRemoteAgentReadinessStatus(remoteConnection);
+    const consentOutput = remoteAgentConsentOutput(consentScope, remoteReadiness);
     const output = {
       ok: true,
       action: "agent_start",
@@ -5397,10 +5592,11 @@ async function runAgentStart(argv: readonly string[]) {
     process.stdout.write(
       format === "json"
         ? `${JSON.stringify(output, null, 2)}\n`
-        : remoteAgentStartReadyHumanReport(consentScope)
+        : remoteAgentStartReadyHumanReport(consentScope, remoteReadiness)
     );
     return;
   }
+  const consentOutput = remoteAgentConsentOutput(consentScope);
   if (!database) {
     const state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
     const record = await appendSpoolRecord(argv, "event", {
