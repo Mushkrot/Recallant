@@ -132,6 +132,10 @@ legacy-compatible `previous_unclosed_session` field contains diagnostic details,
 should review current-project checkpoint/events for continuity, check for fresh parallel work, and
 avoid presenting stale recovery context as an error.
 
+Interrupted session counts are recovery debt, not capture proof failure. If a later scoped cycle has
+fresh context-read, memory-write, and checkpoint evidence, readiness may still report
+`capture_active` while also surfacing the interrupted-session count.
+
 `memory_get_readiness_status` returns the bounded readiness contract used by Workbench and remote
 `agent-start`: configured, context, semantic proof, capture, ingestion, timestamps, and review-state
 counts. It must not return raw memories, raw project files, credentials, artifacts, backups, or bulk

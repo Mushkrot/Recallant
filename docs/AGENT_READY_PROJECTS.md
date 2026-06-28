@@ -33,6 +33,10 @@ memory state. `memory_get_readiness_status` exposes the bounded readiness eviden
 `agent-start` use: checkpoint-only evidence stays non-semantic, semantic proof stays non-capture, and
 `capture_active` requires the real working loop.
 
+Interrupted sessions remain visible as recovery context and should be reviewed by the next agent, but
+they are not a hard blocker for `capture_active` once fresh context-read, memory-write, and
+checkpoint evidence exists.
+
 An agent-ready project has three layers:
 
 - **Thin project files:** `AGENTS.md`, `PROJECT_LOG.md`, and client-local MCP configuration tell

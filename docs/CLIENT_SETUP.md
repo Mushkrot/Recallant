@@ -50,6 +50,9 @@ Onboarding defaults to the Codex beginner flow: attach, client connection, local
 supported, capture proof, readiness proof, and recall proof. The project is not capture active until
 context read, memory write, checkpoint, and recall evidence are present.
 
+Interrupted sessions are reported as recovery context for the next agent. They do not erase current
+capture-active evidence when the working loop has been proven again.
+
 Do not use the local self-host installer or `recallant onboard <project>` as the first step for an
 external workstation that should connect to an existing central Recallant server. That remote
 existing-server path is separate and must not require local Docker, Postgres, `RECALLANT_DATABASE_URL`,

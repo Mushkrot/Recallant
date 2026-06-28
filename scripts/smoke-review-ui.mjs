@@ -436,6 +436,11 @@ await db.appendEvent({
   raw_artifacts: [],
   dedup_key: `review-ui-context-read-${randomUUID()}`
 });
+await db.setCheckpoint(projectId, {
+  status: "in_progress",
+  current_focus: "Review UI smoke capture-active readiness proof.",
+  next_step: "Continue verifying Workbench readiness evidence."
+});
 await db.pool.query(
   `
     INSERT INTO sessions (project_id, client_kind, client_version, status, ended_reason)
@@ -858,7 +863,7 @@ try {
     "Memory capture",
     "Semantic proof",
     "Semantic memory ready",
-    "Configured but not capture active",
+    "Agent capture active",
     "Documentation posture",
     "needs review",
     "last semantic proof",
@@ -977,7 +982,7 @@ try {
     "source-linked",
     "Session starts and context reads prove the agent is entering Recallant.",
     "These records show what Recallant captured as usable working memory.",
-    "Readiness: semantic memory ready",
+    "Readiness: capture active",
     "last context read",
     "last memory write",
     "unclosed active session",
@@ -1289,13 +1294,17 @@ try {
       (item) => item.path === "README.md" && item.role === "canonical_doc"
     ) ||
     json.project_readiness?.project_registered !== true ||
-    json.project_readiness?.readiness_status !== "semantic_memory_ready" ||
-    json.project_readiness?.configured_but_not_capture_active !== true ||
+    json.project_readiness?.readiness_status !== "capture_active" ||
+    json.project_readiness?.configured_but_not_capture_active !== false ||
     json.project_readiness?.semantic_memory_ready !== true ||
+    json.project_readiness?.readiness_contract?.capture_active !== true ||
     !json.project_readiness?.last_semantic_recall_proof_at ||
-    json.project_readiness?.readiness_contract?.primary_state !== "semantic_memory_ready" ||
+    json.project_readiness?.readiness_contract?.primary_state !== "capture_active" ||
     json.project_readiness?.readiness_contract?.evidence?.last_semantic_recall_proof_at !==
       new Date(json.project_readiness.last_semantic_recall_proof_at).toISOString() ||
+    !String(json.project_readiness?.session_recovery_warning ?? "").includes(
+      "recovery context"
+    ) ||
     Number(json.project_readiness?.review_state_counts?.accepted ?? 0) < 1 ||
     Number(json.project_readiness?.review_state_counts?.pending_review ?? 0) < 1 ||
     Number(json.project_readiness?.review_state_counts?.conflict ?? 0) < 1 ||

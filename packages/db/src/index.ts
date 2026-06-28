@@ -7698,7 +7698,6 @@ export class RecallantDb {
     const lastSemanticRecallProofAt = nullableIso(readinessRow.last_semantic_recall_proof_at);
     const operationalCaptureActive =
       Boolean(readinessRow.project_registered) &&
-      Number(readinessRow.interrupted_sessions ?? 0) === 0 &&
       Boolean(lastContextReadAt) &&
       Boolean(lastMemoryWriteAt) &&
       Boolean(checkpointUpdatedAt);
@@ -7736,6 +7735,10 @@ export class RecallantDb {
       readiness_warning:
         readinessContract.configured && !readinessContract.capture_active
           ? "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active."
+          : null,
+      session_recovery_warning:
+        Number(readinessRow.interrupted_sessions ?? 0) > 0
+          ? "Interrupted sessions exist. Treat them as recovery context, not as a capture-active blocker."
           : null,
       review_state_counts: reviewStateCounts
     };
