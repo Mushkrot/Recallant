@@ -3598,7 +3598,8 @@ async function checkOllama() {
 
 async function checkPendingEmbeddingStatus(
   database: ReturnType<typeof createRecallantDbFromEnv>,
-  projectDir: string
+  projectDir: string,
+  projectId?: string | null
 ) {
   if (!database) {
     return {
@@ -3609,7 +3610,9 @@ async function checkPendingEmbeddingStatus(
     };
   }
   try {
-    const status = await database.pendingEmbeddingStatus({ project_path: projectDir });
+    const status = await database.pendingEmbeddingStatus(
+      projectId ? { project_id: projectId } : { project_path: projectDir }
+    );
     return {
       status: "ok",
       ...status
@@ -4681,6 +4684,7 @@ async function checkProductionReadiness(
 async function runDoctor(argv: readonly string[]) {
   const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const projectConfig = await readProjectConfig(projectDir);
   const requireCapture = argv.includes("--require-capture");
   const semanticProofRequested = argv.includes("--semantic-proof");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
@@ -4689,7 +4693,11 @@ async function runDoctor(argv: readonly string[]) {
   try {
     if (database) {
       try {
-        await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
+        if (projectConfig?.project_id) {
+          await database.getProjectReadiness({ project_id: projectConfig.project_id });
+        } else {
+          await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
+        }
         postgres = { configured: true, reachable: true };
       } catch {
         postgres = { configured: true, reachable: false };
@@ -4711,7 +4719,11 @@ async function runDoctor(argv: readonly string[]) {
     const serviceEnvProfile = await checkServiceEnvProfile();
     const productionEnv = await productionReadinessEnvSnapshot();
     const deploymentProfile = await checkDeploymentProfile(productionEnv.values);
-    const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(database, projectDir);
+    const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(
+      database,
+      projectDir,
+      projectConfig?.project_id
+    );
     const readinessContract = readinessContractForDoctor({
       captureReadiness,
       clientConnection,
