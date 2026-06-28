@@ -78,6 +78,7 @@
     "onboarding:smoke": "node scripts/smoke-onboarding-cli.mjs",
     "connect:smoke": "node scripts/smoke-connect-cli.mjs",
     "installer:smoke": "node scripts/smoke-installer.mjs",
+    "cli-version:smoke": "node scripts/smoke-cli-version.mjs",
     "public-readiness:smoke": "node scripts/smoke-public-readiness.mjs",
     "public-clean-host:smoke": "node scripts/smoke-public-clean-host.mjs",
     "public-quickstart:smoke": "node scripts/smoke-public-quickstart.mjs",

@@ -283,6 +283,7 @@ assert((wrapperStat.mode & 0o111) !== 0, "Installed recallant wrapper is not exe
 
 const version = run(recallant, ["--version"], { cwd: projectDir }).trim();
 assert(/^recallant \d+\.\d+\.\d+/.test(version), `Unexpected version output: ${version}`);
+assert(!/^recallant 0\.0\.0(?:$|[-+])/.test(version), `Version output must not be 0.0.0: ${version}`);
 
 const doctorBefore = runJson(recallant, ["doctor", "--format", "json"], { cwd: projectDir });
 assert(

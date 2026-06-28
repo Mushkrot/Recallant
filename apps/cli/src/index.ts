@@ -8,6 +8,7 @@ import {
   randomUUID,
   sign as signPayload
 } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -57,7 +58,44 @@ import { runProjectSanitize } from "./project-sanitize.js";
 import { runRemoteDoctor } from "./remote-doctor.js";
 import { runRemoteCleanup } from "./remote-cleanup.js";
 
-const recallantCliVersion = "0.0.0";
+const fallbackRecallantCliVersion = "0.1.0-dev.0";
+
+function repoRootFromCliModule() {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+function readRecallantCliPackageVersion() {
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(join(repoRootFromCliModule(), "apps", "cli", "package.json"), "utf8")
+    ) as Record<string, unknown>;
+    const version = typeof packageJson.version === "string" ? packageJson.version.trim() : "";
+    return version && version !== "0.0.0" ? version : fallbackRecallantCliVersion;
+  } catch {
+    return fallbackRecallantCliVersion;
+  }
+}
+
+function readGitShortRevision() {
+  const result = spawnSync("git", ["-C", repoRootFromCliModule(), "rev-parse", "--short", "HEAD"], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) return null;
+  const shortRevision = String(result.stdout ?? "").trim();
+  if (!/^[0-9a-f]{7,}$/i.test(shortRevision)) return null;
+  const dirty = spawnSync("git", ["-C", repoRootFromCliModule(), "diff", "--quiet"], {
+    stdio: "ignore"
+  });
+  return dirty.status === 1 ? `${shortRevision}.dirty` : shortRevision;
+}
+
+function resolveRecallantCliVersion() {
+  const packageVersion = readRecallantCliPackageVersion();
+  const gitRevision = readGitShortRevision();
+  return gitRevision ? `${packageVersion}+${gitRevision}` : packageVersion;
+}
+
+const recallantCliVersion = resolveRecallantCliVersion();
 
 const memorySection = `## Memory (Recallant)
 
@@ -7213,10 +7251,6 @@ function requireStringField(source: Record<string, unknown>, key: string) {
     throw new Error(`VALIDATION_ERROR: remote connect response is missing ${key}`);
   }
   return value;
-}
-
-function repoRootFromCliModule() {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }
 
 function runNodeHelperScript(scriptRelativePath: string, args: readonly string[]) {
