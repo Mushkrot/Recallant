@@ -2367,7 +2367,18 @@ export class RecallantDb {
     const projectPath = stringOrNull(input.project_path);
     if (!projectId && projectPath) {
       const project = await this.pool.query<{ id: string }>(
-        "SELECT id FROM projects WHERE primary_path = $1 ORDER BY created_at DESC LIMIT 1",
+        `
+          SELECT p.id
+          FROM projects p
+          WHERE p.primary_path = $1
+          ORDER BY (
+            (SELECT count(*) FROM sessions s WHERE s.project_id = p.id) +
+            (SELECT count(*) FROM events e WHERE e.project_id = p.id) +
+            (SELECT count(*) FROM agent_memories m WHERE m.project_id = p.id)
+          ) DESC,
+          p.updated_at DESC
+          LIMIT 1
+        `,
         [projectPath]
       );
       projectId = project.rows[0]?.id ?? null;

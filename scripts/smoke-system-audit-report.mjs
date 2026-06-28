@@ -9,6 +9,7 @@ const databaseUrl =
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 const developerId = randomUUID();
 const projectId = randomUUID();
+const duplicateProjectId = randomUUID();
 const otherProjectId = randomUUID();
 const projectPath = `/tmp/recallant-system-audit-report-${randomUUID()}`;
 const otherProjectPath = `/tmp/recallant-system-audit-report-other-${randomUUID()}`;
@@ -83,6 +84,15 @@ const otherDb = new RecallantDb({
 });
 await db.ensureProject(projectPath);
 await otherDb.ensureProject(otherProjectPath);
+await withClient(async (client) => {
+  await client.query(
+    `
+      INSERT INTO projects (id, developer_id, name, primary_path)
+      VALUES ($1, $2, 'empty duplicate path fixture', $3)
+    `,
+    [duplicateProjectId, developerId, projectPath]
+  );
+});
 const session = await db.startSession({
   client_kind: "report-smoke",
   project_path: projectPath,
