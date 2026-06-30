@@ -15,6 +15,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
 - [Reference projects](REFERENCE_PROJECTS.md): external projects Recallant studies, what to borrow,
   and what not to copy.
 - [Architecture](ARCHITECTURE.md): public system overview.
+- [Governed graph tree contract](GRAPH_TREE_CONTRACT.md): graph node kinds, relation types,
+  lifecycle states, and governance rules for relation-aware retrieval work.
 - [Self-hosting](SELF_HOSTING.md): install profiles, rollback, verification, and system activity
   audit reports.
 - [Client setup](CLIENT_SETUP.md): Codex, Cursor, Claude Code, Windsurf, and generic MCP clients.

@@ -22,6 +22,7 @@ flowchart TB
     Workbench["Private Workbench"]
     Policy["Governance and policy"]
     Context["Context Pack Builder"]
+    Graph["Governed Graph Relations"]
     Sources["Sources and capabilities"]
     Audit["System Activity Ledger"]
     Store[(Postgres + pgvector)]
@@ -35,7 +36,10 @@ flowchart TB
   Workbench --> Audit
   MCP --> Policy
   Policy --> Context
+  Policy --> Graph
   Policy --> Sources
+  Graph --> Context
+  Graph --> Store
   Sources --> Store
   Policy --> Store
   Audit --> Store
@@ -57,6 +61,9 @@ flowchart TB
   operations, status, timing, trace ids, and health without storing raw request bodies or secrets.
 - **Governed memory:** a durable, reviewable fact, decision, rule, lesson, or checkpoint derived
   from evidence.
+- **Governed graph relation:** a provenance-aware link between evidence, memories, sources, topics,
+  or future semantic nodes. The graph is a retrieval and governance substrate, not just a Workbench
+  visualization.
 - **Context pack:** a bounded startup bundle built by the server for the current task.
 
 ## Project Bootstrap
@@ -64,8 +71,8 @@ flowchart TB
 `recallant onboard <project>` is the product-level path for making a project agent-ready. It owns
 storage readiness, project attach, client connection, capture proof, recall proof, and Workbench
 visibility. Under the hood it creates or updates thin local pointers such as `.recallant/config`,
-`AGENTS.md`, `PROJECT_LOG.md`, and client MCP configuration while keeping durable history in
-Recallant.
+`AGENTS.md`, optional compact local fallback files where allowed, and client MCP configuration
+while keeping durable history in Recallant.
 
 For existing projects, onboarding treats old handoffs, runbooks, and agent files as migration
 inputs. Useful material is imported as source-linked evidence or reviewable memory candidates; long
@@ -101,6 +108,22 @@ Pack Builder combines:
 
 Search and recall remain scoped by default. Cross-project examples can be requested, but they are
 labeled as examples/evidence unless explicitly adopted in the current project.
+
+## Governed Graph Tree
+
+Recallant's current graph surface is intentionally bounded: memories and evidence can be linked,
+and search can optionally expand from seed chunks through graph edges. The
+[governed graph tree contract](GRAPH_TREE_CONTRACT.md) names the public node kinds, relation types,
+lifecycle states, and governance rules that future keeper, retrieval, and review features must use.
+
+This graph layer is meant to improve retrieval quality by preserving useful relationships: what a
+memory was derived from, what decision it supports, what it supersedes, which topic or project it
+belongs to, and which candidates still need review. It must keep provenance, scope, confidence,
+extraction method, and review state attached before graph output can influence recall.
+
+The contract does not claim that Recallant already has automatic keeper extraction, graph retrieval
+profiles, an Obsidian bridge, a dedicated graph database, or a Workbench topology view. Those remain
+future slices layered on top of the governed graph vocabulary.
 
 ## Safety Model
 

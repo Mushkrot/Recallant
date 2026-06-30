@@ -82,6 +82,7 @@ const publicDocs = [
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
   "docs/REFERENCE_PROJECTS.md",
+  "docs/GRAPH_TREE_CONTRACT.md",
   "docs/ARCHITECTURE.md",
   "docs/SELF_HOSTING.md",
   "docs/REMOTE_CONNECT_PLAN.md",
