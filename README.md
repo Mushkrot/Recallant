@@ -35,8 +35,9 @@ is active, and let future agents continue from governed context instead of a lon
 
 ## What You Can Try Today
 
-Recallant is pre-release, but the first installed-host coding-agent memory slice is working:
-onboard a project, prove capture, and get a private Workbench review link.
+Recallant is pre-release, but the first installed-host coding-agent memory loop is working:
+onboard a project, prove capture, close out through the lifecycle readiness gate, and get a
+private Workbench review link.
 
 For a local self-host evaluation, first install Recallant on the machine that will run the local
 storage stack:
@@ -145,6 +146,10 @@ unreviewed team-wide production rollout.
 Current strengths:
 
 - first end-to-end coding-agent memory loop;
+- smoke-backed lifecycle closeout gate: `agent-lifecycle-gate:smoke`, `agent-capture:smoke`, and
+  `product-acceptance:smoke` prove `agent-closeout` / `memory_closeout` only report
+  next-agent readiness after event, checkpoint, accepted closeout memory, semantic recall, and
+  next-session context proof;
 - first agent-ready project onboarding path;
 - existing-project migration reports with local backups, import counts, review-needed counts, and
   raw-secret signals;
@@ -165,11 +170,11 @@ Current strengths:
 Known pre-release work:
 
 - external-host release rehearsal beyond the disposable clean-host smokes;
-- remote project access beyond the current smoke-backed slice: authenticated `/api/mcp`, scoped
-  credentials, provisioning output, stdio-to-HTTPS bridge, remote diagnostics, security matrix, and
-  deterministic isolated external-client rehearsal exist, but real separate-machine rehearsal with
-  operator-provided live credentials, broader onboarding, and broader client transport support are
-  still unfinished;
+- remote project access release hardening: authenticated `/api/mcp`, scoped credentials,
+  provisioning output, universal connect, stdio-to-HTTPS bridge, remote diagnostics, security
+  matrix, deterministic isolated external-client rehearsal, and canary coverage exist, but repeat
+  external-host rehearsals with operator-provided live credentials and broader client transport
+  pilots are still unfinished;
 - more public screenshots and docs polish;
 - broader client pilot matrix;
 - broader real-world existing-project migration pilots;

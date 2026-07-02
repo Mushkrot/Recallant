@@ -24,6 +24,9 @@ dependable before expanding the product surface.
 - Remote existing-project readiness gates that keep `remote_mcp_ready`, session/context readiness,
   checkpoint state, governed semantic marker recall, guided migration approval, and redacted
   external-machine evidence as separate release surfaces.
+- Smoke-backed agent lifecycle closeout gate: normal MCP/CLI closeout updates event/checkpoint
+  state, creates or verifies searchable closeout memory, proves semantic recall and next-session
+  context, and reports next-agent readiness only when that proof is complete.
 - Clean-host dry-run, CLI-wrapper validation, rollback smoke, and opt-in Docker-backed managed
   install smoke.
 - Public quickstart smoke for installed-wrapper onboarding, capture-active proof, and ask recall in
@@ -43,7 +46,7 @@ dependable before expanding the product surface.
 - Later-session recall.
 - Private Workbench for review and management.
 - Source, capability, and secret-reference foundations.
-- Public docs cleanup for OSS review.
+- Public readiness and security smokes that guard the OSS-facing documentation boundary.
 
 ## Near Term
 
