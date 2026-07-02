@@ -30,6 +30,9 @@ Basic RAG can retrieve old chunks but usually lacks authority, review state, lif
 project-scope policy.
 
 Manual handoff files help, but they grow stale and push context-budget work back onto humans.
+The deeper product problem is that work does not yet travel as a governed task: sources, limits,
+status, allowed next action, and closeout evidence are usually reassembled by the maintainer at each
+handoff.
 
 Manual project bootstrap has the same problem. Maintainers often have to recreate `AGENTS.md`,
 handoffs, local logs, client setup, service notes, and safety rules whenever a new project starts.
@@ -45,6 +48,7 @@ sessions, branches, reviews, and releases. Recallant gives Codex a way to:
 - start from a server-built context pack instead of a long manual prompt;
 - attach a project without hand-building the same agent files and handoff structure;
 - remember decisions and checkpoints with source references;
+- turn pauses and closeouts into evidence-backed handoffs instead of another private chat summary;
 - avoid silently mixing unrelated project memory;
 - surface conflicts and candidate rules for maintainer review;
 - preserve release/security evidence without exposing secrets.

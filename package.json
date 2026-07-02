@@ -61,6 +61,8 @@
     "phase9:smoke:decay": "node scripts/smoke-phase9-decay-supersedes.mjs",
     "repo-contract:smoke": "node scripts/smoke-repo-contract.mjs",
     "spool:smoke": "node scripts/smoke-spool.mjs",
+    "agent-lifecycle-contract:smoke": "node scripts/smoke-agent-lifecycle-contract.mjs",
+    "agent-lifecycle-gate:smoke": "node scripts/smoke-agent-lifecycle-gate-cli.mjs",
     "agent-capture:smoke": "node scripts/smoke-agent-capture.mjs",
     "demo-capture:smoke": "node scripts/smoke-demo-capture.mjs",
     "product-acceptance:smoke": "node scripts/smoke-agent-capture.mjs",

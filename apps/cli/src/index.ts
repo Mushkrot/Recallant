@@ -42,6 +42,7 @@ import {
   renderRemoteClientTargetConfig
 } from "./client-targets.js";
 import {
+  buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
   remoteMcpEndpointPath,
   remoteMcpBridgeEndpointUrl,
@@ -50,6 +51,8 @@ import {
   resolveRemoteMcpStoredCredential,
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig,
+  type AgentLifecycleCloseoutProof,
+  type AgentLifecycleMemoryProofStatus,
   type RemoteAgentConsentScope
 } from "@recallant/contracts";
 import { runDetach } from "./detach.js";
@@ -5673,6 +5676,12 @@ async function loadActiveAgentState(argv: readonly string[]) {
   return null;
 }
 
+async function loadClosableAgentState(argv: readonly string[]) {
+  const state = await readAgentSessionState(projectDir(argv));
+  if (state?.status === "active" || state?.status === "offline") return state;
+  return null;
+}
+
 async function runAgentStart(argv: readonly string[]) {
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "json");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
@@ -6016,9 +6025,165 @@ async function runAgentCheckpoint(argv: readonly string[]) {
   );
 }
 
+function closeoutMemoryStatusFromDbStatus(status: unknown): AgentLifecycleMemoryProofStatus {
+  if (status === "accepted") return "accepted";
+  if (status === "candidate") return "candidate";
+  if (status === "needs_review") return "needs_review";
+  if (status === "rejected") return "rejected";
+  return "missing";
+}
+
+function closeoutSummaryText(payload: JsonObject) {
+  return String(payload.summary ?? payload.current_focus ?? "Session closeout");
+}
+
+function closeoutLifecycleMarker(payload: JsonObject, state: AgentSessionState, eventId: string) {
+  return dedupHash("agent-closeout-lifecycle", {
+    session_id: state.session_id,
+    event_id: eventId,
+    summary: closeoutSummaryText(payload),
+    focus: payload.current_focus ?? null,
+    next_step: payload.next_step ?? null
+  });
+}
+
+function closeoutMemoryBody(
+  payload: JsonObject,
+  state: AgentSessionState,
+  eventId: string,
+  lifecycleMarker: string
+) {
+  return [
+    `Status: ${String(payload.status ?? payload.current_status ?? "closed")}`,
+    `Current focus: ${String(payload.current_focus ?? closeoutSummaryText(payload))}`,
+    `Next step: ${String(payload.next_step ?? "Continue from Recallant context.")}`,
+    `Summary: ${closeoutSummaryText(payload)}`,
+    `Lifecycle marker: ${lifecycleMarker}`,
+    `Session: ${state.session_id}`,
+    `Closeout event: ${eventId}`
+  ].join("\n");
+}
+
+function partialRecallProof(): AgentLifecycleCloseoutProof["recall"] {
+  return {
+    ok: false,
+    recall_verified: false,
+    query: null,
+    marker_found: false,
+    recalled_memory_ids: [],
+    checked_at: null
+  };
+}
+
+function partialNextSessionContextProof(): AgentLifecycleCloseoutProof["next_session_context"] {
+  return {
+    ok: false,
+    next_session_context_verified: false,
+    session_id: null,
+    context_pack_id: null,
+    marker_found: false,
+    checked_at: null
+  };
+}
+
+function contextPackWorkingMemories(pack: Awaited<ReturnType<RecallantDb["getContextPack"]>>) {
+  const sections = objectValue(pack.sections);
+  const workingMemories = sections.working_memories;
+  return Array.isArray(workingMemories)
+    ? workingMemories.filter(
+        (memory): memory is Record<string, unknown> =>
+          memory !== null && typeof memory === "object" && !Array.isArray(memory)
+      )
+    : [];
+}
+
+async function verifyCloseoutNextSessionContext(input: {
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>;
+  argv: readonly string[];
+  projectDir: string;
+  state: AgentSessionState;
+  lifecycleMarker: string;
+  closeoutMemoryId: string;
+}): Promise<{
+  proof: AgentLifecycleCloseoutProof["next_session_context"];
+  warnings: string[];
+}> {
+  let verificationSessionId: string | null = null;
+  let contextPackId: string | null = null;
+  let proof = partialNextSessionContextProof();
+  let warnings: string[] = [];
+
+  try {
+    const started = await input.database.startSession({
+      client_kind: input.state.client_kind,
+      client_version: input.state.client_version ?? null,
+      project_id: input.state.project_id ?? null,
+      project_path: input.projectDir,
+      session_label: "recallant-agent-closeout-verification",
+      resume_policy: "normal"
+    });
+    verificationSessionId = String(started.session_id);
+    const pack = await input.database.getContextPack({
+      session_id: verificationSessionId,
+      task_hint: input.lifecycleMarker,
+      include_raw_evidence: "auto",
+      include_recovery: false,
+      local_spool_status: await getLocalSpoolStatus(input.argv),
+      max_chars_total: 4000
+    });
+    contextPackId = String(pack.context_pack_id);
+    const workingMemories = contextPackWorkingMemories(pack);
+    const markerFound = workingMemories.some(
+      (memory) =>
+        String(memory.memory_id ?? "") === input.closeoutMemoryId ||
+        String(memory.body ?? "").includes(input.lifecycleMarker) ||
+        String(memory.title ?? "").includes(input.lifecycleMarker)
+    );
+    proof = {
+      ok: markerFound,
+      next_session_context_verified: markerFound,
+      session_id: verificationSessionId,
+      context_pack_id: contextPackId,
+      marker_found: markerFound,
+      checked_at: new Date().toISOString()
+    };
+    if (!markerFound) {
+      warnings = ["Next-session context pack did not return the closeout memory."];
+    }
+  } catch {
+    proof = {
+      ok: false,
+      next_session_context_verified: false,
+      session_id: verificationSessionId,
+      context_pack_id: contextPackId,
+      marker_found: false,
+      checked_at: new Date().toISOString()
+    };
+    warnings = ["Next-session context verification failed; next agent readiness is false."];
+  } finally {
+    if (verificationSessionId) {
+      try {
+        await input.database.closeSession(verificationSessionId, "closeout_verification");
+      } catch {
+        proof = {
+          ...proof,
+          ok: false,
+          next_session_context_verified: false
+        };
+        warnings = [
+          ...warnings,
+          "Verification session cleanup failed; review active Recallant sessions."
+        ];
+      }
+    }
+  }
+
+  return { proof, warnings };
+}
+
 async function runAgentCloseout(argv: readonly string[]) {
   const dir = projectDir(argv);
-  const state = await loadActiveAgentState(argv);
+  const state = await loadClosableAgentState(argv);
   if (!state) throw new Error("VALIDATION_ERROR: no active Recallant agent session");
   const payload = checkpointPayloadFromFlags(
     argv,
@@ -6041,6 +6206,37 @@ async function runAgentCloseout(argv: readonly string[]) {
       updated_at: new Date().toISOString(),
       last_event_id: String(record.local_id)
     });
+    const lifecycle = buildAgentLifecycleCloseoutResult({
+      mode: "offline_spool",
+      project_id: state.project_id ?? null,
+      session_id: state.session_id,
+      closeout_event_id: null,
+      spool_sync_status: "unsynced",
+      proof: {
+        event: {
+          ok: false,
+          event_written: false,
+          local_id: String(record.local_id),
+          spooled: true
+        },
+        checkpoint: {
+          ok: false,
+          checkpoint_updated: false,
+          checkpoint_updated_at: null,
+          checkpoint_state_only: true
+        },
+        memory: {
+          ok: false,
+          searchable_memory_created: false,
+          memory_status: "missing",
+          memory_id: null,
+          memory_type: null
+        },
+        recall: partialRecallProof(),
+        next_session_context: partialNextSessionContextProof()
+      },
+      warnings: ["Server write failed or is unavailable; closeout was spooled locally."]
+    });
     process.stdout.write(
       `${JSON.stringify(
         {
@@ -6049,6 +6245,7 @@ async function runAgentCloseout(argv: readonly string[]) {
           mode: "offline_spool",
           local_id: record.local_id,
           spool_path: spoolPath(argv),
+          lifecycle,
           project_log_update: projectLogUpdate
         },
         null,
@@ -6077,6 +6274,110 @@ async function runAgentCloseout(argv: readonly string[]) {
       "closeout",
       await getLocalSpoolStatus(argv)
     );
+    const lifecycleMarker = closeoutLifecycleMarker(payload, state, String(event.event_id));
+    const closeoutMemory = await database.createAgentMemory({
+      project_id: state.project_id ?? null,
+      project_path: dir,
+      memory_type: "work_log",
+      scope: "project",
+      scope_kind: "project",
+      title: summarizeText(`Closeout: ${closeoutSummaryText(payload)}`, 72),
+      body: closeoutMemoryBody(payload, state, String(event.event_id), lifecycleMarker),
+      confidence: 0.95,
+      created_by: "agent",
+      source_refs: [
+        {
+          source_kind: "event",
+          source_id: String(event.event_id),
+          quote: summarizeText(`Closeout: ${closeoutSummaryText(payload)}`, 500),
+          metadata: {
+            capture_kind: "agent_closeout",
+            created_from: "recallant_agent_closeout",
+            lifecycle_marker: lifecycleMarker
+          }
+        }
+      ],
+      metadata: {
+        created_from: "recallant_agent_closeout",
+        closeout_event_id: String(event.event_id),
+        lifecycle_marker: lifecycleMarker
+      }
+    });
+    const memoryStatus = closeoutMemoryStatusFromDbStatus(closeoutMemory.status);
+    const recallCheckedAt = new Date().toISOString();
+    let recalledMemoryIds: string[] = [];
+    let recallVerified = false;
+    let recallWarnings: string[] = [];
+    try {
+      const recall = await database.recallAgentMemories({
+        ...(state.project_id ? { project_id: String(state.project_id) } : {}),
+        query: lifecycleMarker,
+        memory_types: ["work_log"],
+        top_k: 5
+      });
+      recalledMemoryIds = recall.memories
+        .map((memory: Record<string, unknown>) => String(memory.memory_id ?? ""))
+        .filter(Boolean);
+      recallVerified =
+        recalledMemoryIds.includes(String(closeoutMemory.memory_id)) ||
+        recall.memories.some((memory: Record<string, unknown>) =>
+          String(memory.body ?? "").includes(lifecycleMarker)
+        );
+      if (!recallVerified) {
+        recallWarnings = ["Semantic recall did not return the closeout memory."];
+      }
+    } catch {
+      recallWarnings = ["Semantic recall verification failed; next agent readiness is false."];
+    }
+    const nextSessionContext = await verifyCloseoutNextSessionContext({
+      database,
+      argv,
+      projectDir: dir,
+      state,
+      lifecycleMarker,
+      closeoutMemoryId: String(closeoutMemory.memory_id)
+    });
+    const lifecycle = buildAgentLifecycleCloseoutResult({
+      mode: "server",
+      project_id: state.project_id ?? null,
+      session_id: state.session_id,
+      closeout_event_id: String(event.event_id),
+      spool_sync_status: closeout.spool_sync_status ?? null,
+      proof: {
+        event: {
+          ok: true,
+          event_written: true,
+          event_id: String(event.event_id)
+        },
+        checkpoint: {
+          ok: Boolean(closeout.updated_at),
+          checkpoint_updated: Boolean(closeout.updated_at),
+          checkpoint_updated_at: closeout.updated_at ? String(closeout.updated_at) : null,
+          checkpoint_state_only: true
+        },
+        memory: {
+          ok: memoryStatus === "accepted",
+          searchable_memory_created: memoryStatus === "accepted",
+          memory_status: memoryStatus,
+          memory_id: String(closeoutMemory.memory_id),
+          memory_type: "work_log",
+          needs_review_ids:
+            memoryStatus === "candidate" || memoryStatus === "needs_review"
+              ? [String(closeoutMemory.memory_id)]
+              : []
+        },
+        recall: {
+          ok: recallVerified,
+          recall_verified: recallVerified,
+          query: lifecycleMarker,
+          marker_found: recallVerified,
+          recalled_memory_ids: recalledMemoryIds,
+          checked_at: recallCheckedAt
+        },
+        next_session_context: nextSessionContext.proof
+      },
+      warnings: [...(closeout.warnings ?? []), ...recallWarnings, ...nextSessionContext.warnings]
+    });
     const now = new Date().toISOString();
     await writeAgentSessionState(dir, {
       ...state,
@@ -6084,7 +6385,8 @@ async function runAgentCloseout(argv: readonly string[]) {
       updated_at: now,
       last_checkpoint_at: now,
       last_memory_write_at: now,
-      last_event_id: String(event.event_id)
+      last_event_id: String(event.event_id),
+      last_memory_id: String(closeoutMemory.memory_id)
     });
     process.stdout.write(
       `${JSON.stringify(
@@ -6095,6 +6397,7 @@ async function runAgentCloseout(argv: readonly string[]) {
           project_id: state.project_id,
           session_id: state.session_id,
           closeout,
+          lifecycle,
           project_log_update: projectLogUpdate
         },
         null,

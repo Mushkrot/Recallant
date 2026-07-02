@@ -20,6 +20,7 @@ const expectedTools = [
   "memory_get_checkpoint",
   "memory_set_checkpoint",
   "memory_agent_checkpoint",
+  "memory_get_readiness_status",
   "memory_create_agent_memory",
   "memory_review_agent_memory",
   "memory_list_agent_memories",

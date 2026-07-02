@@ -108,6 +108,76 @@ memory records. The graph contract should express replacement through `supersede
 `superseded_by` relations rather than requiring every storage table to share one identical status
 enum.
 
+## Graph Candidate Lifecycle
+
+Graph candidate storage is the governed staging layer for proposed graph nodes and edges. It is
+additive to the current `edges` table and does not make candidate graph data retrieval-active by
+default.
+
+The first typed candidate kinds are:
+
+- `node` - a proposed graph node such as a topic, entity, project, decision cluster, open question,
+  preference, or procedure.
+- `edge` - a proposed relation between two endpoint refs.
+
+Candidate records must preserve:
+
+- project and developer scope when available;
+- candidate kind;
+- node kind for node candidates;
+- relation type plus source and destination endpoint refs for edge candidates;
+- title and summary;
+- lifecycle state;
+- confidence when available;
+- extraction method;
+- creator kind;
+- audience when the candidate crosses an audience, project, or domain boundary;
+- bounded non-secret metadata;
+- one or more source refs for agent-generated or import-generated candidates.
+
+The first extraction method values are:
+
+- `human`;
+- `agent`;
+- `import`;
+- `migration`;
+- `closeout`;
+- `keeper`;
+- `deterministic_rule`;
+- `connector`;
+- `vault_bridge`;
+- `other`.
+
+The first source ref kinds are:
+
+- `event`;
+- `chunk`;
+- `raw_artifact`;
+- `edge`;
+- `checkpoint`;
+- `external`;
+- `agent_memory`;
+- `source`.
+
+Source refs are bounded references, not a license to copy raw artifacts into candidate records.
+Agent-generated and import-generated candidates must include source refs before they can be stored or
+reviewed.
+
+The first review actions are:
+
+- `accept`;
+- `approve`;
+- `reject`;
+- `archive`;
+- `unarchive`;
+- `mark_stale`;
+- `edit`;
+- `merge`;
+- `supersede`.
+
+Review actions must preserve source refs and review history. Merge and supersession paths should
+record their target metadata without physically deleting the original candidate row.
+
 ## Governance Requirements
 
 Every generated graph node or edge must preserve governance before it can affect retrieval:
@@ -152,7 +222,6 @@ should show:
 
 ## Phase Boundary
 
-This document is Phase 1 of the graph tree work. It defines the contract and vocabulary. It does not
-build the keeper pipeline, add graph retrieval profiles, create a graph visualization, add an
-Obsidian bridge, or migrate Recallant to a dedicated graph database.
-
+This document defines the graph tree contract and vocabulary. It does not build the keeper pipeline,
+add graph retrieval profiles, create a graph visualization, add an Obsidian bridge, or migrate
+Recallant to a dedicated graph database.

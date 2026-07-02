@@ -40,6 +40,94 @@ What not to copy:
   profiles, review states, and source-governed recall.
 - Do not copy schema or API contracts directly; Recallant-owned contracts remain authoritative.
 
+## Open Engine
+
+Snapshot date: 2026-07-02.
+
+Public sources inspected:
+
+- Public preview:
+  [Make Your AI Agents Hand Off Work Without You](https://natesnewsletter.substack.com/p/ai-agent-handoffs)
+- Related Open Stack / memory-loop preview:
+  [How to Build Your Own AI Memory With Claude or Codex](https://natesnewsletter.substack.com/p/build-your-own-ai-memory)
+- Open Brain repository context:
+  [NateBJones-Projects/OB1](https://github.com/NateBJones-Projects/OB1)
+- OB1/OpenClaw skill context:
+  [NBJ OB1 Agent Memory for OpenClaw](https://raw.githubusercontent.com/NateBJones-Projects/OB1/main/skills/openclaw-agent-memory/README.md)
+
+### Current Read
+
+Open Engine is Nate Jones's process and guide layer for moving work between AI tools. Public
+material describes it as a paid guide and copy-paste template system rather than a public source
+repository. Its center of gravity is the work handoff: one AI tool finishes or pauses work, then the
+next AI tool, person, or team receives a task record with sources, limits, status, and receipt-style
+accountability.
+
+As observed on 2026-07-02:
+
+- The public preview says Open Engine includes a shared task list, a seven-part task record, a
+  one-loop audit, a 30-minute build, and a receipt vocabulary.
+- Nate's later Open Stack preview frames the stack as: Open Brain holds memory, Open Skills holds
+  method, and Open Engine moves work.
+- No separate public Open Engine source repository was found under the visible
+  `NateBJones-Projects` GitHub organization at inspection time.
+- OpenClaw should not be confused with Open Engine. OpenClaw is a separate runtime/workspace
+  ecosystem; OB1's OpenClaw Agent Memory skill is an integration that teaches OpenClaw agents to
+  recall, write back compact operational memory, respect use policy, include provenance, and report
+  usage through OB1 Agent Memory.
+
+### Role For Recallant
+
+Open Engine is a strong process reference for portable task handoff, task records, work receipts,
+and multi-tool agent continuity. It is not Recallant's memory substrate. Its value is the layer
+above memory: how work becomes a claimable, pausable, resumable, and finishable unit that can travel
+between models, tools, agents, and people without forcing the human to carry all state manually.
+
+Recallant already has the infrastructure pieces that Open Engine tries to make usable by process:
+context packs, governed memories, source refs, checkpoints, closeout, capture-active proof,
+Workbench review, and audit. The next product lesson is to make those pieces feel like one simple
+task handoff contract.
+
+Strong patterns to keep in the design loop:
+
+- Treat the task record as a first-class product object, not just a chat summary or checkpoint.
+- Preserve source, limit, status, owner, next-step, and allowed-action fields through handoff.
+- Make "receipt" a concise closeout vocabulary: what changed, what evidence supports it, what was
+  not touched, what is still open, and what the next agent/person may do.
+- Start from the smallest useful loop: one recurring or annoying handoff that can be claimed,
+  paused, resumed, and finished with evidence.
+- Optimize for tool plurality. Claude, Codex, ChatGPT, browser agents, local agents, Slack, Linear,
+  and humans can all be part of one job without crowning one client as the only interface.
+- Separate memory, method, boundary, receipt, and judgment. Recallant should make these separations
+  explicit instead of letting "agent memory" imply permission to act.
+
+What not to copy:
+
+- Do not replace governed memory with copy-paste task templates as the source of truth.
+- Do not make paid guide text, private templates, or non-public material part of the public
+  Recallant contract.
+- Do not blur Open Engine, Open Brain / OB1, and OpenClaw. Treat Open Engine as process/handoff,
+  OB1 as memory substrate prior art, and OpenClaw as a separate runtime/integration target.
+- Do not expand Recallant into a broad personal workflow OS just because Open Engine discusses work
+  moving through many life and team tools.
+- Do not let "receipt" become a self-attested completion note. Recallant receipts should stay tied
+  to source refs, event evidence, review state, and audit where available.
+
+### How Recallant Can Use This Reference
+
+Task handoff checklist:
+
+- Define a Recallant-owned task handoff record that can be created from agent start, closeout,
+  checkpoint, or Workbench review.
+- Map the record onto existing governed primitives: source refs, raw evidence, memories,
+  checkpoints, graph relations, review state, and system activity events.
+- Add a receipt view or CLI output that says whether work was saved, spooled, reviewed, recalled,
+  and safe for the next agent to continue.
+- Keep the record bounded and portable enough to paste into another tool, while preserving the
+  server-backed authoritative state in Recallant.
+- Study Open Engine deeply before designing team handoff UX, but implement only the pieces that
+  strengthen governed coding-agent continuity.
+
 ## MemPalace
 
 Snapshot basis: internal research reviewed 2026-05-19. Refresh before major architecture decisions.
@@ -257,6 +345,94 @@ Workbench/UI checklist:
 - Make mobile a real target, not a compressed desktop table.
 - Keep settings, sources, and policy state visible enough that maintainers can understand what the
   agent is allowed to remember and where it came from.
+
+## OpenHuman
+
+Snapshot date: 2026-07-02.
+
+Public sources inspected:
+
+- Current repository: [tinyhumansai/openhuman](https://github.com/tinyhumansai/openhuman)
+- Current README:
+  [OpenHuman](https://raw.githubusercontent.com/tinyhumansai/openhuman/main/README.md)
+- Memory Tree docs:
+  [Memory Trees](https://raw.githubusercontent.com/tinyhumansai/openhuman/main/gitbooks/features/obsidian-wiki/memory-tree.md)
+- SuperContext docs:
+  [SuperContext](https://raw.githubusercontent.com/tinyhumansai/openhuman/main/gitbooks/features/super-context.md)
+- Goals and todos docs:
+  [Goals & Todos](https://raw.githubusercontent.com/tinyhumansai/openhuman/main/gitbooks/features/goals-and-todos.md)
+- Latest release at inspection time:
+  [v0.58.7](https://github.com/tinyhumansai/openhuman/releases/tag/v0.58.7)
+
+### Current Read
+
+OpenHuman is a fast-moving personal AI harness and desktop workspace. Its public positioning is
+close to "personal AI with local memory plus managed services where needed": UI-first onboarding,
+local Memory Tree / Obsidian-style vault, SuperContext first-turn preparation, goals and todos,
+integrations, MCP/skills catalogs, native tools, model routing, voice, meetings, and optional local
+AI.
+
+As observed on 2026-07-02:
+
+- The repository was not previously listed in Recallant's public reference docs.
+- The default branch is `main`.
+- Public traction shown by GitHub at inspection time was about 34k stars, 3.3k forks, 157 open
+  issues, and 48 published releases. Treat these as dated traction signals, not stable quality
+  metrics.
+- The latest GitHub release was `v0.58.7`, published on 2026-06-30.
+- The repository license is GPL-3.0. Treat OpenHuman primarily as a product, UX, and lifecycle
+  reference unless a separate license and dependency review approves code reuse.
+
+### What Is Strong For Recallant
+
+Memory and context lifecycle:
+
+- SuperContext is a strong reference for the idea that a new agent thread should not start cold.
+  Its harness-level, read-only context scout maps well to Recallant's lifecycle gate direction:
+  session start, bounded context pack, proof that memory was read, and graceful fallback when context
+  cannot be prepared.
+- Memory Tree is a useful product reference for making memory visible as source/topic/global trees,
+  bounded chunks, provenance, background jobs, retrieval scopes, and an Intelligence tab rather than
+  only a hidden vector index.
+- Goals and todos show a durable work contract across turns, interruptions, budgets, and approval
+  gates. Recallant can use this as a reference for agent closeout, next-step readiness, checkpoints,
+  and "what should the next agent do?" surfaces.
+
+Product and trust:
+
+- The README states the local versus managed-service boundary plainly. Recallant should keep the
+  same candor around local-first defaults, remote MCP/server mode, model routing, credentials, and
+  paid or hosted services.
+- The install docs prefer native packages and call out the risk of unverified script installs.
+  Recallant should keep similarly explicit setup, verification, and trust wording.
+- The Intelligence/Memory surfaces are user-visible. Recallant's Workbench should likewise show
+  capture health, source freshness, review state, provenance, and recall proof in plain language.
+
+### What Not To Copy
+
+- Do not copy the broad personal-agent scope. Recallant is not trying to be a meeting bot, voice
+  assistant, media generator, integrations marketplace, and general desktop agent.
+- Do not make a managed backend or hosted connector layer feel like an implicit default for
+  self-hosted Recallant. Remote/server paths must stay explicit, scoped, and auditable.
+- Do not copy the connector/skills/MCP catalog scale before the governed memory core is excellent.
+  More tools can mean more policy, review, and secret-management risk.
+- Do not adopt anthropomorphic product framing or mascot-centered UX. Recallant should stay calm,
+  professional, and maintainer-oriented.
+- Do not reuse code without GPL-3.0, dependency, and architecture review.
+
+### How Recallant Can Use This Reference
+
+Lifecycle and Workbench checklist:
+
+- Treat first-turn context preparation as a product contract, not an optional model behavior.
+- Make next-agent readiness visible: context read, memory write, checkpoint, recall proof, and
+  saved/spooled/review status should be legible before another agent resumes.
+- Expose memory topology as a governed source map: source, topic, project, decision, stale/conflict,
+  accepted/rejected, and provenance states should be actionable.
+- Keep durable thread goals and task boards in mind when designing closeout, follow-up, and
+  budget-limited agent work.
+- Preserve candor in docs: local storage, remote server mode, hosted/paid services, installer
+  integrity, and connector credentials must be stated in ordinary language.
 
 ## MF0.ai / MF0-1984
 

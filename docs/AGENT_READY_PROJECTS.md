@@ -281,6 +281,13 @@ events onto that same loop:
 If MCP is unavailable, the CLI fallback can still record work and write local spool records for
 later sync.
 
+Future task handoff and receipt work should sit on top of this same loop rather than replace it. A
+handoff record may be portable enough to paste into another tool, but its authoritative state should
+map back to Recallant primitives: context-pack reads, governed memories, source refs, raw evidence,
+checkpoints, review state, and audit events. The goal is a claimable, pausable, resumable task unit
+with a concise receipt for what changed, what evidence supports it, what remains open, and what the
+next agent or person may do.
+
 If `memory_start_session` reports `previous_session_recovery` or `previous_unclosed_session`, agents
 should first decide whether the prior session is fresh parallel work or stale recovery material. Fresh
 sessions require care before two agents edit the same project. Stale sessions should be recovered

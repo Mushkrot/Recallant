@@ -46,9 +46,188 @@ export const graphTreeLifecycleStateValues = [
 
 export type GraphTreeLifecycleState = (typeof graphTreeLifecycleStateValues)[number];
 
+export const graphCandidateKindValues = ["node", "edge"] as const;
+
+export type GraphCandidateKind = (typeof graphCandidateKindValues)[number];
+
+export const graphCandidateExtractionMethodValues = [
+  "human",
+  "agent",
+  "import",
+  "migration",
+  "closeout",
+  "keeper",
+  "deterministic_rule",
+  "connector",
+  "vault_bridge",
+  "other"
+] as const;
+
+export type GraphCandidateExtractionMethod = (typeof graphCandidateExtractionMethodValues)[number];
+
+export const graphCandidateSourceRefKindValues = [
+  "event",
+  "chunk",
+  "raw_artifact",
+  "edge",
+  "checkpoint",
+  "external",
+  "agent_memory",
+  "source"
+] as const;
+
+export type GraphCandidateSourceRefKind = (typeof graphCandidateSourceRefKindValues)[number];
+
+export const graphCandidateReviewActionValues = [
+  "accept",
+  "approve",
+  "reject",
+  "archive",
+  "unarchive",
+  "mark_stale",
+  "edit",
+  "merge",
+  "supersede"
+] as const;
+
+export type GraphCandidateReviewAction = (typeof graphCandidateReviewActionValues)[number];
+
+export type GraphCandidateCreatedBy = "agent" | "user" | "system" | "import";
+
+export type GraphCandidateAudience = {
+  kind: string;
+  id?: string | null;
+};
+
+export type GraphCandidateMetadata = Record<string, unknown>;
+
+export type GraphCandidateSourceRef = {
+  source_ref_id?: string;
+  source_kind: GraphCandidateSourceRefKind;
+  source_id?: string | null;
+  uri?: string | null;
+  path?: string | null;
+  anchor?: string | null;
+  quote?: string | null;
+  metadata?: GraphCandidateMetadata;
+};
+
+export type GraphCandidateEndpointRef = {
+  kind: GraphTreeNodeKind | "external";
+  id: string;
+  label?: string | null;
+  metadata?: GraphCandidateMetadata;
+};
+
+export type GraphCandidateBase = {
+  graph_candidate_id?: string;
+  project_id?: string;
+  developer_id?: string;
+  scope?: "project" | "developer" | "domain" | "all";
+  scope_kind?: string | null;
+  scope_id?: string | null;
+  lifecycle_state?: GraphTreeLifecycleState;
+  confidence?: number | null;
+  extraction_method: GraphCandidateExtractionMethod;
+  created_by: GraphCandidateCreatedBy;
+  audience?: GraphCandidateAudience[];
+  source_refs: GraphCandidateSourceRef[];
+  metadata?: GraphCandidateMetadata;
+};
+
+export type GraphNodeCandidate = GraphCandidateBase & {
+  candidate_kind: "node";
+  node_kind: GraphTreeNodeKind;
+  title: string;
+  summary?: string | null;
+};
+
+export type GraphEdgeCandidate = GraphCandidateBase & {
+  candidate_kind: "edge";
+  relation_type: GraphTreeRelationType | string;
+  src: GraphCandidateEndpointRef;
+  dst: GraphCandidateEndpointRef;
+  title?: string | null;
+  summary?: string | null;
+};
+
+export type GraphCandidate = GraphNodeCandidate | GraphEdgeCandidate;
+
+export type CreateGraphCandidateInput = GraphCandidate;
+
+export type ListGraphCandidatesInput = {
+  project_id?: string;
+  developer_id?: string;
+  candidate_kind?: GraphCandidateKind;
+  lifecycle_state?: GraphTreeLifecycleState;
+  source_kind?: GraphCandidateSourceRefKind;
+  extraction_method?: GraphCandidateExtractionMethod;
+  created_by?: GraphCandidateCreatedBy;
+  audience_kind?: string | null;
+  limit?: number;
+};
+
+export type GetGraphCandidateInput = {
+  graph_candidate_id: string;
+};
+
+export type GraphCandidateReviewPatch = {
+  node_kind?: GraphTreeNodeKind;
+  relation_type?: GraphTreeRelationType | string;
+  title?: string | null;
+  summary?: string | null;
+  confidence?: number | null;
+  lifecycle_state?: GraphTreeLifecycleState;
+  audience?: GraphCandidateAudience[];
+  metadata?: GraphCandidateMetadata;
+};
+
+export type ReviewGraphCandidateInput = {
+  graph_candidate_id: string;
+  action: GraphCandidateReviewAction;
+  actor_kind: "agent" | "user" | "system";
+  note?: string | null;
+  patch?: GraphCandidateReviewPatch;
+  merge_target_id?: string | null;
+  superseded_by?: string | null;
+  metadata?: GraphCandidateMetadata;
+};
+
+export type GraphCandidateReviewRecord = {
+  review_action_id?: string;
+  graph_candidate_id: string;
+  action: GraphCandidateReviewAction;
+  actor_kind: "agent" | "user" | "system";
+  note?: string | null;
+  metadata?: GraphCandidateMetadata;
+  created_at?: string;
+};
+
+export type GraphCandidateRecord = GraphCandidate & {
+  graph_candidate_id: string;
+  lifecycle_state: GraphTreeLifecycleState;
+  review_actions?: GraphCandidateReviewRecord[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CreateGraphCandidateResult = GraphCandidateRecord;
+
+export type ListGraphCandidatesResult = {
+  candidates: GraphCandidateRecord[];
+};
+
+export type GetGraphCandidateResult = GraphCandidateRecord;
+
+export type ReviewGraphCandidateResult = GraphCandidateRecord;
+
 const graphTreeNodeKindSet = new Set<string>(graphTreeNodeKindValues);
 const graphTreeRelationTypeSet = new Set<string>(graphTreeRelationTypeValues);
 const graphTreeLifecycleStateSet = new Set<string>(graphTreeLifecycleStateValues);
+const graphCandidateKindSet = new Set<string>(graphCandidateKindValues);
+const graphCandidateExtractionMethodSet = new Set<string>(graphCandidateExtractionMethodValues);
+const graphCandidateSourceRefKindSet = new Set<string>(graphCandidateSourceRefKindValues);
+const graphCandidateReviewActionSet = new Set<string>(graphCandidateReviewActionValues);
 
 export function isGraphTreeNodeKind(value: unknown): value is GraphTreeNodeKind {
   return typeof value === "string" && graphTreeNodeKindSet.has(value);
@@ -60,4 +239,24 @@ export function isGraphTreeRelationType(value: unknown): value is GraphTreeRelat
 
 export function isGraphTreeLifecycleState(value: unknown): value is GraphTreeLifecycleState {
   return typeof value === "string" && graphTreeLifecycleStateSet.has(value);
+}
+
+export function isGraphCandidateKind(value: unknown): value is GraphCandidateKind {
+  return typeof value === "string" && graphCandidateKindSet.has(value);
+}
+
+export function isGraphCandidateExtractionMethod(
+  value: unknown
+): value is GraphCandidateExtractionMethod {
+  return typeof value === "string" && graphCandidateExtractionMethodSet.has(value);
+}
+
+export function isGraphCandidateSourceRefKind(
+  value: unknown
+): value is GraphCandidateSourceRefKind {
+  return typeof value === "string" && graphCandidateSourceRefKindSet.has(value);
+}
+
+export function isGraphCandidateReviewAction(value: unknown): value is GraphCandidateReviewAction {
+  return typeof value === "string" && graphCandidateReviewActionSet.has(value);
 }

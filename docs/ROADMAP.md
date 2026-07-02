@@ -70,6 +70,12 @@ dependable before expanding the product surface.
   repair or improvement plans. This should turn agent participation from passive logging into an
   active, governed conversation channel without allowing agents to bypass review, expose secrets, or
   convert unreviewed complaints into binding instructions.
+- Open Engine task handoff analysis: study Nate Jones's Open Engine as the primary process
+  reference for shared task lists, portable task records, one-loop audits, receipts, and work moving
+  between multiple AI tools. Translate the valuable parts into a Recallant-owned task handoff
+  contract layered over context packs, governed memories, checkpoints, source refs, Workbench review,
+  and system activity events, without replacing governed memory with copy-paste templates or
+  expanding Recallant into a broad personal workflow OS.
 - Documentation posture follow-through: expand Workbench-confirmed canonicalization plans, harden
   empty-project starter-doc generation across more real-world profiles, and broaden posture pilots
   without turning recalled discussion into binding instructions automatically.
