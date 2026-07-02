@@ -433,9 +433,32 @@ await assertFileIncludes(
   "memory_start_session",
   "empty starter AGENTS missing MCP workflow guidance"
 );
+const emptyStarterAgents = await readFile(join(emptyStarterProject, "AGENTS.md"), "utf8");
+assert(
+  countOccurrences(emptyStarterAgents.toLowerCase(), "normal mcp closeout path") === 1,
+  `empty starter AGENTS should have exactly one normal MCP closeout path: ${emptyStarterAgents}`
+);
+assert(
+  emptyStarterAgents.includes("memory_closeout") &&
+    emptyStarterAgents.includes("searchable memory, recall verification") &&
+    emptyStarterAgents.includes("next-session readiness semantics"),
+  `empty starter AGENTS missing high-level MCP closeout semantics: ${emptyStarterAgents}`
+);
+assert(
+  emptyStarterAgents.includes("recallant agent-closeout") &&
+    emptyStarterAgents.includes("CLI fallback closeout path"),
+  `empty starter AGENTS missing CLI fallback closeout path: ${emptyStarterAgents}`
+);
+assert(
+  emptyStarterAgents.includes("memory_set_checkpoint") &&
+    emptyStarterAgents.includes("checkpoint state; it is not semantic recall proof") &&
+    emptyStarterAgents.includes("recallant agent-checkpoint") &&
+    emptyStarterAgents.includes("advanced pause/compaction state helper"),
+  `empty starter AGENTS did not keep checkpoint wording state-only: ${emptyStarterAgents}`
+);
 const emptyStarterDocsCombined = [
   await readFile(join(emptyStarterProject, "README.md"), "utf8"),
-  await readFile(join(emptyStarterProject, "AGENTS.md"), "utf8"),
+  emptyStarterAgents,
   await readFile(join(emptyStarterProject, "PROJECT_LOG.md"), "utf8")
 ].join("\n");
 for (const marker of ["old handoff", "super-secret-value", "raw old handoff"]) {

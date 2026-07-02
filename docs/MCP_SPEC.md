@@ -155,10 +155,12 @@ diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity p
 
 When Recallant is configured and consent allows agent-authored memory, agents must use the MCP
 memory lifecycle by default: start a session, read `memory_get_context_pack`, write concise governed
-decisions/actions/tests/work logs, checkpoint with `memory_agent_checkpoint` for searchable
-closeout, and prove semantic memory with `memory_create_agent_memory` followed by
-`memory_recall_agent_memories`. Bulk project import, raw logs, customer data, raw artifacts,
-database URLs, provider secrets, and existing-file summarization remain approval-gated.
+decisions/actions/tests/work logs, and close out with `memory_closeout`. `memory_closeout` is the
+normal MCP closeout path: it updates checkpoint state, creates or verifies searchable closeout
+memory, runs recall verification, and reports next-session readiness semantics. Use
+`memory_agent_checkpoint` only when the checkpoint itself should become searchable governed
+checkpoint memory. Bulk project import, raw logs, customer data, raw artifacts, database URLs,
+provider secrets, and existing-file summarization remain approval-gated.
 
 ## 3c) Governed Memory Tool UX
 

@@ -125,8 +125,9 @@ The same pilot drove the release gates now used for remote existing-project read
   remote `agent-start` stays `configured` after checkpoint-only/capture proof and reports
   `semantic_memory_ready` only after the governed semantic marker proof;
 - the baseline checkpoint parity contract is state-only: `memory_set_checkpoint` writes checkpoint
-  state and reports no searchable memory id, while searchable checkpoint memory uses the explicit
-  `memory_agent_checkpoint` / CLI `agent-checkpoint` high-level closeout path;
+  state and reports no searchable memory id; normal closeout uses `memory_closeout` / CLI
+  `agent-closeout`, while searchable checkpoint memory uses the explicit
+  `memory_agent_checkpoint` / CLI `agent-checkpoint` path;
 - remote existing-project migration needs a guided, review-first path that inventories safe docs and
   risky paths, groups entries as `summarize_to_memory`, `keep_as_reference`, `skip`, or `ask_owner`,
   then writes concise governed memories only after approval; risky output is path/class/count based
@@ -151,7 +152,7 @@ Remote existing-project readiness is a sequence of proof surfaces, not one boole
 | Existing-project migration | Yes before importing old history | read-only inventory, risk classification, owner approval, concise governed memories/imports, recall verification | Risk output is path/class/count oriented and secret references are names-only. |
 | External-machine evidence | Yes before release-candidate remote claims | `recallant remote-acceptance` evidence bundle plus validator or equivalent server-side trace verification | The remote machine must not receive Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups, or provider secrets. |
 | Remote live external canary | Yes before manual remote-client checks | `npm run remote-live-external-canary:smoke`, and for operator live checks `remote-live-external-canary --live --json` with server trace validation enabled or an equivalent server-side trace gate | Release pass requires `server_trace_validation: pass`, cleanup revoked/deleted, semantic marker recall, next-session recall, evidence validation, and redaction all passing. Server trace validation uses the redacted remote MCP audit envelope plus central DB facts; skipped validation is `not_release_pass`. Public docs use placeholder server URLs only. |
-| Searchable checkpoint memory | Optional closeout | `memory_agent_checkpoint` or CLI `agent-checkpoint` | Use only when the checkpoint itself should become governed searchable memory. |
+| Searchable checkpoint memory | Optional checkpoint memory | `memory_agent_checkpoint` or CLI `agent-checkpoint` | Use only when the checkpoint itself should become governed searchable memory. Normal closeout uses `memory_closeout` or CLI `agent-closeout`. |
 | Live central-server readiness smoke | Optional operator gate | `remote-mcp-live-readiness:smoke` / `remote-connect-live-readiness:smoke` with operator env vars | Skips safely without live inputs and must not be treated as a deterministic fixture. |
 | Local `attach --confirm` | Not a remote-next-step | explicit local/server-local attach or import path only | Do not tell remote-only clients to run local attach after `remote_mcp_ready`. |
 

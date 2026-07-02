@@ -274,12 +274,13 @@ events onto that same loop:
 - session start: `memory_start_session` then `memory_get_context_pack`;
 - meaningful work: concise `memory_append_event` or `memory_create_agent_memory` for decisions,
   actions, and tests;
-- before compaction or pause: checkpoint;
-- stop/closeout: closeout summary and next step;
+- before compaction or pause: checkpoint state only, or `memory_agent_checkpoint` if the checkpoint
+  itself should become searchable memory;
+- stop/closeout: `memory_closeout` with closeout summary and next step;
 - diagnostics: one synthetic non-secret marker create+recall proof.
 
 If MCP is unavailable, the CLI fallback can still record work and write local spool records for
-later sync.
+later sync; use `recallant agent-closeout` as the CLI fallback closeout path.
 
 Future task handoff and receipt work should sit on top of this same loop rather than replace it. A
 handoff record may be portable enough to paste into another tool, but its authoritative state should

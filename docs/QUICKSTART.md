@@ -159,8 +159,10 @@ Do not treat a checkpoint-only readback as semantic recall proof. Do not run loc
 --confirm` on a remote workstation unless the operator explicitly wants the local-storage attach
 path instead of the scoped remote MCP path.
 
-For baseline parity, `memory_set_checkpoint` remains state-only. Use an explicit governed-memory or
-high-level closeout/checkpoint action when a searchable checkpoint memory is required.
+For baseline parity, `memory_set_checkpoint` remains state-only. Use `memory_closeout` or
+`recallant agent-closeout` for normal closeout. Use `memory_agent_checkpoint` or
+`recallant agent-checkpoint` only when the checkpoint itself should become searchable governed
+checkpoint memory.
 
 For headless servers or CI-like hosts, use a short-lived one-time bootstrap token created from a
 protected admin/human surface:

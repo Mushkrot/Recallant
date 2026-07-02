@@ -71,6 +71,7 @@ let contextCanon = null;
 let contextSectionKeys = [];
 let stateOnly = null;
 let highLevelCheckpoint = null;
+let closeoutLifecycle = null;
 let governedMemoryToolsListExcerpt = null;
 let governedMemoryValidationErrors = {};
 let governedMemoryExamples = {};
@@ -319,6 +320,43 @@ try {
     );
   }
 
+  const closeoutCall = await client.callTool(
+    {
+      name: "memory_closeout",
+      arguments: {
+        session_id: "00000000-0000-4000-8000-000000000004",
+        closeout_intent: "task_complete",
+        summary: "MCP closeout lifecycle stub smoke.",
+        checkpoint_payload: {
+          current_status: "stub closeout",
+          current_focus: "phase4 mcp closeout lifecycle proof",
+          next_step: "verify lifecycle is non-ready without database proof",
+          open_questions: []
+        },
+        governed_memory_candidates: [],
+        artifact_refs: []
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const closeout = JSON.parse(closeoutCall.content?.[0]?.text ?? "{}");
+  closeoutLifecycle = closeout.lifecycle ?? null;
+  if (
+    closeoutLifecycle?.mode !== "offline_spool" ||
+    closeoutLifecycle?.next_agent_ready !== false ||
+    closeoutLifecycle?.proof?.event?.event_written !== false ||
+    closeoutLifecycle?.proof?.checkpoint?.checkpoint_state_only !== true ||
+    !closeoutLifecycle?.failure_reasons?.includes("server_unavailable_or_spooled") ||
+    !closeoutLifecycle?.failure_reasons?.includes("incomplete_proof")
+  ) {
+    throw new Error(
+      `memory_closeout did not report non-ready lifecycle in stub mode: ${JSON.stringify(
+        closeout
+      )}`
+    );
+  }
+
   const contextCall = await client.callTool(
     {
       name: "memory_get_context_pack",
@@ -439,6 +477,12 @@ process.stdout.write(
         memory_set_checkpoint_state_only: stateOnly.checkpoint_state_only,
         memory_agent_checkpoint_searchable: highLevelCheckpoint.searchable_memory_created,
         high_level_memory_type: highLevelCheckpoint.memory?.memory_type
+      },
+      closeout_lifecycle_stub: {
+        mode: closeoutLifecycle.mode,
+        next_agent_ready: closeoutLifecycle.next_agent_ready,
+        failure_reasons: closeoutLifecycle.failure_reasons,
+        checkpoint_state_only: closeoutLifecycle.proof?.checkpoint?.checkpoint_state_only
       },
       governed_memory_schema_ux: {
         tools_list_excerpt: governedMemoryToolsListExcerpt,

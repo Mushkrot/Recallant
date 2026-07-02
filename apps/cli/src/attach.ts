@@ -64,10 +64,11 @@ const attachMemorySection = `## Memory (Recallant)
 - Automatic inside consent: session start, context read, concise decisions, actions, tests,
   checkpoints, closeout, and one synthetic proof marker when running diagnostics.
 - After meaningful progress: write concise agent-authored events/memories through
-  \`memory_append_event\` or \`memory_create_agent_memory\`, then call
-  \`memory_set_checkpoint\`; Recallant syncs the compact \`PROJECT_LOG.md\` fallback when it exists.
+  \`memory_append_event\` or \`memory_create_agent_memory\`. Use \`memory_set_checkpoint\` only for
+  checkpoint state; it is not semantic recall proof.
 - On clear pause/exit/closeout intent, or when meaningful work is complete: call
-  \`memory_closeout\`; rely on its repo-sync result instead of editing \`PROJECT_LOG.md\` by hand.
+  \`memory_closeout\`. This is the normal MCP closeout path and includes checkpoint state,
+  searchable memory, recall verification, and next-session readiness semantics.
 - To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
 - Approval required: attach/import/onboard existing project history, bulk file summaries, raw logs,
   customer data, or artifacts. Do not import or summarize project files without owner approval.
@@ -75,7 +76,9 @@ const attachMemorySection = `## Memory (Recallant)
   customer data, raw artifacts, backups, and private deployment notes. Never paste them into memory
   tools.
 - If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
-  \`recallant agent-event\`, \`recallant agent-checkpoint\`, and \`recallant agent-closeout\`.
+  \`recallant agent-event\`, and \`recallant agent-closeout\`. Use \`recallant agent-checkpoint\`
+  only as an advanced pause/compaction state helper, not as closeout proof.
+  \`recallant agent-closeout\` is the CLI fallback closeout path.
   If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
 `;
 

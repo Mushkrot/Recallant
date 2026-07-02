@@ -397,7 +397,7 @@ try {
   );
   const row = checks.rows[0];
   if (
-    row.event_count !== 3 ||
+    row.event_count !== 4 ||
     row.chunk_count < 1 ||
     row.workflow_chunk_count < 1 ||
     row.light_chunk_count < 1 ||

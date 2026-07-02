@@ -638,6 +638,13 @@ assert(
 const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
 const promptHookScript = await readFile(`${projectDir}/.recallant/hooks/user-prompt.sh`, "utf8");
 const toolHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-result.sh`, "utf8");
+const preCompactionHookScript = await readFile(
+  `${projectDir}/.recallant/hooks/pre-compaction.sh`,
+  "utf8"
+);
+const stopHookScript = await readFile(`${projectDir}/.recallant/hooks/stop-session.sh`, "utf8");
+const closeoutHookScript = await readFile(`${projectDir}/.recallant/hooks/closeout.sh`, "utf8");
+const hookReadme = await readFile(`${projectDir}/.recallant/hooks/README.md`, "utf8");
 const hookManifest = JSON.parse(
   await readFile(`${projectDir}/.recallant/hooks/manifest.json`, "utf8")
 );
@@ -652,10 +659,29 @@ assert(
   `Prompt/tool hooks should target explicit capture kinds: ${promptHookScript} ${toolHookScript}`
 );
 assert(
+  stopHookScript.includes("agent-closeout") && closeoutHookScript.includes("agent-closeout"),
+  `Stop/closeout hooks should route to agent-closeout: ${stopHookScript} ${closeoutHookScript}`
+);
+assert(
+  preCompactionHookScript.includes("agent-checkpoint") &&
+    !preCompactionHookScript.includes("agent-closeout"),
+  `Pre-compaction hook should be checkpoint state, not closeout: ${preCompactionHookScript}`
+);
+assert(
+  hookReadme.includes("pre-compaction.sh") &&
+    hookReadme.includes("records state only") &&
+    hookReadme.includes("not semantic closeout proof") &&
+    hookReadme.includes("normal hook closeout gate"),
+  `Hook README should label checkpoint versus closeout semantics: ${hookReadme}`
+);
+assert(
   hookManifest.fail_soft === true &&
     hookManifest.writes_global_config === false &&
     hookManifest.targets?.user_prompt?.script === ".recallant/hooks/user-prompt.sh" &&
     hookManifest.targets?.tool_result?.script === ".recallant/hooks/tool-result.sh" &&
+    hookManifest.targets?.pre_compaction_checkpoint?.input?.includes("state-only") &&
+    hookManifest.targets?.checkpoint?.input?.includes("not semantic closeout proof") &&
+    hookManifest.targets?.stop_closeout?.input?.includes("normal closeout") &&
     hookManifest.ready_proof?.includes("--require-capture"),
   `Hook manifest should expose machine-readable startup targets: ${JSON.stringify(hookManifest)}`
 );
