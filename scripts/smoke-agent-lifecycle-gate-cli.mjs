@@ -148,6 +148,33 @@ function assertReadyLifecycle(lifecycle, label) {
   );
 }
 
+function contractProofCopy() {
+  return JSON.parse(JSON.stringify(contractProof()));
+}
+
+function buildContractLifecycle(proof, overrides = {}) {
+  return buildAgentLifecycleCloseoutResult({
+    mode: "server",
+    project_id: "project-1",
+    session_id: "session-1",
+    closeout_event_id: "event-1",
+    proof,
+    ...overrides
+  });
+}
+
+function assertNotReadyLifecycle(lifecycle, label, expectedReasons) {
+  assert(lifecycle.next_agent_ready === false, `${label} unexpectedly became next-agent ready`);
+  assert(lifecycle.report_required === true, `${label} did not require a report`);
+  for (const reason of expectedReasons) {
+    assert(
+      lifecycle.failure_reasons.includes(reason),
+      `${label} missing failure reason ${reason}: ${JSON.stringify(lifecycle)}`
+    );
+  }
+  assertNoForbiddenStrings(JSON.stringify(lifecycle), label);
+}
+
 function assertContractPositive() {
   const lifecycle = buildAgentLifecycleCloseoutResult({
     mode: "server",
@@ -159,6 +186,107 @@ function assertContractPositive() {
   assertReadyLifecycle(lifecycle, "contract server fixture");
   assert(lifecycle.failure_reasons.length === 0, "contract server fixture had failure reasons");
   assertNoForbiddenStrings(JSON.stringify(lifecycle), "contract server fixture");
+}
+
+function assertContractNegativeCases() {
+  const cases = [
+    {
+      name: "review-required memory",
+      proof: {
+        ...contractProofCopy(),
+        memory: {
+          ok: false,
+          searchable_memory_created: false,
+          memory_status: "candidate",
+          memory_id: "candidate-memory-1",
+          memory_type: "work_log",
+          needs_review_ids: ["candidate-memory-1"]
+        }
+      },
+      reasons: ["review_required", "incomplete_proof"]
+    },
+    {
+      name: "recall failure",
+      proof: {
+        ...contractProofCopy(),
+        recall: {
+          ok: false,
+          recall_verified: false,
+          query: "agent-closeout-lifecycle:fixture",
+          marker_found: false,
+          recalled_memory_ids: [],
+          checked_at: "2026-07-02T00:00:01.000Z"
+        }
+      },
+      reasons: ["recall_verification_failed", "incomplete_proof"]
+    },
+    {
+      name: "next-session context failure",
+      proof: {
+        ...contractProofCopy(),
+        next_session_context: {
+          ok: false,
+          next_session_context_verified: false,
+          session_id: "session-2",
+          context_pack_id: "context-pack-1",
+          marker_found: false,
+          checked_at: "2026-07-02T00:00:02.000Z"
+        }
+      },
+      reasons: ["next_session_context_failed", "incomplete_proof"]
+    },
+    {
+      name: "checkpoint-only proof",
+      proof: {
+        ...contractProofCopy(),
+        event: { ok: false, event_written: false },
+        memory: {
+          ok: false,
+          searchable_memory_created: false,
+          memory_status: "missing",
+          memory_id: null,
+          memory_type: null
+        },
+        recall: {
+          ok: false,
+          recall_verified: false,
+          query: null,
+          marker_found: false,
+          recalled_memory_ids: [],
+          checked_at: null
+        },
+        next_session_context: {
+          ok: false,
+          next_session_context_verified: false,
+          session_id: null,
+          context_pack_id: null,
+          marker_found: false,
+          checked_at: null
+        }
+      },
+      reasons: [
+        "event_write_failed",
+        "memory_not_searchable",
+        "recall_verification_failed",
+        "next_session_context_failed",
+        "incomplete_proof"
+      ],
+      forbiddenReasons: ["checkpoint_update_failed"]
+    }
+  ];
+
+  for (const testCase of cases) {
+    const lifecycle = buildContractLifecycle(testCase.proof);
+    assertNotReadyLifecycle(lifecycle, testCase.name, testCase.reasons);
+    for (const reason of testCase.forbiddenReasons ?? []) {
+      assert(
+        !lifecycle.failure_reasons.includes(reason),
+        `${testCase.name} should not fail for ${reason}: ${JSON.stringify(lifecycle)}`
+      );
+    }
+  }
+
+  return cases.length;
 }
 
 async function withTempProject(callback) {
@@ -212,6 +340,10 @@ async function assertOfflineSpoolCloseout() {
     assert(
       output.lifecycle.failure_reasons.includes("server_unavailable_or_spooled"),
       "offline closeout missing server_unavailable_or_spooled"
+    );
+    assert(
+      output.lifecycle.failure_reasons.includes("incomplete_proof"),
+      "offline closeout missing incomplete_proof"
     );
   });
 }
@@ -282,6 +414,7 @@ async function assertLiveCliPositiveIfRequested() {
 }
 
 assertContractPositive();
+const contractNegativeCases = assertContractNegativeCases();
 await assertOfflineSpoolCloseout();
 await assertNoActiveSessionCloseout();
 const livePositive = await assertLiveCliPositiveIfRequested();
@@ -293,6 +426,7 @@ process.stdout.write(
       cli_positive_cases: livePositive.cases,
       cli_positive_status: livePositive.status,
       contract_positive_cases: 1,
+      contract_negative_cases: contractNegativeCases,
       cli_negative_cases: 2,
       forbidden_output_check: "passed"
     },

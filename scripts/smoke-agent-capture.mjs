@@ -44,10 +44,80 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function assertReadyLifecycle(output, label) {
+  const lifecycle = output.lifecycle;
+  assert(lifecycle, `${label} did not return lifecycle proof: ${JSON.stringify(output)}`);
+  assert(
+    lifecycle.next_agent_ready === true,
+    `${label} did not become next-agent ready: ${JSON.stringify(lifecycle)}`
+  );
+  assert(
+    Array.isArray(lifecycle.failure_reasons) && lifecycle.failure_reasons.length === 0,
+    `${label} had lifecycle failure reasons: ${JSON.stringify(lifecycle.failure_reasons)}`
+  );
+  assert(lifecycle.report_required === false, `${label} unexpectedly required a report`);
+  assert(
+    lifecycle.proof?.event?.event_written === true,
+    `${label} missing closeout event proof`
+  );
+  assert(
+    lifecycle.proof?.checkpoint?.checkpoint_updated === true,
+    `${label} missing checkpoint proof`
+  );
+  assert(
+    lifecycle.proof?.memory?.searchable_memory_created === true &&
+      lifecycle.proof?.memory?.memory_status === "accepted",
+    `${label} missing accepted searchable memory proof: ${JSON.stringify(lifecycle.proof?.memory)}`
+  );
+  assert(
+    lifecycle.proof?.recall?.recall_verified === true &&
+      lifecycle.proof?.recall?.marker_found === true,
+    `${label} missing semantic recall proof: ${JSON.stringify(lifecycle.proof?.recall)}`
+  );
+  assert(
+    lifecycle.proof?.next_session_context?.next_session_context_verified === true &&
+      lifecycle.proof?.next_session_context?.marker_found === true,
+    `${label} missing next-session context proof: ${JSON.stringify(
+      lifecycle.proof?.next_session_context
+    )}`
+  );
+
+  const memoryId = String(lifecycle.proof?.memory?.memory_id ?? "");
+  const recallQuery = String(lifecycle.proof?.recall?.query ?? "");
+  assert(memoryId, `${label} did not return closeout memory id`);
+  assert(recallQuery, `${label} did not return closeout recall query`);
+  return {
+    memoryId,
+    recallQuery,
+    nextAgentReady: lifecycle.next_agent_ready,
+    memoryStatus: lifecycle.proof.memory.memory_status,
+    recallVerified: lifecycle.proof.recall.recall_verified,
+    nextSessionContextVerified: lifecycle.proof.next_session_context.next_session_context_verified
+  };
+}
+
+function assertContextIncludesCloseout(context, closeoutProof, label) {
+  const working = context.sections?.working_memories ?? [];
+  assert(
+    working.some(
+      (memory) =>
+        String(memory.memory_id ?? "") === closeoutProof.memoryId ||
+        String(memory.body ?? "").includes(closeoutProof.recallQuery) ||
+        String(memory.title ?? "").includes(closeoutProof.recallQuery)
+    ),
+    `${label} did not include closeout memory: ${JSON.stringify({
+      closeoutProof,
+      working
+    })}`
+  );
+}
+
 const onlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-online-"));
 const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-offline-"));
 const remoteProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-remote-"));
 const marker = `CAPTURE-SMOKE-${randomUUID()}`;
+let firstCloseoutProof;
+let secondCloseoutProof;
 
 try {
   const attach = await cli(onlineProject, ["attach", ".", "--format", "json"]);
@@ -158,15 +228,12 @@ try {
     "--summary",
     `Closed capture smoke for ${marker}`
   ]);
-  assert(
-    closeout.closeout?.report_required === false,
-    `closeout reported warnings: ${JSON.stringify(closeout)}`
-  );
+  firstCloseoutProof = assertReadyLifecycle(closeout, "first agent-closeout");
 
   const secondStart = await cli(onlineProject, [
     "agent-start",
     "--task-hint",
-    `${marker} readiness decision`
+    `${marker} readiness decision ${firstCloseoutProof.recallQuery}`
   ]);
   assert(
     secondStart.session_id !== started.session_id,
@@ -180,13 +247,14 @@ try {
   const context = await cli(onlineProject, [
     "context",
     "--task-hint",
-    `${marker} readiness decision`
+    `${marker} readiness decision ${firstCloseoutProof.recallQuery}`
   ]);
   const working = context.sections?.working_memories ?? [];
   assert(
     working.some((memory) => String(memory.body).includes(marker)),
     `context pack did not recall captured decision: ${JSON.stringify(context)}`
   );
+  assertContextIncludesCloseout(context, firstCloseoutProof, "second context pack");
   assert(
     String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
     "context pack did not include the latest checkpoint"
@@ -203,10 +271,7 @@ try {
     "--summary",
     `Closed recall verification session for ${marker}`
   ]);
-  assert(
-    secondCloseout.closeout?.report_required === false,
-    `second closeout reported warnings: ${JSON.stringify(secondCloseout)}`
-  );
+  secondCloseoutProof = assertReadyLifecycle(secondCloseout, "second agent-closeout");
 
   const db = new RecallantDb({
     databaseUrl,
@@ -440,4 +505,23 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
   await rm(remoteProject, { recursive: true, force: true });
 }
 
-process.stdout.write("Product acceptance smoke passed\n");
+process.stdout.write(
+  JSON.stringify(
+    {
+      product_acceptance_smoke: "passed",
+      agent_capture_smoke: "passed",
+      golden_lifecycle_gate: {
+        first_closeout_next_agent_ready: firstCloseoutProof?.nextAgentReady === true,
+        second_closeout_next_agent_ready: secondCloseoutProof?.nextAgentReady === true,
+        first_closeout_memory_status: firstCloseoutProof?.memoryStatus ?? null,
+        first_closeout_recall_verified: firstCloseoutProof?.recallVerified === true,
+        first_closeout_next_session_context_verified:
+          firstCloseoutProof?.nextSessionContextVerified === true
+      },
+      offline_spool: "passed",
+      remote_consent_boundary: "passed"
+    },
+    null,
+    2
+  ) + "\n"
+);

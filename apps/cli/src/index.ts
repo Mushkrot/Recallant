@@ -6166,7 +6166,7 @@ async function verifyCloseoutNextSessionContext(input: {
   } finally {
     if (verificationSessionId) {
       try {
-        await input.database.closeSession(verificationSessionId, "closeout_verification");
+        await input.database.closeSession(verificationSessionId, "client_exit");
       } catch {
         proof = {
           ...proof,
