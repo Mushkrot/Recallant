@@ -5482,6 +5482,7 @@ function renderDashboard(
     showReview ||
     showSettings;
   const focused = activeView !== "all";
+  const focusedSettings = activeView === "settings";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -6757,8 +6758,13 @@ function renderDashboard(
             <details class="operation-panel">
               <summary><span>Model costs and approvals</span><small>Paid API remains confirmation-gated</small></summary>
               ${renderCosts(data)}
-            </details>
-            <details class="operation-panel">
+            </details>`
+            }
+            ${
+              focused && !focusedSettings
+                ? ""
+                : `
+            <details class="operation-panel" id="cleanup-forget"${focusedSettings ? " open" : ""}>
               <summary><span>Cleanup / Forget</span><small>Dry-run first; permanent erasure is separate</small></summary>
               ${renderCleanup(data, detach, sanitize)}
             </details>`

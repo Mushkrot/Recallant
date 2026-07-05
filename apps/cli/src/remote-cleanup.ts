@@ -37,19 +37,41 @@ async function pathExists(path: string) {
   }
 }
 
-function tablePattern(tableName: string) {
-  return new RegExp(
-    `(^|\\n)\\[${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*\\n[\\s\\S]*?(?=\\n\\[|$)`
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function tomlTableRanges(existing: string, tableName: string) {
+  const pattern = new RegExp(
+    `(^|\\n)(\\[${escapeRegExp(tableName)}\\]\\s*\\n[\\s\\S]*?)(?=\\n\\[|$)`,
+    "g"
   );
+  return Array.from(existing.matchAll(pattern)).map((match) => {
+    const prefix = match[1] ?? "";
+    return {
+      start: (match.index ?? 0) + prefix.length,
+      end: (match.index ?? 0) + match[0].length,
+      text: match[2] ?? ""
+    };
+  });
 }
 
-function findTomlTable(existing: string, tableName: string) {
-  const match = existing.match(tablePattern(tableName));
-  return match?.[0] ?? null;
-}
-
-function removeTomlTable(existing: string, tableName: string) {
-  return existing.replace(tablePattern(tableName), "").trimEnd();
+function removeTomlTables(
+  existing: string,
+  tableName: string,
+  shouldRemove: (tableText: string) => boolean
+) {
+  const ranges = tomlTableRanges(existing, tableName);
+  if (ranges.length === 0) return existing.trimEnd();
+  let cursor = 0;
+  let next = "";
+  for (const range of ranges) {
+    if (!shouldRemove(range.text)) continue;
+    next += existing.slice(cursor, range.start);
+    cursor = range.end;
+  }
+  next += existing.slice(cursor);
+  return next.replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 function isRemoteRecallantText(text: string) {
@@ -86,9 +108,10 @@ async function codexCleanupChange(
   } catch {
     return { change: null, warnings: [] };
   }
-  const table = findTomlTable(existing, "mcp_servers.recallant");
-  if (!table) return { change: null, warnings: [] };
-  if (!isRemoteRecallantText(table)) {
+  const tables = tomlTableRanges(existing, "mcp_servers.recallant");
+  if (tables.length === 0) return { change: null, warnings: [] };
+  const remoteTables = tables.filter((table) => isRemoteRecallantText(table.text));
+  if (remoteTables.length === 0) {
     return {
       change: null,
       warnings: [
@@ -100,7 +123,7 @@ async function codexCleanupChange(
       ]
     };
   }
-  const next = removeTomlTable(existing, "mcp_servers.recallant");
+  const next = removeTomlTables(existing, "mcp_servers.recallant", isRemoteRecallantText);
   if (!next.trim()) {
     return {
       change: {

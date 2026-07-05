@@ -50,11 +50,11 @@ dependable before expanding the product surface.
 
 ## Near Term
 
-- One-command beginner onboarding hardening: keep rehearsing `recallant onboard <project>` across
+- One-command beginner onboarding hardening: keep rehearsing `recallant connect <project>` across
   clean hosts, real-project sandbox copies, and more client profiles, with storage readiness,
   production-sensitive confirmation, attach/connect orchestration, capture proof, recall proof,
   Workbench outcome, and cleanup in one public beginner flow.
-- Visible onboarding progress after confirmation: once `recallant onboard <project>` has received
+- Visible onboarding progress after confirmation: once `recallant connect <project>` has received
   user confirmation and starts longer-running work, keep the terminal visibly alive with clear stage
   labels, bounded progress messages, and current operation status so a new user does not mistake a
   slow setup step for a hung process.

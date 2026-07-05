@@ -40,6 +40,21 @@ function mustAppearBefore(text, first, second, label) {
   assert(firstIndex < secondIndex, `${label} must lead with ${first} before ${second}`);
 }
 
+function mustLeadWithUniversalConnect(text, label) {
+  const connectIndex = text.indexOf("recallant connect");
+  const onboardIndex = text.indexOf("recallant onboard");
+  assert(
+    connectIndex >= 0,
+    `${label} must include recallant connect as the user-facing entry point`
+  );
+  if (onboardIndex >= 0) {
+    assert(
+      connectIndex < onboardIndex,
+      `${label} must introduce recallant connect before any lower-level recallant onboard mention`
+    );
+  }
+}
+
 function fixtureStderrExcerpt(stderr) {
   const trimmed = stderr.trim();
   return trimmed.length > 0 ? trimmed.slice(0, 1000) : "<empty>";
@@ -118,7 +133,7 @@ mustInclude(
     "Why It Matters",
     "local self-host evaluation",
     "existing central Recallant server",
-    "recallant onboard /path/to/project",
+    "recallant connect /path/to/project",
     "storage_blocked",
     "Workbench link",
     "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
@@ -151,6 +166,18 @@ mustInclude(
   "README.md"
 );
 
+const agentsGuide = await read("AGENTS.md");
+mustInclude(
+  agentsGuide,
+  [
+    "lead with `recallant connect <project>` or",
+    "`recallant connect .`",
+    "Treat `recallant onboard`, `recallant attach`, and client-specific",
+    "as lower-level/debug paths"
+  ],
+  "AGENTS.md universal connect rule"
+);
+
 const readinessContractSource = await read("packages/contracts/src/readiness-status.ts");
 mustInclude(
   readinessContractSource,
@@ -177,6 +204,7 @@ mustInclude(
     "works even when `recallant` is missing or old",
     "registers a local trusted-device key",
     "credential reference, not the raw",
+    "thin agent-ready files",
     "--bootstrap-token <one-time-token>",
     "Advanced/admin fallback",
     "recallant invite /path/to/project --server-url https://memory.example.com",
@@ -184,9 +212,9 @@ mustInclude(
     "It is not the primary beginner remote UX",
     "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "recallant onboard /path/to/project",
     "recallant connect /path/to/project",
     "recallant connect /path/to/project --server-url https://memory.example.com",
+    "recallant onboard /path/to/project",
     "Capture active: yes",
     "documentation posture summary",
     "Documentation posture: empty | healthy |",
@@ -204,7 +232,8 @@ mustInclude(
     "create starter docs",
     "discuss first",
     "Empty projects may receive starter docs during the confirmed",
-    "Existing-doc canonicalization and broader doc rewriting",
+    "Existing-doc canonicalization and broader",
+    "doc rewriting remain confirmed Workbench workflows",
     "Audit view",
     "recallant audit --project-dir /path/to/project",
     "bodies, auth headers, cookies",
@@ -213,6 +242,11 @@ mustInclude(
     "Agent-ready projects"
   ],
   "docs/QUICKSTART.md"
+);
+mustNotInclude(
+  quickstart,
+  ["then writes only remote\nMCP client config locally", "then writes only remote MCP client config locally"],
+  "docs/QUICKSTART.md retired remote-only-config wording"
 );
 mustAppearBefore(
   quickstart,
@@ -230,6 +264,7 @@ mustInclude(
     "recallant connect <project> --server-url https://memory.example.com",
     "recallant connect .",
     "It works even when `recallant` is missing or old",
+    "compact agent-ready files",
     "Advanced/admin fallback",
     "not the universal first-run command",
     "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
@@ -250,6 +285,11 @@ mustInclude(
   ],
   "docs/CLIENT_SETUP.md"
 );
+mustNotInclude(
+  clientSetup,
+  ["writes only remote MCP config", "writes only remote client config"],
+  "docs/CLIENT_SETUP.md retired remote-only-config wording"
+);
 mustAppearBefore(
   clientSetup,
   "curl -fsSL https://memory.example.com/connect | bash",
@@ -264,6 +304,8 @@ mustInclude(
     "Status: the universal remote connect model is implemented",
     "curl -fsSL https://memory.example.com/connect | bash",
     "does not depend on an already installed or up-to-date local `recallant` CLI",
+    "prepares thin agent-ready files",
+    "`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`",
     "credential reference, not the raw secret",
     "Server-generated invites remain supported as an advanced/admin path",
     "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected"
@@ -309,6 +351,7 @@ mustInclude(
     '`recommended_next_call: "memory_get_context_pack"`',
     '`recommended_next_proof_call: "memory_create_agent_memory"`',
     "`remote-ready, local storage not attached`",
+    "`startup_contract` with direct MCP calls and CLI fallback commands",
     "session/context readiness is proven by `memory_start_session` plus `memory_get_context_pack`",
     "bounded `readiness_contract`",
     "a checkpoint can be written and read back with `memory_set_checkpoint`",
@@ -332,7 +375,7 @@ mustInclude(
     "behavior is mandatory by",
     "`memory_get_readiness_status`",
     "a repeated `agent-start` should report",
-    "`readiness_contract.primary_state: \"semantic_memory_ready\"` while `capture_active` remains false",
+    '`readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` remains false',
     "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
     "optionally prove checkpoint state",
     "prove governed semantic recall",
@@ -341,6 +384,7 @@ mustInclude(
     "`memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint",
     "`memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic",
     "proof that semantic recall is populated",
+    "Use `recallant agent-checkpoint` only for explicit pause or compaction state.",
     "baseline checkpoint parity contract is state-only",
     "`memory_agent_checkpoint`"
   ],
@@ -389,7 +433,7 @@ mustInclude(
     "`semantic_memory_ready`",
     "automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the",
     "Beginner Onboarding Contract",
-    "recallant onboard <project>",
+    "recallant connect <project>",
     "Database not configured",
     "advanced/debug APIs",
     "recallant attach .",
@@ -416,7 +460,7 @@ mustInclude(
     "Canonicalize docs for Recallant-aware workflow",
     "Create starter docs",
     "Discuss first",
-    "`recallant onboard <project>` can now create starter docs",
+    "`recallant connect <project>` can now create starter docs",
     "Starter docs always include the base `README.md`, `AGENTS.md`, and `PROJECT_LOG.md`",
     "must not overwrite existing project docs",
     "New Project Bootstrap",
@@ -444,9 +488,9 @@ mustInclude(
     "Product Contract Status",
     "Contract Coverage",
     "Agent-ready project onboarding",
-    "installed-host one-command MVP",
+    "universal CLI one-command MVP",
     "Browser-first project attachment from the Workbench is future work",
-    "recallant onboard <project>",
+    "recallant connect <project>",
     "Database not configured",
     "Existing-project migration",
     "Capture-active proof",
@@ -636,7 +680,7 @@ mustInclude(
     "autonomous browser QA",
     "Security review smoke",
     "One-command beginner onboarding hardening",
-    "recallant onboard <project>",
+    "recallant connect <project>",
     "Autonomous attach polish",
     "Remote existing-project readiness gates",
     "session/context readiness",
@@ -652,6 +696,35 @@ mustInclude(
   ],
   "ROADMAP"
 );
+
+const universalConnectSurfaces = [
+  ["README.md", readme],
+  ["AGENTS.md", agentsGuide],
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/AGENT_READY_PROJECTS.md", agentReadyProjects],
+  ["docs/ARCHITECTURE.md", await read("docs/ARCHITECTURE.md")],
+  ["docs/SELF_HOSTING.md", await read("docs/SELF_HOSTING.md")],
+  ["docs/CONTRACT_STATUS.md", contractStatus],
+  ["docs/ROADMAP.md", roadmap],
+  ["scripts/install-recallant.sh", await read("scripts/install-recallant.sh")],
+  ["scripts/install-recallant-cli.sh", await read("scripts/install-recallant-cli.sh")],
+  ["scripts/install-recallant-bootstrap.sh", await read("scripts/install-recallant-bootstrap.sh")]
+];
+for (const [label, text] of universalConnectSurfaces) {
+  mustLeadWithUniversalConnect(text, label);
+}
+const primaryOnboardPatterns = [
+  /\bThen onboard a project\b/i,
+  /\bOnboard a project:\s*recallant onboard\b/i,
+  /\bThe universal beginner command is:\s*```bash\s*recallant onboard\b/is,
+  /\bThe beginner onboarding path is one command:\s*```bash\s*recallant onboard\b/is,
+  /\brecallant onboard <project>` is the product-level path\b/i,
+  /\bonboarding_command:\s*"recallant onboard <project>"/i
+];
+for (const [label, text] of universalConnectSurfaces) {
+  mustNotMatch(text, primaryOnboardPatterns, label);
+}
 
 const remoteProofDocs = [
   ["docs/QUICKSTART.md", quickstart],
@@ -714,6 +787,26 @@ assert(
 assert(
   String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run documentation-posture:smoke"),
   "smoke:core must include documentation-posture:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-connect-cli:smoke"] ===
+    "node scripts/smoke-remote-connect-cli.mjs",
+  "package.json must expose remote-connect-cli:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run remote-connect-cli:smoke"),
+  "smoke:core must include remote-connect-cli:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-client-cleanup:smoke"] ===
+    "node scripts/smoke-remote-client-cleanup.mjs",
+  "package.json must expose remote-client-cleanup:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
+    "npm run remote-client-cleanup:smoke"
+  ),
+  "smoke:core must include remote-client-cleanup:smoke"
 );
 assert(
   packageJson.scripts?.["remote-live-external-canary"] ===

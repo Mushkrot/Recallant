@@ -297,4 +297,4 @@ echo
 echo "Recallant installed."
 echo "Human UI: http://127.0.0.1:3005/review"
 echo "CLI: $INSTALL_CLI_PREFIX/recallant"
-echo "Onboard a project: recallant onboard /path/to/project"
+echo "Connect a project: recallant connect /path/to/project"

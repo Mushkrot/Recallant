@@ -45,21 +45,22 @@ monorepo/workspace placeholder and is not the installed CLI version.
 From anywhere:
 
 ```bash
-recallant onboard /path/to/project
-```
-
-The universal beginner command is:
-
-```bash
 recallant connect /path/to/project
 ```
 
-With reachable local storage, `connect` runs the local onboarding flow. Without local storage, it
-asks for an existing central Recallant server URL or lets the owner choose local storage. Automation
-can provide the server URL up front:
+`recallant connect` is the universal beginner command for both local self-host projects and projects
+that should connect to an existing central Recallant server. With reachable local storage, `connect`
+runs the local onboarding flow. Without local storage, it asks for an existing central Recallant
+server URL or lets the owner choose local storage. Automation can provide the server URL up front:
 
 ```bash
 recallant connect /path/to/project --server-url https://memory.example.com
+```
+
+The explicit local command remains available for contributors and debugging:
+
+```bash
+recallant onboard /path/to/project
 ```
 
 The one-command flow checks storage readiness, offers local single-user storage setup when needed,
@@ -122,9 +123,9 @@ recallant connect .
 
 When it asks for the central server URL, enter `https://memory.example.com`. For automation, pass
 `--server-url https://memory.example.com`. This works even when `recallant` is missing or old on the
-external machine. It starts a device-style pairing request,
-asks the owner to approve the project through the protected central server, then writes only remote
-MCP client config locally. See
+external machine. It starts a device-style pairing request, asks the owner to approve the project
+through the protected central server, then writes scoped remote MCP client config, a non-secret
+consent receipt, and thin agent-ready files locally. See
 [`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md).
 
 On the first approved connect from a workstation, the flow registers a local trusted-device key.
@@ -136,9 +137,13 @@ secret.
 
 Expected remote readiness:
 
+- `recallant connect . --server-url https://memory.example.com` or `recallant connect-cloud .`
+  creates or safely upserts the thin `README.md`, `AGENTS.md`, and `PROJECT_LOG.md` agent-ready
+  surfaces by default, while preserving existing project docs and avoiding local storage setup;
 - `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
 - the same JSON includes a bounded `readiness_contract`; before proof its primary state remains
   `configured`;
+- the same JSON includes a `startup_contract` with direct MCP calls and CLI fallback commands;
 - the same JSON reports `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`;
 - local `recallant doctor --project-dir .` reports `remote-ready, local storage not attached`
@@ -259,8 +264,8 @@ safety gates. When documentation posture needs review, the Workbench shows a doc
 surface with four choices: keep current docs and add a Recallant layer, canonicalize docs for a
 Recallant-aware workflow, create starter docs, or discuss first. This surface helps the owner choose
 the next documentation posture. Empty projects may receive starter docs during the confirmed
-`recallant onboard <project>` write step. Existing-doc canonicalization and broader doc rewriting
-remain confirmed Workbench workflows.
+`recallant connect <project>` local onboarding write step. Existing-doc canonicalization and broader
+doc rewriting remain confirmed Workbench workflows.
 
 The Workbench and startup context packs also show a minimal canon/capability context layer:
 environment facts, capability references, secret reference names, server canon link status, and a

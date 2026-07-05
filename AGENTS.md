@@ -41,6 +41,14 @@ This repository is public OSS. Treat all tracked files as user-facing or contrib
   deployment notes, and private strategy drafts do not belong in this repository.
 - Do not commit secrets, raw credentials, private server paths, raw memory exports, customer data, or
   local runtime state.
+- For ordinary user-facing project connection guidance, lead with `recallant connect <project>` or
+  `recallant connect .`. Treat `recallant onboard`, `recallant attach`, and client-specific
+  `recallant connect <client> --project-dir ...` as lower-level/debug paths unless the user
+  explicitly asks for those internals.
+- For direct user questions about Recallant Dashboard or CLI behavior, verify the current source,
+  route, command, or UI label before answering. Answers must use exact visible labels, exact command
+  names, and the actual path a user can follow. If the behavior was not verified in the current
+  turn, say that explicitly.
 - Prefer small, reviewable changes that match existing TypeScript, CLI, server, and docs patterns.
 
 ## Before Opening A PR

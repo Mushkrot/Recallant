@@ -324,7 +324,7 @@ assert(
   cliInstallSource.includes('CLI_ENV_FILE="${RECALLANT_CLI_ENV_FILE:-${RECALLANT_ENV_FILE:-}}"') &&
     cliInstallSource.includes('export RECALLANT_ENV_FILE="$CLI_ENV_FILE"') &&
     cliInstallSource.includes("Recallant CLI env file:"),
-  "CLI wrapper installer must bake the selected env file so recallant onboard stays one command"
+  "CLI wrapper installer must bake the selected env file so recallant connect stays one command"
 );
 assert(
   installerSource.includes(
@@ -396,8 +396,8 @@ assert(
     bootstrapSource.includes("This is not the remote existing-server client path.") &&
     bootstrapSource.includes('INVOKE_DIR="$(pwd -P)"') &&
     bootstrapSource.includes('onboard_target="$INVOKE_DIR/$ONBOARD_PROJECT"') &&
-    bootstrapSource.includes('"$recallant_cmd" onboard "$onboard_target"'),
-  "Bootstrap installer must guard local self-host onboarding from being mistaken for remote setup"
+    bootstrapSource.includes('"$recallant_cmd" connect "$onboard_target"'),
+  "Bootstrap installer must guard local self-host project connection from being mistaken for remote setup"
 );
 assert(
   clientBootstrapSource.includes("connect-remote") &&

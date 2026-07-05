@@ -12,7 +12,7 @@ release packaging before it should be treated as stable infrastructure.
 
 | Contract Area | Current Status | Evidence | Remaining Work |
 |---------------|----------------|----------|----------------|
-| Agent-ready project onboarding | Working slice with installed-host one-command MVP | `recallant onboard <project>`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-quickstart:smoke`, `npm run public-install-rollback:smoke`, `npm run public-managed-install:smoke`, `npm run live-acceptance:smoke` | Broader external-host and client pilots before release candidate. |
+| Agent-ready project onboarding | Working slice with universal CLI one-command MVP | `recallant connect <project>`, `npm run product-acceptance:smoke`, `npm run onboarding:smoke`, `npm run public-clean-host:smoke`, `npm run public-quickstart:smoke`, `npm run public-install-rollback:smoke`, `npm run public-managed-install:smoke`, `npm run live-acceptance:smoke` | Broader external-host and client pilots before release candidate. |
 | Thin bootstrap files | Working slice | Attach/init create `.recallant/config`, `AGENTS.md`, `PROJECT_LOG.md`, client MCP config, and `.gitignore`; `connect --install-local-hooks --dry-run` is idempotent and reports ready/no-write when MCP config and hooks already match; `npm run repo-contract:smoke`, `npm run connect:smoke` | Keep generated files compact as more clients are added. |
 | Existing-project migration | Working slice | Discovery/import classify old agent files, handoffs, `.env.example`, runbooks, secret references, risky content, backups, and migration summaries; `npm run prepilot:smoke:discovery`, `npm run prepilot:smoke:import`, `npm run phase10:smoke`, `npm run non-owner-migration:smoke`, opt-in `npm run real-project-pilots:smoke` one-command sandbox-copy pilots | More real-world pilots before release candidate. |
 | Capture-active proof | Working slice with quickstart proof | Onboard verify reports structured capture/readiness/recall stages; `public-quickstart:smoke` proves installed-wrapper onboarding, capture active evidence, recall proof, and Workbench outcome; `npm run product-acceptance:smoke` and `npm run agent-capture:smoke` prove agent closeout readiness, accepted closeout memory, semantic recall, and next-session context; `npm run agent-lifecycle-gate:smoke` keeps degraded lifecycle paths not ready; `npm run demo-capture:smoke` | Keep proof visible in Workbench and docs. |
@@ -73,6 +73,7 @@ Recent verification across the current public checkpoint sequence includes:
 - `npm run remote-connect-storage:smoke`
 - `npm run remote-connect-server:smoke`
 - `npm run remote-connect-cli:smoke`
+- `npm run remote-client-cleanup:smoke`
 - `npm run remote-connect-security:smoke`
 - `npm run remote-connect-external-rehearsal:smoke`
 - `npm run remote-connect-live-readiness:smoke`
@@ -119,6 +120,9 @@ The same pilot drove the release gates now used for remote existing-project read
 - `remote-doctor --capture-proof` proves session/context readiness, while
   `remote-doctor --semantic-proof` adds checkpoint state proof plus a governed synthetic marker
   memory write and recall;
+- `recallant connect-cloud` runs session/context proof by default after approval, reports the
+  normalized proof booleans under `remote_proof`, and keeps governed semantic marker proof explicit
+  through `--proof semantic` / `--semantic-proof`;
 - checkpoint readback and governed semantic recall are separate surfaces, and the docs/CLI should not
   let operators confuse them;
 - `memory_get_readiness_status` now exposes persistent bounded readiness evidence, so a repeated
@@ -138,6 +142,22 @@ The same pilot drove the release gates now used for remote existing-project read
 These are UX and acceptance-flow improvements rather than evidence that the scoped remote MCP core is
 broken. The release gate should still require repeat external-host rehearsals and strict
 capture/recall evidence with redacted outputs.
+
+## Deterministic Remote Agent-Ready Gate
+
+The normal repository gate must catch the core remote beginner regression without owner laptop
+access or a live central server. `smoke:core` therefore includes `npm run remote-connect-cli:smoke`
+and `npm run remote-client-cleanup:smoke`.
+
+That deterministic gate covers the failure mode where remote connect writes only MCP config but does
+not leave the project agent-ready. It exercises empty remote projects, existing-doc projects,
+existing `AGENTS.md`, credential-ref-only config, no local database storage, dry-run no-write
+planning, trusted-device reconnect idempotency, non-ASCII project paths, explicit remote proof
+states, and cleanup/retry preservation of source docs and `.recallant` state.
+
+Live external canary and live central-server readiness checks remain release evidence. They must
+skip or block safely without explicit live environment variables and must not be hidden dependencies
+of normal repository tests.
 
 ## Remote Existing-Project Release Gate Matrix
 
@@ -159,13 +179,14 @@ Remote existing-project readiness is a sequence of proof surfaces, not one boole
 ## What Is Not Ready Yet
 
 - Recallant should not be treated as stable team-wide infrastructure.
-- Browser-first project attachment from the Workbench is future work. The current beginner MVP is an
-  installed-host flow where the user runs one command: `recallant onboard <project>`.
-- Beginner onboarding is not complete unless `recallant onboard <project>` reports storage
-  readiness, project attach, client connection, capture proof, recall proof, and Workbench outcome.
+- Browser-first project attachment from the Workbench is future work. The current beginner MVP is a
+  universal CLI flow where the user runs one command: `recallant connect <project>`.
+- Beginner onboarding is not complete unless `recallant connect <project>` reports storage
+  readiness or remote scoped credential readiness, project attach or remote config, client
+  connection, capture proof, recall proof, and Workbench outcome.
   `Database not configured` is a blocker, not a successful onboarding result.
-- `attach`, `connect`, `doctor`, and `agent-*` are still useful advanced/debug APIs, but the public
-  beginner path should not require users to know those commands.
+- `onboard`, `attach`, client-specific `connect`, `doctor`, and `agent-*` are still useful
+  advanced/debug APIs, but the public beginner path should not require users to know those commands.
 - Live connector ingestion is not the default; connector records are governed references until setup,
   consent, and policy allow capture.
 - Documentation posture is a reported and reviewed context layer. Empty projects can receive

@@ -56,14 +56,15 @@ function missing(posture, label) {
   return posture.missing_recommended_docs.some((item) => item.includes(label));
 }
 
-function starterPlanFor(profile, existingTargetPaths = []) {
+function starterPlanFor(profile, existingTargetPaths = [], agentMode = undefined) {
   return planStarterDocs({
     projectName: `starter-${profile}`,
     posture: {
       ...emptyPosture,
       profile
     },
-    existingTargetPaths
+    existingTargetPaths,
+    agentMode
   });
 }
 
@@ -105,7 +106,10 @@ async function analyzeNoWrite(projectDir) {
 
 const emptyProject = await fixture("empty");
 const emptyPosture = await analyzeNoWrite(emptyProject);
-assert(emptyPosture.status === "docs_absent", `Empty project status failed: ${emptyPosture.status}`);
+assert(
+  emptyPosture.status === "docs_absent",
+  `Empty project status failed: ${emptyPosture.status}`
+);
 assert(
   summarizeDocumentationPostureForOnboard(emptyPosture).status === "empty",
   `Empty project summary status failed: ${JSON.stringify(
@@ -117,15 +121,43 @@ assert(missing(emptyPosture, "README.md"), "Empty project missing README recomme
 assert(missing(emptyPosture, "AGENTS.md"), "Empty project missing AGENTS recommendation");
 
 const starterUnknown = starterPlanFor("unknown");
-assert(starterUnknown.status === "ready", `Unknown starter plan not ready: ${JSON.stringify(starterUnknown)}`);
+assert(
+  starterUnknown.status === "ready",
+  `Unknown starter plan not ready: ${JSON.stringify(starterUnknown)}`
+);
 assert(starterUnknown.eligible_for_apply === true, "Unknown starter plan should be eligible");
 assert(starterUnknown.writes_files === false, "Starter plan should stay read-only before apply");
-assertStarterPaths(
-  starterUnknown,
-  ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
-  "unknown"
-);
+assertStarterPaths(starterUnknown, ["README.md", "AGENTS.md", "PROJECT_LOG.md"], "unknown");
 assertNoPrivateTemplateMarkers(starterUnknown, "unknown");
+
+const starterUnknownAgents =
+  starterUnknown.files.find((file) => file.path === "AGENTS.md")?.content ?? "";
+assert(
+  starterUnknownAgents.includes("configured Recallant MCP/client integration") &&
+    !starterUnknownAgents.includes("central Recallant server through remote MCP"),
+  `Default starter AGENTS should preserve local-storage wording: ${starterUnknownAgents}`
+);
+
+const starterRemote = starterPlanFor("unknown", [], "remote_mcp");
+const starterRemoteAgents =
+  starterRemote.files.find((file) => file.path === "AGENTS.md")?.content ?? "";
+assert(
+  starterRemote.status === "ready" &&
+    starterRemote.eligible_for_apply === true &&
+    starterRemoteAgents.includes("configured remote Recallant MCP/client integration") &&
+    starterRemoteAgents.includes("central Recallant server through remote MCP") &&
+    starterRemoteAgents.includes(
+      "do not set up local Postgres, Docker, or `RECALLANT_DATABASE_URL`"
+    ) &&
+    starterRemoteAgents.includes("memory_start_session") &&
+    starterRemoteAgents.includes("memory_get_context_pack") &&
+    starterRemoteAgents.includes("memory_closeout") &&
+    starterRemoteAgents.includes("checkpoint state; it is not semantic recall proof") &&
+    starterRemoteAgents.includes("recallant agent-start --format json") &&
+    starterRemoteAgents.includes("recallant agent-closeout"),
+  `Remote starter AGENTS did not expose remote MCP mode safely: ${starterRemoteAgents}`
+);
+assertNoPrivateTemplateMarkers(starterRemote, "remote");
 
 const starterService = starterPlanFor("service_app");
 assertStarterPaths(
@@ -235,7 +267,10 @@ assert(
     summarizeDocumentationPostureForOnboard(productionPosture)
   )}`
 );
-assert(hasSignal(productionPosture, "production_or_server_hint"), "Production/server signal missing");
+assert(
+  hasSignal(productionPosture, "production_or_server_hint"),
+  "Production/server signal missing"
+);
 assert(hasSignal(productionPosture, "canon_links_needed"), "Canon-needed signal missing");
 assert(productionPosture.canon_context.needed === true, "Canon context should be needed");
 assert(
@@ -299,7 +334,10 @@ assert(
   summarizeDocumentationPostureForOnboard(readyPosture).status === "healthy",
   `Ready summary status failed: ${JSON.stringify(summarizeDocumentationPostureForOnboard(readyPosture))}`
 );
-assert(!hasSignal(readyPosture, "missing_recallant_workflow"), "Ready docs should have Recallant workflow");
+assert(
+  !hasSignal(readyPosture, "missing_recallant_workflow"),
+  "Ready docs should have Recallant workflow"
+);
 assert(
   readyPosture.existing_docs.includes("docs/ARCHITECTURE.md") &&
     readyPosture.existing_docs.includes("docs/RUNBOOK.md"),

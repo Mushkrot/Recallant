@@ -11,6 +11,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function assertIncludesAll(actual, expected, label) {
+  for (const value of expected) {
+    assert(actual.includes(value), `${label} missing ${value}; got ${actual.join(", ")}`);
+  }
+}
+
+function agentReadyGeneratedPaths(output) {
+  return output.agent_ready_files?.outcome?.generated_files ?? [];
+}
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -149,9 +159,37 @@ try {
   const output = JSON.parse(result.stdout);
   assert(output.status === "connected", "connect-cloud did not report connected");
   assert(output.doctor_status === "skipped", "skip-doctor status missing");
+  assert(
+    output.remote_proof?.status === "skipped" &&
+      output.remote_proof?.capture_active === false &&
+      String(output.remote_proof?.next_action ?? "").includes("remote-doctor"),
+    "skip-doctor did not expose an explicit skipped remote proof state"
+  );
+  assertIncludesAll(
+    agentReadyGeneratedPaths(output),
+    ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+    "external rehearsal generated agent-ready files"
+  );
   const codexConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
   assert(codexConfig.includes("remote-bridge"), "remote bridge config missing");
   assert(!codexConfig.includes("RECALLANT_DATABASE_URL"), "remote config requires DB URL");
+  const agentsDoc = await readFile(join(projectDir, "AGENTS.md"), "utf8");
+  const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
+  const readme = await readFile(join(projectDir, "README.md"), "utf8");
+  assert(
+    agentsDoc.includes("central Recallant server through remote MCP") &&
+      agentsDoc.includes("memory_start_session") &&
+      agentsDoc.includes("recallant agent-start --format json") &&
+      agentsDoc.includes("recallant agent-closeout") &&
+      agentsDoc.includes("memory_get_context_pack"),
+    "external rehearsal AGENTS.md missing remote MCP startup wording"
+  );
+  assert(
+    projectLog.includes("memory_start_session") &&
+      projectLog.includes("memory_closeout") &&
+      projectLog.includes("checkpoint-only state separate from semantic memory proof"),
+    "external rehearsal PROJECT_LOG.md missing compact fallback startup wording"
+  );
   let projectEntries = [];
   try {
     projectEntries = await (await import("node:fs/promises")).readdir(projectDir);
@@ -184,7 +222,7 @@ try {
       "remote consent receipt leaked private key"
     );
   }
-  const combined = `${connectScriptText}\n${result.stdout}\n${result.stderr}\n${codexConfig}\n${remoteConsentReceipt}`;
+  const combined = `${connectScriptText}\n${result.stdout}\n${result.stderr}\n${codexConfig}\n${remoteConsentReceipt}\n${agentsDoc}\n${projectLog}\n${readme}`;
   assert(!forbiddenOutputPattern.test(combined), "external rehearsal leaked forbidden surface");
   assert(!combined.includes(sha256("rcl_conn_external_device")), "device hash leaked");
   assert(!combined.includes(sha256("rcl_poll_external_token")), "poll hash leaked");
@@ -195,6 +233,10 @@ try {
     deterministic_fixture: true,
     approval: "pending_then_approved",
     config_written: true,
+    agent_ready_files: {
+      generated: agentReadyGeneratedPaths(output),
+      skipped_by_flag: output.agent_ready_files?.skipped_by_flag === true
+    },
     remote_doctor: "skipped_by_explicit_flag_in_fixture",
     remote_mcp_capture_recall: "covered_by_remote-mcp-external-rehearsal:smoke",
     no_local_artifacts: {

@@ -47,10 +47,11 @@ https://memory.example.com/connect/approve?code=ABCD-1234
 ```
 
 After the owner approves in the browser, the CLI receives a provisioning package, writes the
-project-local remote MCP config, runs `remote-doctor`, and reports the next `agent-start` command.
-For remote-only projects, that command is a readiness/consent handoff: it should report
-`mode: "remote_mcp_ready"` and direct the agent to the configured MCP `memory_get_context_pack`
-flow without requiring local Recallant storage or Cloudflare browser auth.
+project-local remote MCP config, stores only a credential reference, prepares thin agent-ready files
+(`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`), runs `remote-doctor`, and reports the next
+`agent-start` command. For remote-only projects, that command is a readiness/consent handoff: it
+should report `mode: "remote_mcp_ready"` and direct the agent to the configured MCP
+`memory_get_context_pack` flow without requiring local Recallant storage or Cloudflare browser auth.
 
 ## Authentication Paths
 
@@ -115,7 +116,7 @@ tokens; only token redemption through `/api/connect/start` is public.
 
 ## State Model
 
-Add a DB-backed pending connection table with hash-only device secrets:
+The server stores pending connection requests in a DB-backed table with hash-only device secrets:
 
 - `id`
 - `device_code_hash`
@@ -143,7 +144,7 @@ Raw remote MCP credentials are returned only once, during approved poll redempti
 
 ## CLI Commands
 
-Add:
+Available commands:
 
 ```bash
 recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic]
@@ -168,8 +169,9 @@ This command:
 6. stores the raw scoped credential only in the user's local Recallant credential store;
 7. writes generated project config with a credential reference, not the raw secret;
 8. writes a non-secret project-local remote consent receipt;
-9. runs `remote-doctor`;
-10. prints acceptance and cleanup guidance.
+9. creates or safely upserts compact agent-ready files for the target project;
+10. runs `remote-doctor`;
+11. prints acceptance and cleanup guidance.
 
 The generated config and consent receipt must not contain raw credentials or private keys. The
 credential store entry is local to the user profile; `.codex/config.toml` and equivalent client
@@ -222,89 +224,25 @@ The central server also keeps a bounded payload check and a per-route abuse guar
 connect POST routes. Edge rate limits are still recommended for internet deployments; the server
 guard is a fail-safe, not a replacement for Cloudflare/WAF policy.
 
-## Implementation Record And Regression Guards
+## Regression Guards
 
-The initial shipped slice was built in these independently verifiable pieces. Keep them as the
-regression checklist for future changes.
+The shipped remote connect contract is guarded by deterministic tests rather than private operator
+notes. Future changes should keep these surfaces passing:
 
-### Phase 1: Contract and storage
-
-- Add shared contract helpers for `/connect`, `/api/connect/start`, `/api/connect/poll`, and
-  approval URLs.
-- Add DB migration and methods for pending remote connection requests.
-- Store only hashes/prefixes for device secrets.
-- Add audit events for start, approve, deny, poll, redeem, expire, and failure.
-
-Acceptance:
-
-- storage smoke proves start/approve/redeem/expire and one-time redemption;
-- raw device secret and raw credential are absent from stored rows and audit output.
-
-### Phase 2: Server routes
-
-- Add public bootstrap at `GET /connect`.
-- Add start, poll, and optional cancel JSON APIs.
-- Add protected approval page and protected approval action.
-- Reuse existing remote credential provisioning and remote config rendering.
-
-Acceptance:
-
-- unauthenticated start/poll work without Workbench cookies;
-- approval requires the same protected human auth posture as Workbench;
-- denied/expired/redeemed requests cannot be reused.
-
-### Phase 3: CLI pairing command
-
-- Add `recallant connect-cloud` and aliases.
-- Install/update the remote-only client path from the bootstrap script.
-- Poll with timeout, clear user messaging, and safe retry.
-- Write project-local remote MCP config through the existing `connect-remote` machinery.
-- Run `remote-doctor`.
-
-Acceptance:
-
-- a machine with no current Recallant CLI can run the public bootstrap and complete pairing;
-- a machine with an old CLI is upgraded or bypassed safely;
-- no local Docker/Postgres/database URL is required.
-
-### Phase 4: Security and edge policy
-
-- Add rate limits and bounded payload validation for connect routes.
-- Ensure project metadata is redacted and does not leak private paths.
-- Keep admin credential creation protected.
-- Document Cloudflare Access path split.
-
-Acceptance:
-
-- security smoke covers unauthenticated public route behavior, protected approval, protected
-  Workbench/admin, wrong code, expired code, replay, and redaction.
-
-### Phase 5: External acceptance
-
-- Add deterministic pairing smoke with fixture server.
-- Add live central-server readiness gate for `/connect`.
-- Extend `remote-acceptance` evidence to record connect-cloud bootstrap mode.
-
-Acceptance:
-
-- clean external host can connect a new project with only the `curl .../connect | bash` command;
-- evidence proves remote MCP session/context/write/checkpoint/recall;
-- no local self-host artifacts are created.
-
-### Phase 6: Documentation and migration polish
-
-- Make universal connect the beginner remote docs path.
-- Keep invite documented as advanced/admin.
-- Add troubleshooting for old CLIs, pending approvals, expired codes, denied approvals, and edge
-  Access misconfiguration.
-- Update public readiness/security smokes to prevent docs from regressing back to old invite-first
-  wording.
-
-Acceptance:
-
-- public docs clearly distinguish local self-host onboarding, universal remote connect, and
-  advanced invite provisioning;
-- public readiness and security smokes pass.
+- storage and server route smokes prove start/approve/redeem/expire behavior, one-time redemption,
+  protected approval, and no raw device secret or raw credential in stored rows or audit output;
+- CLI pairing smokes prove no-CLI and stale-CLI bootstrap, browser approval, trusted-device
+  reconnect, bootstrap-token redemption, credential references, and no local Docker/Postgres/database
+  requirement;
+- agent-ready smokes prove empty projects, existing-doc projects, existing `AGENTS.md`, non-ASCII
+  paths, reconnect idempotency, and conflict-safe handling of managed `AGENTS.md` / `PROJECT_LOG.md`
+  sections;
+- remote doctor and remote MCP smokes prove transport/auth/scope, session/context proof, checkpoint
+  state proof, governed semantic marker recall, and honest `configured` versus
+  `semantic_memory_ready` versus `capture_active` reporting;
+- security and public-readiness smokes keep the Workbench/admin boundary protected, keep invite
+  provisioning advanced/admin, keep public examples generic, and prevent docs from regressing to
+  "MCP config only" remote setup language.
 
 ## Non-Goals
 

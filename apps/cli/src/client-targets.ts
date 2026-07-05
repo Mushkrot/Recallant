@@ -248,6 +248,10 @@ function tomlInlineStringMap(values: Record<string, string>) {
   return `{ ${entries.join(", ")} }`;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function shellArg(value: string) {
   return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
@@ -309,10 +313,28 @@ export function codexRemoteMcpServerToml(config: RemoteMcpServerConfig) {
 function upsertTomlTable(existingText: string | null, tableName: string, tableText: string) {
   const existing = existingText?.trimEnd() ?? "";
   const tablePattern = new RegExp(
-    `(^|\\n)\\[${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*\\n[\\s\\S]*?(?=\\n\\[|$)`
+    `(^|\\n)(\\[${escapeRegExp(tableName)}\\]\\s*\\n[\\s\\S]*?)(?=\\n\\[|$)`,
+    "g"
   );
-  if (tablePattern.test(existing)) {
-    return `${existing.replace(tablePattern, (match, prefix: string) => `${prefix}${tableText}`)}\n`;
+  const matches = Array.from(existing.matchAll(tablePattern));
+  if (matches.length > 0) {
+    let cursor = 0;
+    let inserted = false;
+    let rendered = "";
+    for (const match of matches) {
+      const prefix = match[1] ?? "";
+      const tableStart = (match.index ?? 0) + prefix.length;
+      const tableEnd = (match.index ?? 0) + match[0].length;
+      rendered += existing.slice(cursor, tableStart);
+      if (!inserted) {
+        if (rendered && !rendered.endsWith("\n")) rendered += "\n";
+        rendered += tableText;
+        inserted = true;
+      }
+      cursor = tableEnd;
+    }
+    rendered += existing.slice(cursor);
+    return `${rendered.replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
   }
   return existing ? `${existing}\n\n${tableText}\n` : `${tableText}\n`;
 }

@@ -31,7 +31,7 @@ Options:
   --script-sha256 <sha256>
       Optional SHA-256 checksum for scripts/install-recallant.sh.
   --onboard <project-dir>
-      After installing the local Recallant self-host stack, run `recallant onboard <project-dir>`.
+      After installing the local Recallant self-host stack, run `recallant connect <project-dir>`.
       Relative paths are resolved from the directory where this bootstrap command was started.
       This is not the remote existing-server client path.
   --confirm-local-self-host
@@ -270,15 +270,15 @@ if [[ -n "$ONBOARD_PROJECT" ]]; then
 
   if [[ "$install_was_dry_run" == "true" ]]; then
     echo "Next command after preview:"
-    echo "  recallant onboard \"$onboard_target\""
+    echo "  recallant connect \"$onboard_target\""
   else
     recallant_cmd="recallant"
     if ! command -v recallant >/dev/null 2>&1 && [[ -x "$expected_cli_prefix/recallant" ]]; then
       recallant_cmd="$expected_cli_prefix/recallant"
     fi
-    echo "Onboarding project:"
+    echo "Connecting project:"
     echo "  $onboard_target"
-    "$recallant_cmd" onboard "$onboard_target"
+    "$recallant_cmd" connect "$onboard_target"
   fi
 else
   echo "Next command:"

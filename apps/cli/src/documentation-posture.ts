@@ -150,11 +150,18 @@ export type StarterDocsOutcome = {
   status: "generated" | "partial" | "skipped";
   reason: string;
   generated_files: string[];
+  updated_files?: string[];
   skipped_files: Array<{
     path: string;
     reason: string;
   }>;
+  conflict_files?: Array<{
+    path: string;
+    reason: string;
+  }>;
 };
+
+export type StarterDocsAgentMode = "local_storage" | "remote_mcp";
 
 export const starterDocsSettingKey = "starter_docs";
 
@@ -310,16 +317,41 @@ ${profileLine}
 `;
 }
 
-function starterAgents() {
+function starterAgents(mode: StarterDocsAgentMode = "local_storage") {
+  const startLine =
+    mode === "remote_mcp"
+      ? "Start each session through the configured remote Recallant MCP/client integration."
+      : "Start each session through the configured Recallant MCP/client integration.";
+  const modeSpecific =
+    mode === "remote_mcp"
+      ? [
+          "- This project uses a central Recallant server through remote MCP; do not set up local Postgres, Docker, or `RECALLANT_DATABASE_URL` just to work in this project.",
+          "- Direct MCP startup: call `memory_start_session`, then `memory_get_context_pack` with the current task hint before making changes.",
+          "- During work, write concise non-secret decisions, actions, tests, and governed memories with `memory_append_event` or `memory_create_agent_memory` when useful.",
+          "- Use `memory_set_checkpoint` only for checkpoint state; it is not semantic recall proof.",
+          "- On pause or finish, call `memory_closeout`. This is the normal MCP closeout path and includes checkpoint state, searchable memory, recall verification, and next-session readiness semantics.",
+          "- If MCP is unavailable, use the CLI fallback against the configured remote project: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`. Use `recallant agent-checkpoint` only as an advanced pause/compaction state helper.",
+          "- `PROJECT_LOG.md` is a compact current-state fallback. Durable session history belongs in Recallant memory."
+        ]
+      : [
+          "- If MCP is unavailable, use the CLI fallback: `recallant agent-start`, `recallant agent-event`, `recallant agent-checkpoint`, and `recallant agent-closeout`."
+        ];
+  const contextPackLine =
+    mode === "remote_mcp"
+      ? "- Keep checkpoint-only state separate from semantic memory proof."
+      : "- Read the current context pack before making changes.";
+  const memoryLines = [
+    `- ${startLine}`,
+    ...modeSpecific,
+    contextPackLine,
+    "- Record meaningful decisions, actions, tests, and checkpoints in Recallant.",
+    "- On closeout, update the Recallant checkpoint instead of turning this file into a session log."
+  ];
   return `# Agent Instructions
 
 ## Memory (Recallant)
 
-- Start each session through the configured Recallant MCP/client integration.
-- If MCP is unavailable, use the CLI fallback: \`recallant agent-start\`, \`recallant agent-event\`, \`recallant agent-checkpoint\`, and \`recallant agent-closeout\`.
-- Read the current context pack before making changes.
-- Record meaningful decisions, actions, tests, and checkpoints in Recallant.
-- On closeout, update the Recallant checkpoint instead of turning this file into a session log.
+${memoryLines.join("\n")}
 
 ## Project Docs
 
@@ -440,7 +472,8 @@ Record supported runtimes, versions, and migration notes.
 
 function starterDocsBaseFiles(
   projectName: string,
-  profile: DocumentationProfile
+  profile: DocumentationProfile,
+  agentMode: StarterDocsAgentMode
 ): StarterDocsPlanFile[] {
   return [
     {
@@ -455,7 +488,7 @@ function starterDocsBaseFiles(
       kind: "agent_instructions",
       profile: "base",
       required: true,
-      content: starterAgents()
+      content: starterAgents(agentMode)
     },
     {
       path: "PROJECT_LOG.md",
@@ -522,10 +555,12 @@ export function planStarterDocs(input: {
   projectName: string;
   posture: Pick<DocumentationPosture, "status" | "profile" | "existing_docs">;
   existingTargetPaths?: readonly string[];
+  agentMode?: StarterDocsAgentMode;
 }): StarterDocsPlan {
   const profile = input.posture.profile;
+  const agentMode = input.agentMode ?? "local_storage";
   const files = [
-    ...starterDocsBaseFiles(input.projectName, profile),
+    ...starterDocsBaseFiles(input.projectName, profile, agentMode),
     ...starterDocsProfileFiles(profile)
   ];
   const existingTargets = new Set(input.existingTargetPaths ?? []);
@@ -595,7 +630,9 @@ export function compactStarterDocsForSetting(input: {
           status: input.outcome.status,
           reason: input.outcome.reason,
           generated_files: input.outcome.generated_files,
-          skipped_files: input.outcome.skipped_files
+          updated_files: input.outcome.updated_files ?? [],
+          skipped_files: input.outcome.skipped_files,
+          conflict_files: input.outcome.conflict_files ?? []
         }
       : null,
     authority: {

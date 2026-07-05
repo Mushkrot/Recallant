@@ -47,4 +47,4 @@ if [[ -n "$CLI_ENV_FILE" ]]; then
   echo "Recallant CLI env file: $CLI_ENV_FILE"
 fi
 echo "Try: recallant doctor"
-echo "Onboard a project: recallant onboard /path/to/project"
+echo "Connect a project: recallant connect /path/to/project"

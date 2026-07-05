@@ -33,6 +33,13 @@ memory state. `memory_get_readiness_status` exposes the bounded readiness eviden
 `agent-start` use: checkpoint-only evidence stays non-semantic, semantic proof stays non-capture, and
 `capture_active` requires the real working loop.
 
+For remote beginner setup, `recallant connect-cloud` runs session/context proof by default after
+approval and reports it as `remote_proof` in JSON and text output. `--proof semantic` or
+`--semantic-proof` adds one synthetic governed memory marker create/recall proof. `capture_active`
+remains false until a real working loop records context read, memory write, and checkpoint evidence.
+The same remote flow prepares agent-ready thin files by default so the next agent sees startup
+instructions and a compact fallback log, not just raw MCP config.
+
 Interrupted sessions remain visible as recovery context and should be reviewed by the next agent, but
 they are not a hard blocker for `capture_active` once fresh context-read, memory-write, and
 checkpoint evidence exists.
@@ -49,10 +56,10 @@ An agent-ready project has three layers:
 
 ## Beginner Onboarding Contract
 
-The beginner onboarding path is one command:
+The beginner project connection path is one command:
 
 ```bash
-recallant onboard <project>
+recallant connect <project>
 ```
 
 That command should behave like a guided setup program, not a list of commands to memorize. It must:
@@ -75,10 +82,13 @@ clearly stop with one next action.
 The lower-level commands remain advanced/debug APIs for automation and contributors:
 
 ```bash
+recallant onboard .
 recallant attach .
 recallant connect codex --project-dir .
 recallant doctor --project-dir . --require-capture --semantic-proof
 recallant agent-start --task-hint "<task>"
+recallant agent-event --kind action --text "<what changed>"
+recallant agent-closeout --summary "<what changed and what is next>"
 ```
 
 They should not be the normal beginner quickstart. The important user-facing result is
@@ -141,10 +151,10 @@ The Workbench now shows this as a dedicated documentation strategy surface with 
 - **Discuss first:** review ambiguous, risky, production-sensitive, or conflicting posture before
   changing docs.
 
-For an empty project, `recallant onboard <project>` can now create starter docs during the confirmed
-onboarding write step. This is intentionally narrow: it applies only when no project documentation
-was discovered and target files do not already exist. Existing-doc canonicalization and broader
-documentation rewrites still require an owner-reviewed Workbench workflow.
+For an empty project, `recallant connect <project>` can now create starter docs through the confirmed
+local onboarding write step. This is intentionally narrow: it applies only when no project
+documentation was discovered and target files do not already exist. Existing-doc canonicalization and
+broader documentation rewrites still require an owner-reviewed Workbench workflow.
 
 ## New Project Bootstrap
 
@@ -165,6 +175,12 @@ starter surfaces, not imported old handoffs, and they must not overwrite existin
 
 Durable history belongs in Recallant, not in a growing prompt file. A later session should start
 from a server-built context pack, not from a long manual prompt.
+
+Remote connect uses the same thin-file shape. `recallant connect <project> --server-url <https-url>`
+and `recallant connect-cloud <project> --server-url <https-url>` generate or safely upsert
+`README.md`, `AGENTS.md`, and `PROJECT_LOG.md` alongside project-local remote MCP configuration and
+a non-secret consent receipt. The remote workstation still does not need local Docker, Postgres,
+`RECALLANT_DATABASE_URL`, or imported local storage.
 
 ## Existing Project Migration
 
@@ -189,19 +205,24 @@ For a remote existing project, prove the connection before importing history:
 2. verify the same JSON reports `readiness_contract.primary_state: "configured"` until proof exists,
    and recommends `memory_get_context_pack` and
    `memory_create_agent_memory` as the next startup/proof calls;
-3. verify local `recallant doctor --project-dir .` reports
+3. verify the same JSON includes `startup_contract`: direct MCP agents start with
+   `memory_start_session`, then `memory_get_context_pack`, record concise safe work memory, keep
+   checkpoint state separate, and close with `memory_closeout`; CLI fallback uses
+   `recallant agent-start`, `recallant agent-event`, and `recallant agent-closeout`;
+4. verify local `recallant doctor --project-dir .` reports
    `remote-ready, local storage not attached` rather than a local attach failure;
-4. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
-   `recallant remote-doctor --capture-proof`;
-5. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`, but
+5. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
+   `recallant remote-doctor --capture-proof`; `recallant connect-cloud` performs this context proof
+   by default after approval and exposes the result under `remote_proof`;
+6. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`, but
    keep that as checkpoint-only evidence;
-6. run `recallant remote-doctor --semantic-proof`, or create one non-secret governed memory marker
+7. run `recallant remote-doctor --semantic-proof`, or create one non-secret governed memory marker
    with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`;
-7. rerun `recallant agent-start --format json` and verify
+8. rerun `recallant agent-start --format json` and verify
    `readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` is still false
    unless a full capture loop has run;
-8. run a read-only inventory of candidate docs and risky paths;
-9. ask the owner to approve a migration plan before writing project memories or imports.
+9. run a read-only inventory of candidate docs and risky paths;
+10. ask the owner to approve a migration plan before writing project memories or imports.
 
 The proof marker should be synthetic and concise. A safe `memory_create_agent_memory` shape is:
 

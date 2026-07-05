@@ -76,15 +76,18 @@ Confirmed install:
 
 ## Onboarding Storage Readiness
 
-`recallant onboard <project>` checks storage before it changes project files. If
+`recallant connect <project>` checks storage before it changes project files. If
 `RECALLANT_DATABASE_URL` is already reachable, onboarding reuses it. If that variable is not set,
 the installed CLI wrapper loads its configured env file when the server installer provided one, or
 the default single-user env file when it exists. After a server or single-user install, onboarding a
 project on the same machine should therefore stay one command:
 
 ```bash
-recallant onboard /path/to/project
+recallant connect /path/to/project
 ```
+
+The explicit `recallant onboard <project>` command is still available as the lower-level local path,
+but it is not the primary beginner entry point.
 
 In an interactive terminal, missing storage offers to run the single-user install profile before
 project files are touched. Non-interactive runs, explicit private env-file runs, declined setup, or
@@ -192,7 +195,7 @@ npm run live-acceptance
 ```
 
 The `acceptance_report` covers public route auth, private origin auth posture, service-env
-alignment, service runtime readiness, `recallant onboard /path/to/project`, capture/recall proof,
+alignment, service runtime readiness, `recallant connect /path/to/project`, capture/recall proof,
 Workbench project visibility, pending embedding recovery, and optional cleanup preview. It returns
 `pass`, `pass_with_warnings`, or `fail`; public 502, anonymous origin, service-env mismatch, missing
 capture, hidden project, and unrecovered pending embeddings are blocking failures. Output redacts

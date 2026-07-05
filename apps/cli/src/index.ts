@@ -29,8 +29,11 @@ import {
 import {
   analyzeProjectDocumentationPosture,
   summarizeDocumentationPostureForOnboard,
-  type DocumentationPosture
+  type DocumentationPosture,
+  type StarterDocsOutcome,
+  type StarterDocsPlan
 } from "./documentation-posture.js";
+import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
 import { runAttach } from "./attach.js";
 import {
   clientTargetConfig,
@@ -53,12 +56,13 @@ import {
   validateRemoteMcpBridgeConfig,
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
+  type RemoteMcpDoctorReport,
   type RemoteAgentConsentScope
 } from "@recallant/contracts";
 import { runDetach } from "./detach.js";
 import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
-import { runRemoteDoctor } from "./remote-doctor.js";
+import { buildRemoteDoctorReport, runRemoteDoctor } from "./remote-doctor.js";
 import { runRemoteCleanup } from "./remote-cleanup.js";
 
 const fallbackRecallantCliVersion = "0.1.0-dev.0";
@@ -714,6 +718,51 @@ function remoteAgentReadinessSummary(readiness: RemoteAgentReadinessStatus | nul
   return "configured/access-ready only; semantic memory is not proven yet.";
 }
 
+function remoteAgentStartupContract() {
+  return {
+    primary_path: "configured_remote_mcp",
+    direct_mcp_sequence: [
+      {
+        step: "start_session",
+        call: "memory_start_session",
+        note: "Start or recover the Recallant agent session for this project."
+      },
+      {
+        step: "read_context",
+        call: "memory_get_context_pack",
+        note: "Read bounded startup context with the current task hint before changing files."
+      },
+      {
+        step: "record_work",
+        call: "memory_append_event or memory_create_agent_memory",
+        note: "Write concise non-secret decisions, actions, tests, and governed memories when useful."
+      },
+      {
+        step: "checkpoint_state",
+        call: "memory_set_checkpoint",
+        note: "Checkpoint state is not semantic recall proof."
+      },
+      {
+        step: "closeout",
+        call: "memory_closeout",
+        note: "Normal closeout records checkpoint state, searchable memory, recall verification, and next-session readiness."
+      }
+    ],
+    cli_fallback_sequence: [
+      "recallant agent-start --format json",
+      'recallant agent-event --kind action --text "<what changed>"',
+      'recallant agent-closeout --summary "<what changed and what is next>"'
+    ],
+    advanced_pause_checkpoint:
+      "Use recallant agent-checkpoint only for pause/compaction state; it is not semantic memory proof or normal closeout.",
+    project_log_role:
+      "PROJECT_LOG.md is a compact current-state fallback. Durable session history belongs in Recallant memory.",
+    forbidden_client_setup: ["local Postgres", "Docker", "RECALLANT_DATABASE_URL"],
+    remote_doctor_role:
+      "remote-doctor is a diagnostic/proof shortcut, not the normal agent startup path."
+  };
+}
+
 function remoteAgentConsentOutput(
   scope: RemoteAgentConsentScope | null,
   readiness: RemoteAgentReadinessStatus | null = null
@@ -724,6 +773,11 @@ function remoteAgentConsentOutput(
   const recommendedNextProofFollowupCall =
     scope.recommended_next_proof_followup_call ?? "memory_recall_agent_memories";
   const readinessContract = remoteAgentReadinessContract(readiness);
+  const recommendedNextAction = readinessContract.semantic_memory_ready
+    ? "Semantic memory proof is present. Continue normal Recallant startup with memory_start_session, memory_get_context_pack, concise work memory, checkpoint state when needed, and memory_closeout. Agent runtime does not require Cloudflare browser auth."
+    : readinessContract.context_ready
+      ? "Prove semantic memory with one safe governed memory_create_agent_memory marker followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
+      : "Use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth.";
   return {
     destination: scope.destination,
     credential_scope: scope.credential_scope,
@@ -737,12 +791,21 @@ function remoteAgentConsentOutput(
     recommended_next_call: scope.recommended_next_call,
     recommended_next_proof_call: recommendedNextProofCall,
     recommended_next_proof_followup_call: recommendedNextProofFollowupCall,
+    startup_contract: remoteAgentStartupContract(),
     readiness_contract: readinessContract,
+    readiness_state: readinessContract.primary_state,
+    proof_status: {
+      remote_mcp_ready: readinessContract.remote_mcp_ready,
+      context_ready: readinessContract.context_ready,
+      semantic_memory_ready: readinessContract.semantic_memory_ready,
+      capture_active: readinessContract.capture_active,
+      ingestion_approved: readinessContract.ingestion_approved,
+      readiness_state: readinessContract.primary_state,
+      next_action: recommendedNextAction
+    },
     remote_readiness_status: readiness?.ok === true ? "read" : "not_read",
     remote_readiness_warning: readiness?.warning ?? null,
-    recommended_next_action: readinessContract.semantic_memory_ready
-      ? "Semantic memory proof is present. Continue normal Recallant startup with memory_get_context_pack and write checkpoints/actions/tests/closeout as work proceeds. Agent runtime does not require Cloudflare browser auth."
-      : "Use memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
+    recommended_next_action: recommendedNextAction
   };
 }
 
@@ -759,6 +822,11 @@ function remoteAgentStartReadyHumanReport(
     "Mode: remote_mcp_ready",
     `Readiness: ${remoteAgentReadinessSummary(readiness)}`,
     recallantReadinessInvariant,
+    `Readiness state: ${readinessContract.primary_state}`,
+    `remote_mcp_ready: ${readinessContract.remote_mcp_ready ? "yes" : "no"}`,
+    `context_ready: ${readinessContract.context_ready ? "yes" : "no"}`,
+    `semantic_memory_ready: ${readinessContract.semantic_memory_ready ? "yes" : "no"}`,
+    `capture_active: ${readinessContract.capture_active ? "yes" : "no"}`,
     `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
     `Project scope: ${credentialScope.project_id ?? "unknown"}`,
     `Developer scope: ${credentialScope.developer_id ?? "unknown"}`,
@@ -772,6 +840,16 @@ function remoteAgentStartReadyHumanReport(
     ...scope.not_sent.map((item) => `  - ${item}`),
     "",
     "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
+    "",
+    "Agent startup contract:",
+    "  1. MCP: memory_start_session",
+    "  2. MCP: memory_get_context_pack with the current task hint",
+    "  3. MCP: memory_append_event or memory_create_agent_memory for concise non-secret work memory",
+    "  4. MCP: memory_set_checkpoint for state only; it is not semantic recall proof",
+    "  5. MCP: memory_closeout on pause or finish",
+    "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout.",
+    "Use recallant agent-checkpoint only for pause/compaction state, not normal closeout.",
+    "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory.",
     semanticProofAt
       ? `Proof: semantic governed-memory marker evidence was last seen at ${semanticProofAt}.`
       : "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
@@ -1046,7 +1124,11 @@ function agentStartHumanReport(input: {
       `Credential scope: project=${input.consentScope.credential_scope.project_id ?? "unknown"}, developer=${input.consentScope.credential_scope.developer_id ?? "unknown"}, client=${input.consentScope.credential_scope.client_id ?? "unknown"}`,
       `Allowed context: ${input.consentScope.allowed_context.join(" ")}`,
       `Do not send: ${input.consentScope.not_sent.join(", ")}.`,
-      "Next: use memory_get_context_pack through the configured Recallant MCP startup flow. Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
+      "Next: use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow. Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth.",
+      "Record concise non-secret work with memory_append_event or memory_create_agent_memory; close with memory_closeout.",
+      "Use memory_set_checkpoint only for checkpoint state; it is not semantic recall proof.",
+      "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout. Use recallant agent-checkpoint only for pause/compaction state.",
+      "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory."
     );
   } else {
     lines.push(
@@ -5755,7 +5837,7 @@ async function runAgentStart(argv: readonly string[]) {
       previous_session_recovery: result.start_result.previous_session_recovery,
       recommended_next_action:
         consentScope !== null
-          ? "Use memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth. Then use recallant agent-event after meaningful decisions/actions/tests."
+          ? "Use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth. Then use recallant agent-event after meaningful decisions/actions/tests and recallant agent-closeout on pause or finish."
           : "Use recallant agent-event after meaningful decisions/actions/tests.",
       ...consentOutput
     };
@@ -7300,9 +7382,279 @@ function remoteConnectHumanReport(result: {
 function remoteConnectNextAgentSteps() {
   return [
     'Run `recallant agent-start --format json`; remote-only projects should report `mode: "remote_mcp_ready"`.',
-    "Read startup context with `memory_get_context_pack` through the configured Recallant MCP bridge.",
-    "For semantic proof, run `recallant remote-doctor --semantic-proof` or create one safe governed marker with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`.",
+    "Use the configured remote MCP startup loop: `memory_start_session`, `memory_get_context_pack`, concise non-secret work memory, checkpoint state when needed, and `memory_closeout`.",
+    "If direct MCP is unavailable, use the CLI fallback: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`.",
+    "Keep checkpoint-only state separate from semantic memory proof; when proof is needed, create one safe marker with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`. `remote-doctor --semantic-proof` is an optional diagnostic shortcut.",
     "Use the local-storage attach path only when intentionally switching this project away from remote MCP."
+  ];
+}
+
+type RemoteAgentReadyFilesReport = {
+  skipped_by_flag: boolean;
+  plan: {
+    schema_version: 1;
+    status: StarterDocsPlan["status"] | "skipped_by_flag";
+    reason: string;
+    eligible_for_apply: boolean;
+    writes_files: false;
+    planned_files: Array<{
+      path: string;
+      kind: string;
+      profile: string;
+      required: boolean;
+    }>;
+    skipped_files: StarterDocsPlan["skipped_files"];
+  };
+  outcome: StarterDocsOutcome | null;
+};
+
+function buildRemoteAgentReadyFilesReport(input: {
+  plan: StarterDocsPlan | null;
+  outcome: StarterDocsOutcome | null;
+  skippedByFlag: boolean;
+}): RemoteAgentReadyFilesReport {
+  if (input.skippedByFlag || !input.plan) {
+    return {
+      skipped_by_flag: true,
+      plan: {
+        schema_version: 1,
+        status: "skipped_by_flag",
+        reason: "Agent-ready thin files were skipped by --skip-agent-files.",
+        eligible_for_apply: false,
+        writes_files: false,
+        planned_files: [],
+        skipped_files: []
+      },
+      outcome: null
+    };
+  }
+  return {
+    skipped_by_flag: false,
+    plan: {
+      schema_version: 1,
+      status: input.plan.status,
+      reason: input.plan.reason,
+      eligible_for_apply: input.plan.eligible_for_apply,
+      writes_files: input.plan.writes_files,
+      planned_files: input.plan.files.map((file) => ({
+        path: file.path,
+        kind: file.kind,
+        profile: file.profile,
+        required: file.required
+      })),
+      skipped_files: input.plan.skipped_files
+    },
+    outcome: input.outcome
+  };
+}
+
+function remoteAgentReadyFilesHumanLines(report?: RemoteAgentReadyFilesReport | null) {
+  if (!report) return [] as string[];
+  const plannedFiles = report.plan.planned_files.map((file) => file.path);
+  const generatedFiles = report.outcome?.generated_files ?? [];
+  const updatedFiles = report.outcome?.updated_files ?? [];
+  const skippedFiles = report.outcome?.skipped_files ?? report.plan.skipped_files;
+  const conflictFiles = report.outcome?.conflict_files ?? [];
+  return [
+    `Agent-ready files: ${report.outcome?.status ?? report.plan.status}`,
+    plannedFiles.length ? `  - Planned: ${plannedFiles.join(", ")}` : "  - Planned: none",
+    generatedFiles.length ? `  - Generated: ${generatedFiles.join(", ")}` : "  - Generated: none",
+    updatedFiles.length ? `  - Updated: ${updatedFiles.join(", ")}` : "  - Updated: none",
+    skippedFiles.length
+      ? `  - Skipped: ${skippedFiles.map((file) => `${file.path} (${file.reason})`).join(", ")}`
+      : "  - Skipped: none",
+    conflictFiles.length
+      ? `  - Conflicts: ${conflictFiles.map((file) => `${file.path} (${file.reason})`).join(", ")}`
+      : "  - Conflicts: none",
+    `  - Reason: ${report.outcome?.reason ?? report.plan.reason}`
+  ];
+}
+
+type RemoteConnectProofLevel = "transport" | "context" | "semantic";
+
+type RemoteConnectProofReport = {
+  requested_level: RemoteConnectProofLevel;
+  status: "not_run_dry_run" | "skipped" | "passed" | "warning" | "failed";
+  remote_mcp_ready: boolean;
+  context_ready: boolean;
+  semantic_memory_ready: boolean;
+  capture_active: false;
+  readiness_state:
+    | "not_run"
+    | "remote_mcp_ready"
+    | "context_ready"
+    | "semantic_memory_ready"
+    | "attention_required";
+  next_action: string;
+  doctor_summary: RemoteMcpDoctorReport["summary"] | null;
+  stages: Array<{
+    id: string;
+    status: string;
+    code: string;
+    message: string;
+    remediation?: string | null;
+  }>;
+};
+
+function parseRemoteConnectProofLevel(argv: readonly string[]): RemoteConnectProofLevel {
+  if (argv.includes("--semantic-proof")) return "semantic";
+  if (argv.includes("--context-proof") || argv.includes("--capture-proof")) return "context";
+  const raw = parseFlag(argv, "--proof") ?? "context";
+  if (raw === "transport" || raw === "context" || raw === "semantic") return raw;
+  throw new Error("VALIDATION_ERROR: --proof must be transport, context, or semantic");
+}
+
+function remoteDoctorStageStatus(report: RemoteMcpDoctorReport | null, id: string) {
+  return report?.stages.find((stageEntry) => stageEntry.id === id) ?? null;
+}
+
+function firstRemoteDoctorRemediation(report: RemoteMcpDoctorReport | null) {
+  return (
+    report?.stages.find((stageEntry) => stageEntry.status === "fail" && stageEntry.remediation)
+      ?.remediation ??
+    report?.stages.find((stageEntry) => stageEntry.status === "warn" && stageEntry.remediation)
+      ?.remediation ??
+    null
+  );
+}
+
+function remoteConnectProofNextAction(input: {
+  proofLevel: RemoteConnectProofLevel;
+  status: RemoteConnectProofReport["status"];
+  remoteMcpReady: boolean;
+  contextReady: boolean;
+  semanticMemoryReady: boolean;
+  remediation?: string | null;
+}) {
+  if (input.status === "not_run_dry_run") {
+    return `After approval, connect-cloud will run ${input.proofLevel === "semantic" ? "semantic governed-memory proof" : input.proofLevel === "context" ? "session/context proof" : "transport proof"} unless --skip-doctor is used.`;
+  }
+  if (input.status === "skipped") {
+    return "Run `recallant remote-doctor --project-dir . --capture-proof` for context proof, or `recallant remote-doctor --project-dir . --semantic-proof` for governed semantic proof.";
+  }
+  if (input.status === "failed") {
+    return (
+      input.remediation ??
+      "Run `recallant remote-doctor --project-dir . --capture-proof` and fix the first failing stage."
+    );
+  }
+  if (input.semanticMemoryReady) {
+    return "Run `recallant agent-start --format json`; semantic proof is present, while capture_active remains false until a real working loop is recorded.";
+  }
+  if (input.contextReady) {
+    return "Run `recallant remote-doctor --project-dir . --semantic-proof` when you want a safe governed semantic marker create/recall proof.";
+  }
+  if (input.remoteMcpReady) {
+    return "Run `recallant remote-doctor --project-dir . --capture-proof` to prove session/context readiness.";
+  }
+  return "Run `recallant remote-doctor --project-dir . --format json` to diagnose remote MCP access.";
+}
+
+function remoteConnectProofReport(input: {
+  proofLevel: RemoteConnectProofLevel;
+  report: RemoteMcpDoctorReport | null;
+  dryRun: boolean;
+  skipped: boolean;
+}): RemoteConnectProofReport {
+  if (input.dryRun) {
+    return {
+      requested_level: input.proofLevel,
+      status: "not_run_dry_run",
+      remote_mcp_ready: false,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      readiness_state: "not_run",
+      next_action: remoteConnectProofNextAction({
+        proofLevel: input.proofLevel,
+        status: "not_run_dry_run",
+        remoteMcpReady: false,
+        contextReady: false,
+        semanticMemoryReady: false
+      }),
+      doctor_summary: null,
+      stages: []
+    };
+  }
+  if (input.skipped || !input.report) {
+    return {
+      requested_level: input.proofLevel,
+      status: "skipped",
+      remote_mcp_ready: false,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      readiness_state: "not_run",
+      next_action: remoteConnectProofNextAction({
+        proofLevel: input.proofLevel,
+        status: "skipped",
+        remoteMcpReady: false,
+        contextReady: false,
+        semanticMemoryReady: false
+      }),
+      doctor_summary: null,
+      stages: []
+    };
+  }
+  const initializeOk = remoteDoctorStageStatus(input.report, "mcp_initialize")?.status === "pass";
+  const toolsOk = remoteDoctorStageStatus(input.report, "tools_list")?.status === "pass";
+  const contextReady =
+    remoteDoctorStageStatus(input.report, "session_context_readiness")?.status === "pass";
+  const semanticMemoryReady =
+    remoteDoctorStageStatus(input.report, "semantic_memory_proof")?.status === "pass";
+  const remoteMcpReady = initializeOk && toolsOk;
+  const status = input.report.summary.ok
+    ? input.report.summary.warning_stage_ids.length > 0
+      ? "warning"
+      : "passed"
+    : "failed";
+  const readinessState = !input.report.summary.ok
+    ? "attention_required"
+    : semanticMemoryReady
+      ? "semantic_memory_ready"
+      : contextReady
+        ? "context_ready"
+        : remoteMcpReady
+          ? "remote_mcp_ready"
+          : "attention_required";
+  return {
+    requested_level: input.proofLevel,
+    status,
+    remote_mcp_ready: remoteMcpReady,
+    context_ready: contextReady,
+    semantic_memory_ready: semanticMemoryReady,
+    capture_active: false,
+    readiness_state: readinessState,
+    next_action: remoteConnectProofNextAction({
+      proofLevel: input.proofLevel,
+      status,
+      remoteMcpReady,
+      contextReady,
+      semanticMemoryReady,
+      remediation: firstRemoteDoctorRemediation(input.report)
+    }),
+    doctor_summary: input.report.summary,
+    stages: input.report.stages.map((stageEntry) => ({
+      id: stageEntry.id,
+      status: stageEntry.status,
+      code: stageEntry.code,
+      message: stageEntry.message,
+      remediation: stageEntry.remediation ?? null
+    }))
+  };
+}
+
+function remoteProofHumanLines(report?: RemoteConnectProofReport | null) {
+  if (!report) return [] as string[];
+  return [
+    `Remote proof: ${report.status}`,
+    `  - Requested: ${report.requested_level}`,
+    `  - State: ${report.readiness_state}`,
+    `  - remote_mcp_ready: ${report.remote_mcp_ready ? "yes" : "no"}`,
+    `  - context_ready: ${report.context_ready ? "yes" : "no"}`,
+    `  - semantic_memory_ready: ${report.semantic_memory_ready ? "yes" : "no"}`,
+    `  - capture_active: ${report.capture_active ? "yes" : "no"}`,
+    `  - Next: ${report.next_action}`
   ];
 }
 
@@ -7322,6 +7674,8 @@ function remoteConnectCloudHumanReport(result: {
   consentReceiptPath?: string | null;
   configFile?: string | null;
   targetFile?: string | null;
+  agentReadyFiles?: RemoteAgentReadyFilesReport | null;
+  remoteProof?: RemoteConnectProofReport | null;
   writesFiles: boolean;
   doctorStatus: string;
   status: string;
@@ -7359,6 +7713,8 @@ function remoteConnectCloudHumanReport(result: {
         : "Credential storage: project config uses a credential ref; raw scoped credentials are not written into tracked config.",
       result.consentReceiptPath ? `Consent receipt: ${result.consentReceiptPath}` : null,
       `Writes files: ${result.writesFiles ? "yes" : "no"}`,
+      ...remoteAgentReadyFilesHumanLines(result.agentReadyFiles),
+      ...remoteProofHumanLines(result.remoteProof),
       `Remote doctor: ${result.doctorStatus}`,
       "",
       "Next agent steps:",
@@ -7674,9 +8030,26 @@ async function runConnectCloud(argv: readonly string[]) {
   const serverUrl = normalizeInviteServerUrl(requiredFlag(argv, "--server-url"));
   const bootstrapToken = parseFlag(argv, "--bootstrap-token");
   const skipDoctor = argv.includes("--skip-doctor");
+  const skipAgentFiles = argv.includes("--skip-agent-files");
   const dryRun = argv.includes("--dry-run");
+  const proofLevel = parseRemoteConnectProofLevel(argv);
   const pollTimeoutMs = parsePositiveInt(parseFlag(argv, "--poll-timeout-ms"), 120_000);
   const pollIntervalMs = parsePositiveInt(parseFlag(argv, "--poll-interval-ms"), 2_000);
+  const documentationPosture = skipAgentFiles
+    ? null
+    : await analyzeProjectDocumentationPosture(projectDir);
+  const agentReadyFilesPlan = documentationPosture
+    ? planRemoteAgentReadyFiles({
+        projectName: basename(projectDir) || "project",
+        posture: documentationPosture,
+        existingTargetPaths: documentationPosture.existing_docs
+      })
+    : null;
+  const plannedAgentReadyFiles = buildRemoteAgentReadyFilesReport({
+    plan: agentReadyFilesPlan,
+    outcome: null,
+    skippedByFlag: skipAgentFiles
+  });
   const pathHint = await projectPathHint(projectDir);
   const projectFingerprint = remoteConnectHash(`${target}:${pathHint}`);
   const localConfirmation = await confirmRemoteConnectLocalFolder(argv, projectDir, pathHint);
@@ -7818,6 +8191,13 @@ async function runConnectCloud(argv: readonly string[]) {
           }
         : null,
       writes_files: false,
+      agent_ready_files: plannedAgentReadyFiles,
+      remote_proof: remoteConnectProofReport({
+        proofLevel,
+        report: null,
+        dryRun: true,
+        skipped: skipDoctor
+      }),
       doctor_status: "not_run_dry_run",
       safety: {
         requires_recallant_database_url: false,
@@ -7847,6 +8227,13 @@ async function runConnectCloud(argv: readonly string[]) {
               : null,
             bootstrapTokenStatus,
             bootstrapTokenPrefix,
+            agentReadyFiles: plannedAgentReadyFiles,
+            remoteProof: remoteConnectProofReport({
+              proofLevel,
+              report: null,
+              dryRun: true,
+              skipped: skipDoctor
+            }),
             writesFiles: false,
             doctorStatus: "not_run_dry_run",
             status: "dry_run"
@@ -7926,9 +8313,10 @@ async function runConnectCloud(argv: readonly string[]) {
   await writeFile(targetFile, rendered);
 
   let doctorStatus = "skipped";
+  let remoteDoctorReport: RemoteMcpDoctorReport | null = null;
   if (!skipDoctor) {
     doctorStatus = "running";
-    await runRemoteDoctor([
+    const doctorArgs = [
       argv[0] ?? "recallant",
       argv[1] ?? "recallant",
       "remote-doctor",
@@ -7945,9 +8333,13 @@ async function runConnectCloud(argv: readonly string[]) {
       "--client-id",
       config.clientId,
       "--format",
-      format === "json" ? "json" : "text"
-    ]);
-    doctorStatus = "passed";
+      "json",
+      ...(proofLevel === "context" ? ["--capture-proof"] : []),
+      ...(proofLevel === "semantic" ? ["--semantic-proof"] : []),
+      ...(argv.includes("--allow-insecure-localhost") ? ["--allow-insecure-localhost"] : [])
+    ];
+    remoteDoctorReport = await buildRemoteDoctorReport(doctorArgs);
+    doctorStatus = remoteDoctorReport.summary.ok ? "passed" : "failed";
   }
   const approvalMode =
     typeof approved.approval_mode === "string" ? approved.approval_mode : startApprovalMode;
@@ -7961,6 +8353,24 @@ async function runConnectCloud(argv: readonly string[]) {
     credentialPrefix: credentialStore.credential_prefix ?? credentialStore.key,
     credentialStorePath: credentialStore.display_path,
     approvalMode
+  });
+  const agentReadyFilesOutcome = agentReadyFilesPlan
+    ? await applyRemoteAgentReadyFiles({
+        projectDir,
+        projectName: basename(projectDir) || "project",
+        plan: agentReadyFilesPlan
+      })
+    : null;
+  const agentReadyFiles = buildRemoteAgentReadyFilesReport({
+    plan: agentReadyFilesPlan,
+    outcome: agentReadyFilesOutcome,
+    skippedByFlag: skipAgentFiles
+  });
+  const remoteProof = remoteConnectProofReport({
+    proofLevel,
+    report: remoteDoctorReport,
+    dryRun: false,
+    skipped: skipDoctor
   });
   const result = {
     ok: true,
@@ -8000,6 +8410,8 @@ async function runConnectCloud(argv: readonly string[]) {
       redaction_boundary: consentReceipt.consent_scope.redaction_boundary
     },
     writes_files: true,
+    agent_ready_files: agentReadyFiles,
+    remote_proof: remoteProof,
     doctor_status: doctorStatus,
     scope: {
       project_id: config.projectId,
@@ -8043,11 +8455,14 @@ async function runConnectCloud(argv: readonly string[]) {
           consentReceiptPath: remoteAgentConsentReceiptPath(projectDir),
           configFile: targetConfig.config_file,
           targetFile,
+          agentReadyFiles,
+          remoteProof,
           writesFiles: true,
           doctorStatus,
           status: "connected"
         })
   );
+  if (remoteDoctorReport && !remoteDoctorReport.summary.ok) process.exitCode = 1;
 }
 
 function remoteCredentialProvisioningServerUrl(argv: readonly string[]) {
@@ -10002,9 +10417,9 @@ function usageText(command?: string) {
     command === "connect-remote-auto"
   ) {
     return [
-      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--bootstrap-token <one-time-token>] [--poll-timeout-ms <ms>] [--skip-doctor] [--yes] [--format json|text]",
+      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--bootstrap-token <one-time-token>] [--poll-timeout-ms <ms>] [--proof context|semantic|transport] [--semantic-proof] [--skip-doctor] [--skip-agent-files] [--yes] [--format json|text]",
       "",
-      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, registers a local trusted device key on first approval, reuses that key for signed trusted-device reconnect, supports one-time headless bootstrap tokens for servers, writes project-local remote MCP config after approval, and runs remote-doctor by default.",
+      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, registers a local trusted device key on first approval, reuses that key for signed trusted-device reconnect, supports one-time headless bootstrap tokens for servers, writes project-local remote MCP config plus safe thin agent-ready files after approval, and runs remote-doctor context proof by default. Use --proof semantic or --semantic-proof to create and recall one safe governed semantic marker.",
       "",
       "This command does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, provider secrets, or a current preinstalled Recallant CLI when launched through `curl -fsSL https://memory.example.com/connect | bash`.",
       "",

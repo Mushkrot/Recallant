@@ -1057,8 +1057,9 @@ try {
     settingsView.status !== 200 ||
     !settingsViewText.includes('id="settings" open') ||
     !settingsViewText.includes("Edit project settings") ||
+    !settingsViewText.includes("Cleanup / Forget") ||
+    !settingsViewText.includes("Dry-run purge from Recallant") ||
     settingsViewText.includes("Cost / Paid API") ||
-    settingsViewText.includes("Cleanup / Forget") ||
     settingsViewText.includes("Selected Detail")
   ) {
     throw new Error(

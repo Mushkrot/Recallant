@@ -56,10 +56,7 @@ function assertReadyLifecycle(output, label) {
     `${label} had lifecycle failure reasons: ${JSON.stringify(lifecycle.failure_reasons)}`
   );
   assert(lifecycle.report_required === false, `${label} unexpectedly required a report`);
-  assert(
-    lifecycle.proof?.event?.event_written === true,
-    `${label} missing closeout event proof`
-  );
+  assert(lifecycle.proof?.event?.event_written === true, `${label} missing closeout event proof`);
   assert(
     lifecycle.proof?.checkpoint?.checkpoint_updated === true,
     `${label} missing checkpoint proof`
@@ -466,6 +463,20 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
   assert(
     remoteStart.recommended_next_call === "memory_get_context_pack",
     "remote agent-start did not recommend context pack startup"
+  );
+  const remoteMcpCalls =
+    remoteStart.startup_contract?.direct_mcp_sequence?.map((entry) => entry.call).join(" ") ?? "";
+  const remoteCliFallback = remoteStart.startup_contract?.cli_fallback_sequence?.join(" ") ?? "";
+  assert(
+    remoteStart.startup_contract?.primary_path === "configured_remote_mcp" &&
+      remoteMcpCalls.includes("memory_start_session") &&
+      remoteMcpCalls.includes("memory_get_context_pack") &&
+      remoteMcpCalls.includes("memory_closeout") &&
+      remoteCliFallback.includes("recallant agent-start --format json") &&
+      remoteCliFallback.includes("recallant agent-event") &&
+      remoteCliFallback.includes("recallant agent-closeout") &&
+      !remoteCliFallback.includes("agent-checkpoint"),
+    `remote agent-start missing startup contract: ${JSON.stringify(remoteStart.startup_contract)}`
   );
   assert(
     String(remoteStart.recommended_next_action ?? "").includes(

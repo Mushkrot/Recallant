@@ -37,6 +37,22 @@ const remoteProject = await mkdtemp(join(tmpdir(), "recallant-remote-cleanup-"))
 await mkdir(join(remoteProject, ".codex"), { recursive: true });
 await mkdir(join(remoteProject, ".recallant"), { recursive: true });
 const credentialStorePath = join(remoteProject, "remote-mcp-credentials.json");
+const sourceFiles = {
+  "README.md": "# Existing Project\n",
+  "AGENTS.md": "# Existing Agent Notes\n\nKeep owner-authored instructions.\n",
+  "PROJECT_LOG.md": "# Project Log\n\nKeep owner-authored status.\n"
+};
+for (const [path, content] of Object.entries(sourceFiles)) {
+  await writeFile(join(remoteProject, path), content);
+}
+await writeFile(
+  join(remoteProject, ".recallant", "remote-consent.json"),
+  JSON.stringify({ consent: "approved", stored_secret: false }, null, 2) + "\n"
+);
+await writeFile(
+  join(remoteProject, ".recallant", "current-session.json"),
+  JSON.stringify({ session_id: "cleanup-session" }, null, 2) + "\n"
+);
 await writeFile(
   credentialStorePath,
   JSON.stringify(
@@ -70,6 +86,11 @@ await writeFile(
     'command = "recallant"',
     'args = ["remote-bridge"]',
     `env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "rclcred_cleanup", RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = "${credentialStorePath}", RECALLANT_PROJECT_ID = "project", RECALLANT_DEVELOPER_ID = "developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "client" }`,
+    "",
+    "[mcp_servers.recallant]",
+    'command = "recallant"',
+    'args = ["remote-bridge"]',
+    'env = { RECALLANT_REMOTE_MCP_URL = "https://stale.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "stale-ref", RECALLANT_PROJECT_ID = "stale-project", RECALLANT_DEVELOPER_ID = "stale-developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "stale-client" }',
     ""
   ].join("\n")
 );
@@ -103,11 +124,64 @@ if (
   cleanup.status !== "cleaned" ||
   cleanup.updated_paths[0] !== ".codex/config.toml" ||
   afterConfirm.includes("[mcp_servers.recallant]") ||
+  afterConfirm.includes("stale.example.com") ||
   !afterConfirm.includes("[mcp_servers.unrelated]") ||
   !(await exists(join(remoteProject, ".recallant", "config"))) ||
+  !(await exists(join(remoteProject, ".recallant", "remote-consent.json"))) ||
+  !(await exists(join(remoteProject, ".recallant", "current-session.json"))) ||
   !(await exists(credentialStorePath))
 ) {
   throw new Error(`remote-cleanup confirm failed: ${JSON.stringify(cleanup)}`);
+}
+for (const [path, content] of Object.entries(sourceFiles)) {
+  if ((await readFile(join(remoteProject, path), "utf8")) !== content) {
+    throw new Error(`remote-cleanup changed source file ${path}`);
+  }
+}
+
+const genericProject = await mkdtemp(join(tmpdir(), "recallant-remote-cleanup-generic-"));
+await mkdir(join(genericProject, ".recallant"), { recursive: true });
+await writeFile(
+  join(genericProject, ".recallant", "generic-remote-mcp.json"),
+  JSON.stringify(
+    {
+      mcpServers: {
+        recallant: {
+          command: "recallant",
+          args: ["remote-bridge"],
+          env: {
+            RECALLANT_REMOTE_MCP_URL: "https://recallant.example.com",
+            RECALLANT_REMOTE_MCP_CREDENTIAL_REF: "rclcred_cleanup"
+          }
+        }
+      }
+    },
+    null,
+    2
+  ) + "\n"
+);
+await writeFile(
+  join(genericProject, ".recallant", "remote-consent.json"),
+  JSON.stringify({ consent: "approved", stored_secret: false }, null, 2) + "\n"
+);
+const genericCleanup = runJson([
+  "remote-cleanup",
+  "--target",
+  "generic",
+  "--project-dir",
+  genericProject,
+  "--confirm",
+  "--format",
+  "json"
+]);
+if (
+  genericCleanup.status !== "cleaned" ||
+  !(await exists(join(genericProject, ".recallant", "remote-consent.json"))) ||
+  (await exists(join(genericProject, ".recallant", "generic-remote-mcp.json")))
+) {
+  throw new Error(
+    `generic remote-cleanup should remove only generated config: ${JSON.stringify(genericCleanup)}`
+  );
 }
 
 const localProject = await mkdtemp(join(tmpdir(), "recallant-remote-cleanup-local-"));

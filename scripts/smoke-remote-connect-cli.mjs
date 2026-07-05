@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { Buffer } from "node:buffer";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -8,6 +8,73 @@ import { URL } from "node:url";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function assertIncludesAll(actual, expected, label) {
+  for (const value of expected) {
+    assert(actual.includes(value), `${label} missing ${value}; got ${actual.join(", ")}`);
+  }
+}
+
+function agentReadyPlannedPaths(output) {
+  return output.agent_ready_files?.plan?.planned_files?.map((file) => file.path) ?? [];
+}
+
+function agentReadyGeneratedPaths(output) {
+  return output.agent_ready_files?.outcome?.generated_files ?? [];
+}
+
+function agentReadyUpdatedPaths(output) {
+  return output.agent_ready_files?.outcome?.updated_files ?? [];
+}
+
+function agentReadySkippedPaths(output) {
+  return (
+    output.agent_ready_files?.outcome?.skipped_files?.map((file) => file.path) ??
+    output.agent_ready_files?.plan?.skipped_files?.map((file) => file.path) ??
+    []
+  );
+}
+
+function agentReadyConflictPaths(output) {
+  return output.agent_ready_files?.outcome?.conflict_files?.map((file) => file.path) ?? [];
+}
+
+function proofPassedOrWarned(proof) {
+  return proof?.status === "passed" || proof?.status === "warning";
+}
+
+function assertRemoteStartupContract(output, label) {
+  const contract = output.startup_contract;
+  const mcpCalls = contract?.direct_mcp_sequence?.map((entry) => entry.call).join(" ") ?? "";
+  const cliFallback = contract?.cli_fallback_sequence?.join(" ") ?? "";
+  assert(
+    contract?.primary_path === "configured_remote_mcp" &&
+      mcpCalls.includes("memory_start_session") &&
+      mcpCalls.includes("memory_get_context_pack") &&
+      mcpCalls.includes("memory_closeout") &&
+      String(contract?.advanced_pause_checkpoint ?? "").includes("not semantic memory proof") &&
+      String(contract?.project_log_role ?? "").includes("compact current-state fallback") &&
+      cliFallback.includes("recallant agent-start --format json") &&
+      cliFallback.includes("recallant agent-event") &&
+      cliFallback.includes("recallant agent-closeout") &&
+      !cliFallback.includes("agent-checkpoint"),
+    `${label} missing remote startup contract: ${JSON.stringify(contract)}`
+  );
+}
+
+function occurrenceCount(text, needle) {
+  return text.split(needle).length - 1;
 }
 
 const CHECKPOINT_ONLY_AT = "2026-06-27T00:00:00.000Z";
@@ -364,9 +431,32 @@ assert(cliSource.includes("invite"), "help did not distinguish invite fallback")
 
 const tempProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-"));
 const secondProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-second-"));
+const dryRunProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-dry-run-"));
+const skipAgentFilesProject = await mkdtemp(
+  join(tmpdir(), "recallant-connect-cloud-skip-agent-files-")
+);
+const existingDocsProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-existing-"));
+const conflictDocsProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-conflict-"));
+const nonAsciiProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-проект-"));
+const staleConfigProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-stale-config-"));
+const contextProofProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-context-"));
+const semanticProofProject = await mkdtemp(join(tmpdir(), "recallant-connect-cloud-semantic-"));
 const tempHome = await mkdtemp(join(tmpdir(), "recallant-connect-home-"));
+const dryRunHome = await mkdtemp(join(tmpdir(), "recallant-connect-dry-run-home-"));
+const existingDocsHome = await mkdtemp(join(tmpdir(), "recallant-connect-existing-home-"));
+const safetyHome = await mkdtemp(join(tmpdir(), "recallant-connect-safety-home-"));
+const proofHome = await mkdtemp(join(tmpdir(), "recallant-connect-proof-home-"));
 const approvedServer = await connectServer("approved-after-pending");
 const trustedServer = await connectServer("trusted-approved");
+const reconnectServer = await connectServer("trusted-approved");
+const dryRunServer = await connectServer("approved-after-pending");
+const skipAgentFilesServer = await connectServer("approved-after-pending");
+const existingDocsServer = await connectServer("approved-after-pending");
+const conflictDocsServer = await connectServer("approved-after-pending");
+const nonAsciiServer = await connectServer("approved-after-pending");
+const staleConfigServer = await connectServer("approved-after-pending");
+const contextProofServer = await connectServer("approved-after-pending");
+const semanticProofServer = await connectServer("approved-after-pending");
 const bootstrapServer = await connectServer("bootstrap-approved");
 const universalServer = await connectServer("universal-approved");
 const schemelessServer = await connectServer("schemeless-approved");
@@ -435,6 +525,379 @@ try {
     `schemeless localhost URL did not reach the intended server: ${schemeless.stdout}`
   );
 
+  const dryRun = await runCli(
+    [
+      "connect-cloud",
+      dryRunProject,
+      "--server-url",
+      dryRunServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--dry-run",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: dryRunHome }
+    }
+  );
+  assert(dryRun.status === 0, `dry-run connect-cloud failed: ${dryRun.stderr}`);
+  const dryRunJson = JSON.parse(dryRun.stdout);
+  assert(dryRunJson.status === "dry_run", "dry-run did not report dry_run status");
+  assert(dryRunJson.writes_files === false, "dry-run reported file writes");
+  assertIncludesAll(
+    agentReadyPlannedPaths(dryRunJson),
+    ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+    "dry-run planned agent-ready files"
+  );
+  assert(
+    dryRunJson.agent_ready_files?.outcome === null,
+    "dry-run should not report an applied starter-doc outcome"
+  );
+  for (const path of ["README.md", "AGENTS.md", "PROJECT_LOG.md"]) {
+    assert(!(await exists(join(dryRunProject, path))), `dry-run unexpectedly wrote ${path}`);
+  }
+
+  const skipAgentFiles = await runCli(
+    [
+      "connect-cloud",
+      skipAgentFilesProject,
+      "--server-url",
+      skipAgentFilesServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--dry-run",
+      "--skip-agent-files",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: dryRunHome }
+    }
+  );
+  assert(skipAgentFiles.status === 0, `skip-agent-files dry-run failed: ${skipAgentFiles.stderr}`);
+  const skipAgentFilesJson = JSON.parse(skipAgentFiles.stdout);
+  assert(
+    skipAgentFilesJson.agent_ready_files?.skipped_by_flag === true &&
+      skipAgentFilesJson.agent_ready_files?.plan?.status === "skipped_by_flag" &&
+      agentReadyPlannedPaths(skipAgentFilesJson).length === 0,
+    "skip-agent-files did not suppress agent-ready file planning"
+  );
+  assert(
+    !(await exists(join(skipAgentFilesProject, "AGENTS.md"))),
+    "skip-agent-files unexpectedly wrote AGENTS.md"
+  );
+
+  await writeFile(join(existingDocsProject, "README.md"), "# Existing Project\n");
+  await writeFile(
+    join(existingDocsProject, "AGENTS.md"),
+    "# Existing Agent Notes\n\nKeep the project-specific notes intact.\n"
+  );
+  const existingDocs = await runCli(
+    [
+      "connect-cloud",
+      existingDocsProject,
+      "--server-url",
+      existingDocsServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: existingDocsHome }
+    }
+  );
+  assert(existingDocs.status === 0, `existing-docs connect-cloud failed: ${existingDocs.stderr}`);
+  const existingDocsJson = JSON.parse(existingDocs.stdout);
+  assertIncludesAll(
+    agentReadyPlannedPaths(existingDocsJson),
+    ["AGENTS.md", "PROJECT_LOG.md"],
+    "existing-docs planned agent-ready files"
+  );
+  assert(
+    !agentReadyPlannedPaths(existingDocsJson).includes("README.md"),
+    "existing-docs flow should not plan README overwrite"
+  );
+  assertIncludesAll(
+    agentReadyGeneratedPaths(existingDocsJson),
+    ["PROJECT_LOG.md"],
+    "existing-docs generated agent-ready files"
+  );
+  assertIncludesAll(
+    agentReadyUpdatedPaths(existingDocsJson),
+    ["AGENTS.md"],
+    "existing-docs updated agent-ready files"
+  );
+  assert(
+    (await readFile(join(existingDocsProject, "README.md"), "utf8")) === "# Existing Project\n",
+    "existing README was overwritten"
+  );
+  const existingDocsAgents = await readFile(join(existingDocsProject, "AGENTS.md"), "utf8");
+  assert(
+    existingDocsAgents.includes("Keep the project-specific notes intact.") &&
+      existingDocsAgents.includes("central Recallant server through remote MCP") &&
+      occurrenceCount(existingDocsAgents, "central Recallant server through remote MCP") === 1,
+    "existing AGENTS.md was not preserved and upserted safely"
+  );
+
+  const brokenAgents = [
+    "# Existing Agent Notes",
+    "",
+    "Keep this hand-authored guidance.",
+    "",
+    "<!-- recallant:remote-agent-ready:start -->",
+    "partial previous managed section",
+    ""
+  ].join("\n");
+  const brokenProjectLog = [
+    "# Existing Project Log",
+    "",
+    "Owner notes stay intact.",
+    "",
+    "<!-- recallant:remote-project-log:start -->",
+    "partial previous managed section",
+    ""
+  ].join("\n");
+  await writeFile(join(conflictDocsProject, "README.md"), "# Existing Project\n");
+  await writeFile(join(conflictDocsProject, "AGENTS.md"), brokenAgents);
+  await writeFile(join(conflictDocsProject, "PROJECT_LOG.md"), brokenProjectLog);
+  const conflictDocs = await runCli(
+    [
+      "connect-cloud",
+      conflictDocsProject,
+      "--server-url",
+      conflictDocsServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: safetyHome }
+    }
+  );
+  assert(conflictDocs.status === 0, `conflict-docs connect-cloud failed: ${conflictDocs.stderr}`);
+  const conflictDocsJson = JSON.parse(conflictDocs.stdout);
+  assertIncludesAll(
+    agentReadyConflictPaths(conflictDocsJson),
+    ["AGENTS.md", "PROJECT_LOG.md"],
+    "conflict-docs conflict files"
+  );
+  assert(
+    conflictDocsJson.agent_ready_files?.outcome?.status === "partial" &&
+      agentReadyGeneratedPaths(conflictDocsJson).length === 0 &&
+      agentReadyUpdatedPaths(conflictDocsJson).length === 0,
+    `conflict-docs should not edit broken managed sections: ${conflictDocs.stdout}`
+  );
+  assert(
+    (await readFile(join(conflictDocsProject, "AGENTS.md"), "utf8")) === brokenAgents &&
+      (await readFile(join(conflictDocsProject, "PROJECT_LOG.md"), "utf8")) === brokenProjectLog,
+    "conflict-docs changed files with incomplete managed markers"
+  );
+
+  const nonAscii = await runCli(
+    [
+      "connect-cloud",
+      nonAsciiProject,
+      "--server-url",
+      nonAsciiServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: safetyHome }
+    }
+  );
+  assert(nonAscii.status === 0, `non-ASCII connect-cloud failed: ${nonAscii.stderr}`);
+  const nonAsciiJson = JSON.parse(nonAscii.stdout);
+  assert(nonAsciiJson.project_dir === nonAsciiProject, "non-ASCII project path changed in output");
+  assertIncludesAll(
+    agentReadyGeneratedPaths(nonAsciiJson),
+    ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+    "non-ASCII generated agent-ready files"
+  );
+  assert(
+    (await readFile(join(nonAsciiProject, "AGENTS.md"), "utf8")).includes(
+      "central Recallant server through remote MCP"
+    ),
+    "non-ASCII project did not receive valid AGENTS.md"
+  );
+
+  await mkdir(join(staleConfigProject, ".codex"), { recursive: true });
+  await writeFile(
+    join(staleConfigProject, ".codex", "config.toml"),
+    [
+      "[mcp_servers.recallant]",
+      'command = "recallant"',
+      'args = ["remote-bridge"]',
+      'env = { RECALLANT_REMOTE_MCP_URL = "https://old.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "old-ref", RECALLANT_PROJECT_ID = "old-project", RECALLANT_DEVELOPER_ID = "old-developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "old-client" }',
+      "",
+      "[mcp_servers.other]",
+      'command = "other"',
+      'args = ["serve"]',
+      "",
+      "[mcp_servers.recallant]",
+      'command = "recallant"',
+      'args = ["remote-bridge"]',
+      'env = { RECALLANT_REMOTE_MCP_URL = "https://stale.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "stale-ref", RECALLANT_PROJECT_ID = "stale-project", RECALLANT_DEVELOPER_ID = "stale-developer", RECALLANT_REMOTE_MCP_CLIENT_ID = "stale-client" }',
+      ""
+    ].join("\n")
+  );
+  const staleConfig = await runCli(
+    [
+      "connect-cloud",
+      staleConfigProject,
+      "--server-url",
+      staleConfigServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: safetyHome }
+    }
+  );
+  assert(staleConfig.status === 0, `stale-config connect-cloud failed: ${staleConfig.stderr}`);
+  const staleConfigToml = await readFile(join(staleConfigProject, ".codex", "config.toml"), "utf8");
+  assert(
+    occurrenceCount(staleConfigToml, "[mcp_servers.recallant]") === 1 &&
+      staleConfigToml.includes("[mcp_servers.other]") &&
+      staleConfigToml.includes("remote-bridge") &&
+      !staleConfigToml.includes("old.example.com") &&
+      !staleConfigToml.includes("stale.example.com"),
+    `stale duplicate Codex config was not rewritten idempotently:\n${staleConfigToml}`
+  );
+
+  const contextProof = await runCli(
+    [
+      "connect-cloud",
+      contextProofProject,
+      "--server-url",
+      contextProofServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--allow-insecure-localhost",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: proofHome }
+    }
+  );
+  assert(contextProof.status === 0, `context-proof connect-cloud failed: ${contextProof.stderr}`);
+  const contextProofJson = JSON.parse(contextProof.stdout);
+  assert(contextProofJson.doctor_status === "passed", "context proof doctor did not pass");
+  assert(
+    contextProofJson.remote_proof?.requested_level === "context" &&
+      proofPassedOrWarned(contextProofJson.remote_proof) &&
+      contextProofJson.remote_proof?.remote_mcp_ready === true &&
+      contextProofJson.remote_proof?.context_ready === true &&
+      contextProofJson.remote_proof?.semantic_memory_ready === false &&
+      contextProofJson.remote_proof?.capture_active === false &&
+      contextProofJson.remote_proof?.readiness_state === "context_ready",
+    `context proof did not expose honest proof states: ${contextProof.stdout}`
+  );
+  assert(
+    String(contextProofJson.remote_proof?.next_action ?? "").includes("semantic"),
+    "context proof next action did not point to semantic proof"
+  );
+  const contextAgentStart = await runCli(
+    ["agent-start", "--project-dir", contextProofProject, "--format", "json"],
+    { env: { HOME: proofHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(contextAgentStart.status === 0, `context agent-start failed: ${contextAgentStart.stderr}`);
+  const contextAgentStartJson = JSON.parse(contextAgentStart.stdout);
+  assert(
+    contextAgentStartJson.readiness_state === "context_ready" &&
+      contextAgentStartJson.proof_status?.context_ready === true &&
+      contextAgentStartJson.proof_status?.semantic_memory_ready === false &&
+      contextAgentStartJson.proof_status?.capture_active === false,
+    `agent-start after context proof did not expose context_ready: ${contextAgentStart.stdout}`
+  );
+
+  const connectSemanticProof = await runCli(
+    [
+      "connect-cloud",
+      semanticProofProject,
+      "--server-url",
+      semanticProofServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--allow-insecure-localhost",
+      "--semantic-proof",
+      "--yes",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: proofHome }
+    }
+  );
+  assert(
+    connectSemanticProof.status === 0,
+    `semantic-proof connect-cloud failed: ${connectSemanticProof.stderr}`
+  );
+  const connectSemanticProofJson = JSON.parse(connectSemanticProof.stdout);
+  assert(
+    connectSemanticProofJson.remote_proof?.requested_level === "semantic" &&
+      proofPassedOrWarned(connectSemanticProofJson.remote_proof) &&
+      connectSemanticProofJson.remote_proof?.context_ready === true &&
+      connectSemanticProofJson.remote_proof?.semantic_memory_ready === true &&
+      connectSemanticProofJson.remote_proof?.capture_active === false &&
+      connectSemanticProofJson.remote_proof?.readiness_state === "semantic_memory_ready",
+    `semantic proof did not expose honest proof states: ${connectSemanticProof.stdout}`
+  );
+  assert(
+    semanticProofServer.state.semanticProofAt === SEMANTIC_PROOF_AT,
+    "connect-cloud semantic proof did not persist semantic readiness evidence"
+  );
+  const semanticAgentStart = await runCli(
+    ["agent-start", "--project-dir", semanticProofProject, "--format", "json"],
+    { env: { HOME: proofHome, RECALLANT_DATABASE_URL: "" } }
+  );
+  assert(
+    semanticAgentStart.status === 0,
+    `semantic agent-start failed: ${semanticAgentStart.stderr}`
+  );
+  const semanticAgentStartJson = JSON.parse(semanticAgentStart.stdout);
+  assert(
+    semanticAgentStartJson.readiness_state === "semantic_memory_ready" &&
+      semanticAgentStartJson.proof_status?.semantic_memory_ready === true &&
+      semanticAgentStartJson.proof_status?.capture_active === false,
+    `agent-start after semantic proof did not expose semantic_memory_ready: ${semanticAgentStart.stdout}`
+  );
+
   const approved = await runCli(
     [
       "connect-cloud",
@@ -457,6 +920,12 @@ try {
   const approvedJson = JSON.parse(approved.stdout);
   assert(approvedJson.status === "connected", "approved flow did not connect");
   assert(approvedJson.doctor_status === "skipped", "skip doctor was not honored");
+  assert(
+    approvedJson.remote_proof?.status === "skipped" &&
+      approvedJson.remote_proof?.remote_mcp_ready === false &&
+      approvedJson.remote_proof?.next_action?.includes("remote-doctor"),
+    "skip doctor did not report explicit skipped proof state"
+  );
   assert(
     approvedJson.trusted_device?.store_path?.includes(".config/recallant/trusted-device.json"),
     "trusted device store path missing"
@@ -565,6 +1034,55 @@ try {
     "remote consent receipt leaked raw credential"
   );
   assert(!consentReceipt.includes("PRIVATE KEY"), "remote consent receipt leaked private key text");
+  assert(
+    approvedJson.agent_ready_files?.skipped_by_flag === false,
+    "approved flow unexpectedly skipped agent-ready files"
+  );
+  assertIncludesAll(
+    agentReadyPlannedPaths(approvedJson),
+    ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+    "approved planned agent-ready files"
+  );
+  assertIncludesAll(
+    agentReadyGeneratedPaths(approvedJson),
+    ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
+    "approved generated agent-ready files"
+  );
+  const approvedAgents = await readFile(join(tempProject, "AGENTS.md"), "utf8");
+  const approvedProjectLog = await readFile(join(tempProject, "PROJECT_LOG.md"), "utf8");
+  const approvedReadme = await readFile(join(tempProject, "README.md"), "utf8");
+  assert(
+    approvedAgents.includes("central Recallant server through remote MCP") &&
+      approvedAgents.includes(
+        "do not set up local Postgres, Docker, or `RECALLANT_DATABASE_URL`"
+      ) &&
+      approvedAgents.includes("memory_start_session") &&
+      approvedAgents.includes("memory_closeout") &&
+      approvedAgents.includes("checkpoint state; it is not semantic recall proof") &&
+      approvedAgents.includes("recallant agent-start --format json") &&
+      approvedAgents.includes("recallant agent-closeout") &&
+      approvedAgents.includes("memory_get_context_pack"),
+    "approved AGENTS.md missing remote MCP agent-ready wording"
+  );
+  assert(
+    approvedProjectLog.includes("central Recallant server through remote MCP") &&
+      approvedProjectLog.includes("memory_start_session") &&
+      approvedProjectLog.includes("memory_closeout") &&
+      approvedProjectLog.includes("checkpoint-only state separate from semantic memory proof") &&
+      approvedProjectLog.includes("recallant agent-start --format json") &&
+      approvedProjectLog.includes("memory_get_context_pack"),
+    "approved PROJECT_LOG.md missing remote MCP agent-ready wording"
+  );
+  for (const generatedDoc of [approvedAgents, approvedProjectLog, approvedReadme]) {
+    assert(
+      !generatedDoc.includes("rcl_mcp_connect_secret") &&
+        !generatedDoc.includes("PRIVATE KEY") &&
+        !generatedDoc.includes("postgres://") &&
+        !generatedDoc.includes("/ai/") &&
+        !generatedDoc.includes("RECALLANT_DATABASE_URL="),
+      "generated agent-ready docs leaked forbidden private surface"
+    );
+  }
   assert(!approved.stdout.includes("credential_hash"), "approved output exposed credential hash");
   const remoteStart = await runCli(
     ["agent-start", "--project-dir", tempProject, "--format", "json"],
@@ -578,6 +1096,11 @@ try {
   );
   assert(
     remoteStartJson.remote_readiness_status === "read" &&
+      remoteStartJson.readiness_state === "configured" &&
+      remoteStartJson.proof_status?.remote_mcp_ready === true &&
+      remoteStartJson.proof_status?.context_ready === false &&
+      remoteStartJson.proof_status?.semantic_memory_ready === false &&
+      remoteStartJson.proof_status?.capture_active === false &&
       remoteStartJson.readiness_contract?.primary_state === "configured" &&
       remoteStartJson.readiness_contract?.semantic_memory_ready === false &&
       remoteStartJson.readiness_contract?.capture_active === false &&
@@ -589,6 +1112,7 @@ try {
     remoteStartJson.recommended_next_call === "memory_get_context_pack",
     "remote agent-start did not recommend context pack startup"
   );
+  assertRemoteStartupContract(remoteStartJson, "remote agent-start");
   assert(
     remoteStartJson.recommended_next_proof_call === "memory_create_agent_memory" &&
       remoteStartJson.recommended_next_proof_followup_call === "memory_recall_agent_memories",
@@ -629,7 +1153,11 @@ try {
   );
   const remoteStartAfterCaptureProofJson = JSON.parse(remoteStartAfterCaptureProof.stdout);
   assert(
-    remoteStartAfterCaptureProofJson.readiness_contract?.semantic_memory_ready === false &&
+    remoteStartAfterCaptureProofJson.readiness_state === "context_ready" &&
+      remoteStartAfterCaptureProofJson.proof_status?.context_ready === true &&
+      remoteStartAfterCaptureProofJson.proof_status?.semantic_memory_ready === false &&
+      remoteStartAfterCaptureProofJson.proof_status?.capture_active === false &&
+      remoteStartAfterCaptureProofJson.readiness_contract?.semantic_memory_ready === false &&
       remoteStartAfterCaptureProofJson.readiness_contract?.capture_active === false &&
       remoteStartAfterCaptureProofJson.readiness_contract?.evidence
         ?.last_semantic_recall_proof_at === null,
@@ -652,10 +1180,8 @@ try {
   assert(
     stageCode(semanticProofJson, "session_context_readiness") ===
       "pass:session_context_readiness_ok" &&
-      stageCode(semanticProofJson, "checkpoint_state_proof") ===
-        "pass:checkpoint_state_proof_ok" &&
-      stageCode(semanticProofJson, "semantic_memory_proof") ===
-        "pass:semantic_memory_proof_ok",
+      stageCode(semanticProofJson, "checkpoint_state_proof") === "pass:checkpoint_state_proof_ok" &&
+      stageCode(semanticProofJson, "semantic_memory_proof") === "pass:semantic_memory_proof_ok",
     `remote semantic proof did not pass all proof stages: ${semanticProof.stdout}`
   );
   assert(
@@ -673,12 +1199,15 @@ try {
   const remoteStartAfterProofJson = JSON.parse(remoteStartAfterProof.stdout);
   assert(
     remoteStartAfterProofJson.mode === "remote_mcp_ready" &&
+      remoteStartAfterProofJson.readiness_state === "semantic_memory_ready" &&
+      remoteStartAfterProofJson.proof_status?.semantic_memory_ready === true &&
+      remoteStartAfterProofJson.proof_status?.capture_active === false &&
       remoteStartAfterProofJson.readiness_contract?.primary_state === "semantic_memory_ready" &&
       remoteStartAfterProofJson.readiness_contract?.semantic_memory_ready === true &&
       remoteStartAfterProofJson.readiness_contract?.capture_active === false &&
       remoteStartAfterProofJson.readiness_contract?.ingestion_approved === false &&
-      remoteStartAfterProofJson.readiness_contract?.evidence
-        ?.last_semantic_recall_proof_at === SEMANTIC_PROOF_AT,
+      remoteStartAfterProofJson.readiness_contract?.evidence?.last_semantic_recall_proof_at ===
+        SEMANTIC_PROOF_AT,
     `post-proof remote agent-start did not read semantic readiness: ${remoteStartAfterProof.stdout}`
   );
   assert(
@@ -697,6 +1226,8 @@ try {
   );
   assert(
     remoteStartAfterProofText.stdout.includes("semantic_memory_ready") &&
+      remoteStartAfterProofText.stdout.includes("memory_start_session") &&
+      remoteStartAfterProofText.stdout.includes("memory_closeout") &&
       remoteStartAfterProofText.stdout.includes(SEMANTIC_PROOF_AT) &&
       !remoteStartAfterProofText.stdout.includes("semantic memory is not proven yet"),
     `post-proof text output did not describe semantic readiness: ${remoteStartAfterProofText.stdout}`
@@ -736,6 +1267,47 @@ try {
   assert(
     !remoteDoctorText.stdout.includes("Project is not attached to Recallant yet."),
     "local doctor text still reports standalone not-attached headline"
+  );
+
+  const reconnect = await runCli(
+    [
+      "connect-cloud",
+      tempProject,
+      "--server-url",
+      reconnectServer.baseUrl,
+      "--poll-timeout-ms",
+      "5000",
+      "--poll-interval-ms",
+      "50",
+      "--skip-doctor",
+      "--format",
+      "json"
+    ],
+    {
+      env: { HOME: tempHome }
+    }
+  );
+  assert(reconnect.status === 0, `same-project reconnect failed: ${reconnect.stderr}`);
+  const reconnectJson = JSON.parse(reconnect.stdout);
+  assert(reconnectJson.status === "connected", "same-project reconnect did not connect");
+  assert(
+    reconnectJson.approval_mode === "trusted_device" &&
+      reconnectJson.browser_approval_required === false,
+    "same-project reconnect should use trusted device approval"
+  );
+  assert(
+    agentReadyGeneratedPaths(reconnectJson).length === 0,
+    "same-project reconnect regenerated agent-ready files"
+  );
+  assertIncludesAll(
+    agentReadySkippedPaths(reconnectJson),
+    ["AGENTS.md", "PROJECT_LOG.md"],
+    "same-project reconnect skipped agent-ready files"
+  );
+  const reconnectedAgents = await readFile(join(tempProject, "AGENTS.md"), "utf8");
+  assert(
+    occurrenceCount(reconnectedAgents, "central Recallant server through remote MCP") === 1,
+    "same-project reconnect duplicated AGENTS.md remote MCP section"
   );
 
   const trusted = await runCli(
@@ -897,12 +1469,33 @@ try {
 } finally {
   approvedServer.server.close();
   trustedServer.server.close();
+  reconnectServer.server.close();
+  dryRunServer.server.close();
+  skipAgentFilesServer.server.close();
+  existingDocsServer.server.close();
+  conflictDocsServer.server.close();
+  nonAsciiServer.server.close();
+  staleConfigServer.server.close();
+  contextProofServer.server.close();
+  semanticProofServer.server.close();
   bootstrapServer.server.close();
   universalServer.server.close();
   schemelessServer.server.close();
   await rm(tempProject, { recursive: true, force: true });
   await rm(secondProject, { recursive: true, force: true });
+  await rm(dryRunProject, { recursive: true, force: true });
+  await rm(skipAgentFilesProject, { recursive: true, force: true });
+  await rm(existingDocsProject, { recursive: true, force: true });
+  await rm(conflictDocsProject, { recursive: true, force: true });
+  await rm(nonAsciiProject, { recursive: true, force: true });
+  await rm(staleConfigProject, { recursive: true, force: true });
+  await rm(contextProofProject, { recursive: true, force: true });
+  await rm(semanticProofProject, { recursive: true, force: true });
   await rm(tempHome, { recursive: true, force: true });
+  await rm(dryRunHome, { recursive: true, force: true });
+  await rm(existingDocsHome, { recursive: true, force: true });
+  await rm(safetyHome, { recursive: true, force: true });
+  await rm(proofHome, { recursive: true, force: true });
   await rm(universalProject, { recursive: true, force: true });
   await rm(schemelessProject, { recursive: true, force: true });
   await rm(universalHome, { recursive: true, force: true });
@@ -989,6 +1582,21 @@ process.stdout.write(
         consent_receipt: "project_local_non_secret_remote_boundary",
         agent_start_readiness:
           "configured_checkpoint_only_then_capture_proof_non_semantic_then_semantic_memory_ready_without_capture_active",
+        regression_matrix: {
+          old_mac_test_failure_mode:
+            "remote connect must produce agent-ready thin files, not only MCP config",
+          empty_remote_project: "README.md, AGENTS.md, and PROJECT_LOG.md generated",
+          existing_doc_remote_project:
+            "existing README preserved, existing AGENTS.md safely upserted, PROJECT_LOG.md generated",
+          existing_agents_md: "hand-authored AGENTS.md notes preserved",
+          credential_ref_only_safety: "project config uses credential ref, not raw scoped secret",
+          no_local_storage: "remote-only project does not require local database storage",
+          dry_run: "reports planned files without writing them",
+          idempotent_reconnect: "trusted reconnect does not duplicate agent-ready sections",
+          non_ascii_path: "non-ASCII project path connects and receives valid thin files",
+          remote_proof_status: "skipped/context/semantic proof states are explicit",
+          cleanup_retry: "covered by remote-client-cleanup:smoke"
+        },
         doctor: "runs_by_default_skip_flag_honored",
         denied: "clear_error",
         expired: "clear_error",

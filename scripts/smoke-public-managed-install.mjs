@@ -176,7 +176,7 @@ try {
     JSON.stringify(
       {
         status: "ok",
-        onboarding_command: "recallant onboard <project>",
+        onboarding_command: "recallant connect <project>",
         project_id: config.project_id ?? null,
         clean_root: "[temporary-directory-removed]",
         postgres_port: port,

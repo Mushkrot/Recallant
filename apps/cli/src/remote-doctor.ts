@@ -1011,7 +1011,7 @@ function textReport(report: RemoteMcpDoctorReport) {
   return `${lines.join("\n")}\n`;
 }
 
-export async function runRemoteDoctor(argv: readonly string[]) {
+export async function buildRemoteDoctorReport(argv: readonly string[]) {
   const options = readOptions(argv);
   const validation = validateBeforeNetwork(options);
   let report: RemoteMcpDoctorReport;
@@ -1040,6 +1040,12 @@ export async function runRemoteDoctor(argv: readonly string[]) {
   const redactedReport = redactRemoteMcpDoctorValue(report, [
     options.credential ?? ""
   ]) as RemoteMcpDoctorReport;
+  return redactedReport;
+}
+
+export async function runRemoteDoctor(argv: readonly string[]) {
+  const options = readOptions(argv);
+  const redactedReport = await buildRemoteDoctorReport(argv);
   process.stdout.write(
     options.format === "json"
       ? `${JSON.stringify(redactedReport, null, 2)}\n`

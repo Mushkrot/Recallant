@@ -16,7 +16,8 @@ curl -fsSL https://memory.example.com/connect | bash
 
 That command installs or updates only the remote client CLI, starts browser approval through the
 protected central server, receives a scoped provisioning package, writes project-local remote MCP
-config, and runs `remote-doctor`. The detailed implementation record and route contract are in
+config plus thin agent-ready files, and runs `remote-doctor`. The detailed implementation record and
+route contract are in
 [`docs/REMOTE_CONNECT_PLAN.md`](REMOTE_CONNECT_PLAN.md). Server-generated one-time invites remain
 supported for advanced/admin provisioning, automation, pre-known projects, and directed one-time
 access, but they are not the universal first-run command.
@@ -26,24 +27,24 @@ transport, scope, header, and error contracts.
 
 ## Beginner Flow
 
-For projects on a machine that already has a local Recallant install and storage, use onboarding:
-
-```bash
-recallant onboard <project>
-```
-
-The universal beginner command is:
+For any project, start with the universal beginner command:
 
 ```bash
 recallant connect <project>
 ```
 
-It routes to local onboarding when private storage is reachable. If local storage is missing, it
-asks for an existing central Recallant server URL or lets the owner choose local storage. Automation
-can provide the server URL up front:
+On a machine that already has a local Recallant install and storage, it routes to local onboarding.
+If local storage is missing, it asks for an existing central Recallant server URL or lets the owner
+choose local storage. Automation can provide the server URL up front:
 
 ```bash
 recallant connect <project> --server-url https://memory.example.com
+```
+
+The explicit local command is still available for contributors and diagnostics:
+
+```bash
+recallant onboard <project>
 ```
 
 Onboarding defaults to the Codex beginner flow: attach, client connection, local hooks when
@@ -53,10 +54,10 @@ context read, memory write, checkpoint, and recall evidence are present.
 Interrupted sessions are reported as recovery context for the next agent. They do not erase current
 capture-active evidence when the working loop has been proven again.
 
-Do not use the local self-host installer or `recallant onboard <project>` as the first step for an
-external workstation that should connect to an existing central Recallant server. That remote
-existing-server path is separate and must not require local Docker, Postgres, `RECALLANT_DATABASE_URL`,
-or internal server paths.
+Do not use the local self-host installer or lower-level `recallant onboard <project>` as the first
+step for an external workstation that should connect to an existing central Recallant server. That
+remote existing-server path is separate and must not require local Docker, Postgres,
+`RECALLANT_DATABASE_URL`, or internal server paths.
 
 For a remote workstation, the beginner flow is:
 
@@ -82,7 +83,9 @@ the `curl .../connect | bash` path. The remote machine starts a pending connecti
 owner approves it in the protected browser flow. That first approval registers a local trusted-device
 key on the workstation. Later projects from the same trusted workstation can reconnect with the same
 `curl .../connect | bash` / `connect-cloud` path using signed device challenges instead of another
-Cloudflare email-code browser approval.
+Cloudflare email-code browser approval. The approved flow writes remote client configuration, a
+non-secret consent receipt, and compact agent-ready files; it does not install local Recallant
+storage or import existing project history.
 
 For headless servers or CI-like hosts where no browser approval is practical, an administrator can
 create a short-lived one-time bootstrap token through the protected central server API. The remote
@@ -710,6 +713,11 @@ Text mode prints the same boundary for humans. Local `recallant doctor` should d
 `remote-ready, local storage not attached` so agents do not run local `attach --confirm` unless the
 operator explicitly chooses the local-storage path.
 
+Remote connect also prepares the project for the next agent by creating or safely upserting the thin
+`README.md`, `AGENTS.md`, and `PROJECT_LOG.md` surfaces. These files route startup to Recallant and
+record a compact fallback state; they are not a local memory store and they do not replace governed
+server memory.
+
 For an already connected remote project, use `recallant agent-start --format json` as the first
 refresh check. If it reports `remote_mcp_ready`, the existing scoped config is usable; no local
 `attach`, `onboard`, or import is needed. If the local client itself needs to be updated or the
@@ -762,6 +770,8 @@ If MCP tools are unavailable, use CLI fallback commands:
 ```bash
 recallant agent-start --task-hint "<current task>"
 recallant agent-event --kind decision --text "<important decision>"
-recallant agent-checkpoint --summary "<current state>"
 recallant agent-closeout --summary "<what changed and what is next>"
 ```
+
+Use `recallant agent-checkpoint` only for explicit pause or compaction state. It is not the normal
+closeout path and it is not semantic recall proof.

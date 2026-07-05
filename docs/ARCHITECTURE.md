@@ -68,11 +68,13 @@ flowchart TB
 
 ## Project Bootstrap
 
-`recallant onboard <project>` is the product-level path for making a project agent-ready. It owns
-storage readiness, project attach, client connection, capture proof, recall proof, and Workbench
-visibility. Under the hood it creates or updates thin local pointers such as `.recallant/config`,
-`AGENTS.md`, optional compact local fallback files where allowed, and client MCP configuration
-while keeping durable history in Recallant.
+`recallant connect <project>` is the product-level path for making a project agent-ready. It routes
+to local onboarding when storage is reachable on the same host, or to the remote existing-server path
+when a central server URL is provided. It owns storage readiness, project attach or scoped remote
+credential setup, client connection, capture proof, recall proof, and Workbench visibility. Under the
+local path it creates or updates thin local pointers such as `.recallant/config`, `AGENTS.md`,
+optional compact local fallback files where allowed, and client MCP configuration while keeping
+durable history in Recallant.
 
 For existing projects, onboarding treats old handoffs, runbooks, and agent files as migration
 inputs. Useful material is imported as source-linked evidence or reviewable memory candidates; long

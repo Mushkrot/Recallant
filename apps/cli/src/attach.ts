@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createRecallantDbFromEnv, type RecallantDb } from "@recallant/db";
 import {
   type DiscoveryCandidate,
@@ -14,10 +14,9 @@ import {
   compactStarterDocsForSetting,
   documentationPostureSettingKey,
   planStarterDocs,
-  starterDocsSettingKey,
-  type StarterDocsOutcome,
-  type StarterDocsPlan
+  starterDocsSettingKey
 } from "./documentation-posture.js";
+import { applyStarterDocs } from "./starter-docs.js";
 import { clientTargetConfig, renderClientTargetConfig } from "./client-targets.js";
 
 type AttachMode = "manual" | "guided" | "autopilot";
@@ -509,41 +508,6 @@ function plannedChanges(input: {
       production_sensitive: input.productionSensitive
     }
   ];
-}
-
-async function applyStarterDocs(input: {
-  projectDir: string;
-  plan: StarterDocsPlan;
-}): Promise<StarterDocsOutcome> {
-  if (!input.plan.eligible_for_apply) {
-    return {
-      status: "skipped",
-      reason: input.plan.reason,
-      generated_files: [] as string[],
-      skipped_files: input.plan.skipped_files
-    };
-  }
-  const generatedFiles = [];
-  const skippedFiles = [...input.plan.skipped_files];
-  for (const file of input.plan.files) {
-    const targetPath = join(input.projectDir, file.path);
-    const existing = await readOptional(targetPath);
-    if (existing !== null) {
-      skippedFiles.push({ path: file.path, reason: "Target file already exists." });
-      continue;
-    }
-    await mkdir(dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
-    generatedFiles.push(file.path);
-  }
-  return {
-    status: skippedFiles.length > 0 ? "partial" : "generated",
-    reason: generatedFiles.length
-      ? "Starter docs were generated for an empty project."
-      : "No starter docs were generated.",
-    generated_files: generatedFiles,
-    skipped_files: skippedFiles
-  };
 }
 
 function rawSecretFindings(candidates: readonly DiscoveryCandidate[]) {

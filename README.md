@@ -46,10 +46,10 @@ storage stack:
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
 ```
 
-Then onboard a project from anywhere:
+Then connect a project from anywhere:
 
 ```bash
-recallant onboard /path/to/project
+recallant connect /path/to/project
 ```
 
 After install or update, the CLI should report the CLI package version plus checkout metadata:
@@ -61,10 +61,12 @@ recallant --version
 
 The root monorepo package version is not the installed CLI version.
 
-This local self-host path creates local storage and may require Docker/Postgres. It is not the path
-for connecting a workstation project to an existing central Recallant server.
+The same `recallant connect` command is the beginner entry point for local self-host projects and
+projects that should connect to an existing central Recallant server. With reachable local storage it
+runs local onboarding. Without local storage, it asks for an existing central server URL or local
+storage setup before changing project files.
 
-Onboarding defaults to the beginner Codex path: project attach, local client connection, optional
+Local onboarding defaults to the beginner Codex path: project attach, local client connection, optional
 hooks, capture proof, recall proof, and the Workbench outcome. If storage is missing in an
 interactive terminal, it offers to run the local single-user storage setup first; in automation it
 stops with `storage_blocked` and a plain setup choice. `Database not configured` is not a successful
@@ -97,6 +99,8 @@ the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 Remote project access to an existing central Recallant server is a separate path. `remote_mcp_ready`
 maps to `configured`: scoped access exists, but memory is not proven by access alone.
+The remote connect path prepares scoped remote MCP access plus thin agent-ready files
+(`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`) without installing local storage.
 `recallant remote-doctor --semantic-proof` creates and recalls one safe governed marker; the server
 persists readiness evidence, and a later `recallant agent-start` reads that evidence through the
 bounded readiness status. Checkpoint-only readback and capture-proof do not imply

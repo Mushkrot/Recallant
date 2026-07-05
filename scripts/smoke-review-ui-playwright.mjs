@@ -1038,9 +1038,10 @@ async function run() {
     );
     await desktop.locator("#settings[open]").waitFor();
     await desktop.getByText("Edit project settings").waitFor();
+    await desktop.getByText("Cleanup / Forget").waitFor();
+    await desktop.getByRole("button", { name: "Dry-run purge from Recallant" }).waitFor();
     await absent(desktop.getByText("Selected Detail"), "focused Settings selected detail");
     await absent(desktop.getByText("Cost / Paid API"), "focused Settings cost panel");
-    await absent(desktop.getByText("Cleanup / Forget"), "focused Settings cleanup panel");
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
       fullPage: true
