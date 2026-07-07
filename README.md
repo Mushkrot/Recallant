@@ -154,6 +154,8 @@ Current strengths:
   `product-acceptance:smoke` prove `agent-closeout` / `memory_closeout` only report
   next-agent readiness after event, checkpoint, accepted closeout memory, semantic recall, and
   next-session context proof;
+- project-binding regression coverage for session-derived context/closeout writes, config-derived
+  CLI writes, `project_dir` compatibility aliasing, and duplicate path ambiguity handling;
 - first agent-ready project onboarding path;
 - existing-project migration reports with local backups, import counts, review-needed counts, and
   raw-secret signals;

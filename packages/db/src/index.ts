@@ -2770,16 +2770,16 @@ export class RecallantDb {
             FROM projects p
             WHERE p.developer_id = $1
               AND p.primary_path IS NOT DISTINCT FROM $2
-            ORDER BY (
-              (SELECT count(*) FROM sessions s WHERE s.project_id = p.id) +
-              (SELECT count(*) FROM events e WHERE e.project_id = p.id) +
-              (SELECT count(*) FROM agent_memories m WHERE m.project_id = p.id)
-            ) DESC,
-            p.updated_at DESC
-            LIMIT 1
+            ORDER BY p.updated_at DESC, p.id
+            LIMIT 2
           `,
           [developerId, primaryPath]
         );
+        if (existing.rows.length > 1) {
+          throw new Error(
+            "VALIDATION_ERROR: ambiguous project path; multiple project records share the same developer_id and primary_path. Provide project_id from local project config or repair duplicate project identity before starting a path-only session."
+          );
+        }
         projectId = existing.rows[0]?.id ?? randomUUID();
       }
       await client.query(
@@ -5589,6 +5589,11 @@ export class RecallantDb {
 
   async getContextPack(input: ContextPackInput) {
     const context = await this.contextForSession(input.session_id);
+    if (input.project_id && input.project_id !== context.projectId) {
+      throw new Error(
+        "VALIDATION_ERROR: project_id must match the project resolved from session_id for memory_get_context_pack"
+      );
+    }
     await withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
       await this.insertEvent(client, {
@@ -6339,7 +6344,9 @@ export class RecallantDb {
   }
 
   async listAgentMemories(input: ListAgentMemoriesInput) {
-    const context = await this.ensureProject();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject();
     const sourceFilter = await this.sourceFilter(input.source_id);
     if (input.view === "duplicates") {
       const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
@@ -8628,7 +8635,11 @@ export class RecallantDb {
     };
   }
 
-  private async queryManagedProject(whereClause: string, values: unknown[]) {
+  private async queryManagedProject(
+    whereClause: string,
+    values: unknown[],
+    options: { rejectAmbiguousPath?: boolean } = {}
+  ) {
     const result = await this.pool.query<ManagedProjectRow>(
       `
         SELECT p.id AS project_id, p.developer_id, p.name, p.primary_path,
@@ -8641,10 +8652,15 @@ export class RecallantDb {
           (SELECT count(*) FROM agent_memories m WHERE m.project_id = p.id)
         ) DESC,
         p.updated_at DESC
-        LIMIT 1
+        LIMIT ${options.rejectAmbiguousPath ? 2 : 1}
       `,
       values
     );
+    if (options.rejectAmbiguousPath && result.rows.length > 1) {
+      throw new Error(
+        "VALIDATION_ERROR: ambiguous managed project path; multiple project records share the same developer_id and primary_path. Provide project_id from local project config or repair duplicate project identity before using path-only project management."
+      );
+    }
     return result.rows[0] ?? null;
   }
 
@@ -8689,7 +8705,8 @@ export class RecallantDb {
       if (projectPath) {
         const fallbackProject = await this.queryManagedProject(
           "p.developer_id = $1::uuid AND p.primary_path IS NOT DISTINCT FROM $2",
-          [developerId, projectPath]
+          [developerId, projectPath],
+          { rejectAmbiguousPath: true }
         );
         if (fallbackProject) {
           return {
@@ -8719,7 +8736,8 @@ export class RecallantDb {
 
     const project = await this.queryManagedProject(
       "p.developer_id = $1::uuid AND p.primary_path IS NOT DISTINCT FROM $2",
-      [developerId, projectPath]
+      [developerId, projectPath],
+      { rejectAmbiguousPath: true }
     );
     return {
       project,
@@ -8943,6 +8961,8 @@ export class RecallantDb {
     }
     return {
       ...checkpoint,
+      project_id: context.projectId,
+      developer_id: context.developerId,
       spool_sync_status: spoolStatus,
       report_required: warnings.length > 0,
       warnings

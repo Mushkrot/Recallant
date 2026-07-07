@@ -6359,10 +6359,16 @@ async function runAgentCloseout(argv: readonly string[]) {
       "closeout",
       await getLocalSpoolStatus(argv)
     );
+    const closeoutProjectId =
+      typeof closeout.project_id === "string" ? closeout.project_id : (state.project_id ?? null);
+    const closeoutState = {
+      ...state,
+      project_id: closeoutProjectId
+    };
     const lifecycleMarker = closeoutLifecycleMarker(payload, state, String(event.event_id));
     const closeoutMemory = await database.createAgentMemory({
-      project_id: state.project_id ?? null,
-      project_path: dir,
+      project_id: closeoutProjectId,
+      project_path: closeoutProjectId ? null : dir,
       memory_type: "work_log",
       scope: "project",
       scope_kind: "project",
@@ -6395,7 +6401,7 @@ async function runAgentCloseout(argv: readonly string[]) {
     let recallWarnings: string[] = [];
     try {
       const recall = await database.recallAgentMemories({
-        ...(state.project_id ? { project_id: String(state.project_id) } : {}),
+        ...(closeoutProjectId ? { project_id: closeoutProjectId } : {}),
         query: lifecycleMarker,
         memory_types: ["work_log"],
         top_k: 5
@@ -6418,13 +6424,13 @@ async function runAgentCloseout(argv: readonly string[]) {
       database,
       argv,
       projectDir: dir,
-      state,
+      state: closeoutState,
       lifecycleMarker,
       closeoutMemoryId: String(closeoutMemory.memory_id)
     });
     const lifecycle = buildAgentLifecycleCloseoutResult({
       mode: "server",
-      project_id: state.project_id ?? null,
+      project_id: closeoutProjectId,
       session_id: state.session_id,
       closeout_event_id: String(event.event_id),
       spool_sync_status: closeout.spool_sync_status ?? null,
@@ -6541,7 +6547,7 @@ async function runDemoCapture(argv: readonly string[]) {
       })
     });
     const memory = await database.createAgentMemory({
-      project_path: dir,
+      project_id: String(config.project_id),
       memory_type: "decision",
       scope: "project",
       scope_kind: "project",
@@ -6794,6 +6800,7 @@ async function runSpoolStatus(argv: readonly string[]) {
 }
 
 async function runSyncSpool(argv: readonly string[]) {
+  const dir = projectDir(argv);
   const records = await readJsonl(spoolPath(argv));
   const manifest = await readSpoolManifest(argv);
   const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
@@ -6820,6 +6827,7 @@ async function runSyncSpool(argv: readonly string[]) {
   }
   const database = createRecallantDbFromEnv();
   if (!database) throw new Error("RECALLANT_DATABASE_URL is required for sync-spool");
+  const config = await readProjectConfig(dir);
   const synced = { ...manifest.synced };
   let syncSessionId: string | null = null;
   try {
@@ -6827,7 +6835,8 @@ async function runSyncSpool(argv: readonly string[]) {
       unsynced.length > 0
         ? await database.startSession({
             client_kind: "recallant-cli",
-            project_path: projectDir(argv),
+            project_id: config?.project_id ?? null,
+            project_path: dir,
             session_label: "spool-sync",
             resume_policy: "normal"
           })

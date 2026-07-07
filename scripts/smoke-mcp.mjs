@@ -99,9 +99,26 @@ try {
     throw new Error(`memory_search schema is missing source_id: ${JSON.stringify(searchTool)}`);
   }
 
+  const startSessionTool = list.tools?.find((tool) => tool.name === "memory_start_session");
+  const startSessionProperties = startSessionTool?.inputSchema?.properties ?? {};
+  for (const property of ["client_kind", "project_path", "project_dir"]) {
+    if (!Object.hasOwn(startSessionProperties, property)) {
+      throw new Error(
+        `memory_start_session schema is missing ${property}: ${JSON.stringify(startSessionTool)}`
+      );
+    }
+  }
+
   const agentCheckpointTool = list.tools?.find((tool) => tool.name === "memory_agent_checkpoint");
   const agentCheckpointProperties = agentCheckpointTool?.inputSchema?.properties ?? {};
-  for (const property of ["session_id", "client_kind", "project_id", "project_path", "payload"]) {
+  for (const property of [
+    "session_id",
+    "client_kind",
+    "project_id",
+    "project_path",
+    "project_dir",
+    "payload"
+  ]) {
     if (!Object.hasOwn(agentCheckpointProperties, property)) {
       throw new Error(
         `memory_agent_checkpoint schema is missing ${property}: ${JSON.stringify(
@@ -297,6 +314,7 @@ try {
     {
       name: "memory_agent_checkpoint",
       arguments: {
+        project_dir: "/tmp/recallant-mcp-smoke-project-dir",
         payload: {
           current_status: "stub checkpoint closeout",
           current_focus: "phase4 searchable checkpoint proof",
@@ -311,7 +329,9 @@ try {
   if (
     highLevelCheckpoint.searchable_memory_created !== true ||
     highLevelCheckpoint.checkpoint_state_only !== false ||
-    highLevelCheckpoint.memory?.memory_type !== "checkpoint"
+    highLevelCheckpoint.memory?.memory_type !== "checkpoint" ||
+    highLevelCheckpoint.project_path_source !== "argument.project_dir" ||
+    highLevelCheckpoint.project_scope_diagnostic?.project_dir_alias !== "accepted_as_project_path"
   ) {
     throw new Error(
       `memory_agent_checkpoint did not report searchable checkpoint memory: ${JSON.stringify(
@@ -351,9 +371,7 @@ try {
     !closeoutLifecycle?.failure_reasons?.includes("incomplete_proof")
   ) {
     throw new Error(
-      `memory_closeout did not report non-ready lifecycle in stub mode: ${JSON.stringify(
-        closeout
-      )}`
+      `memory_closeout did not report non-ready lifecycle in stub mode: ${JSON.stringify(closeout)}`
     );
   }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
@@ -187,12 +187,104 @@ function contextAwarePath(context: RecallantToolsRuntimeContext) {
   };
 }
 
-function scopedProjectInput<T extends Record<string, unknown>>(args: T): T {
+type ProjectPathSource =
+  | "argument.project_path"
+  | "argument.project_dir"
+  | "context.projectPath"
+  | "env.RECALLANT_PROJECT_PATH"
+  | "none";
+
+type ProjectScopeDiagnostic = {
+  project_path_source: ProjectPathSource;
+  project_dir_alias: "not_provided" | "accepted_as_project_path" | "accepted_same_path";
+  provided_fields: {
+    project_path: boolean;
+    project_dir: boolean;
+  };
+};
+
+function stringInput(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function comparableProjectPath(value: string) {
+  return resolve(value);
+}
+
+function validationError(message: string) {
+  return new Error(`VALIDATION_ERROR: ${message}`);
+}
+
+function scopedProjectInputWithDiagnostics<T extends Record<string, unknown>>(
+  args: T,
+  options: { includeEnvironmentProjectScope?: boolean } = {}
+) {
   const context = currentRecallantToolsContext();
-  return {
+  const argumentProjectPath = stringInput(args.project_path);
+  const argumentProjectDir = stringInput(args.project_dir);
+  if (
+    argumentProjectPath &&
+    argumentProjectDir &&
+    comparableProjectPath(argumentProjectPath) !== comparableProjectPath(argumentProjectDir)
+  ) {
+    throw validationError(
+      "`project_path` and `project_dir` refer to different paths; provide only one field or matching values."
+    );
+  }
+  const contextProjectPath = stringInput(context.projectPath);
+  const envProjectPath = options.includeEnvironmentProjectScope
+    ? stringInput(process.env.RECALLANT_PROJECT_PATH)
+    : null;
+  const projectPath =
+    argumentProjectPath ?? argumentProjectDir ?? contextProjectPath ?? envProjectPath ?? undefined;
+  const projectPathSource: ProjectPathSource = argumentProjectPath
+    ? "argument.project_path"
+    : argumentProjectDir
+      ? "argument.project_dir"
+      : contextProjectPath
+        ? "context.projectPath"
+        : envProjectPath
+          ? "env.RECALLANT_PROJECT_PATH"
+          : "none";
+  const input = {
     ...args,
-    project_id: args.project_id ?? context.projectId ?? undefined,
-    project_path: args.project_path ?? context.projectPath ?? undefined
+    project_id:
+      args.project_id ??
+      context.projectId ??
+      (options.includeEnvironmentProjectScope ? process.env.RECALLANT_PROJECT_ID : undefined) ??
+      undefined,
+    project_path: projectPath
+  };
+  delete (input as Record<string, unknown>).project_dir;
+  return {
+    input,
+    diagnostic: {
+      project_path_source: projectPathSource,
+      project_dir_alias: argumentProjectDir
+        ? argumentProjectPath
+          ? "accepted_same_path"
+          : "accepted_as_project_path"
+        : "not_provided",
+      provided_fields: {
+        project_path: argumentProjectPath !== null,
+        project_dir: argumentProjectDir !== null
+      }
+    } satisfies ProjectScopeDiagnostic,
+    aliasProvided: argumentProjectDir !== null
+  };
+}
+
+function scopedProjectInput<T extends Record<string, unknown>>(args: T): T {
+  return scopedProjectInputWithDiagnostics(args).input as T;
+}
+
+function projectScopeDiagnosticOutput(
+  scoped: ReturnType<typeof scopedProjectInputWithDiagnostics>
+) {
+  if (!scoped.aliasProvided) return {};
+  return {
+    project_path_source: scoped.diagnostic.project_path_source,
+    project_scope_diagnostic: scoped.diagnostic
   };
 }
 
@@ -679,12 +771,20 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       client_kind: clientKind,
       client_version: nullableString,
       project_path: nullableString,
+      project_dir: nullableString.describe("Compatibility alias for project_path."),
       session_label: nullableString,
       resume_policy: z.enum(["normal", "force_new", "recover_previous"]).default("normal")
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.startSession(scopedProjectInput(args) as StartSessionInput);
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      if (database) {
+        const started = await database.startSession(scoped.input as StartSessionInput);
+        return {
+          ...started,
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
       return stubResponse("memory_start_session", {
         session_id: randomUUID(),
         project_id:
@@ -698,7 +798,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           agent_message:
             "No previous unfinished agent session was found for this project. Start from the context pack."
         },
-        recommended_next_calls: ["memory_get_context_pack"]
+        recommended_next_calls: ["memory_get_context_pack"],
+        ...projectScopeDiagnosticOutput(scoped)
       });
     }
   },
@@ -1144,6 +1245,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       client_kind: z.string().min(1).default("mcp"),
       project_id: uuidString.nullable().optional(),
       project_path: nullableString,
+      project_dir: nullableString.describe("Compatibility alias for project_path."),
       payload: checkpointPayloadSchema,
       metadata
     }),
@@ -1151,16 +1253,11 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       const payload = args.payload as JsonObject;
       const context = currentRecallantToolsContext();
-      const projectId =
-        context.projectId ??
-        (typeof args.project_id === "string" ? args.project_id : null) ??
-        process.env.RECALLANT_PROJECT_ID ??
-        null;
-      const projectPath =
-        context.projectPath ??
-        (typeof args.project_path === "string" ? args.project_path : null) ??
-        process.env.RECALLANT_PROJECT_PATH ??
-        null;
+      const scoped = scopedProjectInputWithDiagnostics(args, {
+        includeEnvironmentProjectScope: true
+      });
+      const projectId = stringInput(scoped.input.project_id);
+      const projectPath = stringInput(scoped.input.project_path);
       const sessionId =
         typeof args.session_id === "string" ? args.session_id : (context.sessionId ?? null);
       if (database) {
@@ -1232,7 +1329,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           memory: {
             ...memory,
             memory_type: "checkpoint"
-          }
+          },
+          ...projectScopeDiagnosticOutput(scoped)
         };
       }
       return stubResponse("memory_agent_checkpoint", {
@@ -1244,7 +1342,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         event_appended: false,
         event_id: null,
         memory_id: randomUUID(),
-        memory: { status: "accepted", use_policy: "recall_allowed", memory_type: "checkpoint" }
+        memory: { status: "accepted", use_policy: "recall_allowed", memory_type: "checkpoint" },
+        ...projectScopeDiagnosticOutput(scoped)
       });
     }
   },
@@ -1603,6 +1702,11 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           localSpoolStatus,
           args.closeout_diagnostics as JsonObject | null | undefined
         );
+        const closeoutProjectId = stringInput(checkpoint?.project_id) ?? context.projectId ?? null;
+        const closeoutContext = {
+          ...context,
+          projectId: closeoutProjectId
+        };
         const createdMemoryIds: string[] = [];
         const needsReviewIds: string[] = [];
         const warnings = [...(checkpoint?.warnings ?? [])];
@@ -1614,6 +1718,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           }
           try {
             const created = await database.createAgentMemory({
+              project_id: closeoutProjectId ?? undefined,
               memory_type: String(candidate.memory_type),
               scope: "project",
               title: String(candidate.title),
@@ -1645,8 +1750,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           payload: checkpointPayload
         });
         const closeoutMemory = await database.createAgentMemory({
-          project_id: context.projectId ?? undefined,
-          project_path: context.projectPath ?? undefined,
+          project_id: closeoutProjectId ?? undefined,
+          project_path: closeoutProjectId ? undefined : (context.projectPath ?? undefined),
           memory_type: "work_log",
           scope: "project",
           scope_kind: "project",
@@ -1691,7 +1796,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         let recallWarnings: string[] = [];
         try {
           const recall = await database.recallAgentMemories({
-            ...(context.projectId ? { project_id: context.projectId } : {}),
+            ...(closeoutProjectId ? { project_id: closeoutProjectId } : {}),
             query: lifecycleMarker,
             memory_types: ["work_log"],
             top_k: 5
@@ -1712,7 +1817,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         }
         const nextSessionContext = await verifyMcpCloseoutNextSessionContext({
           database,
-          context,
+          context: closeoutContext,
           lifecycleMarker,
           closeoutMemoryId: String(closeoutMemory.memory_id),
           localSpoolStatus
@@ -1738,7 +1843,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         const lifecycleWarnings = [...warnings, ...recallWarnings, ...nextSessionContext.warnings];
         const lifecycle = buildAgentLifecycleCloseoutResult({
           mode: "server",
-          project_id: context.projectId ?? null,
+          project_id: closeoutProjectId,
           session_id: sessionId,
           closeout_event_id: String(closeoutEvent.event_id),
           spool_sync_status: checkpoint?.spool_sync_status ?? "not_provided",
