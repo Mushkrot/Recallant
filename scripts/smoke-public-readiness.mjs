@@ -569,8 +569,10 @@ mustInclude(
     "`selected_candidate`",
     "`promotion_readiness`",
     "`hygiene`",
+    "`topology`",
     "`available_actions`",
     "`governance`",
+    "Workbench Graph Topology",
     "/review?view=review",
     "/api/review-action",
     "/review-action",
@@ -578,22 +580,35 @@ mustInclude(
     "`action=promote`",
     "not default retrieval input",
     "`accept` does not promote them into `edges`",
+    "`Graph topology`",
+    "`Active promoted links`",
+    "`Candidate links`",
+    "`Blocked states`",
+    "`Source-backed evidence`",
+    "No graph topology is visible for this project yet.",
+    "does not create graph nodes",
+    "does not auto-promote candidates",
+    "does not change retrieval",
     "`Promote candidate`",
     "`memory_promote_graph_candidate`",
     "`memory_graph_hygiene`",
     "`recallant graph hygiene`",
     "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
-    "npm run graph-promotion:smoke"
+    "npm run graph-promotion:smoke",
+    "npm run graph-topology:smoke"
   ],
   "GRAPH_TREE_CONTRACT graph review"
 );
 mustInclude(
   contractStatus,
   [
-    "Working B6 explicit graph promotion slice",
+    "Working B7 read-only Workbench topology slice",
     "Workbench graph review fields/actions",
+    "read-only topology nodes/links/groups/summary",
+    "topology result types",
     "`graph_candidates` payload",
     "hygiene counts",
+    "topology",
     "promotion readiness",
     "selected-candidate source refs, review history",
     "/review?view=review",
@@ -605,12 +620,20 @@ mustInclude(
     "`recallant graph hygiene`",
     "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
     "keeps unpromoted graph candidates out of retrieval",
+    "`Graph topology`",
+    "`Active promoted links`",
+    "`Candidate links`",
+    "`Blocked states`",
+    "`Source-backed evidence`",
+    "does not create first-class graph nodes",
+    "auto-promote candidates",
+    "change retrieval semantics",
     "npm run graph-promotion:smoke",
+    "npm run graph-topology:smoke",
     "npm run graph-candidates:smoke",
     "npm run graph-retrieval-profiles:smoke",
     "npm run review-ui:smoke",
     "npm run review-ui:playwright",
-    "Workbench topology visualization",
     "universal `curl .../connect \\| bash` beginner UX are present",
     "trusted-device registration/reconnect",
     "headless",
@@ -678,6 +701,17 @@ mustInclude(
   ],
   "ARCHITECTURE"
 );
+mustInclude(
+  architecture,
+  [
+    "read-only Workbench topology view",
+    "derived from graph candidates, source refs, promotion readiness",
+    "active `edges`",
+    "driven by unpromoted candidates"
+  ],
+  "ARCHITECTURE graph topology"
+);
+mustNotInclude(architecture, ["or a Workbench topology view"], "ARCHITECTURE");
 
 const selfHosting = await read("docs/SELF_HOSTING.md");
 mustInclude(
@@ -745,6 +779,15 @@ mustInclude(
     "governed semantic marker recall",
     "external-machine evidence bundles",
     "Remote existing-project pilot hardening",
+    "Read-only Workbench graph topology visualization",
+    "`graph_candidates.topology`",
+    "`Graph topology`",
+    "`Active promoted links`",
+    "`Candidate links`",
+    "`Blocked states`",
+    "`Source-backed evidence`",
+    "`graph-topology:smoke`",
+    "read-only Workbench topology",
     "remote live external canary",
     "before manual remote-client",
     "rollback smoke",
@@ -754,6 +797,7 @@ mustInclude(
   ],
   "ROADMAP"
 );
+mustNotInclude(roadmap, ["Workbench topology visualization, richer review ergonomics"], "ROADMAP");
 
 const universalConnectSurfaces = [
   ["README.md", readme],

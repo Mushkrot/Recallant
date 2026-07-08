@@ -19,12 +19,11 @@ This contract covers:
 - compatibility with the current `edges` table;
 - provenance, scope, confidence, extraction, review, and safety requirements;
 - the current graph candidate, Markdown vault bridge, memory keeper candidate, graph retrieval
-  profile, and Workbench graph review surfaces.
+  profile, Workbench graph review, and Workbench graph topology surfaces.
 
 This contract does not implement:
 
 - graph database migration;
-- Workbench topology or graph visualization;
 - automatic promotion from reviewed candidates into active graph state;
 - first-class graph-node storage beyond the current bounded `edges` table.
 
@@ -178,9 +177,9 @@ reviewed.
 
 ## Workbench Graph Review Surface
 
-The Workbench graph review slice is a human review surface for staged graph candidates and explicit
-B6 promotion readiness. It is not a topology browser, automatic graph mutation engine, or broad
-graph maintenance workflow.
+The Workbench graph review slice is a human review surface for staged graph candidates, explicit B6
+promotion readiness, and B7 read-only topology visualization. It is not an automatic graph mutation
+engine, first-class graph-node store, graph database migration, or broad graph maintenance workflow.
 
 The dashboard API accepts graph filters alongside the existing Review UI filters:
 
@@ -204,14 +203,47 @@ The dashboard response exposes graph review data under `graph_candidates`:
   and review history;
 - `promotion_readiness` - per-candidate status attached to queue rows and the selected candidate;
 - `hygiene` - read-only graph candidate hygiene counts, readiness rows, and duplicate groups;
+- `topology` - read-only topology nodes, links, groups, summary counts, truncation/omitted counts,
+  and governance flags derived from graph candidates, source refs, promotion readiness, and active
+  `edges`;
 - `available_actions` - the bounded action set the UI may present;
 - `governance` - explicit flags that candidate storage is staged only and not retrieval-active.
 
 The `/review?view=review` Workbench view renders node and edge candidate lanes, selected candidate
-detail, promotion readiness, hygiene counts, source evidence, review history, empty state copy, and
-action forms. The UI must make the staged boundary visible: graph candidates can be reviewed, but
-they are not default retrieval input and `accept` does not promote them into `edges`. Only the
-explicit `Promote candidate` action may activate a compatible accepted edge.
+detail, promotion readiness, hygiene counts, the `Graph topology` panel, source evidence, review
+history, empty state copy, and action forms. The topology panel uses exact visible lanes named
+`Active promoted links`, `Candidate links`, `Blocked states`, and `Source-backed evidence`. Its
+empty state is `No graph topology is visible for this project yet.` The UI must make the staged
+boundary visible: graph candidates can be reviewed, but they are not default retrieval input and
+`accept` does not promote them into `edges`. Only the explicit `Promote candidate` action may
+activate a compatible accepted edge.
+
+## Workbench Graph Topology
+
+B7 topology is a read-only dashboard payload and visualization. It derives shape from existing
+`graph_candidates`, `graph_candidate_source_refs`, per-candidate `promotion_readiness`, and active
+promoted `edges`. It does not create graph nodes, does not create or update graph candidates, does
+not create or update `edges`, does not auto-promote candidates, and does not change retrieval
+semantics.
+
+The topology payload contains:
+
+- `nodes` - bounded candidate, endpoint, and source nodes with `label`, `public_safe_label`,
+  lifecycle state, promotion status, source-ref counts, and status tags;
+- `links` - bounded `candidate_edge`, `active_edge`, and `source_ref` links with relation labels,
+  source/target topology ids, active/source-backed flags, lifecycle state, and promotion status;
+- `groups` - compact counts for candidate nodes, candidate links, active promoted links, blocked
+  candidates, and source-backed evidence;
+- `summary` - candidate, active edge, source-ref, blocked, duplicate, promotable, promoted, stale,
+  limit, omitted, and truncation counts;
+- `governance` - explicit `read_only`, `mutates_candidates: false`, `mutates_edges: false`,
+  `derived_from`, `supported_endpoint_policy: "chunk_to_chunk"`, and
+  `retrieval_semantics_changed: false` flags.
+
+The topology labels are bounded for display. Public-safe screenshot mode uses `public_safe_label`
+instead of raw candidate ids, raw private paths, or long source quotes. Topology reads remain
+project-scoped and developer-scoped; cross-project candidates, source refs, and active edges are
+excluded.
 
 Workbench review actions are accepted through `/api/review-action` and `/review-action` when the
 request names a graph candidate, for example with `graph_candidate_id` or
@@ -260,9 +292,11 @@ The exact B6 promotion and hygiene surfaces are:
 - HTTP: `/api/review-action` or `/review-action` with `target_kind=graph_candidate` and
   `action=promote`.
 
-The public smoke gate for this slice is `npm run graph-promotion:smoke`. It proves accept-only
-non-activation, explicit retrieval activation, idempotent promotion, hygiene count transitions,
-blocked node and unsupported endpoint cases, project isolation, and forbidden fixture token
+The public smoke gates for this slice include `npm run graph-promotion:smoke` and
+`npm run graph-topology:smoke`. They prove accept-only non-activation, explicit retrieval
+activation, idempotent promotion, hygiene count transitions, promoted active topology links, staged
+candidate topology links, source-ref markers, blocked node and unsupported endpoint cases,
+read-only topology counts, deterministic truncation, project isolation, and forbidden fixture token
 absence.
 
 ## Markdown Vault Bridge
@@ -454,7 +488,7 @@ should show:
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
 Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
-explicit chunk-to-chunk candidate promotion, read-only hygiene report, and Workbench graph review
-slices. It does not create a graph visualization, automatic promotion, first-class graph node
+explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review, and
+Workbench graph topology slices. It does not create automatic promotion, first-class graph node
 storage, passive vault sync, raw media ingestion, broad graph maintenance workflows, or a dedicated
 graph database migration.

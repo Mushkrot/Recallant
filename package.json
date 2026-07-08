@@ -38,6 +38,7 @@
     "graph-candidates:smoke": "node scripts/smoke-graph-candidates.mjs",
     "graph-retrieval-profiles:smoke": "node scripts/smoke-graph-retrieval-profiles.mjs",
     "graph-promotion:smoke": "node scripts/smoke-graph-promotion.mjs",
+    "graph-topology:smoke": "node scripts/smoke-graph-topology.mjs",
     "memory-keeper:smoke": "node scripts/smoke-memory-keeper.mjs",
     "vault-bridge:smoke": "node scripts/smoke-vault-bridge.mjs",
     "management-chat-ai:smoke": "node scripts/smoke-management-chat-ai.mjs",

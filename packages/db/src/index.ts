@@ -17,11 +17,16 @@ import {
   type GetGraphCandidateHygieneInput,
   type GetGraphCandidateInput,
   type GetGraphCandidateResult,
+  type GetGraphTopologyInput,
   type GraphCandidateEndpointRef,
   type GraphCandidateHygieneResult,
   type GraphCandidateRecord,
   type GraphCandidateReviewPatch,
   type GraphCandidateReviewRecord,
+  type GraphTopologyLink,
+  type GraphTopologyNode,
+  type GraphTopologyNodeStatus,
+  type GraphTopologyResult,
   type GraphRetrievalProfile,
   type GraphTreeLifecycleState,
   type GraphTreeNodeKind,
@@ -1052,6 +1057,7 @@ type GraphCandidateGetInput = GetGraphCandidateInput & GraphCandidateScopedInput
 type GraphCandidateReviewInput = ReviewGraphCandidateInput & GraphCandidateScopedInput;
 type GraphCandidatePromoteInput = PromoteGraphCandidateInput & GraphCandidateScopedInput;
 type GraphCandidateHygieneInput = GetGraphCandidateHygieneInput & GraphCandidateScopedInput;
+type GraphTopologyInput = GetGraphTopologyInput & GraphCandidateScopedInput;
 
 type GraphCandidateDbRow = {
   id: string;
@@ -1077,6 +1083,15 @@ type GraphCandidateDbRow = {
   review_actions?: unknown;
   created_at: Date | string;
   updated_at: Date | string;
+};
+
+type GraphTopologyActiveEdgeRow = {
+  id: string;
+  src_kind: string;
+  src_id: string;
+  dst_kind: string;
+  dst_id: string;
+  relation_type: string;
 };
 
 export type ArchiveInput = {
@@ -1877,6 +1892,68 @@ function graphCandidateNeedsConflictReview(candidate: GraphCandidateRecord) {
   }
   const metadataText = JSON.stringify(candidate.metadata ?? {}).toLowerCase();
   return metadataText.includes("conflict") || metadataText.includes("supersede");
+}
+
+function graphTopologyStableId(prefix: string, ...values: unknown[]) {
+  const digest = createHash("sha1").update(JSON.stringify(values)).digest("hex").slice(0, 16);
+  return `${prefix}:${digest}`;
+}
+
+function graphTopologyBoundedLabel(value: unknown, fallback: string, maxLength = 72) {
+  const normalized = redactSecretValues(String(value ?? fallback))
+    .replace(/\s+/g, " ")
+    .trim();
+  const label = normalized.length > 0 ? normalized : fallback;
+  return label.length > maxLength ? `${label.slice(0, maxLength - 1).trimEnd()}...` : label;
+}
+
+function graphTopologyEndpointLabel(endpoint: GraphCandidateEndpointRef, publicSafe = false) {
+  const kind = endpoint.kind || "endpoint";
+  if (publicSafe) return graphTopologyBoundedLabel(kind, "endpoint", 36);
+  return graphTopologyBoundedLabel(
+    endpoint.label ?? `${kind} ${endpoint.id.slice(0, 8)}`,
+    kind,
+    54
+  );
+}
+
+function graphTopologyCandidateLabel(candidate: GraphCandidateRecord, publicSafe = false) {
+  if (publicSafe) {
+    return candidate.candidate_kind === "edge" ? "Edge candidate" : "Node candidate";
+  }
+  if (candidate.candidate_kind === "node") {
+    return graphTopologyBoundedLabel(candidate.title, "Node candidate");
+  }
+  const src = graphTopologyEndpointLabel(candidate.src);
+  const dst = graphTopologyEndpointLabel(candidate.dst);
+  return graphTopologyBoundedLabel(`${src} ${candidate.relation_type} ${dst}`, "Edge candidate");
+}
+
+function graphTopologySourceLabel(
+  ref: GraphCandidateRecord["source_refs"][number],
+  publicSafe = false
+) {
+  const kind = String(ref.source_kind ?? "source").replaceAll("_", " ");
+  if (publicSafe) return graphTopologyBoundedLabel(kind, "source evidence", 36);
+  return graphTopologyBoundedLabel(ref.anchor ?? ref.source_id ?? ref.uri ?? kind, kind, 54);
+}
+
+function graphTopologyStatuses(
+  candidate: GraphCandidateRecord,
+  readiness?: GraphCandidateHygieneResult["readiness"][number] | null
+) {
+  const statuses: GraphTopologyNodeStatus[] = [];
+  const add = (status: GraphTopologyNodeStatus) => {
+    if (!statuses.includes(status)) statuses.push(status);
+  };
+  if (candidate.lifecycle_state === "accepted") add("accepted");
+  else if (candidate.lifecycle_state === "stale" || candidate.lifecycle_state === "archived")
+    add("stale");
+  else add("candidate");
+  if (readiness?.status) add(readiness.status);
+  if (candidate.source_refs.length > 0) add("source_backed");
+  if (readiness?.promoted_edge_id) add("active");
+  return statuses;
 }
 
 function importMemoryType(resultClasses: readonly string[]) {
@@ -6767,6 +6844,422 @@ export class RecallantDb {
     };
   }
 
+  async getGraphTopology(input: GraphTopologyInput = {}): Promise<GraphTopologyResult> {
+    await this.ensureGraphCandidateSchema();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    const candidateLimit = Math.min(Math.max(input.limit_candidates ?? 120, 1), 500);
+    const maxNodes = Math.min(Math.max(input.max_nodes ?? 160, 1), 500);
+    const maxLinks = Math.min(Math.max(input.max_links ?? 220, 1), 800);
+    const emptyTopology = (): GraphTopologyResult => ({
+      generated_at: new Date().toISOString(),
+      project_id: context.projectId,
+      nodes: [],
+      links: [],
+      groups: [],
+      summary: {
+        candidate_count: 0,
+        candidate_node_count: 0,
+        candidate_edge_count: 0,
+        active_edge_count: 0,
+        source_ref_count: 0,
+        blocked_count: 0,
+        duplicate_count: 0,
+        promotable_count: 0,
+        promoted_count: 0,
+        stale_count: 0,
+        omitted_candidate_count: 0,
+        omitted_node_count: 0,
+        omitted_link_count: 0,
+        truncated: false,
+        limits: {
+          candidates: candidateLimit,
+          nodes: maxNodes,
+          links: maxLinks
+        }
+      },
+      governance: {
+        read_only: true,
+        mutates_candidates: false,
+        mutates_edges: false,
+        derived_from: [
+          "graph_candidates",
+          "graph_candidate_source_refs",
+          "promotion_readiness",
+          "edges"
+        ],
+        supported_endpoint_policy: "chunk_to_chunk",
+        retrieval_semantics_changed: false
+      }
+    });
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      return emptyTopology();
+    }
+
+    const candidateCounts = await this.pool.query<{
+      total: number;
+      node_count: number;
+      edge_count: number;
+      source_ref_count: number;
+    }>(
+      `
+        SELECT
+          count(*)::int AS total,
+          count(*) FILTER (WHERE gc.candidate_kind = 'node')::int AS node_count,
+          count(*) FILTER (WHERE gc.candidate_kind = 'edge')::int AS edge_count,
+          count(r.id)::int AS source_ref_count
+        FROM graph_candidates gc
+        LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+        WHERE gc.project_id = $1 AND gc.developer_id = $2
+      `,
+      [context.projectId, context.developerId]
+    );
+    const countRow = candidateCounts.rows[0] ?? {
+      total: 0,
+      node_count: 0,
+      edge_count: 0,
+      source_ref_count: 0
+    };
+    const candidateRows = await this.pool.query<GraphCandidateDbRow>(
+      `
+        SELECT
+          gc.*,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs,
+          (
+            SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.created_at DESC), '[]'::jsonb)
+            FROM graph_candidate_review_actions a
+            WHERE a.graph_candidate_id = gc.id
+          ) AS review_actions
+        FROM graph_candidates gc
+        LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+        WHERE gc.project_id = $1 AND gc.developer_id = $2
+        GROUP BY gc.id
+        ORDER BY gc.updated_at DESC, gc.created_at DESC, gc.id ASC
+        LIMIT $3::int
+      `,
+      [context.projectId, context.developerId, candidateLimit]
+    );
+    const candidates = candidateRows.rows.map((row) => this.graphCandidateRecordFromRow(row));
+    const hygiene = await this.getGraphCandidateHygiene({
+      project_id: context.projectId,
+      developer_id: context.developerId,
+      limit: candidateLimit
+    });
+    const readinessById = new Map(
+      hygiene.readiness.map((readiness) => [readiness.graph_candidate_id, readiness])
+    );
+    let activeEdgeTotal = 0;
+    let activeEdges: GraphTopologyActiveEdgeRow[] = [];
+    try {
+      const edgeRows = await this.pool.query<
+        GraphTopologyActiveEdgeRow & { total_count: number | string }
+      >(
+        `
+          SELECT id::text, src_kind, src_id, dst_kind, dst_id, relation_type,
+                 count(*) OVER()::int AS total_count
+          FROM edges
+          WHERE project_id = $1
+          ORDER BY relation_type ASC, src_kind ASC, src_id ASC, dst_kind ASC, dst_id ASC, id ASC
+          LIMIT $2::int
+        `,
+        [context.projectId, maxLinks]
+      );
+      activeEdges = edgeRows.rows;
+      activeEdgeTotal = Number(edgeRows.rows[0]?.total_count ?? edgeRows.rows.length);
+    } catch (error) {
+      if ((error as { code?: string }).code !== "42P01") throw error;
+    }
+
+    const nodes = new Map<string, GraphTopologyNode>();
+    const links: GraphTopologyLink[] = [];
+    let omittedNodeCount = 0;
+    let omittedLinkCount = 0;
+    const addNode = (node: GraphTopologyNode) => {
+      const existing = nodes.get(node.topology_node_id);
+      if (existing) {
+        for (const status of node.statuses) {
+          if (!existing.statuses.includes(status)) existing.statuses.push(status);
+        }
+        existing.source_ref_count += node.source_ref_count;
+        return existing.topology_node_id;
+      }
+      if (nodes.size >= maxNodes) {
+        omittedNodeCount += 1;
+        return null;
+      }
+      nodes.set(node.topology_node_id, node);
+      return node.topology_node_id;
+    };
+    const addLink = (link: GraphTopologyLink) => {
+      if (links.length >= maxLinks) {
+        omittedLinkCount += 1;
+        return;
+      }
+      links.push(link);
+    };
+
+    for (const candidate of candidates) {
+      const readiness = readinessById.get(candidate.graph_candidate_id) ?? null;
+      const candidateNodeId = addNode({
+        topology_node_id: graphTopologyStableId("candidate", candidate.graph_candidate_id),
+        node_kind: "candidate",
+        label: graphTopologyCandidateLabel(candidate),
+        public_safe_label: graphTopologyCandidateLabel(candidate, true),
+        detail:
+          candidate.candidate_kind === "edge"
+            ? graphTopologyBoundedLabel(candidate.relation_type, "candidate edge", 48)
+            : graphTopologyBoundedLabel(candidate.node_kind, "candidate node", 48),
+        graph_candidate_id: candidate.graph_candidate_id,
+        candidate_kind: candidate.candidate_kind,
+        graph_node_kind:
+          candidate.candidate_kind === "node" ? candidate.node_kind : candidate.src.kind,
+        lifecycle_state: candidate.lifecycle_state,
+        promotion_status: readiness?.status ?? null,
+        source_ref_count: candidate.source_refs.length,
+        statuses: graphTopologyStatuses(candidate, readiness)
+      });
+
+      if (candidate.candidate_kind === "edge") {
+        const srcNodeId = addNode({
+          topology_node_id: graphTopologyStableId("endpoint", candidate.src.kind, candidate.src.id),
+          node_kind: "endpoint",
+          label: graphTopologyEndpointLabel(candidate.src),
+          public_safe_label: graphTopologyEndpointLabel(candidate.src, true),
+          detail: graphTopologyBoundedLabel(candidate.src.kind, "endpoint", 48),
+          graph_node_kind: candidate.src.kind,
+          lifecycle_state: null,
+          promotion_status: readiness?.status ?? null,
+          source_ref_count: 0,
+          statuses: readiness?.promoted_edge_id ? ["active"] : []
+        });
+        const dstNodeId = addNode({
+          topology_node_id: graphTopologyStableId("endpoint", candidate.dst.kind, candidate.dst.id),
+          node_kind: "endpoint",
+          label: graphTopologyEndpointLabel(candidate.dst),
+          public_safe_label: graphTopologyEndpointLabel(candidate.dst, true),
+          detail: graphTopologyBoundedLabel(candidate.dst.kind, "endpoint", 48),
+          graph_node_kind: candidate.dst.kind,
+          lifecycle_state: null,
+          promotion_status: readiness?.status ?? null,
+          source_ref_count: 0,
+          statuses: readiness?.promoted_edge_id ? ["active"] : []
+        });
+        if (srcNodeId && dstNodeId) {
+          addLink({
+            topology_link_id: graphTopologyStableId(
+              "candidate-link",
+              candidate.graph_candidate_id,
+              candidate.relation_type
+            ),
+            link_kind: "candidate_edge",
+            source_node_id: srcNodeId,
+            target_node_id: dstNodeId,
+            label: graphTopologyBoundedLabel(candidate.relation_type, "candidate edge", 48),
+            public_safe_label: graphTopologyBoundedLabel(
+              candidate.relation_type,
+              "candidate edge",
+              48
+            ),
+            relation_type: candidate.relation_type,
+            graph_candidate_id: candidate.graph_candidate_id,
+            edge_id: readiness?.promoted_edge_id ?? null,
+            lifecycle_state: candidate.lifecycle_state,
+            promotion_status: readiness?.status ?? null,
+            active: Boolean(readiness?.promoted_edge_id),
+            source_backed: candidate.source_refs.length > 0
+          });
+        }
+      }
+
+      if (candidateNodeId) {
+        for (const ref of candidate.source_refs.slice(0, 3)) {
+          const sourceNodeId = addNode({
+            topology_node_id: graphTopologyStableId(
+              "source",
+              ref.source_kind,
+              ref.source_id,
+              ref.uri,
+              ref.path,
+              ref.anchor
+            ),
+            node_kind: "source",
+            label: graphTopologySourceLabel(ref),
+            public_safe_label: graphTopologySourceLabel(ref, true),
+            detail: "Source evidence marker",
+            lifecycle_state: null,
+            promotion_status: null,
+            source_ref_count: 1,
+            statuses: ["source_backed"]
+          });
+          if (sourceNodeId) {
+            addLink({
+              topology_link_id: graphTopologyStableId(
+                "source-link",
+                candidate.graph_candidate_id,
+                ref.source_ref_id,
+                ref.source_kind,
+                ref.source_id,
+                ref.anchor
+              ),
+              link_kind: "source_ref",
+              source_node_id: sourceNodeId,
+              target_node_id: candidateNodeId,
+              label: "source evidence",
+              public_safe_label: "source evidence",
+              graph_candidate_id: candidate.graph_candidate_id,
+              lifecycle_state: candidate.lifecycle_state,
+              promotion_status: readiness?.status ?? null,
+              active: false,
+              source_backed: true
+            });
+          }
+        }
+        if (candidate.source_refs.length > 3) {
+          omittedLinkCount += candidate.source_refs.length - 3;
+        }
+      }
+    }
+
+    for (const edge of activeEdges) {
+      const srcNodeId = addNode({
+        topology_node_id: graphTopologyStableId("endpoint", edge.src_kind, edge.src_id),
+        node_kind: "endpoint",
+        label: graphTopologyBoundedLabel(`${edge.src_kind} ${edge.src_id.slice(0, 8)}`, "endpoint"),
+        public_safe_label: graphTopologyBoundedLabel(edge.src_kind, "endpoint", 36),
+        detail: graphTopologyBoundedLabel(edge.src_kind, "endpoint", 48),
+        graph_node_kind: graphTreeNodeKindSet.has(edge.src_kind)
+          ? (edge.src_kind as GraphTreeNodeKind)
+          : "external",
+        lifecycle_state: null,
+        promotion_status: "promoted",
+        source_ref_count: 0,
+        statuses: ["active", "promoted"]
+      });
+      const dstNodeId = addNode({
+        topology_node_id: graphTopologyStableId("endpoint", edge.dst_kind, edge.dst_id),
+        node_kind: "endpoint",
+        label: graphTopologyBoundedLabel(`${edge.dst_kind} ${edge.dst_id.slice(0, 8)}`, "endpoint"),
+        public_safe_label: graphTopologyBoundedLabel(edge.dst_kind, "endpoint", 36),
+        detail: graphTopologyBoundedLabel(edge.dst_kind, "endpoint", 48),
+        graph_node_kind: graphTreeNodeKindSet.has(edge.dst_kind)
+          ? (edge.dst_kind as GraphTreeNodeKind)
+          : "external",
+        lifecycle_state: null,
+        promotion_status: "promoted",
+        source_ref_count: 0,
+        statuses: ["active", "promoted"]
+      });
+      if (srcNodeId && dstNodeId) {
+        addLink({
+          topology_link_id: graphTopologyStableId(
+            "active-link",
+            edge.id,
+            edge.relation_type,
+            edge.src_id,
+            edge.dst_id
+          ),
+          link_kind: "active_edge",
+          source_node_id: srcNodeId,
+          target_node_id: dstNodeId,
+          label: graphTopologyBoundedLabel(edge.relation_type, "active edge", 48),
+          public_safe_label: graphTopologyBoundedLabel(edge.relation_type, "active edge", 48),
+          relation_type: edge.relation_type,
+          edge_id: edge.id,
+          lifecycle_state: null,
+          promotion_status: "promoted",
+          active: true,
+          source_backed: false
+        });
+      }
+    }
+
+    const summary: GraphTopologyResult["summary"] = {
+      candidate_count: Number(countRow.total ?? candidates.length),
+      candidate_node_count: Number(countRow.node_count ?? 0),
+      candidate_edge_count: Number(countRow.edge_count ?? 0),
+      active_edge_count: activeEdgeTotal,
+      source_ref_count: Number(countRow.source_ref_count ?? 0),
+      blocked_count: hygiene.counts.blocked,
+      duplicate_count: hygiene.counts.duplicate,
+      promotable_count: hygiene.counts.promotable,
+      promoted_count: hygiene.counts.promoted,
+      stale_count: hygiene.counts.stale,
+      omitted_candidate_count: Math.max(0, Number(countRow.total ?? 0) - candidates.length),
+      omitted_node_count: omittedNodeCount,
+      omitted_link_count: omittedLinkCount + Math.max(0, activeEdgeTotal - activeEdges.length),
+      truncated: false,
+      limits: {
+        candidates: candidateLimit,
+        nodes: maxNodes,
+        links: maxLinks
+      }
+    };
+    summary.truncated =
+      summary.omitted_candidate_count > 0 ||
+      summary.omitted_node_count > 0 ||
+      summary.omitted_link_count > 0;
+
+    return {
+      generated_at: new Date().toISOString(),
+      project_id: context.projectId,
+      nodes: Array.from(nodes.values()).sort((left, right) =>
+        left.topology_node_id.localeCompare(right.topology_node_id)
+      ),
+      links,
+      groups: [
+        {
+          group_key: "candidate_nodes",
+          label: "Node candidates",
+          count: summary.candidate_node_count,
+          status: "candidate"
+        },
+        {
+          group_key: "candidate_edges",
+          label: "Candidate links",
+          count: summary.candidate_edge_count,
+          status: "candidate"
+        },
+        {
+          group_key: "active_edges",
+          label: "Active promoted links",
+          count: summary.active_edge_count,
+          status: "active"
+        },
+        {
+          group_key: "blocked",
+          label: "Blocked candidates",
+          count: summary.blocked_count,
+          status: "blocked"
+        },
+        {
+          group_key: "source_backed",
+          label: "Source-backed evidence",
+          count: summary.source_ref_count,
+          status: "source_backed"
+        }
+      ],
+      summary,
+      governance: {
+        read_only: true,
+        mutates_candidates: false,
+        mutates_edges: false,
+        derived_from: [
+          "graph_candidates",
+          "graph_candidate_source_refs",
+          "promotion_readiness",
+          "edges"
+        ],
+        supported_endpoint_policy: "chunk_to_chunk",
+        retrieval_semantics_changed: false
+      }
+    };
+  }
+
   async getContextPack(input: ContextPackInput) {
     const context = await this.contextForSession(input.session_id);
     if (input.project_id && input.project_id !== context.projectId) {
@@ -9350,6 +9843,12 @@ export class RecallantDb {
       project_id: dashboardProjectId,
       limit: 500
     });
+    const graphTopology = await this.getGraphTopology({
+      project_id: dashboardProjectId,
+      limit_candidates: 120,
+      max_nodes: 160,
+      max_links: 220
+    });
     const graphReadinessById = new Map(
       graphHygiene.readiness.map((readiness) => [readiness.graph_candidate_id, readiness])
     );
@@ -9378,6 +9877,7 @@ export class RecallantDb {
           }
         : null,
       hygiene: graphHygiene,
+      topology: graphTopology,
       available_actions: [
         "accept",
         "reject",

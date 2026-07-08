@@ -1847,6 +1847,32 @@ try {
   const graphPromotedJson = await graphPromotedDashboard.json();
   const graphPromotedReadiness =
     graphPromotedJson.graph_candidates?.selected_candidate?.promotion_readiness;
+  const graphTopology = graphPromotedJson.graph_candidates?.topology;
+  const graphTopologyText = JSON.stringify(graphTopology ?? {});
+  const graphTopologyLinkKinds = Array.from(
+    new Set((graphTopology?.links ?? []).map((link) => link.link_kind))
+  ).sort();
+  const graphPromotedHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${graphPromotableCandidate.graph_candidate_id}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const graphPromotedHtmlText = await graphPromotedHtml.text();
+  const topologyHtmlMarkers = [
+    "Graph topology",
+    "Active promoted links",
+    "Candidate links",
+    "Blocked states",
+    "Source-backed evidence"
+  ];
+  const emptyTopologyHtml = await fetch(
+    `${baseUrl}/review?project_id=${humanMemorySpace.project_id}&view=review`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const emptyTopologyHtmlText = await emptyTopologyHtml.text();
   await assertNoGraphPromoteAction(
     graphPromotableCandidate.graph_candidate_id,
     "Already-promoted graph candidate"
@@ -1855,10 +1881,31 @@ try {
     graphPromotedDashboard.status !== 200 ||
     graphPromotedReadiness?.status !== "promoted" ||
     graphPromotedReadiness?.promoted_edge_id !== graphPromotionJson.promoted_edge_id ||
-    graphPromotedJson.graph_candidates?.hygiene?.counts?.promoted < 1
+    graphPromotedJson.graph_candidates?.hygiene?.counts?.promoted < 1 ||
+    graphTopology?.governance?.read_only !== true ||
+    graphTopology?.governance?.mutates_candidates !== false ||
+    graphTopology?.governance?.mutates_edges !== false ||
+    graphTopology?.summary?.active_edge_count < 1 ||
+    graphTopology?.summary?.candidate_edge_count < 1 ||
+    graphTopology?.summary?.source_ref_count < 1 ||
+    !graphTopologyLinkKinds.includes("active_edge") ||
+    !graphTopologyLinkKinds.includes("candidate_edge") ||
+    !graphTopologyLinkKinds.includes("source_ref") ||
+    graphTopologyText.includes(otherProjectGraphCandidate.graph_candidate_id) ||
+    graphPromotedHtml.status !== 200 ||
+    !topologyHtmlMarkers.every((marker) => graphPromotedHtmlText.includes(marker)) ||
+    !emptyTopologyHtmlText.includes("No graph topology is visible for this project yet.")
   ) {
     throw new Error(
-      `Graph promoted dashboard smoke failed: ${JSON.stringify(graphPromotedJson.graph_candidates)}`
+      `Graph promoted dashboard smoke failed: ${JSON.stringify({
+        graph_candidates: graphPromotedJson.graph_candidates,
+        topology_markers: topologyHtmlMarkers.filter((marker) =>
+          graphPromotedHtmlText.includes(marker)
+        ),
+        empty_topology_present: emptyTopologyHtmlText.includes(
+          "No graph topology is visible for this project yet."
+        )
+      })}`
     );
   }
   graphReviewExcerpt = {
@@ -1871,6 +1918,10 @@ try {
     accepted_promotion_readiness: graphAcceptedReadiness,
     promotable_promotion_readiness: graphPromotableReadiness,
     promoted_promotion_readiness: graphPromotedReadiness,
+    topology_summary: graphTopology.summary,
+    topology_link_kinds: graphTopologyLinkKinds,
+    topology_html_markers: topologyHtmlMarkers,
+    empty_topology_state: "No graph topology is visible for this project yet.",
     action_lifecycle: graphActionJson.lifecycle_state,
     promotion_status: graphPromotionJson.status,
     repeat_promotion_status: graphRepeatPromotionJson.status,

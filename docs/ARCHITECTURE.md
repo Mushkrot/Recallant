@@ -127,8 +127,10 @@ extraction method, and review state attached before graph output can influence r
 
 Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, a
 deterministic `recallant keeper candidates` path for keeper-generated candidate proposals, read-only
-graph hygiene reporting, and explicit promotion for accepted chunk-to-chunk edge candidates. It also
-has named one-hop graph retrieval profiles on `memory_search`, including `same_topic`,
+graph hygiene reporting, explicit promotion for accepted chunk-to-chunk edge candidates, and a
+read-only Workbench topology view derived from graph candidates, source refs, promotion readiness,
+and active `edges`. It also has named one-hop graph retrieval profiles on `memory_search`, including
+`same_topic`,
 `source_neighborhood`, `decision_cluster`, `preference_chain`, `conflict_check`,
 `supersession_trace`, and `project_context`, with legacy `graph_expand: true` preserved through the
 `edge_neighborhood` profile. These surfaces stay review-first: candidates preserve source refs,
@@ -138,8 +140,9 @@ promotion path.
 
 Recallant does not yet have automatic promotion policies, a dedicated graph database, passive vault
 sync, raw media ingestion, broad graph maintenance workflows, support for promotion endpoint kinds
-beyond the B6 chunk-to-chunk subset, or a Workbench topology view. Those remain future slices
-layered on top of the governed graph vocabulary.
+beyond the B6 chunk-to-chunk subset, first-class graph node storage, or graph retrieval semantics
+driven by unpromoted candidates. Those remain future slices layered on top of the governed graph
+vocabulary.
 
 ## Safety Model
 

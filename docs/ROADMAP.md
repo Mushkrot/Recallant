@@ -63,6 +63,10 @@ dependable before expanding the product surface.
 - Named one-hop graph retrieval profiles on `memory_search`, with profile-specific relation
   allowlists, legacy `graph_expand` compatibility through `edge_neighborhood`, trace metadata,
   scope/source/archive guard coverage, and graph candidate isolation.
+- Read-only Workbench graph topology visualization, with the `graph_candidates.topology` payload,
+  exact lanes `Graph topology`, `Active promoted links`, `Candidate links`, `Blocked states`, and
+  `Source-backed evidence`, empty-state copy, project isolation, public-safe labels, and
+  `graph-topology:smoke` coverage.
 - Public readiness and security smokes that guard the OSS-facing documentation boundary.
 
 ## Near Term
@@ -101,10 +105,10 @@ dependable before expanding the product surface.
   without turning recalled discussion into binding instructions automatically.
 - Governed graph next slices after the shipped candidate storage, Workbench review surface,
   explicit chunk-to-chunk promotion, read-only hygiene report, Markdown vault bridge, memory keeper
-  candidate pipeline, and named one-hop retrieval profiles: broader keeper source integration,
-  Workbench topology visualization, richer review ergonomics, first-class graph storage decisions,
-  broader graph hygiene/maintenance workflows, human-memory expansion, more endpoint kinds, and
-  automatic promotion policy decisions.
+  candidate pipeline, named one-hop retrieval profiles, and read-only Workbench topology
+  visualization: broader keeper source integration, richer review ergonomics, first-class graph
+  storage decisions, broader graph hygiene/maintenance workflows, human-memory expansion, more
+  endpoint kinds, and automatic promotion policy decisions.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

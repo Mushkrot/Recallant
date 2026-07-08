@@ -384,6 +384,108 @@ export type GetGraphCandidateHygieneInput = {
   limit?: number;
 };
 
+export type GraphTopologyNodeKind = "candidate" | "endpoint" | "source";
+
+export type GraphTopologyLinkKind = "candidate_edge" | "active_edge" | "source_ref";
+
+export type GraphTopologyNodeStatus =
+  | "active"
+  | "candidate"
+  | "accepted"
+  | "blocked"
+  | "duplicate"
+  | "promotable"
+  | "promoted"
+  | "source_backed"
+  | "stale";
+
+export type GraphTopologyNode = {
+  topology_node_id: string;
+  node_kind: GraphTopologyNodeKind;
+  label: string;
+  public_safe_label: string;
+  detail?: string | null;
+  graph_candidate_id?: string | null;
+  candidate_kind?: GraphCandidateKind | null;
+  graph_node_kind?: GraphTreeNodeKind | "external" | null;
+  lifecycle_state?: GraphTreeLifecycleState | null;
+  promotion_status?: GraphCandidatePromotionReadinessStatus | null;
+  source_ref_count: number;
+  statuses: GraphTopologyNodeStatus[];
+};
+
+export type GraphTopologyLink = {
+  topology_link_id: string;
+  link_kind: GraphTopologyLinkKind;
+  source_node_id: string;
+  target_node_id: string;
+  label: string;
+  public_safe_label: string;
+  relation_type?: string | null;
+  graph_candidate_id?: string | null;
+  edge_id?: string | null;
+  lifecycle_state?: GraphTreeLifecycleState | null;
+  promotion_status?: GraphCandidatePromotionReadinessStatus | null;
+  active: boolean;
+  source_backed: boolean;
+};
+
+export type GraphTopologyGroup = {
+  group_key: string;
+  label: string;
+  count: number;
+  status?: GraphTopologyNodeStatus | null;
+};
+
+export type GraphTopologySummary = {
+  candidate_count: number;
+  candidate_node_count: number;
+  candidate_edge_count: number;
+  active_edge_count: number;
+  source_ref_count: number;
+  blocked_count: number;
+  duplicate_count: number;
+  promotable_count: number;
+  promoted_count: number;
+  stale_count: number;
+  omitted_candidate_count: number;
+  omitted_node_count: number;
+  omitted_link_count: number;
+  truncated: boolean;
+  limits: {
+    candidates: number;
+    nodes: number;
+    links: number;
+  };
+};
+
+export type GraphTopologyResult = {
+  generated_at: string;
+  project_id?: string | null;
+  nodes: GraphTopologyNode[];
+  links: GraphTopologyLink[];
+  groups: GraphTopologyGroup[];
+  summary: GraphTopologySummary;
+  governance: {
+    read_only: true;
+    mutates_candidates: false;
+    mutates_edges: false;
+    derived_from: Array<
+      "graph_candidates" | "graph_candidate_source_refs" | "promotion_readiness" | "edges"
+    >;
+    supported_endpoint_policy: "chunk_to_chunk";
+    retrieval_semantics_changed: false;
+  };
+};
+
+export type GetGraphTopologyInput = {
+  project_id?: string;
+  developer_id?: string;
+  limit_candidates?: number;
+  max_nodes?: number;
+  max_links?: number;
+};
+
 export type GraphCandidateReviewRecord = {
   review_action_id?: string;
   graph_candidate_id: string;

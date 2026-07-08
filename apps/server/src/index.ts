@@ -5108,6 +5108,126 @@ function renderGraphCandidateLane(
   </details>`;
 }
 
+function graphTopologyLabel(row: Record<string, unknown>) {
+  const safe = optionalInput(row.public_safe_label);
+  const label = optionalInput(row.label);
+  return publicScreenshotMode()
+    ? (safe ?? label ?? "Topology item")
+    : (label ?? safe ?? "Topology item");
+}
+
+function graphTopologyNodeLabels(nodes: Array<Record<string, unknown>>) {
+  return new Map(
+    nodes.map((node) => [String(node.topology_node_id ?? ""), graphTopologyLabel(node)])
+  );
+}
+
+function renderGraphTopologyLink(
+  link: Record<string, unknown>,
+  nodeLabels: Map<string, string>,
+  tone: string
+) {
+  const source = nodeLabels.get(String(link.source_node_id ?? "")) ?? "source";
+  const target = nodeLabels.get(String(link.target_node_id ?? "")) ?? "target";
+  const status = optionalInput(link.promotion_status) ?? (link.active ? "active" : "candidate");
+  return `<article class="graph-topology-link ${escapeHtml(tone)}">
+    <div>
+      <strong>${escapeHtml(source)}</strong>
+      <span>${escapeHtml(graphTopologyLabel(link))}</span>
+      <strong>${escapeHtml(target)}</strong>
+    </div>
+    ${renderBadges([
+      ["Status", humanStatus(status)],
+      ["Kind", String(link.link_kind ?? "link").replaceAll("_", " ")],
+      ["Source", link.source_backed ? "backed" : "none"]
+    ])}
+  </article>`;
+}
+
+function renderGraphTopologyLane(
+  title: string,
+  rows: Array<Record<string, unknown>>,
+  nodeLabels: Map<string, string>,
+  tone: string,
+  emptyLabel: string
+) {
+  return `<div class="graph-topology-lane ${escapeHtml(tone)}">
+    <div class="graph-topology-lane-head">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(rows.length)}</strong>
+    </div>
+    ${rows.length === 0 ? `<p class="empty">${escapeHtml(emptyLabel)}</p>` : rows.map((row) => renderGraphTopologyLink(row, nodeLabels, tone)).join("")}
+  </div>`;
+}
+
+function renderGraphTopology(data: ReviewDashboardData) {
+  const graph = asRecord(data.graph_candidates);
+  const topology = asRecord(graph.topology);
+  const summary = asRecord(topology.summary);
+  const nodes = asArray(topology.nodes).map(asRecord);
+  const links = asArray(topology.links).map(asRecord);
+  const nodeLabels = graphTopologyNodeLabels(nodes);
+  const activeLinks = links.filter((link) => link.link_kind === "active_edge" || link.active);
+  const candidateLinks = links.filter(
+    (link) => link.link_kind === "candidate_edge" && !link.active
+  );
+  const sourceLinks = links.filter((link) => link.link_kind === "source_ref");
+  const blockedLinks = links.filter((link) =>
+    ["blocked", "duplicate", "stale"].includes(String(link.promotion_status ?? ""))
+  );
+  const hasTopology = nodes.length > 0 || links.length > 0;
+  return `<section class="graph-topology" aria-label="Graph topology" data-graph-topology>
+    <div class="graph-topology-head">
+      <div>
+        <span>Graph topology</span>
+        <h3>Graph topology</h3>
+        <p>Read-only shape derived from graph candidates, source evidence, promotion readiness, and active edges.</p>
+      </div>
+      <div class="graph-topology-counts">
+        <span><strong>${escapeHtml(summary.active_edge_count ?? activeLinks.length)}</strong> active</span>
+        <span><strong>${escapeHtml(summary.candidate_edge_count ?? candidateLinks.length)}</strong> candidate</span>
+        <span><strong>${escapeHtml(summary.blocked_count ?? blockedLinks.length)}</strong> blocked</span>
+        <span><strong>${escapeHtml(summary.source_ref_count ?? sourceLinks.length)}</strong> source-backed</span>
+      </div>
+    </div>
+    ${
+      hasTopology
+        ? `<div class="graph-topology-map">
+            ${renderGraphTopologyLane(
+              "Source-backed evidence",
+              sourceLinks,
+              nodeLabels,
+              "source-backed",
+              "No source evidence links are visible."
+            )}
+            ${renderGraphTopologyLane(
+              "Candidate links",
+              candidateLinks,
+              nodeLabels,
+              "candidate",
+              "No staged candidate links are visible."
+            )}
+            ${renderGraphTopologyLane(
+              "Active promoted links",
+              activeLinks,
+              nodeLabels,
+              "active",
+              "No active promoted links are visible."
+            )}
+            ${renderGraphTopologyLane(
+              "Blocked states",
+              blockedLinks,
+              nodeLabels,
+              "blocked",
+              "No blocked topology states are visible."
+            )}
+          </div>
+          ${summary.truncated ? `<p class="graph-topology-note">Topology is bounded; omitted candidates ${escapeHtml(summary.omitted_candidate_count ?? 0)}, nodes ${escapeHtml(summary.omitted_node_count ?? 0)}, links ${escapeHtml(summary.omitted_link_count ?? 0)}.</p>` : ""}`
+        : `<p class="empty">No graph topology is visible for this project yet.</p>`
+    }
+  </section>`;
+}
+
 function renderGraphCandidateReview(data: ReviewDashboardData) {
   const graph = asRecord(data.graph_candidates);
   const candidates = asArray(graph.candidates).map(asRecord);
@@ -5138,6 +5258,7 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
         <span><strong>${escapeHtml(hygieneCounts.duplicate ?? 0)}</strong> duplicate</span>
       </div>
     </div>
+    ${renderGraphTopology(data)}
     <div class="graph-review-grid">
       <div class="graph-review-lanes">
         ${renderGraphCandidateLane("Node candidates", nodeCandidates, data.current_project_id, selectedId)}
@@ -6225,6 +6346,31 @@ function renderDashboard(
     .graph-review-counts { display: grid; grid-template-columns: repeat(2, minmax(88px, 1fr)); gap: 6px; min-width: 220px; }
     .graph-review-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #fff; color: #4f5867; text-transform: none; }
     .graph-review-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-topology { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fff; min-width: 0; }
+    .graph-topology-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.62fr); gap: 10px; align-items: start; margin-bottom: 10px; }
+    .graph-topology-head span { display: block; color: #166454; font-size: 11px; font-weight: 760; text-transform: uppercase; }
+    .graph-topology-head h3 { margin: 2px 0 5px; font-size: 15px; }
+    .graph-topology-head p, .graph-topology-note { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .graph-topology-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .graph-topology-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 12px; }
+    .graph-topology-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-topology-map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-items: stretch; min-width: 0; }
+    .graph-topology-lane { display: grid; align-content: start; gap: 7px; border: 1px solid #dfe6ee; border-radius: 7px; padding: 8px; background: #fbfcfe; min-width: 0; min-height: 168px; }
+    .graph-topology-lane.active { border-top: 3px solid #166454; }
+    .graph-topology-lane.candidate { border-top: 3px solid #50617a; }
+    .graph-topology-lane.blocked { border-top: 3px solid #8a3c15; }
+    .graph-topology-lane.source-backed { border-top: 3px solid #7a4d18; }
+    .graph-topology-lane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .graph-topology-lane-head span { color: #303845; font-size: 12px; font-weight: 760; overflow-wrap: anywhere; }
+    .graph-topology-lane-head strong { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; background: #fff; color: #445064; font-size: 11px; }
+    .graph-topology-link { border: 1px solid #e2e8ef; border-radius: 7px; padding: 8px; background: #fff; min-width: 0; }
+    .graph-topology-link > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
+    .graph-topology-link strong { color: #20242c; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-topology-link span { color: #5f6875; font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-topology-link.active { background: #eef8f5; border-color: #bdd8cf; }
+    .graph-topology-link.blocked { background: #fff4ed; border-color: #e1b59b; }
+    .graph-topology-link.source-backed { background: #fff9e8; border-color: #e3d3a5; }
+    .graph-topology-note { margin-top: 8px; }
     .graph-review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr); gap: 10px; align-items: start; }
     .graph-review-lanes, .graph-candidate-list, .graph-source-refs, .graph-review-history { display: grid; gap: 8px; }
     .graph-candidate-card, .graph-candidate-detail, .graph-source-refs article, .graph-review-history article { border: 1px solid #dfe6ee; border-radius: 7px; background: #fff; padding: 9px; min-width: 0; }
@@ -6251,8 +6397,9 @@ function renderDashboard(
     .graph-action-detail label, .graph-target-actions label { display: grid; gap: 3px; color: #5f6875; font-size: 11px; min-width: min(190px, 100%); }
     .graph-action-detail input, .graph-target-actions input { max-width: 100%; min-width: 0; }
     @media (max-width: 760px) {
-      .graph-review-head, .graph-review-grid { display: grid; grid-template-columns: 1fr; }
+      .graph-review-head, .graph-review-grid, .graph-topology-head { display: grid; grid-template-columns: 1fr; }
       .graph-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .graph-topology-map { grid-template-columns: 1fr; }
       .graph-promotion-state { grid-template-columns: 1fr; }
       .graph-actions, .graph-target-actions, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
     }
@@ -6949,6 +7096,8 @@ function renderDashboard(
       .source-tree-group, .source-filter-panel, .source-filter-chips,
       .source-workspace-grid, .source-management, .source-list,
       .review-workspace, .review-guide, .migration-review, .migration-review-lanes, .review-lanes,
+      .graph-review, .graph-topology, .graph-topology-map, .graph-topology-lane,
+      .graph-topology-link,
       .activity-list, .activity-group, .operation-panels, .operation-panel,
       .command-grid, .summary-grid, .signal-strip, .first-screen-snapshot {
         max-width: 100%;
