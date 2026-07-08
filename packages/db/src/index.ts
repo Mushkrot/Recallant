@@ -8470,6 +8470,13 @@ export class RecallantDb {
   async getReviewDashboard(input?: {
     project_id?: string | null;
     selected_memory_id?: string | null;
+    graph_candidate_id?: string | null;
+    graph_lifecycle_state?: string | null;
+    graph_candidate_kind?: string | null;
+    graph_extraction_method?: string | null;
+    graph_source_kind?: string | null;
+    graph_node_kind?: string | null;
+    graph_relation_type?: string | null;
     source_id?: string | null;
     rule_scope?: string | null;
     rule_scope_kind?: string | null;
@@ -8588,6 +8595,42 @@ export class RecallantDb {
     const selectedSourceId = input?.source_id && input.source_id !== "all" ? input.source_id : null;
     const sourceFilter = await this.sourceFilter(selectedSourceId);
     const effectiveSourceId = sourceFilter?.source_id ?? null;
+    const graphFilters = {
+      lifecycle_state:
+        input?.graph_lifecycle_state &&
+        input.graph_lifecycle_state !== "all" &&
+        graphTreeLifecycleStateSet.has(input.graph_lifecycle_state)
+          ? input.graph_lifecycle_state
+          : null,
+      candidate_kind:
+        input?.graph_candidate_kind &&
+        input.graph_candidate_kind !== "all" &&
+        graphCandidateKindSet.has(input.graph_candidate_kind)
+          ? input.graph_candidate_kind
+          : null,
+      extraction_method:
+        input?.graph_extraction_method &&
+        input.graph_extraction_method !== "all" &&
+        graphCandidateExtractionMethodSet.has(input.graph_extraction_method)
+          ? input.graph_extraction_method
+          : null,
+      source_kind:
+        input?.graph_source_kind &&
+        input.graph_source_kind !== "all" &&
+        graphCandidateSourceRefKindSet.has(input.graph_source_kind)
+          ? input.graph_source_kind
+          : null,
+      node_kind:
+        input?.graph_node_kind &&
+        input.graph_node_kind !== "all" &&
+        graphTreeNodeKindSet.has(input.graph_node_kind)
+          ? input.graph_node_kind
+          : null,
+      relation_type:
+        input?.graph_relation_type && input.graph_relation_type !== "all"
+          ? input.graph_relation_type
+          : null
+    };
     const ruleMemoryDomain =
       input?.rule_memory_domain === "all"
         ? undefined
@@ -8696,6 +8739,175 @@ export class RecallantDb {
       this.withSourceProvenance(row)
     );
     const migrationReview = summarizeMigrationReview(importCandidateRows, duplicateConflictRows);
+    const graphValues: unknown[] = [dashboardProjectId, context.developerId];
+    const graphClauses = ["gc.project_id = $1::uuid", "gc.developer_id = $2::uuid"];
+    const addGraphFilter = (sql: string, value: unknown) => {
+      graphValues.push(value);
+      graphClauses.push(sql.replace("?", `$${graphValues.length}`));
+    };
+    if (graphFilters.lifecycle_state)
+      addGraphFilter("gc.lifecycle_state = ?", graphFilters.lifecycle_state);
+    if (graphFilters.candidate_kind)
+      addGraphFilter("gc.candidate_kind = ?", graphFilters.candidate_kind);
+    if (graphFilters.extraction_method)
+      addGraphFilter("gc.extraction_method = ?", graphFilters.extraction_method);
+    if (graphFilters.source_kind) {
+      graphValues.push(graphFilters.source_kind);
+      graphClauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM graph_candidate_source_refs source_filter
+          WHERE source_filter.graph_candidate_id = gc.id
+            AND source_filter.source_kind = $${graphValues.length}
+        )
+      `);
+    }
+    if (graphFilters.node_kind) addGraphFilter("gc.node_kind = ?", graphFilters.node_kind);
+    if (graphFilters.relation_type)
+      addGraphFilter("gc.relation_type = ?", graphFilters.relation_type);
+    graphValues.push(50);
+    let graphRows: GraphCandidateRecord[] = [];
+    let graphCounts: Record<string, unknown> = {
+      total: 0,
+      candidate_kind: {},
+      lifecycle_state: {},
+      extraction_method: {},
+      source_kind: {},
+      node_kind: {},
+      relation_type: {}
+    };
+    try {
+      await this.ensureGraphCandidateSchema();
+      const graphCandidates = await this.pool.query<GraphCandidateDbRow>(
+        `
+          SELECT
+            gc.*,
+            coalesce(
+              jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+                FILTER (WHERE r.id IS NOT NULL),
+              '[]'::jsonb
+            ) AS source_refs,
+            (
+              SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.created_at DESC), '[]'::jsonb)
+              FROM graph_candidate_review_actions a
+              WHERE a.graph_candidate_id = gc.id
+            ) AS review_actions
+          FROM graph_candidates gc
+          LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+          WHERE ${graphClauses.join(" AND ")}
+          GROUP BY gc.id
+          ORDER BY gc.updated_at DESC, gc.created_at DESC
+          LIMIT $${graphValues.length}::int
+        `,
+        graphValues
+      );
+      graphRows = graphCandidates.rows.map((row) => this.graphCandidateRecordFromRow(row));
+      const graphCountRows = await this.pool.query<{
+        facet: string;
+        value: string | null;
+        count: number;
+      }>(
+        `
+          WITH scoped AS (
+            SELECT *
+            FROM graph_candidates
+            WHERE project_id = $1::uuid AND developer_id = $2::uuid
+          )
+          SELECT 'candidate_kind' AS facet, candidate_kind AS value, count(*)::int AS count
+          FROM scoped GROUP BY candidate_kind
+          UNION ALL
+          SELECT 'lifecycle_state' AS facet, lifecycle_state AS value, count(*)::int AS count
+          FROM scoped GROUP BY lifecycle_state
+          UNION ALL
+          SELECT 'extraction_method' AS facet, extraction_method AS value, count(*)::int AS count
+          FROM scoped GROUP BY extraction_method
+          UNION ALL
+          SELECT 'node_kind' AS facet, node_kind AS value, count(*)::int AS count
+          FROM scoped WHERE node_kind IS NOT NULL GROUP BY node_kind
+          UNION ALL
+          SELECT 'relation_type' AS facet, relation_type AS value, count(*)::int AS count
+          FROM scoped WHERE relation_type IS NOT NULL GROUP BY relation_type
+          UNION ALL
+          SELECT 'source_kind' AS facet, r.source_kind AS value, count(DISTINCT scoped.id)::int AS count
+          FROM scoped
+          JOIN graph_candidate_source_refs r ON r.graph_candidate_id = scoped.id
+          GROUP BY r.source_kind
+        `,
+        [dashboardProjectId, context.developerId]
+      );
+      const nextCounts: Record<string, Record<string, number> | number> = {
+        total: 0,
+        candidate_kind: {},
+        lifecycle_state: {},
+        extraction_method: {},
+        source_kind: {},
+        node_kind: {},
+        relation_type: {}
+      };
+      for (const row of graphCountRows.rows) {
+        const facet = row.facet;
+        const value = row.value ?? "unknown";
+        const count = Number(row.count ?? 0);
+        if (facet === "candidate_kind") nextCounts.total = Number(nextCounts.total ?? 0) + count;
+        const bucket = nextCounts[facet];
+        if (bucket && typeof bucket === "object") {
+          bucket[value] = count;
+        }
+      }
+      graphCounts = nextCounts;
+    } catch (error) {
+      if ((error as { code?: string }).code !== "42P01") throw error;
+    }
+    const graphSelected =
+      input?.graph_candidate_id && input.graph_candidate_id.trim().length > 0
+        ? (graphRows.find(
+            (candidate) => candidate.graph_candidate_id === input.graph_candidate_id
+          ) ??
+          (await this.getGraphCandidate({
+            project_id: dashboardProjectId,
+            graph_candidate_id: input.graph_candidate_id
+          }).catch((error) => {
+            if (String(error).includes("VALIDATION_ERROR: graph candidate not found")) return null;
+            throw error;
+          })))
+        : (graphRows[0] ?? null);
+    const graphCandidatesDashboard = {
+      filters: {
+        lifecycle_state: graphFilters.lifecycle_state ?? "all",
+        candidate_kind: graphFilters.candidate_kind ?? "all",
+        extraction_method: graphFilters.extraction_method ?? "all",
+        source_kind: graphFilters.source_kind ?? "all",
+        node_kind: graphFilters.node_kind ?? "all",
+        relation_type: graphFilters.relation_type ?? "all"
+      },
+      counts: graphCounts,
+      candidates: graphRows.map((candidate) => ({
+        ...candidate,
+        review_action_count: candidate.review_actions?.length ?? 0,
+        source_ref_count: candidate.source_refs.length
+      })),
+      selected_candidate: graphSelected
+        ? {
+            ...graphSelected,
+            review_action_count: graphSelected.review_actions?.length ?? 0,
+            source_ref_count: graphSelected.source_refs.length
+          }
+        : null,
+      available_actions: [
+        "accept",
+        "reject",
+        "archive",
+        "unarchive",
+        "mark_stale",
+        "edit",
+        "merge",
+        "supersede"
+      ],
+      governance: {
+        candidate_storage_only: true,
+        retrieval_active: false
+      }
+    };
     const critical = await this.pool.query(
       `
         SELECT
@@ -8969,6 +9181,7 @@ export class RecallantDb {
       canon_capability_context: canonCapabilityContext,
       critical: critical.rows[0],
       inbox: inbox.memories,
+      graph_candidates: graphCandidatesDashboard,
       import_candidates: importCandidateRows,
       duplicate_conflicts: duplicateConflictRows,
       migration_review: migrationReview,

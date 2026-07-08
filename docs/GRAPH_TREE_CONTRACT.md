@@ -18,13 +18,14 @@ This contract covers:
 - graph lifecycle states;
 - compatibility with the current `edges` table;
 - provenance, scope, confidence, extraction, review, and safety requirements;
-- the current graph candidate, Markdown vault bridge, memory keeper candidate, and graph retrieval
-  profile surfaces.
+- the current graph candidate, Markdown vault bridge, memory keeper candidate, graph retrieval
+  profile, and Workbench graph review surfaces.
 
 This contract does not implement:
 
 - graph database migration;
-- Workbench topology or graph visualization.
+- Workbench topology or graph visualization;
+- promotion from reviewed candidates into active graph state.
 
 ## Current Compatibility Surface
 
@@ -113,10 +114,11 @@ Graph candidate storage is the governed staging layer for proposed graph nodes a
 additive to the current `edges` table and does not make candidate graph data retrieval-active by
 default.
 
-Recallant now includes the first B1 candidate storage and review slice. Candidate records live in
-project-scoped graph candidate tables, preserve source references and review history, and are exposed
-through MCP tools for create, list, get, and review operations. Accepting a candidate records the
-reviewed lifecycle state; it does not insert rows into `edges` or change default retrieval by itself.
+Recallant now includes the first candidate storage, MCP review, and Workbench review slice.
+Candidate records live in project-scoped graph candidate tables, preserve source references and
+review history, and are exposed through MCP tools, the Workbench review dashboard, and Workbench
+review action routes. Accepting a candidate records the reviewed lifecycle state; it does not insert
+rows into `edges`, create first-class graph nodes, or change default retrieval by itself.
 
 The first typed candidate kinds are:
 
@@ -166,6 +168,46 @@ The first source ref kinds are:
 Source refs are bounded references, not a license to copy raw artifacts into candidate records.
 Agent-generated and import-generated candidates must include source refs before they can be stored or
 reviewed.
+
+## Workbench Graph Review Surface
+
+The Workbench graph review slice is a human review surface for staged graph candidates. It is not a
+topology browser, graph mutation engine, graph hygiene workflow, or candidate promotion path.
+
+The dashboard API accepts graph filters alongside the existing Review UI filters:
+
+- `graph_candidate_id`;
+- `graph_lifecycle_state`;
+- `graph_candidate_kind`;
+- `graph_extraction_method`;
+- `graph_source_kind`;
+- `graph_node_kind`;
+- `graph_relation_type`.
+
+The dashboard response exposes graph review data under `graph_candidates`:
+
+- `filters` - the applied graph filter values;
+- `counts` - total candidate count plus grouped counts by candidate kind, lifecycle state,
+  extraction method, source kind, node kind, and relation type;
+- `candidates` - project-scoped queue rows with candidate identity, kind, lifecycle, confidence,
+  extraction method, title, summary, endpoint labels for edge candidates, source-ref count, and
+  review-action count;
+- `selected_candidate` - optional detail for the requested graph candidate, including source refs
+  and review history;
+- `available_actions` - the bounded action set the UI may present;
+- `governance` - explicit flags that candidate storage is staged only and not retrieval-active.
+
+The `/review?view=review` Workbench view renders node and edge candidate lanes, selected candidate
+detail, source evidence, review history, empty state copy, and action forms. The UI must make the
+staged boundary visible: graph candidates can be reviewed, but they are not default retrieval input
+and are not promoted into `edges` by the dashboard or review forms.
+
+Workbench review actions are accepted through `/api/review-action` and `/review-action` when the
+request names a graph candidate, for example with `graph_candidate_id` or
+`target_kind=graph_candidate`. The supported actions are the graph review action set below. Review
+requests must remain project-scoped, validate candidate ids and action-specific metadata, preserve
+source refs and review history, and return bounded validation errors without echoing raw request
+bodies.
 
 ## Markdown Vault Bridge
 
@@ -350,7 +392,7 @@ should show:
 ## Phase Boundary
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
-Markdown vault bridge, deterministic keeper candidate, and named one-hop graph retrieval profile
-slices. It does not create a graph visualization, promote accepted candidates into active graph
-state, add passive vault sync, ingest raw media, implement graph hygiene/maintenance workflows, or
-migrate Recallant to a dedicated graph database.
+Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile, and
+Workbench graph review slices. It does not create a graph visualization, promote accepted candidates
+into active graph state, add passive vault sync, ingest raw media, implement graph
+hygiene/maintenance workflows, or migrate Recallant to a dedicated graph database.

@@ -374,7 +374,11 @@ await db.pool.query(
         updated_by = EXCLUDED.updated_by,
         updated_at = now()
   `,
-  [projectId, JSON.stringify(documentationPostureFixture), JSON.stringify(generatedStarterDocsFixture)]
+  [
+    projectId,
+    JSON.stringify(documentationPostureFixture),
+    JSON.stringify(generatedStarterDocsFixture)
+  ]
 );
 await db.pool.query(
   `
@@ -661,7 +665,9 @@ const semanticProofMarker = await db.createAgentMemory({
   title: "Review UI safe semantic proof marker",
   body: `review-ui-semantic-proof:${randomUUID()}`,
   created_by: "agent",
-  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: "semantic proof marker" }],
+  source_refs: [
+    { source_kind: "event", source_id: event.event_id, quote: "semantic proof marker" }
+  ],
   metadata: { diagnostic_marker: true, contains_raw_secret: false }
 });
 const duplicate = await db.createAgentMemory({
@@ -763,6 +769,67 @@ const forgettable = await db.createAgentMemory({
   created_by: "agent",
   source_refs: [{ source_kind: "event", source_id: event.event_id, quote: forgetSecret }]
 });
+await db.ensureGraphCandidateSchema();
+const graphNodeCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "node",
+  node_kind: "topic",
+  title: "Review UI graph node candidate",
+  summary: "Graph node fixture for Workbench review.",
+  confidence: 0.84,
+  extraction_method: "deterministic_rule",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "source",
+      source_id: importedDocSource.id,
+      quote: "Bounded graph node evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph" }
+});
+const graphEdgeCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "supports",
+  src: { kind: "topic", id: "review-ui-graph", label: "Review UI graph source" },
+  dst: { kind: "decision_cluster", id: "workbench-review", label: "Workbench review" },
+  title: "Review UI graph edge candidate",
+  summary: "Graph edge fixture for Workbench review.",
+  confidence: 0.78,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph" }
+});
+const otherProjectGraphCandidate = await sandboxDb.createGraphCandidate({
+  project_id: sandboxProjectId,
+  candidate_kind: "node",
+  node_kind: "topic",
+  title: "Other project graph candidate",
+  summary: "This candidate must not leak into the selected project dashboard.",
+  confidence: 0.63,
+  extraction_method: "deterministic_rule",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "source",
+      source_id: randomUUID(),
+      quote: "Other project graph evidence."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-other-project" }
+});
+const graphEdgesBeforeReviewAction = await db.pool.query(
+  "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+  [projectId]
+);
 
 const server = createRecallantHttpServer();
 server.listen(0, "127.0.0.1");
@@ -777,6 +844,7 @@ let fallbackPostureExcerpt = "";
 let emptyStarterDocsExcerpt = null;
 let healthyPostureExcerpt = null;
 let workbenchPostureExcerpt = "";
+let graphReviewExcerpt = null;
 
 try {
   const unauthorized = await fetch(`${baseUrl}/review`);
@@ -1067,9 +1135,12 @@ try {
     );
   }
 
-  const auditApi = await fetch(`${baseUrl}/api/review-dashboard?project_id=${projectId}&view=audit`, {
-    headers: { authorization: `Bearer ${token}` }
-  });
+  const auditApi = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&view=audit`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
   const auditJson = await auditApi.json();
   if (
     auditApi.status !== 200 ||
@@ -1078,7 +1149,9 @@ try {
     !Array.isArray(auditJson.audit_report.timeline) ||
     !Array.isArray(auditJson.audit_report.recommendations)
   ) {
-    throw new Error(`Audit API failed: ${auditApi.status}; ${JSON.stringify(auditJson.audit_report)}`);
+    throw new Error(
+      `Audit API failed: ${auditApi.status}; ${JSON.stringify(auditJson.audit_report)}`
+    );
   }
   const auditView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=audit`, {
     headers: { authorization: `Bearer ${token}` }
@@ -1094,7 +1167,9 @@ try {
     auditViewText.includes(rawProviderSecret) ||
     auditViewText.includes(rawDatabaseSecret)
   ) {
-    throw new Error(`Audit focused view failed: ${auditView.status}; ${auditViewText.slice(0, 700)}`);
+    throw new Error(
+      `Audit focused view failed: ${auditView.status}; ${auditViewText.slice(0, 700)}`
+    );
   }
   const futureSince = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const emptyAuditView = await fetch(
@@ -1106,7 +1181,9 @@ try {
     emptyAuditView.status !== 200 ||
     !emptyAuditText.includes("No audit activity matched these filters.")
   ) {
-    throw new Error(`Audit empty state failed: ${emptyAuditView.status}; ${emptyAuditText.slice(0, 700)}`);
+    throw new Error(
+      `Audit empty state failed: ${emptyAuditView.status}; ${emptyAuditText.slice(0, 700)}`
+    );
   }
   const requiredLayoutContracts = [
     "main { display: grid; grid-template-columns: minmax(0, 1fr)",
@@ -1303,9 +1380,7 @@ try {
     json.project_readiness?.readiness_contract?.primary_state !== "capture_active" ||
     json.project_readiness?.readiness_contract?.evidence?.last_semantic_recall_proof_at !==
       new Date(json.project_readiness.last_semantic_recall_proof_at).toISOString() ||
-    !String(json.project_readiness?.session_recovery_warning ?? "").includes(
-      "recovery context"
-    ) ||
+    !String(json.project_readiness?.session_recovery_warning ?? "").includes("recovery context") ||
     Number(json.project_readiness?.review_state_counts?.accepted ?? 0) < 1 ||
     Number(json.project_readiness?.review_state_counts?.pending_review ?? 0) < 1 ||
     Number(json.project_readiness?.review_state_counts?.conflict ?? 0) < 1 ||
@@ -1396,6 +1471,120 @@ try {
   ) {
     throw new Error(`Review dashboard API smoke failed: ${JSON.stringify(json)}`);
   }
+  const graphDashboardApi = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&graph_candidate_id=${graphNodeCandidate.graph_candidate_id}&graph_candidate_kind=node&graph_node_kind=topic&graph_source_kind=source`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const graphDashboardJson = await graphDashboardApi.json();
+  const graphDashboardText = JSON.stringify(graphDashboardJson.graph_candidates ?? {});
+  if (
+    graphDashboardApi.status !== 200 ||
+    !graphDashboardJson.graph_candidates ||
+    graphDashboardJson.graph_candidates.counts?.candidate_kind?.node < 1 ||
+    graphDashboardJson.graph_candidates.counts?.candidate_kind?.edge < 1 ||
+    graphDashboardJson.graph_candidates.filters?.candidate_kind !== "node" ||
+    graphDashboardJson.graph_candidates.filters?.node_kind !== "topic" ||
+    graphDashboardJson.graph_candidates.filters?.source_kind !== "source" ||
+    !graphDashboardJson.graph_candidates.candidates.some(
+      (candidate) => candidate.graph_candidate_id === graphNodeCandidate.graph_candidate_id
+    ) ||
+    graphDashboardJson.graph_candidates.selected_candidate?.graph_candidate_id !==
+      graphNodeCandidate.graph_candidate_id ||
+    graphDashboardJson.graph_candidates.selected_candidate?.source_ref_count !== 1 ||
+    graphDashboardText.includes(otherProjectGraphCandidate.graph_candidate_id)
+  ) {
+    throw new Error(`Graph dashboard API smoke failed: ${graphDashboardText}`);
+  }
+  const graphAction = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      graph_candidate_id: graphEdgeCandidate.graph_candidate_id,
+      action: "accept",
+      note: "review ui graph action smoke"
+    })
+  });
+  const graphActionJson = await graphAction.json();
+  if (
+    graphAction.status !== 200 ||
+    graphActionJson.lifecycle_state !== "accepted" ||
+    graphActionJson.review_actions?.length < 1
+  ) {
+    throw new Error(`Graph review action smoke failed: ${JSON.stringify(graphActionJson)}`);
+  }
+  const graphActionError = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      action: "accept"
+    })
+  });
+  const graphActionErrorJson = await graphActionError.json();
+  if (
+    graphActionError.status !== 409 ||
+    graphActionErrorJson.ok !== false ||
+    !String(graphActionErrorJson.error ?? "").includes("VALIDATION_ERROR")
+  ) {
+    throw new Error(
+      `Graph review action error smoke failed: ${JSON.stringify(graphActionErrorJson)}`
+    );
+  }
+  const graphAcceptedDashboard = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&graph_candidate_id=${graphEdgeCandidate.graph_candidate_id}&graph_lifecycle_state=accepted&graph_candidate_kind=edge`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const graphAcceptedJson = await graphAcceptedDashboard.json();
+  const graphEdgesAfterReviewAction = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  if (
+    graphAcceptedDashboard.status !== 200 ||
+    graphAcceptedJson.graph_candidates?.selected_candidate?.graph_candidate_id !==
+      graphEdgeCandidate.graph_candidate_id ||
+    graphAcceptedJson.graph_candidates?.selected_candidate?.review_actions?.length < 1 ||
+    graphAcceptedJson.graph_candidates?.filters?.lifecycle_state !== "accepted" ||
+    graphAcceptedJson.graph_candidates?.filters?.candidate_kind !== "edge" ||
+    graphEdgesAfterReviewAction.rows[0]?.count !== graphEdgesBeforeReviewAction.rows[0]?.count
+  ) {
+    throw new Error(
+      `Graph accepted dashboard smoke failed: ${JSON.stringify({
+        graphAccepted: graphAcceptedJson.graph_candidates,
+        edgesBefore: graphEdgesBeforeReviewAction.rows[0]?.count,
+        edgesAfter: graphEdgesAfterReviewAction.rows[0]?.count
+      })}`
+    );
+  }
+  graphReviewExcerpt = {
+    api_status: graphDashboardApi.status,
+    counts: graphDashboardJson.graph_candidates.counts,
+    filters: graphDashboardJson.graph_candidates.filters,
+    selected_kind: graphDashboardJson.graph_candidates.selected_candidate.candidate_kind,
+    action_lifecycle: graphActionJson.lifecycle_state,
+    action_error_status: graphActionError.status,
+    review_history_count:
+      graphAcceptedJson.graph_candidates.selected_candidate.review_actions.length,
+    cross_project_leaked: graphDashboardText.includes(
+      otherProjectGraphCandidate.graph_candidate_id
+    ),
+    accepted_retrieval_active: false,
+    edges_before: graphEdgesBeforeReviewAction.rows[0]?.count,
+    edges_after: graphEdgesAfterReviewAction.rows[0]?.count
+  };
 
   const emptyPostureApi = await fetch(
     `${baseUrl}/api/review-dashboard?project_id=${humanMemorySpace.project_id}`,
@@ -1435,8 +1624,8 @@ try {
   );
   const emptyPostureHtmlText = await emptyPostureHtml.text();
   fallbackPostureExcerpt = htmlTextExcerpt(emptyPostureHtmlText, "Documentation strategy");
-  const fallbackRecommendedCount =
-    (emptyPostureHtmlText.match(/Recommended strategy/g) ?? []).length;
+  const fallbackRecommendedCount = (emptyPostureHtmlText.match(/Recommended strategy/g) ?? [])
+    .length;
   if (
     emptyPostureHtml.status !== 200 ||
     emptyPostureHtmlText.includes(rawProviderSecret) ||
@@ -3326,6 +3515,7 @@ process.stdout.write(
       fallback_posture_excerpt: fallbackPostureExcerpt,
       empty_starter_docs_excerpt: emptyStarterDocsExcerpt,
       healthy_posture_excerpt: healthyPostureExcerpt,
+      graph_review_excerpt: graphReviewExcerpt,
       workbench_posture_excerpt: workbenchPostureExcerpt
     },
     null,

@@ -550,9 +550,47 @@ mustInclude(
   ],
   "CONTRACT_STATUS"
 );
+const graphTreeContract = await read("docs/GRAPH_TREE_CONTRACT.md");
+mustInclude(
+  graphTreeContract,
+  [
+    "Workbench Graph Review Surface",
+    "`graph_candidate_id`",
+    "`graph_lifecycle_state`",
+    "`graph_candidate_kind`",
+    "`graph_extraction_method`",
+    "`graph_source_kind`",
+    "`graph_node_kind`",
+    "`graph_relation_type`",
+    "`graph_candidates`",
+    "`selected_candidate`",
+    "`available_actions`",
+    "`governance`",
+    "/review?view=review",
+    "/api/review-action",
+    "/review-action",
+    "`target_kind=graph_candidate`",
+    "not default retrieval input",
+    "not promoted into `edges`"
+  ],
+  "GRAPH_TREE_CONTRACT graph review"
+);
 mustInclude(
   contractStatus,
   [
+    "Working B5 Workbench graph review slice",
+    "Workbench graph review fields/actions",
+    "`graph_candidates` payload",
+    "selected-candidate source refs and review history",
+    "/review?view=review",
+    "/api/review-action",
+    "/review-action",
+    "without inserting rows into `edges`",
+    "npm run graph-candidates:smoke",
+    "npm run graph-retrieval-profiles:smoke",
+    "npm run review-ui:smoke",
+    "npm run review-ui:playwright",
+    "Workbench topology visualization",
     "universal `curl .../connect \\| bash` beginner UX are present",
     "trusted-device registration/reconnect",
     "headless",

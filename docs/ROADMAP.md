@@ -49,6 +49,9 @@ dependable before expanding the product surface.
 - Governed graph candidate storage and review lifecycle, with project-scoped candidate records,
   source refs, review history, MCP create/list/get/review tools, policy smoke coverage, and no
   implicit promotion into default retrieval.
+- Workbench graph candidate review, with dashboard/API graph filters, grouped counts, node and edge
+  review lanes, selected candidate source refs and review history, form/API review actions, browser
+  smoke coverage, and an explicit candidate-storage-only boundary.
 - Deterministic memory keeper graph candidate generation through `recallant keeper candidates`,
   with dry-run defaults, confirm-gated candidate persistence, source refs, keeper extraction
   metadata, unsafe-input redaction to `needs_review`, and retrieval-isolation smoke coverage.
@@ -91,10 +94,11 @@ dependable before expanding the product surface.
 - Documentation posture follow-through: expand Workbench-confirmed canonicalization plans, harden
   empty-project starter-doc generation across more real-world profiles, and broaden posture pilots
   without turning recalled discussion into binding instructions automatically.
-- Governed graph next slices after the shipped candidate storage, Markdown vault bridge, memory
-  keeper candidate pipeline, and named one-hop retrieval profiles: broader keeper source
-  integration, practical review surfaces, first-class graph storage decisions, graph hygiene
-  workflows, human-memory expansion, and safe promotion paths for accepted candidates.
+- Governed graph next slices after the shipped candidate storage, Workbench review surface, Markdown
+  vault bridge, memory keeper candidate pipeline, and named one-hop retrieval profiles: broader
+  keeper source integration, Workbench topology visualization, richer review ergonomics, first-class
+  graph storage decisions, graph hygiene workflows, human-memory expansion, and safe promotion paths
+  for accepted candidates.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

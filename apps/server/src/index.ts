@@ -23,6 +23,7 @@ import {
   remoteMcpProvisioningOutput,
   remoteMcpPayloadLimits,
   remoteMcpRequiredHeaders,
+  type ReviewGraphCandidateInput,
   type RemoteMcpProvisioningAction,
   type RemoteMcpProvisioningOutput,
   type RemoteMcpErrorCode
@@ -2151,6 +2152,92 @@ function reviewPathWithParams(projectId: unknown, params: Record<string, unknown
   }
   const rendered = query.toString();
   return `/review${rendered ? `?${rendered}` : ""}`;
+}
+
+type WorkbenchGraphReviewInput = ReviewGraphCandidateInput & {
+  project_id?: string | null;
+};
+
+function graphReviewTargetId(body: Record<string, unknown>) {
+  return optionalInput(body.graph_candidate_id) ?? optionalInput(body.candidate_id);
+}
+
+function isGraphReviewRequest(body: Record<string, unknown>) {
+  return (
+    Boolean(graphReviewTargetId(body)) ||
+    optionalInput(body.target_kind) === "graph_candidate" ||
+    body.graph_review === true ||
+    optionalInput(body.review_kind) === "graph_candidate"
+  );
+}
+
+function numberFormInput(value: unknown) {
+  if (value === null || value === undefined || value === "") return undefined;
+  return Number(value);
+}
+
+function graphReviewPatch(action: string, body: Record<string, unknown>) {
+  const rawPatch = isRecord(body.patch) ? body.patch : {};
+  const patch: Record<string, unknown> = {};
+  const value = (key: string) => rawPatch[key] ?? body[key];
+  const nodeKind = optionalInput(value("node_kind"));
+  const relationType = optionalInput(value("relation_type"));
+  const title = optionalInput(value("title"));
+  const summary = optionalInput(value("summary"));
+  const lifecycleState = optionalInput(value("lifecycle_state"));
+  const confidence = numberFormInput(value("confidence"));
+  const metadata =
+    (isRecord(rawPatch.metadata) ? rawPatch.metadata : null) ??
+    (isRecord(body.patch_metadata) ? body.patch_metadata : null) ??
+    parseOptionalJsonObject(body.patch_metadata);
+  if (nodeKind) patch.node_kind = nodeKind;
+  if (relationType) patch.relation_type = relationType;
+  if (action === "edit" && (title || "title" in rawPatch || "title" in body)) patch.title = title;
+  if (action === "edit" && (summary || "summary" in rawPatch || "summary" in body))
+    patch.summary = summary;
+  if (confidence !== undefined) patch.confidence = confidence;
+  if (lifecycleState) patch.lifecycle_state = lifecycleState;
+  if (metadata) patch.metadata = metadata;
+  return patch;
+}
+
+function graphReviewMetadata(body: Record<string, unknown>) {
+  return (
+    (isRecord(body.metadata) ? body.metadata : null) ?? parseOptionalJsonObject(body.metadata) ?? {}
+  );
+}
+
+function buildGraphReviewInput(body: Record<string, unknown>): WorkbenchGraphReviewInput {
+  const graphCandidateId = graphReviewTargetId(body);
+  if (!graphCandidateId) throw new Error("VALIDATION_ERROR: graph_candidate_id is required");
+  const action = optionalInput(body.action);
+  if (!action) throw new Error("VALIDATION_ERROR: graph candidate action is required");
+  const targetGraphCandidateId =
+    optionalInput(body.target_graph_candidate_id) ?? optionalInput(body.target_candidate_id);
+  return {
+    project_id: optionalInput(body.project_id),
+    graph_candidate_id: graphCandidateId,
+    action: action as WorkbenchGraphReviewInput["action"],
+    actor_kind: "user",
+    note: optionalInput(body.note),
+    patch: graphReviewPatch(action, body),
+    merge_target_id: optionalInput(body.merge_target_id) ?? targetGraphCandidateId,
+    superseded_by: optionalInput(body.superseded_by) ?? targetGraphCandidateId,
+    metadata: graphReviewMetadata(body)
+  };
+}
+
+function graphReviewRedirectPath(body: Record<string, unknown>, graphCandidateId: string) {
+  return reviewPathWithParams(body.project_id, {
+    view: optionalInput(body.view) ?? "review",
+    graph_candidate_id: graphCandidateId,
+    graph_lifecycle_state: body.graph_lifecycle_state,
+    graph_candidate_kind: body.graph_candidate_kind,
+    graph_extraction_method: body.graph_extraction_method,
+    graph_source_kind: body.graph_source_kind,
+    graph_node_kind: body.graph_node_kind,
+    graph_relation_type: body.graph_relation_type
+  });
 }
 
 function rootWorkbenchPath(view: WorkbenchView) {
@@ -4465,6 +4552,13 @@ function renderCosts(data: ReviewDashboardData) {
   </div>`;
 }
 
+function publicSafeTechnicalFilterValue(label: string, value: unknown) {
+  if (!publicScreenshotMode()) return value;
+  if (label === "project_id") return value ? "selected project" : "";
+  if (label === "source_id") return value && value !== "all" ? "selected source" : "all";
+  return value;
+}
+
 function renderRuleFilters(data: ReviewDashboardData) {
   const filters = asRecord(data.rule_filters);
   const sourceFilters = asRecord(data.source_filters);
@@ -4505,12 +4599,12 @@ function renderRuleFilters(data: ReviewDashboardData) {
     <details>
       <summary>Technical filter values</summary>
       ${renderMeta([
-        ["project_id", projectId],
+        ["project_id", publicSafeTechnicalFilterValue("project_id", projectId)],
         ["scope", current.scope],
         ["scope_kind", current.scope_kind],
         ["memory_type", current.rule_type],
         ["memory_domain", current.rule_domain],
-        ["source_id", current.source_id]
+        ["source_id", publicSafeTechnicalFilterValue("source_id", current.source_id)]
       ])}
     </details>
   </div>`;
@@ -4735,6 +4829,256 @@ function renderMigrationReviewQueue(data: ReviewDashboardData) {
   </section>`;
 }
 
+function graphCandidateLabel(candidate: Record<string, unknown>) {
+  const kind = String(candidate.candidate_kind ?? "candidate");
+  const id = String(candidate.graph_candidate_id ?? "");
+  return publicScreenshotMode()
+    ? `${kind === "edge" ? "Edge" : "Node"} candidate`
+    : `${kind === "edge" ? "Edge" : "Node"} ${shortId(id)}`;
+}
+
+function graphEndpointLabel(endpoint: unknown) {
+  const row = asRecord(endpoint);
+  const label = optionalInput(row.label);
+  if (label) return label;
+  const kind = optionalInput(row.kind) ?? "endpoint";
+  if (publicScreenshotMode()) return kind;
+  return `${kind} ${shortId(row.id)}`;
+}
+
+function graphSourceRefLabel(ref: Record<string, unknown>) {
+  const kind = String(ref.source_kind ?? "source").replaceAll("_", " ");
+  if (publicScreenshotMode()) return kind;
+  const id = optionalInput(ref.source_id);
+  return id ? `${kind} ${shortId(id)}` : kind;
+}
+
+function graphConfidence(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "not set";
+  return `${Math.round(numeric * 100)}%`;
+}
+
+function renderGraphSourceRefs(sourceRefs: Array<Record<string, unknown>>) {
+  if (sourceRefs.length === 0) return `<p class="empty">No source refs recorded.</p>`;
+  return `<div class="graph-source-refs">
+    ${sourceRefs
+      .slice(0, 4)
+      .map(
+        (ref) => `<article>
+          <strong>${escapeHtml(graphSourceRefLabel(ref))}</strong>
+          <p>${escapeHtml(ref.quote ?? ref.path ?? ref.uri ?? "Source evidence available.")}</p>
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderGraphReviewHistory(actions: Array<Record<string, unknown>>) {
+  if (actions.length === 0) return `<p class="empty">No graph review actions yet.</p>`;
+  return `<div class="graph-review-history">
+    ${actions
+      .slice(0, 6)
+      .map(
+        (action) => `<article>
+          <strong>${escapeHtml(humanStatus(action.action))}</strong>
+          <span>${escapeHtml(action.actor_kind ?? "user")} · ${escapeHtml(formatDate(action.created_at) || "now")}</span>
+          ${action.note ? `<p>${escapeHtml(action.note)}</p>` : ""}
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderGraphActionForm(
+  candidate: Record<string, unknown>,
+  projectId: unknown,
+  action: string,
+  label: string,
+  extra = ""
+) {
+  return `<form method="post" action="/review-action">
+    <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+    <input type="hidden" name="target_kind" value="graph_candidate" />
+    <input type="hidden" name="graph_candidate_id" value="${escapeHtml(candidate.graph_candidate_id)}" />
+    <input type="hidden" name="action" value="${escapeHtml(action)}" />
+    <input type="hidden" name="view" value="review" />
+    ${extra}
+    <button type="submit">${escapeHtml(label)}</button>
+  </form>`;
+}
+
+function renderGraphCandidateActions(candidate: Record<string, unknown>, projectId: unknown) {
+  return `<div class="graph-actions">
+    ${renderGraphActionForm(candidate, projectId, "accept", "Accept")}
+    ${renderGraphActionForm(candidate, projectId, "reject", "Reject")}
+    ${renderGraphActionForm(candidate, projectId, "mark_stale", "Mark stale")}
+    ${renderGraphActionForm(candidate, projectId, "archive", "Archive")}
+    ${renderGraphActionForm(candidate, projectId, "unarchive", "Unarchive")}
+  </div>
+  <details class="graph-action-detail">
+    <summary>Edit candidate</summary>
+    <form method="post" action="/review-action">
+      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+      <input type="hidden" name="target_kind" value="graph_candidate" />
+      <input type="hidden" name="graph_candidate_id" value="${escapeHtml(candidate.graph_candidate_id)}" />
+      <input type="hidden" name="action" value="edit" />
+      <input type="hidden" name="view" value="review" />
+      <label>Title <input name="title" value="${escapeHtml(candidate.title ?? "")}" /></label>
+      <label>Summary <input name="summary" value="${escapeHtml(candidate.summary ?? "")}" /></label>
+      <label>Confidence <input name="confidence" inputmode="decimal" value="${escapeHtml(candidate.confidence ?? "")}" /></label>
+      <label>Lifecycle <input name="lifecycle_state" value="${escapeHtml(candidate.lifecycle_state ?? "")}" /></label>
+      <label>Note <input name="note" value="" /></label>
+      <button type="submit">Save edit</button>
+    </form>
+  </details>
+  <details class="graph-action-detail">
+    <summary>Merge or supersede</summary>
+    <div class="graph-target-actions">
+      ${renderGraphActionForm(
+        candidate,
+        projectId,
+        "merge",
+        "Merge",
+        `<label>Target <input name="target_graph_candidate_id" value="" /></label><label>Note <input name="note" value="" /></label>`
+      )}
+      ${renderGraphActionForm(
+        candidate,
+        projectId,
+        "supersede",
+        "Supersede",
+        `<label>Target <input name="target_graph_candidate_id" value="" /></label><label>Note <input name="note" value="" /></label>`
+      )}
+    </div>
+  </details>`;
+}
+
+function renderGraphCandidateCard(
+  candidate: Record<string, unknown>,
+  projectId: unknown,
+  selectedId: unknown
+) {
+  const selected = String(candidate.graph_candidate_id ?? "") === String(selectedId ?? "");
+  const kind = String(candidate.candidate_kind ?? "node");
+  const title =
+    optionalInput(candidate.title) ??
+    (kind === "edge"
+      ? `${graphEndpointLabel(candidate.src)} ${candidate.relation_type ?? "relates to"} ${graphEndpointLabel(candidate.dst)}`
+      : "Untitled graph candidate");
+  const href = reviewPathWithParams(projectId, {
+    view: "review",
+    graph_candidate_id: candidate.graph_candidate_id
+  });
+  return `<article class="graph-candidate-card${selected ? " selected" : ""}">
+    <div class="graph-candidate-main">
+      <div>
+        <span class="graph-candidate-id">${escapeHtml(graphCandidateLabel(candidate))}</span>
+        <h3><a href="${escapeHtml(href)}">${escapeHtml(title)}</a></h3>
+        <p>${escapeHtml(candidate.summary ?? "No summary recorded.")}</p>
+      </div>
+      ${renderBadges([
+        ["State", humanStatus(candidate.lifecycle_state)],
+        ["Kind", kind],
+        ["Confidence", graphConfidence(candidate.confidence)],
+        ["Method", String(candidate.extraction_method ?? "").replaceAll("_", " ")],
+        ["Sources", candidate.source_ref_count ?? asArray(candidate.source_refs).length],
+        ["Actions", candidate.review_action_count ?? asArray(candidate.review_actions).length]
+      ])}
+    </div>
+    <div class="graph-candidate-shape">
+      ${
+        kind === "edge"
+          ? `<span>${escapeHtml(graphEndpointLabel(candidate.src))}</span>
+             <strong>${escapeHtml(candidate.relation_type ?? "related")}</strong>
+             <span>${escapeHtml(graphEndpointLabel(candidate.dst))}</span>`
+          : `<span>${escapeHtml(candidate.node_kind ?? "node")}</span>
+             <strong>${escapeHtml(title)}</strong>`
+      }
+    </div>
+  </article>`;
+}
+
+function renderGraphCandidateDetail(selected: Record<string, unknown>, projectId: unknown) {
+  if (!selected.graph_candidate_id) return "";
+  const sourceRefs = asArray(selected.source_refs).map(asRecord);
+  const reviewActions = asArray(selected.review_actions).map(asRecord);
+  return `<section class="graph-candidate-detail" aria-label="Selected graph candidate">
+    <div class="graph-detail-head">
+      <span>${escapeHtml(graphCandidateLabel(selected))}</span>
+      <strong>${escapeHtml(selected.title ?? "Selected graph candidate")}</strong>
+      <p>Accepted candidates remain staged review records and are not retrieval-active by themselves.</p>
+    </div>
+    ${renderMeta([
+      ["Lifecycle", humanStatus(selected.lifecycle_state)],
+      ["Candidate kind", selected.candidate_kind],
+      ["Node kind", selected.node_kind],
+      ["Relation", selected.relation_type],
+      ["Confidence", graphConfidence(selected.confidence)],
+      ["Extraction", String(selected.extraction_method ?? "").replaceAll("_", " ")],
+      ["Created by", selected.created_by],
+      ["Updated", formatDate(selected.updated_at)]
+    ])}
+    <h4>Source evidence</h4>
+    ${renderGraphSourceRefs(sourceRefs)}
+    <h4>Review history</h4>
+    ${renderGraphReviewHistory(reviewActions)}
+    <h4>Actions</h4>
+    ${renderGraphCandidateActions(selected, projectId)}
+  </section>`;
+}
+
+function renderGraphCandidateLane(
+  title: string,
+  rows: Array<Record<string, unknown>>,
+  projectId: unknown,
+  selectedId: unknown
+) {
+  return `<details class="review-lane graph-candidate-lane" open>
+    <summary>
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(rows.length)}</strong>
+    </summary>
+    ${rows.length === 0 ? `<p class="empty">No graph candidates match the current filters.</p>` : ""}
+    <div class="graph-candidate-list">
+      ${rows.map((row) => renderGraphCandidateCard(row, projectId, selectedId)).join("")}
+    </div>
+  </details>`;
+}
+
+function renderGraphCandidateReview(data: ReviewDashboardData) {
+  const graph = asRecord(data.graph_candidates);
+  const candidates = asArray(graph.candidates).map(asRecord);
+  const selected = asRecord(graph.selected_candidate);
+  const selectedId = selected.graph_candidate_id;
+  const counts = asRecord(graph.counts);
+  const candidateKindCounts = asRecord(counts.candidate_kind);
+  const lifecycleCounts = asRecord(counts.lifecycle_state);
+  const nodeCandidates = candidates.filter((candidate) => candidate.candidate_kind === "node");
+  const edgeCandidates = candidates.filter((candidate) => candidate.candidate_kind === "edge");
+  return `<section class="graph-review" aria-label="Graph candidates">
+    <div class="graph-review-head">
+      <div>
+        <span>Graph candidates</span>
+        <h3>Graph candidates</h3>
+        <p>Accepted candidates remain staged review records and are not retrieval-active by themselves.</p>
+      </div>
+      <div class="graph-review-counts">
+        <span><strong>${escapeHtml(counts.total ?? candidates.length)}</strong> total</span>
+        <span><strong>${escapeHtml(candidateKindCounts.node ?? 0)}</strong> node</span>
+        <span><strong>${escapeHtml(candidateKindCounts.edge ?? 0)}</strong> edge</span>
+        <span><strong>${escapeHtml(lifecycleCounts.accepted ?? 0)}</strong> accepted</span>
+      </div>
+    </div>
+    <div class="graph-review-grid">
+      <div class="graph-review-lanes">
+        ${renderGraphCandidateLane("Node candidates", nodeCandidates, data.current_project_id, selectedId)}
+        ${renderGraphCandidateLane("Edge candidates", edgeCandidates, data.current_project_id, selectedId)}
+      </div>
+      ${renderGraphCandidateDetail(selected, data.current_project_id)}
+    </div>
+  </section>`;
+}
+
 function renderReviewDecisionGuide(
   importCount: number,
   inboxCount: number,
@@ -4779,6 +5123,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   return `<div class="review-workspace">
     ${renderSourceFilterControl(data, "review")}
     ${renderReviewDecisionGuide(importCount, inboxCount, conflictCount, ruleCount)}
+    ${renderGraphCandidateReview(data)}
     ${renderMigrationReviewQueue(data)}
     <div class="review-overview">
       ${renderReviewSummaryTile(
@@ -5803,6 +6148,37 @@ function renderDashboard(
     .review-lane summary strong { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 8px; color: #445064; background: #f8fafc; font-size: 12px; }
     .review-lane[open] summary { margin-bottom: 8px; }
     .review-lane-note { margin: 0 0 10px; color: #4f5867; font-size: 12px; line-height: 1.4; }
+    .graph-review { border: 1px solid #d7e1df; border-radius: 7px; padding: 12px; background: #fbfdfc; }
+    .graph-review-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 10px; }
+    .graph-review-head span { display: block; color: #166454; font-size: 11px; font-weight: 760; text-transform: uppercase; }
+    .graph-review-head h3 { margin: 2px 0 5px; font-size: 15px; }
+    .graph-review-head p, .graph-detail-head p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .graph-review-counts { display: grid; grid-template-columns: repeat(2, minmax(88px, 1fr)); gap: 6px; min-width: 220px; }
+    .graph-review-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #fff; color: #4f5867; text-transform: none; }
+    .graph-review-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr); gap: 10px; align-items: start; }
+    .graph-review-lanes, .graph-candidate-list, .graph-source-refs, .graph-review-history { display: grid; gap: 8px; }
+    .graph-candidate-card, .graph-candidate-detail, .graph-source-refs article, .graph-review-history article { border: 1px solid #dfe6ee; border-radius: 7px; background: #fff; padding: 9px; min-width: 0; }
+    .graph-candidate-card.selected { border-color: #7eb4a8; box-shadow: 0 0 0 1px rgba(23, 107, 93, 0.12); }
+    .graph-candidate-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .graph-candidate-id, .graph-detail-head span { display: block; color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .graph-candidate-card h3 { margin: 2px 0 5px; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-candidate-card p, .graph-source-refs p, .graph-review-history p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.38; overflow-wrap: anywhere; }
+    .graph-candidate-shape { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; border-top: 1px solid #edf1f5; margin-top: 8px; padding-top: 8px; font-size: 12px; color: #4f5867; overflow-wrap: anywhere; }
+    .graph-candidate-shape strong { color: #20242c; overflow-wrap: anywhere; }
+    .graph-detail-head strong { display: block; font-size: 15px; line-height: 1.25; margin: 2px 0 5px; overflow-wrap: anywhere; }
+    .graph-candidate-detail h4 { margin: 10px 0 6px; font-size: 12px; color: #4f5867; text-transform: uppercase; }
+    .graph-actions, .graph-target-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .graph-action-detail { border-top: 1px solid #edf1f5; margin-top: 8px; padding-top: 8px; }
+    .graph-action-detail summary { font-size: 12px; font-weight: 700; }
+    .graph-action-detail form { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; margin-top: 8px; }
+    .graph-action-detail label, .graph-target-actions label { display: grid; gap: 3px; color: #5f6875; font-size: 11px; min-width: min(190px, 100%); }
+    .graph-action-detail input, .graph-target-actions input { max-width: 100%; min-width: 0; }
+    @media (max-width: 760px) {
+      .graph-review-head, .graph-review-grid { display: grid; grid-template-columns: 1fr; }
+      .graph-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .graph-actions, .graph-target-actions, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
+    }
     .review-action-group { border-bottom: 1px solid #e3e8ef; padding-bottom: 8px; margin-bottom: 8px; }
     .risky-action-group { border: 1px solid #e5c7bf; border-radius: 7px; padding: 8px; background: #fffaf8; }
     .cost-summary h3 { margin: 10px 0 6px; font-size: 13px; color: #303845; }
@@ -6910,6 +7286,13 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       const dashboardInput = {
         project_id: requestUrl.searchParams.get("project_id"),
         selected_memory_id: requestUrl.searchParams.get("memory_id"),
+        graph_candidate_id: requestUrl.searchParams.get("graph_candidate_id"),
+        graph_lifecycle_state: requestUrl.searchParams.get("graph_lifecycle_state"),
+        graph_candidate_kind: requestUrl.searchParams.get("graph_candidate_kind"),
+        graph_extraction_method: requestUrl.searchParams.get("graph_extraction_method"),
+        graph_source_kind: requestUrl.searchParams.get("graph_source_kind"),
+        graph_node_kind: requestUrl.searchParams.get("graph_node_kind"),
+        graph_relation_type: requestUrl.searchParams.get("graph_relation_type"),
         source_id: requestUrl.searchParams.get("source_id"),
         rule_scope: requestUrl.searchParams.get("scope"),
         rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
@@ -7161,10 +7544,24 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/review-action") {
-        const body = (await readJson(request)) as ReviewAgentMemoryInput;
+        const body = (await readJson(request)) as Record<string, unknown>;
+        if (isGraphReviewRequest(body)) {
+          try {
+            const result = await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            write(response, 200, JSON.stringify(result), "application/json");
+          } catch (error) {
+            write(
+              response,
+              409,
+              JSON.stringify({ ok: false, error: safeHttpAuditErrorMessage(error) }),
+              "application/json"
+            );
+          }
+          return;
+        }
         const result = await database.reviewAgentMemory({
-          ...body,
-          actor_kind: body.actor_kind ?? "user"
+          ...(body as ReviewAgentMemoryInput),
+          actor_kind: (body as ReviewAgentMemoryInput).actor_kind ?? "user"
         });
         write(
           response,
@@ -7176,6 +7573,22 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       }
       if (request.method === "POST" && requestUrl.pathname === "/review-action") {
         const body = await readForm(request);
+        if (isGraphReviewRequest(body)) {
+          try {
+            const result = await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            const location = graphReviewRedirectPath(body, result.graph_candidate_id);
+            write(response, 303, "See other", "text/plain", { location });
+          } catch (error) {
+            write(
+              response,
+              409,
+              safeHttpAuditErrorMessage(error),
+              "text/plain",
+              sessionCookie ? { "set-cookie": sessionCookie } : {}
+            );
+          }
+          return;
+        }
         const action = String(body.action ?? "");
         const patch =
           action === "edit"

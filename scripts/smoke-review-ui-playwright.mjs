@@ -53,6 +53,9 @@ async function assertResponsiveBounds(page, label) {
       ".migration-review",
       ".migration-review-lanes article",
       ".review-lane",
+      ".graph-review",
+      ".graph-candidate-card",
+      ".graph-candidate-detail",
       ".activity-group",
       ".activity-item",
       "button",
@@ -204,6 +207,7 @@ async function run() {
     activity: join(publicReportDir, "recallant-workbench-activity.png"),
     audit: join(publicReportDir, "recallant-workbench-audit.png"),
     review: join(publicReportDir, "recallant-workbench-review.png"),
+    reviewMobile: join(publicReportDir, "recallant-workbench-review-mobile.png"),
     mobile: join(publicReportDir, "recallant-workbench-mobile.png")
   };
   const forbiddenPublicText = [
@@ -461,6 +465,53 @@ async function run() {
     source_refs: [
       { source_kind: "event", source_id: userEvent.event_id, quote: "review candidate" }
     ]
+  });
+  await db.ensureGraphCandidateSchema();
+  await db.createGraphCandidate({
+    project_id: projectId,
+    candidate_kind: "node",
+    node_kind: "topic",
+    title: "Playwright graph node candidate",
+    summary:
+      "Graph node candidate with a deliberately long readable summary that should wrap inside the Review view without creating horizontal scroll.",
+    confidence: 0.86,
+    extraction_method: "deterministic_rule",
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "source",
+        source_id: importedDocSource.id,
+        quote: "Bounded graph node evidence for Playwright."
+      }
+    ],
+    metadata: { smoke: "playwright-graph-review" }
+  });
+  const graphEdgeCandidate = await db.createGraphCandidate({
+    project_id: projectId,
+    candidate_kind: "edge",
+    relation_type: "supports",
+    src: { kind: "topic", id: "playwright-graph", label: "Playwright graph source endpoint" },
+    dst: { kind: "decision_cluster", id: "review-workbench", label: "Review Workbench graph destination" },
+    title: "Playwright graph edge candidate",
+    summary: "Graph edge candidate for focused Review view screenshots.",
+    confidence: 0.79,
+    extraction_method: "keeper",
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "agent_memory",
+        source_id: rule.memory_id,
+        quote: "Bounded graph edge evidence for Playwright."
+      }
+    ],
+    metadata: { smoke: "playwright-graph-review" }
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectId,
+    graph_candidate_id: graphEdgeCandidate.graph_candidate_id,
+    action: "accept",
+    actor_kind: "user",
+    note: "Playwright graph review history proof"
   });
   const denseMemorySources = [importedDocSource, ...denseSources].filter(Boolean);
   const denseActivityTitles = [
@@ -947,15 +998,32 @@ async function run() {
       forbiddenPublicText
     );
 
-    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=review`, {
-      waitUntil: "networkidle"
-    });
+    await desktop.goto(
+      `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${graphEdgeCandidate.graph_candidate_id}`,
+      {
+        waitUntil: "networkidle"
+      }
+    );
     await desktop.getByRole("heading", { name: "Review", exact: true }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Review view");
     await assertResponsiveBounds(desktop, "desktop focused Review view");
     await visibleBox(desktop.locator("#review"), "desktop focused Review");
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
+    await visibleBox(desktop.locator("#review .graph-review"), "desktop graph review");
+    await visibleBox(
+      desktop.locator("#review .graph-candidate-detail"),
+      "desktop graph candidate detail"
+    );
+    await desktop.getByText("Graph candidates").first().waitFor();
+    await desktop.getByText("Node candidates").waitFor();
+    await desktop.getByText("Edge candidates").waitFor();
+    await desktop.getByText("Playwright graph node candidate").first().waitFor();
+    await desktop.getByText("Playwright graph source endpoint").first().waitFor();
+    await desktop.getByText("Review Workbench graph destination").first().waitFor();
+    await desktop.getByText("Source evidence").first().waitFor();
+    await desktop.getByText("Review history").first().waitFor();
+    await desktop.getByText("Accepted candidates remain staged review records").first().waitFor();
     const migrationQueue = desktop.locator("#review .migration-review");
     await visibleBox(migrationQueue, "desktop migration review queue");
     await desktop.getByText("Migration review queue").waitFor();
@@ -1103,6 +1171,30 @@ async function run() {
       path: publicScreenshots.mobile,
       fullPage: true
     });
+    await mobile.goto(
+      `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${graphEdgeCandidate.graph_candidate_id}`,
+      { waitUntil: "networkidle" }
+    );
+    await mobile.getByRole("heading", { name: "Review", exact: true }).waitFor();
+    await noHorizontalScroll(mobile, "mobile focused Review graph view");
+    await assertResponsiveBounds(mobile, "mobile focused Review graph view");
+    await visibleBox(mobile.locator("#review .graph-review"), "mobile graph review");
+    await visibleBox(
+      mobile.locator("#review .graph-candidate-detail"),
+      "mobile graph candidate detail"
+    );
+    await mobile.getByText("Graph candidates").first().waitFor();
+    await mobile.getByText("Node candidates").waitFor();
+    await mobile.getByText("Edge candidates").waitFor();
+    await mobile.getByText("Playwright graph edge candidate").first().waitFor();
+    await saveScreenshotPair(
+      mobile,
+      join(reportDir, "recallant-workbench-mobile-focused-review.png"),
+      publicScreenshots.reviewMobile,
+      "mobile focused Review",
+      forbiddenPublicText
+    );
+    await mobile.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await mobile
       .locator('#ask-recallant textarea[name="message"]')
       .fill("Why is this rule not applied?");
@@ -1135,6 +1227,7 @@ async function run() {
             join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
             join(reportDir, "recallant-workbench-dense-mobile.png"),
+            join(reportDir, "recallant-workbench-mobile-focused-review.png"),
             join(reportDir, "recallant-workbench-mobile-chat.png")
           ],
           public_safe_screenshot_candidates: Object.values(publicScreenshots),
@@ -1148,6 +1241,8 @@ async function run() {
             "desktop_focused_sources_view",
             "memory_tree_source_map",
             "review_decision_workflow",
+            "graph_review_workbench_desktop",
+            "graph_review_workbench_mobile",
             "migration_review_queue_browser_qa",
             "public_safe_screenshot_candidates",
             "desktop_focused_source_filtered_activity_view",
