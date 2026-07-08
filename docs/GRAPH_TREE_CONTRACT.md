@@ -168,6 +168,36 @@ Source refs are bounded references, not a license to copy raw artifacts into can
 Agent-generated and import-generated candidates must include source refs before they can be stored or
 reviewed.
 
+## Markdown Vault Bridge
+
+Recallant includes a first Obsidian-compatible Markdown vault bridge. It is a compatibility bridge,
+not an Obsidian plugin, Obsidian server dependency, passive sync daemon, or broad import path.
+
+The CLI surface is:
+
+```bash
+recallant vault inventory <vault-dir> [--project-dir <project-dir>] [--format json|text]
+recallant vault candidates <vault-dir> [--project-dir <project-dir>] [--write-candidates --confirm]
+recallant vault export <vault-dir> [--output <dir>] [--write --confirm]
+```
+
+All vault commands are dry-run by default. `vault inventory` reads Markdown files and reports a
+source-linked inventory without writing memory, database rows, or files. `vault candidates` maps
+vault notes, headings, tags, links, external URLs, and media references into B1 graph candidate
+proposals with extraction method `vault_bridge`; it persists candidates only when both
+`--write-candidates` and `--confirm` are present. `vault export` previews four human-readable
+Markdown review files and writes them only when both `--write` and `--confirm` are present:
+
+- `Recallant/Decisions.md`;
+- `Recallant/Checkpoints.md`;
+- `Recallant/Open Questions.md`;
+- `Recallant/Memory Review.md`.
+
+The bridge deliberately ignores `.obsidian/` internals and generated `Recallant/` export folders.
+It detects media references without copying or ingesting raw media. It treats secret-like source
+content as review-required and reports only bounded names/codes, never raw secret values. Vault
+candidate output remains staged review state and is not retrieval-active by default.
+
 The first review actions are:
 
 - `accept`;

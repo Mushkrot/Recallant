@@ -64,6 +64,15 @@ import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
 import { buildRemoteDoctorReport, runRemoteDoctor } from "./remote-doctor.js";
 import { runRemoteCleanup } from "./remote-cleanup.js";
+import {
+  buildVaultCandidatePlan,
+  buildVaultMarkdownExportPlan,
+  formatVaultCandidateText,
+  formatVaultInventoryText,
+  formatVaultMarkdownExportText,
+  inventoryVault,
+  writeVaultMarkdownExport
+} from "./vault-bridge.js";
 
 const fallbackRecallantCliVersion = "0.1.0-dev.0";
 
@@ -299,7 +308,10 @@ function positionalArgs(argv: readonly string[]) {
     "--invite-token",
     "--connect-url",
     "--poll-timeout-ms",
-    "--poll-interval-ms"
+    "--poll-interval-ms",
+    "--include",
+    "--exclude",
+    "--output"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -10391,6 +10403,130 @@ async function runSourceCommand(argv: readonly string[]) {
   }
 }
 
+function repeatedFlag(argv: readonly string[], name: string) {
+  const values: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === name && argv[index + 1]) values.push(argv[index + 1]!);
+  }
+  return values;
+}
+
+async function runVaultCommand(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "inventory";
+  const args = positionalArgs(argv).slice(1);
+  const vaultDir = args[0]
+    ? resolve(args[0])
+    : resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const format = parseFlag(argv, "--format") ?? (argv.includes("--text") ? "text" : "json");
+
+  const inventory = await inventoryVault({
+    vaultDir,
+    includePrefixes: repeatedFlag(argv, "--include"),
+    excludePrefixes: repeatedFlag(argv, "--exclude")
+  });
+
+  if (subcommand === "inventory" || subcommand === "inspect") {
+    process.stdout.write(
+      format === "text"
+        ? formatVaultInventoryText(inventory)
+        : `${JSON.stringify(inventory, null, 2)}\n`
+    );
+    return;
+  }
+
+  if (subcommand === "candidates" || subcommand === "proposals") {
+    const plan = buildVaultCandidatePlan(inventory);
+    const writeCandidates = argv.includes("--write-candidates");
+    if (!writeCandidates) {
+      process.stdout.write(
+        format === "text" ? formatVaultCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+      );
+      return;
+    }
+    if (!argv.includes("--confirm")) {
+      throw new Error(
+        "VALIDATION_ERROR: vault candidate persistence requires --write-candidates --confirm"
+      );
+    }
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? vaultDir);
+    const database = createRecallantDbFromEnv();
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for vault candidate writes");
+    try {
+      const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
+      for (const proposal of plan.proposals) {
+        created.push(
+          await database.createGraphCandidate({
+            ...proposal.candidate,
+            project_path: projectDir
+          })
+        );
+      }
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ...plan,
+            dry_run: false,
+            writes_database: true,
+            project_dir: projectDir,
+            persisted: {
+              count: created.length,
+              graph_candidate_ids: created.map((candidate) => candidate.graph_candidate_id)
+            },
+            proposals: plan.proposals.map((proposal) => ({
+              ...proposal,
+              persisted: created.find((candidate) => candidate.title === proposal.candidate.title)
+                ?.graph_candidate_id
+            }))
+          },
+          null,
+          2
+        )}\n`
+      );
+    } finally {
+      await database.close();
+    }
+    return;
+  }
+
+  if (subcommand === "export") {
+    const outputDir = parseFlag(argv, "--output");
+    const plan = buildVaultMarkdownExportPlan(inventory, outputDir);
+    const writeExport = argv.includes("--write");
+    if (!writeExport) {
+      process.stdout.write(
+        format === "text"
+          ? formatVaultMarkdownExportText(plan)
+          : `${JSON.stringify(plan, null, 2)}\n`
+      );
+      return;
+    }
+    if (!argv.includes("--confirm")) {
+      throw new Error("VALIDATION_ERROR: vault export writes require --write --confirm");
+    }
+    const written = await writeVaultMarkdownExport(plan, {
+      overwrite: argv.includes("--overwrite")
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ...plan,
+          dry_run: false,
+          writes_files: true,
+          written: {
+            count: written.length,
+            files: written
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+
+  throw new Error("VALIDATION_ERROR: vault supports inventory|candidates|export");
+}
+
 function usageText(command?: string) {
   if (command === "onboard") {
     return [
@@ -10550,7 +10686,15 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "vault") {
+    return [
+      "Usage: recallant vault <inventory|candidates|export> <vault-dir> [--project-dir <project-dir>] [--format json|text] [--include <path-prefix>] [--exclude <path-prefix>] [--output <dir>] [--write-candidates --confirm] [--write --confirm] [--overwrite]",
+      "",
+      "Inspect an Obsidian-compatible Markdown vault, optionally persist governed graph candidates, or export Recallant Markdown review files. Dry-run is the default.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -10605,6 +10749,7 @@ async function main(argv: readonly string[]) {
   if (command === "detach" || command === "project-detach") return runDetach(argv);
   if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
   if (command === "source" || command === "project-source") return runSourceCommand(argv);
+  if (command === "vault") return runVaultCommand(argv);
   if (command === "local-cleanup" || command === "sandbox-local-cleanup")
     return runLocalCleanup(argv);
   if (command === "init") return runInit(argv);

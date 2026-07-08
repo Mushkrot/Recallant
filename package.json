@@ -36,6 +36,7 @@
     "phase6:smoke:governed": "node scripts/smoke-phase6-governed-memory.mjs",
     "phase6:smoke:graph": "node scripts/smoke-phase6-graph-context-forget.mjs",
     "graph-candidates:smoke": "node scripts/smoke-graph-candidates.mjs",
+    "vault-bridge:smoke": "node scripts/smoke-vault-bridge.mjs",
     "management-chat-ai:smoke": "node scripts/smoke-management-chat-ai.mjs",
     "management-chat-live:smoke": "node scripts/smoke-management-chat-live.mjs",
     "stage2:global-rule": "node scripts/smoke-stage2-global-rule.mjs",
