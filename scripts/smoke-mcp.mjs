@@ -14,6 +14,10 @@ const expectedTools = [
   "memory_search",
   "memory_fetch_chunk",
   "memory_link",
+  "memory_create_graph_candidate",
+  "memory_list_graph_candidates",
+  "memory_get_graph_candidate",
+  "memory_review_graph_candidate",
   "memory_promote",
   "memory_archive",
   "memory_forget",
@@ -75,6 +79,8 @@ let closeoutLifecycle = null;
 let governedMemoryToolsListExcerpt = null;
 let governedMemoryValidationErrors = {};
 let governedMemoryExamples = {};
+let graphCandidateToolsListExcerpt = null;
+let graphCandidateStubResponses = {};
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -132,6 +138,29 @@ try {
   const recallMemoryTool = list.tools?.find((tool) => tool.name === "memory_recall_agent_memories");
   assert(createMemoryTool, "tools/list missing memory_create_agent_memory");
   assert(recallMemoryTool, "tools/list missing memory_recall_agent_memories");
+  const graphCreateTool = list.tools?.find(
+    (tool) => tool.name === "memory_create_graph_candidate"
+  );
+  const graphListTool = list.tools?.find((tool) => tool.name === "memory_list_graph_candidates");
+  const graphGetTool = list.tools?.find((tool) => tool.name === "memory_get_graph_candidate");
+  const graphReviewTool = list.tools?.find(
+    (tool) => tool.name === "memory_review_graph_candidate"
+  );
+  assert(graphCreateTool, "tools/list missing memory_create_graph_candidate");
+  assert(graphListTool, "tools/list missing memory_list_graph_candidates");
+  assert(graphGetTool, "tools/list missing memory_get_graph_candidate");
+  assert(graphReviewTool, "tools/list missing memory_review_graph_candidate");
+  mustInclude(
+    JSON.stringify([graphCreateTool, graphListTool, graphGetTool, graphReviewTool]),
+    ["governed", "staging", "do not affect default retrieval", "review"],
+    "graph candidate tools/list excerpt"
+  );
+  graphCandidateToolsListExcerpt = {
+    names: [graphCreateTool.name, graphListTool.name, graphGetTool.name, graphReviewTool.name],
+    create_description: graphCreateTool.description,
+    review_description: graphReviewTool.description,
+    create_properties: Object.keys(graphCreateTool.inputSchema?.properties ?? {})
+  };
   const createProperties = createMemoryTool.inputSchema?.properties ?? {};
   const recallProperties = recallMemoryTool.inputSchema?.properties ?? {};
   const createToolExcerptText = JSON.stringify(
@@ -266,6 +295,88 @@ try {
       { ...validCreateMemoryArgs, body: undefined },
       ["body", "required", "raw secrets"]
     )
+  };
+
+  const graphCreateCall = await client.callTool(
+    {
+      name: "memory_create_graph_candidate",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        candidate_kind: "node",
+        node_kind: "topic",
+        title: "Safe graph candidate stub",
+        summary: "A bounded non-secret MCP graph candidate smoke.",
+        confidence: 0.82,
+        extraction_method: "agent",
+        created_by: "agent",
+        audience: [{ kind: "all_agents", id: null }],
+        source_refs: [
+          {
+            source_kind: "external",
+            source_id: "mcp-graph-candidate-smoke",
+            quote: "bounded non-secret evidence"
+          }
+        ],
+        metadata: { smoke: true }
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphCreate = JSON.parse(graphCreateCall.content?.[0]?.text ?? "{}");
+  const graphListCall = await client.callTool(
+    {
+      name: "memory_list_graph_candidates",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        lifecycle_state: "candidate",
+        limit: 5
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphList = JSON.parse(graphListCall.content?.[0]?.text ?? "{}");
+  const graphReviewCall = await client.callTool(
+    {
+      name: "memory_review_graph_candidate",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        graph_candidate_id: graphCreate.graph_candidate_id,
+        action: "reject",
+        actor_kind: "agent",
+        note: "stub smoke review"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphReview = JSON.parse(graphReviewCall.content?.[0]?.text ?? "{}");
+  if (
+    graphCreate.tool !== "memory_create_graph_candidate" ||
+    graphCreate.governance?.retrieval_active !== false ||
+    graphList.tool !== "memory_list_graph_candidates" ||
+    graphList.governance?.candidate_storage_only !== true ||
+    graphReview.tool !== "memory_review_graph_candidate" ||
+    graphReview.review_actions?.length !== 1
+  ) {
+    throw new Error(
+      `Graph candidate stub responses were unsafe: ${JSON.stringify({
+        graphCreate,
+        graphList,
+        graphReview
+      })}`
+    );
+  }
+  mustNotContain(
+    JSON.stringify({ graphCreate, graphList, graphReview }),
+    forbiddenOutputFixtures,
+    "graph candidate stub responses"
+  );
+  graphCandidateStubResponses = {
+    create: graphCreate,
+    list: graphList,
+    review: graphReview
   };
 
   const call = await client.callTool(
@@ -507,6 +618,10 @@ process.stdout.write(
         invalid_call_errors: governedMemoryValidationErrors,
         safe_examples: governedMemoryExamples,
         forbidden_secret_values_leaked: false
+      },
+      graph_candidate_tools: {
+        tools_list_excerpt: graphCandidateToolsListExcerpt,
+        stub_responses: graphCandidateStubResponses
       }
     },
     null,

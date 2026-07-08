@@ -212,7 +212,30 @@ required-field message. These messages must not echo raw request bodies, raw sec
 customer data, private keys, backups, raw artifacts, large logs, database URLs, auth headers, or
 provider keys.
 
-## 3d) External Rehearsal
+## 3d) Governed Graph Candidate Tools
+
+The graph candidate tool surface is a governed staging path for proposed graph nodes and edges. It
+does not make candidate data retrieval-active by default, and accepting a candidate records review
+state without automatically inserting an `edges` row.
+
+The first candidate tools are:
+
+- `memory_create_graph_candidate` - create a project-scoped node or edge candidate with lifecycle
+  state, scope, audience, confidence, extraction method, creator provenance, bounded metadata, and
+  source refs.
+- `memory_list_graph_candidates` - list candidates for the scoped project with optional lifecycle,
+  kind, scope, and pagination filters.
+- `memory_get_graph_candidate` - read one candidate plus its source refs and review history inside
+  the scoped project.
+- `memory_review_graph_candidate` - record review actions such as accept, reject, archive,
+  unarchive, mark stale, edit, merge, or supersede while preserving the original candidate row.
+
+Agent-generated and import-generated candidates require source refs. Tool handlers must keep project
+scope explicit, reject wrong-project access, and block raw secrets, database URLs, provider tokens,
+raw credentials, raw artifacts, customer data, private keys, backups, auth headers, cookies, and
+private deployment details from candidate payloads and responses.
+
+## 3e) External Rehearsal
 
 `remote-mcp-external-rehearsal:smoke` proves the shipped remote client path from a scrubbed
 external-like child-process environment. It uses HTTPS `/api/mcp`, `recallant connect-remote`,

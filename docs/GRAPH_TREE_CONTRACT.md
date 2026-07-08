@@ -114,6 +114,11 @@ Graph candidate storage is the governed staging layer for proposed graph nodes a
 additive to the current `edges` table and does not make candidate graph data retrieval-active by
 default.
 
+Recallant now includes the first B1 candidate storage and review slice. Candidate records live in
+project-scoped graph candidate tables, preserve source references and review history, and are exposed
+through MCP tools for create, list, get, and review operations. Accepting a candidate records the
+reviewed lifecycle state; it does not insert rows into `edges` or change default retrieval by itself.
+
 The first typed candidate kinds are:
 
 - `node` - a proposed graph node such as a topic, entity, project, decision cluster, open question,

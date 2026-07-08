@@ -5,8 +5,18 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
+  graphCandidateExtractionMethodValues,
+  graphCandidateKindValues,
+  graphCandidateReviewActionValues,
+  graphCandidateSourceRefKindValues,
+  graphTreeLifecycleStateValues,
+  graphTreeNodeKindValues,
   type AgentLifecycleCloseoutProof,
-  type AgentLifecycleMemoryProofStatus
+  type AgentLifecycleMemoryProofStatus,
+  type CreateGraphCandidateInput,
+  type GetGraphCandidateInput,
+  type ListGraphCandidatesInput,
+  type ReviewGraphCandidateInput
 } from "@recallant/contracts";
 import {
   createRecallantDbFromEnv,
@@ -17,6 +27,7 @@ import {
   type CrossProjectRecallInput,
   type CreateAgentMemoryInput,
   type ForgetInput,
+  type GraphCandidateScopedInput,
   type AppendEventInput,
   type AppendTurnInput,
   type JsonObject,
@@ -51,6 +62,36 @@ const clientKind = z.enum(["codex", "cursor", "windsurf", "claude_code", "unknow
 const scope = z.enum(["project", "developer", "all"]);
 const memoryScope = z.enum(["project", "developer"]);
 const sourceKind = z.enum(["event", "chunk", "raw_artifact", "edge", "checkpoint", "external"]);
+const graphNodeKind = z.enum(graphTreeNodeKindValues);
+const graphCandidateKind = z.enum(graphCandidateKindValues);
+const graphLifecycleState = z.enum(graphTreeLifecycleStateValues);
+const graphExtractionMethod = z.enum(graphCandidateExtractionMethodValues);
+const graphSourceRefKind = z.enum(graphCandidateSourceRefKindValues);
+const graphReviewAction = z.enum(graphCandidateReviewActionValues);
+const graphCandidateScope = z.enum(["project", "developer", "domain", "all"]);
+const graphCandidateAudience = z
+  .array(
+    z.object({
+      kind: z.string().min(1),
+      id: nullableString
+    })
+  )
+  .default([]);
+const graphCandidateEndpointRef = z.object({
+  kind: z.union([graphNodeKind, z.literal("external")]),
+  id: z.string().min(1),
+  label: nullableString,
+  metadata
+});
+const graphCandidateSourceRef = z.object({
+  source_kind: graphSourceRefKind,
+  source_id: nullableString,
+  uri: nullableString,
+  path: nullableString,
+  anchor: nullableString,
+  quote: z.string().max(1000).nullable().optional(),
+  metadata
+});
 const memoryTypeValues = [
   "decision",
   "constraint",
@@ -133,6 +174,10 @@ export type RecallantToolName =
   | "memory_search"
   | "memory_fetch_chunk"
   | "memory_link"
+  | "memory_create_graph_candidate"
+  | "memory_list_graph_candidates"
+  | "memory_get_graph_candidate"
+  | "memory_review_graph_candidate"
   | "memory_promote"
   | "memory_archive"
   | "memory_forget"
@@ -1091,6 +1136,220 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       if (database) return database.linkMemory(args as LinkMemoryInput);
       return stubResponse("memory_link", { edge_id: randomUUID() });
+    }
+  },
+  {
+    name: "memory_create_graph_candidate",
+    title: "Create Graph Candidate",
+    description:
+      "Create a governed staging record for a proposed graph node or edge. Graph candidates preserve provenance and review state; they do not affect default retrieval by themselves.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      developer_id: uuidString.nullable().optional(),
+      candidate_kind: graphCandidateKind,
+      node_kind: graphNodeKind.optional(),
+      relation_type: z.string().min(1).optional(),
+      src: graphCandidateEndpointRef.optional(),
+      dst: graphCandidateEndpointRef.optional(),
+      title: nullableString,
+      summary: nullableString,
+      lifecycle_state: graphLifecycleState.optional(),
+      confidence: z.number().min(0).max(1).nullable().optional(),
+      extraction_method: graphExtractionMethod,
+      created_by: z.enum(["agent", "user", "system", "import"]),
+      scope: graphCandidateScope.default("project"),
+      scope_kind: nullableString,
+      scope_id: nullableString,
+      audience: graphCandidateAudience,
+      source_refs: z.array(graphCandidateSourceRef).default([]),
+      metadata
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const created = await database.createGraphCandidate(
+          scoped.input as CreateGraphCandidateInput & GraphCandidateScopedInput
+        );
+        return {
+          ...created,
+          governance: {
+            candidate_storage_only: true,
+            retrieval_active: false
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_create_graph_candidate", {
+        graph_candidate_id: randomUUID(),
+        candidate_kind: args.candidate_kind,
+        lifecycle_state: args.lifecycle_state ?? "candidate",
+        source_refs: args.source_refs ?? [],
+        review_actions: [],
+        governance: {
+          candidate_storage_only: true,
+          retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_list_graph_candidates",
+    title: "List Graph Candidates",
+    description:
+      "List governed graph candidate staging records for the current project. Candidate rows are reviewable proposals and do not affect default retrieval by themselves.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      developer_id: uuidString.nullable().optional(),
+      candidate_kind: graphCandidateKind.optional(),
+      lifecycle_state: graphLifecycleState.optional(),
+      source_kind: graphSourceRefKind.optional(),
+      extraction_method: graphExtractionMethod.optional(),
+      created_by: z.enum(["agent", "user", "system", "import"]).optional(),
+      audience_kind: nullableString,
+      limit: z.number().int().positive().max(200).default(50)
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const result = await database.listGraphCandidates(
+          scoped.input as ListGraphCandidatesInput & GraphCandidateScopedInput
+        );
+        return {
+          ...result,
+          governance: {
+            candidate_storage_only: true,
+            retrieval_active: false
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_list_graph_candidates", {
+        candidates: [],
+        governance: {
+          candidate_storage_only: true,
+          retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_get_graph_candidate",
+    title: "Get Graph Candidate",
+    description:
+      "Read one governed graph candidate staging record from the current project. Candidate data remains outside default retrieval unless a future promotion path is used.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      graph_candidate_id: uuidString
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const result = await database.getGraphCandidate(
+          scoped.input as GetGraphCandidateInput & GraphCandidateScopedInput
+        );
+        return {
+          ...result,
+          governance: {
+            candidate_storage_only: true,
+            retrieval_active: false
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_get_graph_candidate", {
+        graph_candidate_id: args.graph_candidate_id,
+        found: false,
+        governance: {
+          candidate_storage_only: true,
+          retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_review_graph_candidate",
+    title: "Review Graph Candidate",
+    description:
+      "Append review history and update lifecycle state for a governed graph candidate. Accepting a candidate records review state only; it does not insert graph edges or change default retrieval by itself.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      graph_candidate_id: uuidString,
+      action: graphReviewAction,
+      actor_kind: z.enum(["agent", "user", "system"]),
+      note: nullableString,
+      patch: z
+        .object({
+          node_kind: graphNodeKind.optional(),
+          relation_type: z.string().min(1).optional(),
+          title: nullableString,
+          summary: nullableString,
+          confidence: z.number().min(0).max(1).nullable().optional(),
+          lifecycle_state: graphLifecycleState.optional(),
+          audience: graphCandidateAudience.optional(),
+          metadata: metadata.optional()
+        })
+        .default({}),
+      merge_target_id: uuidString.nullable().optional(),
+      superseded_by: uuidString.nullable().optional(),
+      metadata
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const result = await database.reviewGraphCandidate(
+          scoped.input as ReviewGraphCandidateInput & GraphCandidateScopedInput
+        );
+        return {
+          ...result,
+          governance: {
+            candidate_storage_only: true,
+            retrieval_active: false
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_review_graph_candidate", {
+        graph_candidate_id: args.graph_candidate_id,
+        lifecycle_state:
+          args.action === "reject"
+            ? "rejected"
+            : args.action === "archive"
+              ? "archived"
+              : args.action === "mark_stale" || args.action === "supersede"
+                ? "stale"
+                : "accepted",
+        review_actions: [
+          {
+            review_action_id: randomUUID(),
+            graph_candidate_id: args.graph_candidate_id,
+            action: args.action,
+            actor_kind: args.actor_kind,
+            note: args.note ?? null,
+            metadata: args.metadata ?? {},
+            created_at: nowIso()
+          }
+        ],
+        governance: {
+          candidate_storage_only: true,
+          retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
     }
   },
   {

@@ -1,10 +1,18 @@
 import pg from "pg";
+import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
 const client = new pg.Client({ connectionString: databaseUrl });
+
+const db = new RecallantDb({ databaseUrl });
+
+async function requireIndex(indexName) {
+  const result = await client.query("SELECT to_regclass($1) AS index_name", [indexName]);
+  assert(result.rows[0]?.index_name === indexName, `Missing required index: ${indexName}`);
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -28,8 +36,11 @@ function requireColumns(tableName, actual, expected) {
   assert(missing.length === 0, `${tableName} missing columns: ${missing.join(", ")}`);
 }
 
-await client.connect();
 try {
+  await db.ensureGraphCandidateSchema();
+  await db.ensureGraphCandidateSchema();
+
+  await client.connect();
   const extensions = await client.query(
     "SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pgcrypto')"
   );
@@ -73,10 +84,60 @@ try {
   const agentMemories = await tableColumns("agent_memories");
   requireColumns("agent_memories", agentMemories, ["scope_kind", "scope_id", "audience"]);
 
+  const graphCandidates = await tableColumns("graph_candidates");
+  requireColumns("graph_candidates", graphCandidates, [
+    "project_id",
+    "developer_id",
+    "candidate_kind",
+    "node_kind",
+    "relation_type",
+    "src_endpoint",
+    "dst_endpoint",
+    "title",
+    "summary",
+    "lifecycle_state",
+    "confidence",
+    "extraction_method",
+    "created_by",
+    "scope",
+    "scope_kind",
+    "scope_id",
+    "audience",
+    "metadata",
+    "created_at",
+    "updated_at"
+  ]);
+
+  const graphCandidateSourceRefs = await tableColumns("graph_candidate_source_refs");
+  requireColumns("graph_candidate_source_refs", graphCandidateSourceRefs, [
+    "graph_candidate_id",
+    "source_kind",
+    "source_id",
+    "uri",
+    "path",
+    "anchor",
+    "quote",
+    "metadata",
+    "created_at"
+  ]);
+
+  const graphCandidateReviewActions = await tableColumns("graph_candidate_review_actions");
+  requireColumns("graph_candidate_review_actions", graphCandidateReviewActions, [
+    "graph_candidate_id",
+    "action",
+    "actor_kind",
+    "note",
+    "metadata",
+    "created_at"
+  ]);
+
   const requiredTables = [
     "agent_memories",
     "agent_memory_source_refs",
     "agent_memory_review_actions",
+    "graph_candidates",
+    "graph_candidate_source_refs",
+    "graph_candidate_review_actions",
     "recall_traces",
     "system_settings",
     "developer_settings",
@@ -98,8 +159,12 @@ try {
   const presentTables = new Set(tables.rows.map((row) => row.table_name));
   const missingTables = requiredTables.filter((tableName) => !presentTables.has(tableName));
   assert(missingTables.length === 0, `Missing required tables: ${missingTables.join(", ")}`);
+
+  await requireIndex("idx_graph_candidates_project_lifecycle");
+  await requireIndex("idx_graph_candidate_source_refs_candidate");
 } finally {
-  await client.end();
+  await client.end().catch(() => {});
+  await db.close();
 }
 
 process.stdout.write("Schema smoke passed\n");

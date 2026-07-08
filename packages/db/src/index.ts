@@ -1,7 +1,29 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { buildRecallantReadinessContract } from "@recallant/contracts";
+import {
+  buildRecallantReadinessContract,
+  graphCandidateExtractionMethodValues,
+  graphCandidateKindValues,
+  graphCandidateReviewActionValues,
+  graphCandidateSourceRefKindValues,
+  graphTreeLifecycleStateValues,
+  graphTreeNodeKindValues,
+  type CreateGraphCandidateInput,
+  type CreateGraphCandidateResult,
+  type GetGraphCandidateInput,
+  type GetGraphCandidateResult,
+  type GraphCandidateEndpointRef,
+  type GraphCandidateRecord,
+  type GraphCandidateReviewPatch,
+  type GraphCandidateReviewRecord,
+  type GraphTreeLifecycleState,
+  type GraphTreeNodeKind,
+  type ListGraphCandidatesInput,
+  type ListGraphCandidatesResult,
+  type ReviewGraphCandidateInput,
+  type ReviewGraphCandidateResult
+} from "@recallant/contracts";
 import { Pool, type PoolClient } from "pg";
 import { deriveCanonCapabilityContext } from "./canon-capability-context.js";
 import {
@@ -42,6 +64,25 @@ export {
 } from "./system-activity.js";
 
 export const recallantDatabasePackage = "recallant-db";
+
+function sqlStringList(values: readonly string[]) {
+  return values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
+}
+
+const graphCandidateKindSql = sqlStringList(graphCandidateKindValues);
+const graphTreeNodeKindSql = sqlStringList(graphTreeNodeKindValues);
+const graphTreeLifecycleStateSql = sqlStringList(graphTreeLifecycleStateValues);
+const graphCandidateExtractionMethodSql = sqlStringList(graphCandidateExtractionMethodValues);
+const graphCandidateSourceRefKindSql = sqlStringList(graphCandidateSourceRefKindValues);
+const graphCandidateReviewActionSql = sqlStringList(graphCandidateReviewActionValues);
+const graphCandidateKindSet = new Set<string>(graphCandidateKindValues);
+const graphTreeNodeKindSet = new Set<string>(graphTreeNodeKindValues);
+const graphTreeLifecycleStateSet = new Set<string>(graphTreeLifecycleStateValues);
+const graphCandidateExtractionMethodSet = new Set<string>(graphCandidateExtractionMethodValues);
+const graphCandidateSourceRefKindSet = new Set<string>(graphCandidateSourceRefKindValues);
+const graphCandidateReviewActionSet = new Set<string>(graphCandidateReviewActionValues);
+const graphCandidateCreatedBySet = new Set(["agent", "user", "system", "import"]);
+const graphCandidateReviewActorSet = new Set(["agent", "user", "system"]);
 
 export type RecallantDbConfig = {
   databaseUrl: string;
@@ -993,6 +1034,41 @@ export type LinkMemoryInput = {
   metadata?: JsonObject;
 };
 
+export type GraphCandidateScopedInput = {
+  project_id?: string | null;
+  project_path?: string | null;
+};
+
+type GraphCandidateListInput = ListGraphCandidatesInput & GraphCandidateScopedInput;
+type GraphCandidateGetInput = GetGraphCandidateInput & GraphCandidateScopedInput;
+type GraphCandidateReviewInput = ReviewGraphCandidateInput & GraphCandidateScopedInput;
+
+type GraphCandidateDbRow = {
+  id: string;
+  project_id: string;
+  developer_id: string;
+  candidate_kind: string;
+  node_kind: string | null;
+  relation_type: string | null;
+  src_endpoint: unknown;
+  dst_endpoint: unknown;
+  title: string | null;
+  summary: string | null;
+  lifecycle_state: string;
+  confidence: number | null;
+  extraction_method: string;
+  created_by: string;
+  scope: string;
+  scope_kind: string | null;
+  scope_id: string | null;
+  audience: unknown;
+  metadata: unknown;
+  source_refs?: unknown;
+  review_actions?: unknown;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
 export type ArchiveInput = {
   chunk_id: string;
   action: "archive" | "unarchive";
@@ -1594,6 +1670,122 @@ function hasForbiddenAgentMemoryPayload(input: CreateAgentMemoryInput) {
   ].some((pattern) => pattern.test(combined));
 }
 
+function hasForbiddenGraphCandidatePayload(
+  input: CreateGraphCandidateInput | GraphCandidateReviewPatch
+) {
+  const metadata =
+    "metadata" in input && input.metadata && typeof input.metadata === "object"
+      ? (input.metadata as JsonObject)
+      : undefined;
+  if (
+    metadataFlagIsTrue(metadata, "contains_raw_secret") ||
+    metadataFlagIsTrue(metadata, "contains_raw_credentials") ||
+    metadataFlagIsTrue(metadata, "contains_customer_data") ||
+    metadataFlagIsTrue(metadata, "contains_raw_artifact")
+  ) {
+    return true;
+  }
+  const payload = JSON.stringify(input);
+  return (
+    [
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+      /\bRECALLANT_DATABASE_URL\s*=/i,
+      /\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"']+/i,
+      /\b(?:api[_-]?key|provider[_-]?(?:token|secret)|raw[_-]?credential|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{12,}/i
+    ].some((pattern) => pattern.test(payload)) || hasForbiddenCredentialField(input)
+  );
+}
+
+function hasForbiddenCredentialField(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") {
+    return [
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+      /\bRECALLANT_DATABASE_URL\s*=/i,
+      /\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"']+/i
+    ].some((pattern) => pattern.test(value));
+  }
+  if (Array.isArray(value)) return value.some((item) => hasForbiddenCredentialField(item));
+  if (typeof value !== "object") return false;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      /(?:api[_-]?key|provider[_-]?(?:token|secret)|raw[_-]?credential|password|passwd|secret|token|database[_-]?url|dsn)$/i.test(
+        key
+      ) &&
+      child !== null &&
+      child !== undefined &&
+      child !== false
+    ) {
+      return true;
+    }
+    if (hasForbiddenCredentialField(child)) return true;
+  }
+  return false;
+}
+
+function validateGraphCandidateConfidence(confidence: number | null | undefined) {
+  if (confidence === null || confidence === undefined) return;
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new Error("VALIDATION_ERROR: graph candidate confidence must be between 0 and 1");
+  }
+}
+
+function validateGraphCandidateEndpoint(endpoint: GraphCandidateEndpointRef, label: string) {
+  if (!endpoint || typeof endpoint !== "object") {
+    throw new Error(`VALIDATION_ERROR: ${label} endpoint ref is required`);
+  }
+  if (endpoint.kind !== "external" && !graphTreeNodeKindSet.has(endpoint.kind)) {
+    throw new Error(`VALIDATION_ERROR: ${label} endpoint kind is not allowed`);
+  }
+  if (!endpoint.id || typeof endpoint.id !== "string") {
+    throw new Error(`VALIDATION_ERROR: ${label} endpoint id is required`);
+  }
+}
+
+function normalizeGraphCandidateScope(
+  scope: string | null | undefined,
+  context: ProjectContext,
+  scopeKind?: string | null,
+  scopeId?: string | null
+) {
+  const normalizedScope = scope ?? "project";
+  if (!["project", "developer", "domain", "all"].includes(normalizedScope)) {
+    throw new Error("VALIDATION_ERROR: graph candidate scope is not allowed");
+  }
+  return {
+    scope: normalizedScope,
+    scope_kind: scopeKind ?? normalizedScope,
+    scope_id:
+      scopeId ??
+      (normalizedScope === "project"
+        ? context.projectId
+        : normalizedScope === "developer"
+          ? context.developerId
+          : null)
+  };
+}
+
+function graphCandidateJsonArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function graphCandidateReviewStateForAction(
+  previousState: string,
+  action: string,
+  patch?: GraphCandidateReviewPatch
+): GraphTreeLifecycleState {
+  if (action === "accept" || action === "approve") return "accepted";
+  if (action === "reject") return "rejected";
+  if (action === "archive") return "archived";
+  if (action === "unarchive") return "candidate";
+  if (action === "mark_stale") return "stale";
+  if (action === "merge") return "archived";
+  if (action === "supersede") return "stale";
+  if (action === "edit")
+    return patch?.lifecycle_state ?? (previousState as GraphTreeLifecycleState);
+  throw new Error(`VALIDATION_ERROR: unsupported graph candidate review action ${action}`);
+}
+
 function importMemoryType(resultClasses: readonly string[]) {
   if (resultClasses.includes("secret_reference_names_only")) return "secret_reference";
   if (resultClasses.includes("handoff_checkpoint")) return "checkpoint_seed";
@@ -2099,6 +2291,110 @@ export class RecallantDb {
 
   async ensureSystemActivitySchema() {
     await ensureSystemActivitySchema(this.pool);
+  }
+
+  async ensureGraphCandidateSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS graph_candidates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+        candidate_kind TEXT NOT NULL CHECK (candidate_kind IN (${graphCandidateKindSql})),
+        node_kind TEXT CHECK (node_kind IS NULL OR node_kind IN (${graphTreeNodeKindSql})),
+        relation_type TEXT,
+        src_endpoint JSONB,
+        dst_endpoint JSONB,
+        title TEXT,
+        summary TEXT,
+        lifecycle_state TEXT NOT NULL DEFAULT 'candidate' CHECK (
+          lifecycle_state IN (${graphTreeLifecycleStateSql})
+        ),
+        confidence REAL CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
+        extraction_method TEXT NOT NULL CHECK (
+          extraction_method IN (${graphCandidateExtractionMethodSql})
+        ),
+        created_by TEXT NOT NULL CHECK (created_by IN ('agent', 'user', 'system', 'import')),
+        scope TEXT NOT NULL DEFAULT 'project' CHECK (scope IN ('project', 'developer', 'domain', 'all')),
+        scope_kind TEXT,
+        scope_id TEXT,
+        audience JSONB NOT NULL DEFAULT '[]'::jsonb,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (
+          (
+            candidate_kind = 'node'
+            AND node_kind IS NOT NULL
+            AND relation_type IS NULL
+            AND src_endpoint IS NULL
+            AND dst_endpoint IS NULL
+            AND title IS NOT NULL
+            AND btrim(title) <> ''
+          )
+          OR (
+            candidate_kind = 'edge'
+            AND node_kind IS NULL
+            AND relation_type IS NOT NULL
+            AND btrim(relation_type) <> ''
+            AND src_endpoint IS NOT NULL
+            AND dst_endpoint IS NOT NULL
+          )
+        )
+      )
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS graph_candidate_source_refs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        graph_candidate_id UUID NOT NULL REFERENCES graph_candidates(id) ON DELETE CASCADE,
+        source_kind TEXT NOT NULL CHECK (source_kind IN (${graphCandidateSourceRefKindSql})),
+        source_id TEXT,
+        uri TEXT,
+        path TEXT,
+        anchor TEXT,
+        quote TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (
+          source_id IS NOT NULL
+          OR uri IS NOT NULL
+          OR path IS NOT NULL
+          OR anchor IS NOT NULL
+          OR quote IS NOT NULL
+        )
+      )
+    `);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS graph_candidate_review_actions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        graph_candidate_id UUID NOT NULL REFERENCES graph_candidates(id) ON DELETE CASCADE,
+        action TEXT NOT NULL CHECK (action IN (${graphCandidateReviewActionSql})),
+        actor_kind TEXT NOT NULL CHECK (actor_kind IN ('agent', 'user', 'system')),
+        note TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_candidates_project_lifecycle
+        ON graph_candidates (project_id, lifecycle_state, updated_at DESC)
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_candidates_project_kind
+        ON graph_candidates (project_id, candidate_kind, updated_at DESC)
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_candidate_source_refs_candidate
+        ON graph_candidate_source_refs (graph_candidate_id)
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_candidate_source_refs_source
+        ON graph_candidate_source_refs (source_kind, source_id)
+        WHERE source_id IS NOT NULL
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_graph_candidate_review_actions_candidate
+        ON graph_candidate_review_actions (graph_candidate_id, created_at DESC)
+    `);
   }
 
   async ensureRemoteOnboardingInviteSchema() {
@@ -5587,6 +5883,330 @@ export class RecallantDb {
     return { edge_id: result.rows[0]?.id };
   }
 
+  async createGraphCandidate(
+    input: CreateGraphCandidateInput & GraphCandidateScopedInput
+  ): Promise<CreateGraphCandidateResult> {
+    await this.ensureGraphCandidateSchema();
+    if (!graphCandidateKindSet.has(input.candidate_kind)) {
+      throw new Error("VALIDATION_ERROR: graph candidate kind is not allowed");
+    }
+    if (!graphCandidateExtractionMethodSet.has(input.extraction_method)) {
+      throw new Error("VALIDATION_ERROR: graph candidate extraction_method is not allowed");
+    }
+    if (!graphCandidateCreatedBySet.has(input.created_by)) {
+      throw new Error("VALIDATION_ERROR: graph candidate created_by is not allowed");
+    }
+    if (input.lifecycle_state && !graphTreeLifecycleStateSet.has(input.lifecycle_state)) {
+      throw new Error("VALIDATION_ERROR: graph candidate lifecycle_state is not allowed");
+    }
+    validateGraphCandidateConfidence(input.confidence);
+    if (hasForbiddenGraphCandidatePayload(input)) {
+      throw new Error(
+        "VALIDATION_ERROR: graph candidates must not contain raw secrets, credentials, database URLs, provider secrets, customer data, raw artifacts, backups, or private keys"
+      );
+    }
+    if (
+      (input.created_by === "agent" || input.created_by === "import") &&
+      (input.source_refs?.length ?? 0) === 0
+    ) {
+      throw new Error("VALIDATION_ERROR: agent/import graph candidates require source_refs");
+    }
+    this.validateGraphCandidateSourceRefs(input.source_refs ?? []);
+    if (input.candidate_kind === "node") {
+      if (!graphTreeNodeKindSet.has(input.node_kind)) {
+        throw new Error("VALIDATION_ERROR: graph node candidate node_kind is not allowed");
+      }
+      if (!input.title?.trim()) {
+        throw new Error("VALIDATION_ERROR: graph node candidate title is required");
+      }
+    } else {
+      validateGraphCandidateEndpoint(input.src, "src");
+      validateGraphCandidateEndpoint(input.dst, "dst");
+      if (!input.relation_type?.trim()) {
+        throw new Error("VALIDATION_ERROR: graph edge candidate relation_type is required");
+      }
+    }
+
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      throw new Error("VALIDATION_ERROR: graph candidate developer_id does not match project");
+    }
+    const scoped = normalizeGraphCandidateScope(
+      input.scope,
+      context,
+      input.scope_kind,
+      input.scope_id
+    );
+
+    return withTransaction(this.pool, async (client) => {
+      const result = await client.query<{ id: string }>(
+        `
+          INSERT INTO graph_candidates (
+            project_id, developer_id, candidate_kind, node_kind, relation_type, src_endpoint,
+            dst_endpoint, title, summary, lifecycle_state, confidence, extraction_method,
+            created_by, scope, scope_kind, scope_id, audience, metadata
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          RETURNING id
+        `,
+        [
+          context.projectId,
+          context.developerId,
+          input.candidate_kind,
+          input.candidate_kind === "node" ? input.node_kind : null,
+          input.candidate_kind === "edge" ? input.relation_type : null,
+          input.candidate_kind === "edge" ? JSON.stringify(input.src) : null,
+          input.candidate_kind === "edge" ? JSON.stringify(input.dst) : null,
+          input.title ?? null,
+          input.summary ?? null,
+          input.lifecycle_state ?? "candidate",
+          input.confidence ?? null,
+          input.extraction_method,
+          input.created_by,
+          scoped.scope,
+          scoped.scope_kind,
+          scoped.scope_id,
+          JSON.stringify(input.audience ?? [{ kind: "all_agents", id: null }]),
+          JSON.stringify(input.metadata ?? {})
+        ]
+      );
+      const candidateId = result.rows[0]?.id;
+      if (!candidateId) throw new Error("Failed to create graph candidate");
+      for (const ref of input.source_refs ?? []) {
+        await client.query(
+          `
+            INSERT INTO graph_candidate_source_refs (
+              graph_candidate_id, source_kind, source_id, uri, path, anchor, quote, metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `,
+          [
+            candidateId,
+            ref.source_kind,
+            stringOrNull(ref.source_id),
+            stringOrNull(ref.uri),
+            stringOrNull(ref.path),
+            stringOrNull(ref.anchor),
+            stringOrNull(ref.quote),
+            JSON.stringify(ref.metadata ?? {})
+          ]
+        );
+      }
+      return this.fetchGraphCandidateRecord(client, candidateId, context);
+    });
+  }
+
+  async listGraphCandidates(
+    input: GraphCandidateListInput = {}
+  ): Promise<ListGraphCandidatesResult> {
+    await this.ensureGraphCandidateSchema();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      return { candidates: [] };
+    }
+    const values: unknown[] = [context.projectId, context.developerId];
+    const clauses = ["gc.project_id = $1::uuid", "gc.developer_id = $2::uuid"];
+    const add = (sql: string, value: unknown) => {
+      values.push(value);
+      clauses.push(sql.replace("?", `$${values.length}`));
+    };
+    if (input.candidate_kind) add("gc.candidate_kind = ?", input.candidate_kind);
+    if (input.lifecycle_state) add("gc.lifecycle_state = ?", input.lifecycle_state);
+    if (input.extraction_method) add("gc.extraction_method = ?", input.extraction_method);
+    if (input.created_by) add("gc.created_by = ?", input.created_by);
+    if (input.source_kind) {
+      values.push(input.source_kind);
+      clauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM graph_candidate_source_refs source_filter
+          WHERE source_filter.graph_candidate_id = gc.id
+            AND source_filter.source_kind = $${values.length}
+        )
+      `);
+    }
+    if (input.audience_kind) {
+      values.push(input.audience_kind);
+      clauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(coalesce(gc.audience, '[]'::jsonb)) AS audience_item
+          WHERE audience_item->>'kind' = $${values.length}
+        )
+      `);
+    }
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+    values.push(limit);
+    const result = await this.pool.query<GraphCandidateDbRow>(
+      `
+        SELECT
+          gc.*,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs,
+          (
+            SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.created_at DESC), '[]'::jsonb)
+            FROM graph_candidate_review_actions a
+            WHERE a.graph_candidate_id = gc.id
+          ) AS review_actions
+        FROM graph_candidates gc
+        LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+        WHERE ${clauses.join(" AND ")}
+        GROUP BY gc.id
+        ORDER BY gc.updated_at DESC, gc.created_at DESC
+        LIMIT $${values.length}::int
+      `,
+      values
+    );
+    return { candidates: result.rows.map((row) => this.graphCandidateRecordFromRow(row)) };
+  }
+
+  async getGraphCandidate(input: GraphCandidateGetInput): Promise<GetGraphCandidateResult> {
+    await this.ensureGraphCandidateSchema();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    return this.fetchGraphCandidateRecord(this.pool, input.graph_candidate_id, context);
+  }
+
+  async reviewGraphCandidate(
+    input: GraphCandidateReviewInput
+  ): Promise<ReviewGraphCandidateResult> {
+    await this.ensureGraphCandidateSchema();
+    if (!graphCandidateReviewActionSet.has(input.action)) {
+      throw new Error(
+        `VALIDATION_ERROR: unsupported graph candidate review action ${input.action}`
+      );
+    }
+    if (!graphCandidateReviewActorSet.has(input.actor_kind)) {
+      throw new Error("VALIDATION_ERROR: graph candidate review actor_kind is not allowed");
+    }
+    validateGraphCandidateConfidence(input.patch?.confidence);
+    if (
+      input.patch?.lifecycle_state &&
+      !graphTreeLifecycleStateSet.has(input.patch.lifecycle_state)
+    ) {
+      throw new Error("VALIDATION_ERROR: graph candidate lifecycle_state is not allowed");
+    }
+    if (input.patch && hasForbiddenGraphCandidatePayload(input.patch)) {
+      throw new Error(
+        "VALIDATION_ERROR: graph candidate review patches must not contain raw secrets, credentials, database URLs, provider secrets, customer data, raw artifacts, backups, or private keys"
+      );
+    }
+    if (input.metadata && hasForbiddenCredentialField(input.metadata)) {
+      throw new Error(
+        "VALIDATION_ERROR: graph candidate review metadata contains forbidden fields"
+      );
+    }
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+
+    return withTransaction(this.pool, async (client) => {
+      const before = await client.query<GraphCandidateDbRow>(
+        `
+          SELECT *
+          FROM graph_candidates
+          WHERE id = $1 AND project_id = $2 AND developer_id = $3
+          FOR UPDATE
+        `,
+        [input.graph_candidate_id, context.projectId, context.developerId]
+      );
+      const previous = before.rows[0];
+      if (!previous) {
+        throw new Error("VALIDATION_ERROR: graph candidate not found");
+      }
+      const nextState = graphCandidateReviewStateForAction(
+        previous.lifecycle_state,
+        input.action,
+        input.patch
+      );
+      const updates: string[] = ["updated_at = now()", "lifecycle_state = $4"];
+      const values: unknown[] = [
+        input.graph_candidate_id,
+        context.projectId,
+        context.developerId,
+        nextState
+      ];
+      const set = (column: string, value: unknown) => {
+        values.push(value);
+        updates.push(`${column} = $${values.length}`);
+      };
+      if (input.action === "edit" && input.patch) {
+        if (input.patch.node_kind !== undefined) {
+          if (!graphTreeNodeKindSet.has(input.patch.node_kind)) {
+            throw new Error("VALIDATION_ERROR: graph candidate patch node_kind is not allowed");
+          }
+          set("node_kind", input.patch.node_kind);
+        }
+        if (input.patch.relation_type !== undefined)
+          set("relation_type", input.patch.relation_type);
+        if (input.patch.title !== undefined) set("title", input.patch.title);
+        if (input.patch.summary !== undefined) set("summary", input.patch.summary);
+        if (input.patch.confidence !== undefined) set("confidence", input.patch.confidence);
+        if (input.patch.audience !== undefined)
+          set("audience", JSON.stringify(input.patch.audience));
+        if (input.patch.metadata !== undefined)
+          set("metadata", JSON.stringify(input.patch.metadata));
+      }
+      if (input.action === "merge" || input.action === "supersede") {
+        set(
+          "metadata",
+          JSON.stringify({
+            ...(readObjectSetting(previous.metadata) ?? {}),
+            merge_target_id: input.merge_target_id ?? null,
+            superseded_by: input.superseded_by ?? null,
+            review_action: input.action
+          })
+        );
+      }
+      await client.query(
+        `
+          UPDATE graph_candidates
+          SET ${updates.join(", ")}
+          WHERE id = $1 AND project_id = $2 AND developer_id = $3
+        `,
+        values
+      );
+      await client.query(
+        `
+          INSERT INTO graph_candidate_review_actions (
+            graph_candidate_id, action, actor_kind, note, metadata
+          )
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          input.graph_candidate_id,
+          input.action,
+          input.actor_kind,
+          input.note ?? null,
+          JSON.stringify({
+            ...(input.metadata ?? {}),
+            previous_state: {
+              lifecycle_state: previous.lifecycle_state,
+              node_kind: previous.node_kind,
+              relation_type: previous.relation_type,
+              title: previous.title,
+              summary: previous.summary,
+              confidence: previous.confidence
+            },
+            next_state: { lifecycle_state: nextState },
+            patch: input.patch ?? {},
+            merge_target_id: input.merge_target_id ?? null,
+            superseded_by: input.superseded_by ?? null
+          })
+        ]
+      );
+      return this.fetchGraphCandidateRecord(client, input.graph_candidate_id, context);
+    });
+  }
+
   async getContextPack(input: ContextPackInput) {
     const context = await this.contextForSession(input.session_id);
     if (input.project_id && input.project_id !== context.projectId) {
@@ -8415,6 +9035,154 @@ export class RecallantDb {
       };
     }
     return { status: "accepted", usePolicy: "recall_allowed", reason: "ordinary_memory" };
+  }
+
+  private validateGraphCandidateSourceRefs(
+    refs: NonNullable<CreateGraphCandidateInput["source_refs"]>
+  ) {
+    for (const ref of refs) {
+      if (!graphCandidateSourceRefKindSet.has(ref.source_kind)) {
+        throw new Error("VALIDATION_ERROR: graph candidate source_ref kind is not allowed");
+      }
+      if (
+        !stringOrNull(ref.source_id) &&
+        !stringOrNull(ref.uri) &&
+        !stringOrNull(ref.path) &&
+        !stringOrNull(ref.anchor) &&
+        !stringOrNull(ref.quote)
+      ) {
+        throw new Error("VALIDATION_ERROR: graph candidate source_ref needs an identifier");
+      }
+      assertMaxChars("graph candidate source_ref uri", ref.uri, 1000);
+      assertMaxChars("graph candidate source_ref path", ref.path, 1000);
+      assertMaxChars("graph candidate source_ref quote", ref.quote, 1000);
+      if (hasForbiddenCredentialField(ref)) {
+        throw new Error("VALIDATION_ERROR: graph candidate source_ref contains forbidden fields");
+      }
+    }
+  }
+
+  private async fetchGraphCandidateRecord(
+    queryable: Pool | PoolClient,
+    candidateId: string,
+    context: ProjectContext
+  ) {
+    const result = await queryable.query<GraphCandidateDbRow>(
+      `
+        SELECT
+          gc.*,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs,
+          (
+            SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.created_at DESC), '[]'::jsonb)
+            FROM graph_candidate_review_actions a
+            WHERE a.graph_candidate_id = gc.id
+          ) AS review_actions
+        FROM graph_candidates gc
+        LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+        WHERE gc.id = $1 AND gc.project_id = $2 AND gc.developer_id = $3
+        GROUP BY gc.id
+      `,
+      [candidateId, context.projectId, context.developerId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("VALIDATION_ERROR: graph candidate not found");
+    return this.graphCandidateRecordFromRow(row);
+  }
+
+  private graphCandidateRecordFromRow(row: GraphCandidateDbRow): GraphCandidateRecord {
+    const sourceRefs = this.graphCandidateSourceRefsFromJson(row.source_refs);
+    const reviewActions = this.graphCandidateReviewActionsFromJson(row.review_actions);
+    const base = {
+      graph_candidate_id: row.id,
+      project_id: row.project_id,
+      developer_id: row.developer_id,
+      scope: row.scope as GraphCandidateRecord["scope"],
+      scope_kind: row.scope_kind,
+      scope_id: row.scope_id,
+      lifecycle_state: row.lifecycle_state as GraphCandidateRecord["lifecycle_state"],
+      confidence: row.confidence,
+      extraction_method: row.extraction_method as GraphCandidateRecord["extraction_method"],
+      created_by: row.created_by as GraphCandidateRecord["created_by"],
+      audience: graphCandidateJsonArray(row.audience) as GraphCandidateRecord["audience"],
+      source_refs: sourceRefs,
+      metadata: readObjectSetting(row.metadata) ?? {},
+      review_actions: reviewActions,
+      created_at: nullableIso(row.created_at) ?? undefined,
+      updated_at: nullableIso(row.updated_at) ?? undefined
+    };
+    if (row.candidate_kind === "node") {
+      return {
+        ...base,
+        candidate_kind: "node",
+        node_kind: row.node_kind as GraphTreeNodeKind,
+        title: redactSecretValues(row.title ?? ""),
+        summary: row.summary ? redactSecretValues(row.summary) : null
+      };
+    }
+    return {
+      ...base,
+      candidate_kind: "edge",
+      relation_type: row.relation_type ?? "",
+      src: this.graphCandidateEndpointFromJson(row.src_endpoint),
+      dst: this.graphCandidateEndpointFromJson(row.dst_endpoint),
+      title: row.title ? redactSecretValues(row.title) : null,
+      summary: row.summary ? redactSecretValues(row.summary) : null
+    };
+  }
+
+  private graphCandidateEndpointFromJson(value: unknown): GraphCandidateEndpointRef {
+    const record = readObjectSetting(value) ?? {};
+    const metadata = readObjectSetting(record.metadata) ?? {};
+    return {
+      kind:
+        typeof record.kind === "string" &&
+        (record.kind === "external" || graphTreeNodeKindSet.has(record.kind))
+          ? (record.kind as GraphCandidateEndpointRef["kind"])
+          : "external",
+      id: typeof record.id === "string" ? record.id : "",
+      label: typeof record.label === "string" ? redactSecretValues(record.label) : null,
+      metadata
+    };
+  }
+
+  private graphCandidateSourceRefsFromJson(value: unknown) {
+    return graphCandidateJsonArray(value).map((item) => {
+      const record = readObjectSetting(item) ?? {};
+      return {
+        source_ref_id: stringOrNull(record.id) ?? stringOrNull(record.source_ref_id) ?? undefined,
+        source_kind: String(
+          record.source_kind ?? "external"
+        ) as GraphCandidateRecord["source_refs"][number]["source_kind"],
+        source_id: stringOrNull(record.source_id),
+        uri: stringOrNull(record.uri),
+        path: stringOrNull(record.path),
+        anchor: stringOrNull(record.anchor),
+        quote: stringOrNull(record.quote) ? redactSecretValues(String(record.quote)) : null,
+        metadata: readObjectSetting(record.metadata) ?? {}
+      };
+    });
+  }
+
+  private graphCandidateReviewActionsFromJson(value: unknown): GraphCandidateReviewRecord[] {
+    return graphCandidateJsonArray(value).map((item) => {
+      const record = readObjectSetting(item) ?? {};
+      return {
+        review_action_id:
+          stringOrNull(record.id) ?? stringOrNull(record.review_action_id) ?? undefined,
+        graph_candidate_id: String(record.graph_candidate_id ?? ""),
+        action: String(record.action ?? "edit") as GraphCandidateReviewRecord["action"],
+        actor_kind: String(
+          record.actor_kind ?? "system"
+        ) as GraphCandidateReviewRecord["actor_kind"],
+        note: stringOrNull(record.note),
+        metadata: readObjectSetting(record.metadata) ?? {},
+        created_at: nullableIso(record.created_at) ?? undefined
+      };
+    });
   }
 
   private buildSearchFilter(input: {

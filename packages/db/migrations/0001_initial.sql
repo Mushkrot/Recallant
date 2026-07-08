@@ -155,6 +155,114 @@ CREATE TABLE edges (
   CHECK (src_kind <> dst_kind OR src_id <> dst_id)
 );
 
+CREATE TABLE graph_candidates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  candidate_kind TEXT NOT NULL CHECK (candidate_kind IN ('node', 'edge')),
+  node_kind TEXT CHECK (
+    node_kind IS NULL
+    OR node_kind IN (
+      'source',
+      'chunk',
+      'event',
+      'memory',
+      'topic',
+      'entity',
+      'person',
+      'project',
+      'decision_cluster',
+      'open_question',
+      'preference',
+      'procedure'
+    )
+  ),
+  relation_type TEXT,
+  src_endpoint JSONB,
+  dst_endpoint JSONB,
+  title TEXT,
+  summary TEXT,
+  lifecycle_state TEXT NOT NULL DEFAULT 'candidate' CHECK (
+    lifecycle_state IN ('candidate', 'accepted', 'needs_review', 'rejected', 'stale', 'archived')
+  ),
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)),
+  extraction_method TEXT NOT NULL CHECK (
+    extraction_method IN (
+      'human',
+      'agent',
+      'import',
+      'migration',
+      'closeout',
+      'keeper',
+      'deterministic_rule',
+      'connector',
+      'vault_bridge',
+      'other'
+    )
+  ),
+  created_by TEXT NOT NULL CHECK (created_by IN ('agent', 'user', 'system', 'import')),
+  scope TEXT NOT NULL DEFAULT 'project' CHECK (scope IN ('project', 'developer', 'domain', 'all')),
+  scope_kind TEXT,
+  scope_id TEXT,
+  audience JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (
+      candidate_kind = 'node'
+      AND node_kind IS NOT NULL
+      AND relation_type IS NULL
+      AND src_endpoint IS NULL
+      AND dst_endpoint IS NULL
+      AND title IS NOT NULL
+      AND btrim(title) <> ''
+    )
+    OR (
+      candidate_kind = 'edge'
+      AND node_kind IS NULL
+      AND relation_type IS NOT NULL
+      AND btrim(relation_type) <> ''
+      AND src_endpoint IS NOT NULL
+      AND dst_endpoint IS NOT NULL
+    )
+  )
+);
+
+CREATE TABLE graph_candidate_source_refs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  graph_candidate_id UUID NOT NULL REFERENCES graph_candidates(id) ON DELETE CASCADE,
+  source_kind TEXT NOT NULL CHECK (
+    source_kind IN ('event', 'chunk', 'raw_artifact', 'edge', 'checkpoint', 'external', 'agent_memory', 'source')
+  ),
+  source_id TEXT,
+  uri TEXT,
+  path TEXT,
+  anchor TEXT,
+  quote TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    source_id IS NOT NULL
+    OR uri IS NOT NULL
+    OR path IS NOT NULL
+    OR anchor IS NOT NULL
+    OR quote IS NOT NULL
+  )
+);
+
+CREATE TABLE graph_candidate_review_actions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  graph_candidate_id UUID NOT NULL REFERENCES graph_candidates(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK (
+    action IN ('accept', 'approve', 'reject', 'archive', 'unarchive', 'mark_stale', 'edit', 'merge', 'supersede')
+  ),
+  actor_kind TEXT NOT NULL CHECK (actor_kind IN ('agent', 'user', 'system')),
+  note TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE checkpoints (
   project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -577,6 +685,12 @@ CREATE INDEX idx_chunks_scope_kind ON chunks (scope_kind, scope_id) WHERE scope_
 
 CREATE INDEX idx_edges_src ON edges (project_id, src_kind, src_id);
 CREATE INDEX idx_edges_dst ON edges (project_id, dst_kind, dst_id);
+
+CREATE INDEX idx_graph_candidates_project_lifecycle ON graph_candidates (project_id, lifecycle_state, updated_at DESC);
+CREATE INDEX idx_graph_candidates_project_kind ON graph_candidates (project_id, candidate_kind, updated_at DESC);
+CREATE INDEX idx_graph_candidate_source_refs_candidate ON graph_candidate_source_refs (graph_candidate_id);
+CREATE INDEX idx_graph_candidate_source_refs_source ON graph_candidate_source_refs (source_kind, source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX idx_graph_candidate_review_actions_candidate ON graph_candidate_review_actions (graph_candidate_id, created_at DESC);
 
 CREATE INDEX idx_agent_memories_project_policy ON agent_memories (project_id, status, use_policy, updated_at DESC);
 CREATE INDEX idx_agent_memories_developer_scope ON agent_memories (developer_id, scope, status, use_policy);
