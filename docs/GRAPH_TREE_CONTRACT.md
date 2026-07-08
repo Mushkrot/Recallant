@@ -17,13 +17,12 @@ This contract covers:
 - graph relation types;
 - graph lifecycle states;
 - compatibility with the current `edges` table;
-- provenance, scope, confidence, extraction, review, and safety requirements.
+- provenance, scope, confidence, extraction, review, and safety requirements;
+- the current graph candidate, Markdown vault bridge, and memory keeper candidate surfaces.
 
 This contract does not implement:
 
-- automatic keeper extraction;
 - graph retrieval profiles;
-- Obsidian vault bridges;
 - graph database migration;
 - Workbench topology or graph visualization.
 
@@ -198,6 +197,48 @@ It detects media references without copying or ingesting raw media. It treats se
 content as review-required and reports only bounded names/codes, never raw secret values. Vault
 candidate output remains staged review state and is not retrieval-active by default.
 
+## Memory Keeper Candidate Pipeline
+
+Recallant includes a deterministic local-first memory keeper candidate pipeline. It turns controlled
+source text into governed graph candidate proposals; it does not silently promote those proposals
+into recall-active memory or graph edges.
+
+The CLI surface is:
+
+```bash
+recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text]
+recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text] --write-candidates --confirm
+```
+
+`keeper candidates` is dry-run by default and does not require `RECALLANT_DATABASE_URL` unless the
+caller explicitly passes both `--write-candidates` and `--confirm`. Dry-run output reports
+`dry_run: true`, `writes_database: false`, candidate counts, source refs, lifecycle states,
+confidence, extraction method `keeper`, and reason/provenance metadata.
+
+The first deterministic extractor recognizes conservative, reviewable signals:
+
+- `Project: ...`;
+- `Topic:` / `Topics:` / `Tag:` / `Tags: ...`;
+- `Entity:` / `Entities: ...`;
+- `Decision: ...`;
+- Markdown headings;
+- Markdown tags.
+
+Those signals produce staged node candidates for projects, topics, entities, and decision clusters.
+They also produce relation candidates such as `derived_from`, `belongs_to_project`, `about`, and
+`same_topic_as` when the input supplies enough structure. Every proposal includes source refs with
+bounded quotes and source metadata. Secret-like input is redacted and marked `needs_review`; raw
+tokens, private keys, database URLs, customer-data markers, and raw-artifact markers must not be
+copied into proposal JSON or stored graph candidate rows.
+
+Confirmed keeper writes call the same graph candidate storage used by other candidate sources.
+Stored keeper candidates remain staged review records. They are not part of default retrieval, and
+accepting or reviewing a candidate still does not by itself insert a row into `edges`.
+
+The public smoke gate for this surface is `npm run memory-keeper:smoke`. It checks dry-run behavior
+without database configuration, confirm-gated writes, source refs, `needs_review` lifecycle on
+unsafe fixtures, CLI and stored-payload leak scans, and default retrieval isolation.
+
 The first review actions are:
 
 - `accept`;
@@ -257,6 +298,7 @@ should show:
 
 ## Phase Boundary
 
-This document defines the graph tree contract and vocabulary. It does not build the keeper pipeline,
-add graph retrieval profiles, create a graph visualization, add an Obsidian bridge, or migrate
-Recallant to a dedicated graph database.
+This document defines the graph tree contract and vocabulary, plus the current graph candidate,
+Markdown vault bridge, and deterministic keeper candidate slices. It does not add graph retrieval
+profiles, create a graph visualization, promote accepted candidates into active graph state, add
+passive vault sync, ingest raw media, or migrate Recallant to a dedicated graph database.

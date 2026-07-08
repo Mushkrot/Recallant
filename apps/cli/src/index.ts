@@ -14,7 +14,12 @@ import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supportedClientKinds } from "@recallant/adapters";
-import { getRecallantCoreInfo } from "@recallant/core";
+import {
+  buildMemoryKeeperPlan,
+  getRecallantCoreInfo,
+  type MemoryKeeperPlan,
+  type MemoryKeeperSourceInput
+} from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
 import { runRecallantRemoteBridge, runRecallantStdioServer } from "@recallant/mcp";
@@ -54,8 +59,10 @@ import {
   resolveRemoteMcpStoredCredential,
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig,
+  graphCandidateSourceRefKindValues,
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
+  type GraphCandidateSourceRefKind,
   type RemoteMcpDoctorReport,
   type RemoteAgentConsentScope
 } from "@recallant/contracts";
@@ -311,7 +318,9 @@ function positionalArgs(argv: readonly string[]) {
     "--poll-interval-ms",
     "--include",
     "--exclude",
-    "--output"
+    "--output",
+    "--from-file",
+    "--source-path"
   ]);
   const args: string[] = [];
   for (let index = 3; index < argv.length; index += 1) {
@@ -10411,6 +10420,174 @@ function repeatedFlag(argv: readonly string[], name: string) {
   return values;
 }
 
+type KeeperCliPlan = MemoryKeeperPlan & {
+  action: "keeper_candidates";
+  project_dir: string;
+};
+
+type KeeperCandidateTextPlan = Omit<KeeperCliPlan, "dry_run" | "writes_database" | "proposals"> & {
+  dry_run: boolean;
+  writes_database: boolean;
+  persisted?: {
+    count: number;
+    graph_candidate_ids: Array<string | undefined>;
+  };
+  proposals: Array<KeeperCliPlan["proposals"][number] & { persisted?: string | null }>;
+};
+
+function parseKeeperFormat(argv: readonly string[]) {
+  const format = parseFlag(argv, "--format") ?? "json";
+  if (format !== "json" && format !== "text") {
+    throw new Error("VALIDATION_ERROR: keeper candidates --format must be json or text");
+  }
+  return format;
+}
+
+function parseKeeperSourceKind(raw: string | undefined): GraphCandidateSourceRefKind {
+  if (!raw) return "external";
+  if (!graphCandidateSourceRefKindValues.includes(raw as GraphCandidateSourceRefKind)) {
+    throw new Error(`VALIDATION_ERROR: invalid keeper source kind ${raw}`);
+  }
+  return raw as GraphCandidateSourceRefKind;
+}
+
+async function readKeeperSourceInput(
+  argv: readonly string[],
+  projectDir: string
+): Promise<MemoryKeeperSourceInput> {
+  const text = parseFlag(argv, "--text");
+  const fromFile = parseFlag(argv, "--from-file");
+  if (text !== undefined && fromFile !== undefined) {
+    throw new Error("VALIDATION_ERROR: keeper candidates accepts either --text or --from-file");
+  }
+  if (text === undefined && fromFile === undefined) {
+    throw new Error("VALIDATION_ERROR: keeper candidates requires --text or --from-file");
+  }
+
+  const resolvedFile = fromFile ? resolve(fromFile) : null;
+  const sourcePath = parseFlag(argv, "--source-path") ?? resolvedFile;
+  const content = text !== undefined ? text : await readFile(resolvedFile!, "utf8");
+  return {
+    input_kind: fromFile ? "file" : "text",
+    text: content,
+    source_kind: parseKeeperSourceKind(parseFlag(argv, "--source-kind")),
+    source_id: parseFlag(argv, "--source-id") ?? null,
+    path: sourcePath,
+    label: parseFlag(argv, "--label") ?? (fromFile ? basename(fromFile) : "Keeper CLI text"),
+    metadata: {
+      cli_command: "keeper candidates",
+      project_dir: projectDir
+    }
+  };
+}
+
+function formatKeeperCandidateText(plan: KeeperCandidateTextPlan) {
+  const lines = [
+    "Recallant keeper candidates",
+    `Dry run: ${plan.dry_run}`,
+    `Writes database: ${plan.writes_database}`,
+    `Project dir: ${plan.project_dir}`,
+    `Input: ${plan.input.input_kind} source=${plan.input.source_kind} source_id=${plan.input.source_id ?? "none"}`,
+    `Proposals: ${plan.summary.proposals} (${plan.summary.node_candidates} nodes, ${plan.summary.edge_candidates} edges)`,
+    `Lifecycle states: ${plan.summary.lifecycle_states.join(", ")}`,
+    `Source refs required: ${plan.summary.source_refs_required}`,
+    ""
+  ];
+  if (plan.persisted) {
+    lines.splice(8, 0, `Persisted: ${plan.persisted.count}`);
+  }
+
+  for (const proposal of plan.proposals) {
+    const candidate = proposal.candidate;
+    const lifecycle = candidate.lifecycle_state ?? "candidate";
+    const confidence =
+      typeof candidate.confidence === "number" ? candidate.confidence.toFixed(2) : "n/a";
+    const sourceRefStatus = candidate.source_refs.length > 0 ? "present" : "missing";
+    const reason = String(candidate.metadata?.reason ?? proposal.reason);
+    const persisted = proposal.persisted ? ` persisted=${proposal.persisted}` : "";
+    if (candidate.candidate_kind === "node") {
+      lines.push(
+        `- node ${candidate.node_kind} "${candidate.title}" lifecycle=${lifecycle} confidence=${confidence} source_refs=${sourceRefStatus}(${candidate.source_refs.length})${persisted} reason=${reason}`
+      );
+    } else {
+      lines.push(
+        `- edge ${candidate.relation_type} "${candidate.src.label ?? candidate.src.id}" -> "${
+          candidate.dst.label ?? candidate.dst.id
+        }" lifecycle=${lifecycle} confidence=${confidence} source_refs=${sourceRefStatus}(${
+          candidate.source_refs.length
+        })${persisted} reason=${reason}`
+      );
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function runKeeperCommand(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "candidates";
+  if (subcommand !== "candidates" && subcommand !== "proposals") {
+    throw new Error("VALIDATION_ERROR: keeper supports candidates");
+  }
+
+  const writeCandidates = argv.includes("--write-candidates");
+  if (writeCandidates && !argv.includes("--confirm")) {
+    throw new Error(
+      "VALIDATION_ERROR: keeper candidate persistence requires --write-candidates --confirm"
+    );
+  }
+
+  const format = parseKeeperFormat(argv);
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const sourceInput = await readKeeperSourceInput(argv, projectDir);
+  const plan: KeeperCliPlan = {
+    action: "keeper_candidates",
+    project_dir: projectDir,
+    ...buildMemoryKeeperPlan(sourceInput)
+  };
+
+  if (writeCandidates) {
+    const database = createRecallantDbFromEnv();
+    if (!database)
+      throw new Error("RECALLANT_DATABASE_URL is required for keeper candidate writes");
+    try {
+      const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
+      for (const proposal of plan.proposals) {
+        created.push(
+          await database.createGraphCandidate({
+            ...proposal.candidate,
+            project_path: projectDir
+          })
+        );
+      }
+      const persistedPlan = {
+        ...plan,
+        dry_run: false,
+        writes_database: true,
+        persisted: {
+          count: created.length,
+          graph_candidate_ids: created.map((candidate) => candidate.graph_candidate_id)
+        },
+        proposals: plan.proposals.map((proposal, index) => ({
+          ...proposal,
+          persisted: created[index]?.graph_candidate_id ?? null
+        }))
+      };
+      process.stdout.write(
+        format === "text"
+          ? formatKeeperCandidateText(persistedPlan)
+          : `${JSON.stringify(persistedPlan, null, 2)}\n`
+      );
+    } finally {
+      await database.close();
+    }
+    return;
+  }
+
+  process.stdout.write(
+    format === "text" ? formatKeeperCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+  );
+}
+
 async function runVaultCommand(argv: readonly string[]) {
   const subcommand = argv[3] ?? "inventory";
   const args = positionalArgs(argv).slice(1);
@@ -10694,7 +10871,15 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "keeper") {
+    return [
+      "Usage: recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text] [--write-candidates --confirm]",
+      "",
+      "Extract governed graph candidate proposals from controlled source text. Dry-run is the default and does not require RECALLANT_DATABASE_URL.",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -10750,6 +10935,7 @@ async function main(argv: readonly string[]) {
   if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
   if (command === "source" || command === "project-source") return runSourceCommand(argv);
   if (command === "vault") return runVaultCommand(argv);
+  if (command === "keeper") return runKeeperCommand(argv);
   if (command === "local-cleanup" || command === "sandbox-local-cleanup")
     return runLocalCleanup(argv);
   if (command === "init") return runInit(argv);

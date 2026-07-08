@@ -118,16 +118,21 @@ labeled as examples/evidence unless explicitly adopted in the current project.
 Recallant's current graph surface is intentionally bounded: memories and evidence can be linked,
 and search can optionally expand from seed chunks through graph edges. The
 [governed graph tree contract](GRAPH_TREE_CONTRACT.md) names the public node kinds, relation types,
-lifecycle states, and governance rules that future keeper, retrieval, and review features must use.
+lifecycle states, and governance rules that keeper, retrieval, and review features must use.
 
 This graph layer is meant to improve retrieval quality by preserving useful relationships: what a
 memory was derived from, what decision it supports, what it supersedes, which topic or project it
 belongs to, and which candidates still need review. It must keep provenance, scope, confidence,
 extraction method, and review state attached before graph output can influence recall.
 
-The contract does not claim that Recallant already has automatic keeper extraction, graph retrieval
-profiles, an Obsidian bridge, a dedicated graph database, or a Workbench topology view. Those remain
-future slices layered on top of the governed graph vocabulary.
+Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, and
+a deterministic `recallant keeper candidates` path for keeper-generated candidate proposals. These
+surfaces stay review-first: candidates preserve source refs, confidence, extraction method,
+lifecycle state, and provenance, and they do not become retrieval-active by default.
+
+Recallant does not yet have graph retrieval profiles, automatic promotion from accepted candidates
+into active graph state, a dedicated graph database, passive vault sync, raw media ingestion, or a
+Workbench topology view. Those remain future slices layered on top of the governed graph vocabulary.
 
 ## Safety Model
 

@@ -49,6 +49,9 @@ dependable before expanding the product surface.
 - Governed graph candidate storage and review lifecycle, with project-scoped candidate records,
   source refs, review history, MCP create/list/get/review tools, policy smoke coverage, and no
   implicit promotion into default retrieval.
+- Deterministic memory keeper graph candidate generation through `recallant keeper candidates`,
+  with dry-run defaults, confirm-gated candidate persistence, source refs, keeper extraction
+  metadata, unsafe-input redaction to `needs_review`, and retrieval-isolation smoke coverage.
 - Public readiness and security smokes that guard the OSS-facing documentation boundary.
 
 ## Near Term
@@ -85,9 +88,10 @@ dependable before expanding the product surface.
 - Documentation posture follow-through: expand Workbench-confirmed canonicalization plans, harden
   empty-project starter-doc generation across more real-world profiles, and broaden posture pilots
   without turning recalled discussion into binding instructions automatically.
-- Governed graph next slices after the shipped dry-run Markdown vault bridge: keeper-generated
-  candidates, named graph retrieval profiles, practical review surfaces, first-class graph storage
-  decisions, and safe promotion paths for accepted candidates.
+- Governed graph next slices after the shipped candidate storage, Markdown vault bridge, and memory
+  keeper candidate pipeline: broader keeper source integration, named graph retrieval profiles,
+  practical review surfaces, first-class graph storage decisions, and safe promotion paths for
+  accepted candidates.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.
