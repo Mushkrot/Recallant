@@ -35,6 +35,106 @@ export const graphTreeRelationTypeValues = [
 
 export type GraphTreeRelationType = (typeof graphTreeRelationTypeValues)[number];
 
+export const graphRetrievalProfileValues = [
+  "edge_neighborhood",
+  "same_topic",
+  "source_neighborhood",
+  "decision_cluster",
+  "preference_chain",
+  "conflict_check",
+  "supersession_trace",
+  "project_context"
+] as const;
+
+export type GraphRetrievalProfile = (typeof graphRetrievalProfileValues)[number];
+
+export type GraphRetrievalCandidatePolicy = "exclude_candidates";
+
+export type GraphRetrievalStalePolicy = "exclude_archived";
+
+export type GraphRetrievalScopePolicy = "seed_scope_and_project";
+
+export type GraphRetrievalProfilePolicy = {
+  profile: GraphRetrievalProfile;
+  allowed_relation_types: readonly GraphTreeRelationType[];
+  allow_unlisted_relation_types: boolean;
+  max_hops: 1;
+  default_budget_nodes: number;
+  candidate_policy: GraphRetrievalCandidatePolicy;
+  stale_policy: GraphRetrievalStalePolicy;
+  scope_policy: GraphRetrievalScopePolicy;
+  explanation: string;
+};
+
+const graphRetrievalProfilePolicyBase = {
+  max_hops: 1,
+  default_budget_nodes: 8,
+  candidate_policy: "exclude_candidates",
+  stale_policy: "exclude_archived",
+  scope_policy: "seed_scope_and_project"
+} as const;
+
+export const graphRetrievalProfilePolicies = {
+  edge_neighborhood: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "edge_neighborhood",
+    allowed_relation_types: graphTreeRelationTypeValues,
+    allow_unlisted_relation_types: true,
+    explanation: "Legacy one-hop accepted-edge neighborhood used by graph_expand compatibility."
+  },
+  same_topic: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "same_topic",
+    allowed_relation_types: ["same_topic_as", "about", "mentions"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop topic-adjacent memories connected by same-topic, about, or mention edges."
+  },
+  source_neighborhood: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "source_neighborhood",
+    allowed_relation_types: ["derived_from", "mentions", "about"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop memories tied to the same source lineage or explicit source mentions."
+  },
+  decision_cluster: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "decision_cluster",
+    allowed_relation_types: ["supports", "conflicts_with", "caused_by", "derived_from", "about"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop decision support, conflict, cause, and source-lineage context."
+  },
+  preference_chain: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "preference_chain",
+    allowed_relation_types: ["supports", "supersedes", "superseded_by", "same_topic_as", "about"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop preference evolution and related topic context."
+  },
+  conflict_check: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "conflict_check",
+    allowed_relation_types: ["conflicts_with"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop memories that explicitly conflict with the seed result set."
+  },
+  supersession_trace: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "supersession_trace",
+    allowed_relation_types: ["supersedes", "superseded_by"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop supersession context for newer or older related memories."
+  },
+  project_context: {
+    ...graphRetrievalProfilePolicyBase,
+    profile: "project_context",
+    allowed_relation_types: ["belongs_to_project", "about", "same_topic_as"],
+    allow_unlisted_relation_types: false,
+    explanation: "One-hop project membership and project-topic context."
+  }
+} as const satisfies Record<GraphRetrievalProfile, GraphRetrievalProfilePolicy>;
+
+export const graphExpandCompatibilityProfile = "edge_neighborhood" as const;
+
 export const graphTreeLifecycleStateValues = [
   "candidate",
   "accepted",
@@ -223,6 +323,7 @@ export type ReviewGraphCandidateResult = GraphCandidateRecord;
 
 const graphTreeNodeKindSet = new Set<string>(graphTreeNodeKindValues);
 const graphTreeRelationTypeSet = new Set<string>(graphTreeRelationTypeValues);
+const graphRetrievalProfileSet = new Set<string>(graphRetrievalProfileValues);
 const graphTreeLifecycleStateSet = new Set<string>(graphTreeLifecycleStateValues);
 const graphCandidateKindSet = new Set<string>(graphCandidateKindValues);
 const graphCandidateExtractionMethodSet = new Set<string>(graphCandidateExtractionMethodValues);
@@ -235,6 +336,45 @@ export function isGraphTreeNodeKind(value: unknown): value is GraphTreeNodeKind 
 
 export function isGraphTreeRelationType(value: unknown): value is GraphTreeRelationType {
   return typeof value === "string" && graphTreeRelationTypeSet.has(value);
+}
+
+export function isGraphRetrievalProfile(value: unknown): value is GraphRetrievalProfile {
+  return typeof value === "string" && graphRetrievalProfileSet.has(value);
+}
+
+export class GraphRetrievalProfileValidationError extends Error {
+  readonly code = "VALIDATION_ERROR";
+
+  constructor() {
+    super(`graph_retrieval_profile must be one of: ${graphRetrievalProfileValues.join(", ")}`);
+    this.name = "GraphRetrievalProfileValidationError";
+  }
+}
+
+export function parseGraphRetrievalProfile(value: unknown): GraphRetrievalProfile | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (isGraphRetrievalProfile(value)) {
+    return value;
+  }
+  throw new GraphRetrievalProfileValidationError();
+}
+
+export function graphRetrievalProfilePolicy(
+  profile: GraphRetrievalProfile
+): GraphRetrievalProfilePolicy {
+  return graphRetrievalProfilePolicies[profile];
+}
+
+export function graphRetrievalProfileForGraphExpand(input: {
+  graph_expand?: boolean | null;
+  graph_retrieval_profile?: GraphRetrievalProfile | null;
+}): GraphRetrievalProfile | null {
+  if (input.graph_retrieval_profile) {
+    return input.graph_retrieval_profile;
+  }
+  return input.graph_expand === true ? graphExpandCompatibilityProfile : null;
 }
 
 export function isGraphTreeLifecycleState(value: unknown): value is GraphTreeLifecycleState {

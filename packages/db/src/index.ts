@@ -7,8 +7,11 @@ import {
   graphCandidateKindValues,
   graphCandidateReviewActionValues,
   graphCandidateSourceRefKindValues,
+  graphRetrievalProfileForGraphExpand,
+  graphRetrievalProfilePolicy,
   graphTreeLifecycleStateValues,
   graphTreeNodeKindValues,
+  parseGraphRetrievalProfile,
   type CreateGraphCandidateInput,
   type CreateGraphCandidateResult,
   type GetGraphCandidateInput,
@@ -17,6 +20,7 @@ import {
   type GraphCandidateRecord,
   type GraphCandidateReviewPatch,
   type GraphCandidateReviewRecord,
+  type GraphRetrievalProfile,
   type GraphTreeLifecycleState,
   type GraphTreeNodeKind,
   type ListGraphCandidatesInput,
@@ -1179,6 +1183,61 @@ type SourceFilter = {
   uri: string | null;
   source_kind: string | null;
   match_values: string[];
+};
+
+type SearchFilter = {
+  whereSql: string;
+  params: unknown[];
+};
+
+type GraphHitDirection = "outbound" | "inbound";
+
+type GraphHitTrace = {
+  profile: GraphRetrievalProfile;
+  seed_chunk_id: string;
+  edge_id: string;
+  relation_type: string;
+  direction: GraphHitDirection;
+  inclusion_reason: string;
+  max_hops: 1;
+  weight: number;
+};
+
+type SearchHitRow = {
+  id: string;
+  text: string;
+  source_event_id: string;
+  occurred_at: string;
+  event_payload: unknown;
+  score: number;
+  path: string;
+  superseded_by: string | null;
+  graph_trace?: GraphHitTrace;
+};
+
+type GraphExpansionSummary = {
+  profile: GraphRetrievalProfile;
+  expanded: boolean;
+  max_hops: 1;
+  budget_nodes: number;
+  allowed_relation_types: readonly string[];
+  allow_unlisted_relation_types: boolean;
+  included: number;
+  excluded_by_policy: number;
+  budget_cutoff: number;
+};
+
+type GraphExpansionSerializedRow = {
+  id?: unknown;
+  text?: unknown;
+  source_event_id?: unknown;
+  occurred_at?: unknown;
+  event_payload?: unknown;
+  weight?: unknown;
+  seed_chunk_id?: unknown;
+  edge_id?: unknown;
+  relation_type?: unknown;
+  direction?: unknown;
 };
 
 export type ProjectSourceKind =
@@ -5535,6 +5594,7 @@ export class RecallantDb {
     scope_kind?: string | null;
     audience?: string | null;
     graph_expand?: boolean;
+    graph_retrieval_profile?: GraphRetrievalProfile | string | null;
     graph_budget_nodes?: number;
     include_archived?: boolean;
   }) {
@@ -5566,6 +5626,11 @@ export class RecallantDb {
         }
       };
     }
+    const requestedGraphProfile = parseGraphRetrievalProfile(input.graph_retrieval_profile);
+    const graphProfile = graphRetrievalProfileForGraphExpand({
+      graph_expand: input.graph_expand,
+      graph_retrieval_profile: requestedGraphProfile
+    });
     const route = await this.resolveEmbeddingRoute(
       this.pool,
       context.projectId,
@@ -5722,7 +5787,7 @@ export class RecallantDb {
       }
     }
 
-    const rows = Array.from(candidates.values())
+    const rows: SearchHitRow[] = Array.from(candidates.values())
       .map((candidate) => ({
         id: candidate.id,
         text: candidate.text,
@@ -5764,15 +5829,33 @@ export class RecallantDb {
       rows.sort((left, right) => right.score - left.score);
     }
 
-    if (input.graph_expand && rows.length > 0) {
-      const graphRows = await this.expandGraphRows({
+    let graphRetrieval: GraphExpansionSummary | null = null;
+    if (graphProfile && rows.length > 0) {
+      const policy = graphRetrievalProfilePolicy(graphProfile);
+      const graphBudget = Math.max(
+        0,
+        Math.floor(input.graph_budget_nodes ?? policy.default_budget_nodes)
+      );
+      const graphFilter = this.buildSearchFilter({
+        projectId: context.projectId,
+        developerId: context.developerId,
+        scope: input.scope ?? "project",
+        scopeKind: input.scope_kind ?? null,
+        audience: input.audience ?? null,
+        includeArchived: input.include_archived === true,
+        sourceFilter,
+        startIndex: 6
+      });
+      const graphExpansion = await this.expandGraphRows({
         projectId: context.projectId,
         seedChunkIds: rows.map((row) => row.id),
-        budget: input.graph_budget_nodes ?? 8,
-        sourceFilter,
+        budget: graphBudget,
+        filter: graphFilter,
+        profile: graphProfile,
         existingChunkIds: new Set(rows.map((row) => row.id))
       });
-      rows.push(...graphRows);
+      rows.push(...graphExpansion.rows);
+      graphRetrieval = graphExpansion.summary;
       rows.sort((left, right) => right.score - left.score);
     }
 
@@ -5791,6 +5874,7 @@ export class RecallantDb {
         path: row.path,
         why: row.path,
         superseded_by: row.superseded_by,
+        graph_trace: row.graph_trace ?? null,
         occurred_at: row.occurred_at,
         provenance: this.eventSourceProvenance(row.event_payload),
         text_excerpt: excerpt,
@@ -5817,6 +5901,7 @@ export class RecallantDb {
             source_kind: sourceFilter.source_kind
           }
         : null,
+      graph_retrieval: graphRetrieval,
       route: { provider: route.provider, model: route.model, dims: route.dims }
     };
   }
@@ -9194,7 +9279,7 @@ export class RecallantDb {
     includeArchived?: boolean;
     sourceFilter?: SourceFilter | null;
     startIndex: number;
-  }) {
+  }): SearchFilter {
     const clauses = [`c.developer_id = $${input.startIndex}::uuid`];
     if (!input.includeArchived) clauses.push("c.archived_at IS NULL");
     const params: unknown[] = [input.developerId];
@@ -9282,67 +9367,182 @@ export class RecallantDb {
     projectId: string;
     seedChunkIds: string[];
     budget: number;
-    sourceFilter?: SourceFilter | null;
+    filter: SearchFilter;
+    profile: GraphRetrievalProfile;
     existingChunkIds: Set<string>;
-  }) {
-    if (input.budget <= 0) return [];
-    const values: unknown[] = [input.projectId, input.seedChunkIds];
-    const clauses = ["c.archived_at IS NULL"];
-    this.addSourceEvidenceFilterClause({
-      clauses,
-      values,
-      sourceFilter: input.sourceFilter ?? null,
-      chunkAlias: "c",
-      eventAlias: "ev"
-    });
+  }): Promise<{ rows: SearchHitRow[]; summary: GraphExpansionSummary }> {
+    const policy = graphRetrievalProfilePolicy(input.profile);
+    const emptySummary = {
+      profile: input.profile,
+      expanded: false,
+      max_hops: policy.max_hops,
+      budget_nodes: input.budget,
+      allowed_relation_types: [...policy.allowed_relation_types],
+      allow_unlisted_relation_types: policy.allow_unlisted_relation_types,
+      included: 0,
+      excluded_by_policy: 0,
+      budget_cutoff: 0
+    } satisfies GraphExpansionSummary;
+    if (input.budget <= 0 || input.seedChunkIds.length === 0) {
+      return { rows: [], summary: emptySummary };
+    }
+    const values: unknown[] = [
+      input.projectId,
+      input.seedChunkIds,
+      policy.allow_unlisted_relation_types,
+      [...policy.allowed_relation_types],
+      [...input.existingChunkIds],
+      ...input.filter.params
+    ];
     values.push(input.budget);
     const budgetParam = values.length;
     const result = await this.pool.query<{
-      id: string;
-      text: string;
-      source_event_id: string;
-      occurred_at: string;
-      event_payload: unknown;
-      weight: number;
+      rows: unknown;
+      excluded_by_policy_count: number | string | null;
+      eligible_count: number | string | null;
     }>(
       `
-        WITH neighbors AS (
+        WITH incident_edges AS (
           SELECT
-            CASE
-              WHEN e.src_kind = 'chunk' AND e.src_id = ANY($2::text[]) THEN e.dst_id
-              WHEN e.dst_kind = 'chunk' AND e.dst_id = ANY($2::text[]) THEN e.src_id
-            END AS chunk_id,
-            max(e.weight) AS weight
+            e.id::text AS edge_id,
+            e.relation_type,
+            e.weight,
+            e.src_id AS seed_chunk_id,
+            e.dst_id AS chunk_id,
+            'outbound' AS direction
           FROM edges e
           WHERE e.project_id = $1
-            AND (
-              (e.src_kind = 'chunk' AND e.src_id = ANY($2::text[]))
-              OR (e.dst_kind = 'chunk' AND e.dst_id = ANY($2::text[]))
-            )
-          GROUP BY chunk_id
+            AND e.src_kind = 'chunk'
+            AND e.dst_kind = 'chunk'
+            AND e.src_id = ANY($2::text[])
+
+          UNION ALL
+
+          SELECT
+            e.id::text AS edge_id,
+            e.relation_type,
+            e.weight,
+            e.dst_id AS seed_chunk_id,
+            e.src_id AS chunk_id,
+            'inbound' AS direction
+          FROM edges e
+          WHERE e.project_id = $1
+            AND e.src_kind = 'chunk'
+            AND e.dst_kind = 'chunk'
+            AND e.dst_id = ANY($2::text[])
+        ),
+        classified_edges AS (
+          SELECT
+            incident_edges.*,
+            ($3::boolean OR incident_edges.relation_type = ANY($4::text[])) AS relation_allowed
+          FROM incident_edges
+          WHERE incident_edges.chunk_id IS NOT NULL
+            AND NOT (incident_edges.chunk_id = ANY($5::text[]))
+        ),
+        eligible AS (
+          SELECT
+            c.id,
+            c.text,
+            c.source_event_id,
+            ev.occurred_at,
+            ev.payload AS event_payload,
+            classified_edges.weight,
+            classified_edges.seed_chunk_id,
+            classified_edges.edge_id,
+            classified_edges.relation_type,
+            classified_edges.direction,
+            row_number() OVER (
+              PARTITION BY c.id
+              ORDER BY classified_edges.weight DESC, classified_edges.edge_id
+            ) AS duplicate_rank
+          FROM classified_edges
+          JOIN chunks c ON c.id::text = classified_edges.chunk_id
+          JOIN events ev ON ev.id = c.source_event_id
+          WHERE classified_edges.relation_allowed
+            AND ${input.filter.whereSql}
+        ),
+        ranked AS (
+          SELECT
+            eligible.*,
+            row_number() OVER (
+              ORDER BY eligible.weight DESC, eligible.edge_id, eligible.id
+            ) AS budget_rank
+          FROM eligible
+          WHERE eligible.duplicate_rank = 1
         )
-        SELECT c.id, c.text, c.source_event_id, ev.occurred_at, ev.payload AS event_payload,
-               n.weight
-        FROM neighbors n
-        JOIN chunks c ON c.id::text = n.chunk_id
-        JOIN events ev ON ev.id = c.source_event_id
-        WHERE ${clauses.join(" AND ")}
-        LIMIT $${budgetParam}
+        SELECT
+          coalesce(
+            jsonb_agg(
+              jsonb_build_object(
+                'id', ranked.id,
+                'text', ranked.text,
+                'source_event_id', ranked.source_event_id,
+                'occurred_at', ranked.occurred_at,
+                'event_payload', ranked.event_payload,
+                'weight', ranked.weight,
+                'seed_chunk_id', ranked.seed_chunk_id,
+                'edge_id', ranked.edge_id,
+                'relation_type', ranked.relation_type,
+                'direction', ranked.direction
+              )
+              ORDER BY ranked.budget_rank
+            ) FILTER (WHERE ranked.budget_rank <= $${budgetParam}),
+            '[]'::jsonb
+          ) AS rows,
+          (SELECT count(*) FROM classified_edges WHERE NOT relation_allowed)::int
+            AS excluded_by_policy_count,
+          (SELECT count(*) FROM ranked)::int AS eligible_count
+        FROM ranked
       `,
       values
     );
-    return result.rows
-      .filter((row) => !input.existingChunkIds.has(row.id))
-      .map((row) => ({
-        id: row.id,
-        text: row.text,
-        source_event_id: row.source_event_id,
-        occurred_at: row.occurred_at,
+    const resultRow = result.rows[0];
+    const serializedRows = Array.isArray(resultRow?.rows)
+      ? (resultRow.rows as GraphExpansionSerializedRow[])
+      : [];
+    const includedRows: SearchHitRow[] = [];
+    for (const row of serializedRows) {
+      const id = stringOrNull(row.id);
+      const text = typeof row.text === "string" ? row.text : null;
+      const sourceEventId = stringOrNull(row.source_event_id);
+      const seedChunkId = stringOrNull(row.seed_chunk_id);
+      const edgeId = stringOrNull(row.edge_id);
+      const relationType = stringOrNull(row.relation_type);
+      const direction = row.direction === "inbound" ? "inbound" : "outbound";
+      if (!id || !text || !sourceEventId || !seedChunkId || !edgeId || !relationType) continue;
+      const weight = Number(row.weight ?? 0);
+      includedRows.push({
+        id,
+        text,
+        source_event_id: sourceEventId,
+        occurred_at: nullableIso(row.occurred_at) ?? String(row.occurred_at ?? ""),
         event_payload: row.event_payload,
-        score: Number(row.weight) * 0.2,
+        score: weight * 0.2,
         path: "graph",
-        superseded_by: null
-      }));
+        superseded_by: null,
+        graph_trace: {
+          profile: input.profile,
+          seed_chunk_id: seedChunkId,
+          edge_id: edgeId,
+          relation_type: relationType,
+          direction,
+          inclusion_reason: policy.allow_unlisted_relation_types
+            ? "edge_neighborhood_compatibility"
+            : "relation_allowed_by_profile",
+          max_hops: policy.max_hops,
+          weight
+        }
+      });
+    }
+    const eligibleCount = Number(resultRow?.eligible_count ?? 0);
+    const summary: GraphExpansionSummary = {
+      ...emptySummary,
+      expanded: true,
+      included: includedRows.length,
+      excluded_by_policy: Number(resultRow?.excluded_by_policy_count ?? 0),
+      budget_cutoff: Math.max(0, eligibleCount - includedRows.length)
+    };
+    return { rows: includedRows, summary };
   }
 
   private redactSourceRef(sourceRef: unknown) {

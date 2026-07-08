@@ -9,6 +9,7 @@ import {
   graphCandidateKindValues,
   graphCandidateReviewActionValues,
   graphCandidateSourceRefKindValues,
+  graphRetrievalProfileValues,
   graphTreeLifecycleStateValues,
   graphTreeNodeKindValues,
   type AgentLifecycleCloseoutProof,
@@ -68,6 +69,7 @@ const graphLifecycleState = z.enum(graphTreeLifecycleStateValues);
 const graphExtractionMethod = z.enum(graphCandidateExtractionMethodValues);
 const graphSourceRefKind = z.enum(graphCandidateSourceRefKindValues);
 const graphReviewAction = z.enum(graphCandidateReviewActionValues);
+const graphRetrievalProfile = z.enum(graphRetrievalProfileValues);
 const graphCandidateScope = z.enum(["project", "developer", "domain", "all"]);
 const graphCandidateAudience = z
   .array(
@@ -1074,6 +1076,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       top_k: z.number().int().positive().default(8),
       max_chars_total: z.number().int().positive().default(12_000),
       graph_expand: z.boolean().default(false),
+      graph_retrieval_profile: graphRetrievalProfile.nullable().optional(),
       graph_budget_nodes: z.number().int().nonnegative().default(8),
       include_archived: z.boolean().default(false)
     }),
@@ -1091,6 +1094,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           scope_kind: args.scope_kind as string | null | undefined,
           audience: args.audience as string | null | undefined,
           graph_expand: args.graph_expand as boolean | undefined,
+          graph_retrieval_profile: args.graph_retrieval_profile as string | null | undefined,
           graph_budget_nodes: args.graph_budget_nodes as number | undefined,
           include_archived: args.include_archived as boolean | undefined
         });

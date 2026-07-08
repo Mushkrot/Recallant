@@ -212,7 +212,41 @@ required-field message. These messages must not echo raw request bodies, raw sec
 customer data, private keys, backups, raw artifacts, large logs, database URLs, auth headers, or
 provider keys.
 
-## 3d) Governed Graph Candidate Tools
+## 3d) Raw Evidence Search Graph Profiles
+
+`memory_search` is the raw evidence/chunk search surface. It supports lexical, vector, and hybrid
+retrieval, plus an optional one-hop graph expansion from the seed hits.
+
+Graph expansion accepts these compatibility fields:
+
+- `graph_expand` - legacy boolean. `true` maps to `edge_neighborhood` when
+  `graph_retrieval_profile` is not supplied.
+- `graph_retrieval_profile` - optional explicit profile name.
+- `graph_budget_nodes` - maximum graph-expanded neighbors to add.
+
+The first explicit profile names are:
+
+- `edge_neighborhood`;
+- `same_topic`;
+- `source_neighborhood`;
+- `decision_cluster`;
+- `preference_chain`;
+- `conflict_check`;
+- `supersession_trace`;
+- `project_context`.
+
+Profiles are one-hop and edge-based in this slice. They preserve the same project, developer, scope,
+audience, archive, and source-filter constraints as ordinary seed hits. Graph-expanded hits keep
+`why: "graph"` for compatibility and include `graph_trace` with profile, seed chunk id, edge id,
+relation type, direction, inclusion reason, hop limit, and edge weight. Responses include
+`graph_retrieval` summary counts for included hits, excluded-by-policy edges, and budget cutoff.
+
+Graph candidate rows are not queried by `memory_search`. Accepting or reviewing a graph candidate
+does not make it retrieval-active by itself. Unknown `graph_retrieval_profile` values fail input
+validation with a bounded error listing allowed profiles and the `graph_retrieval_profile` path,
+without echoing raw request bodies.
+
+## 3e) Governed Graph Candidate Tools
 
 The graph candidate tool surface is a governed staging path for proposed graph nodes and edges. It
 does not make candidate data retrieval-active by default, and accepting a candidate records review
@@ -235,7 +269,7 @@ scope explicit, reject wrong-project access, and block raw secrets, database URL
 raw credentials, raw artifacts, customer data, private keys, backups, auth headers, cookies, and
 private deployment details from candidate payloads and responses.
 
-## 3e) External Rehearsal
+## 3f) External Rehearsal
 
 `remote-mcp-external-rehearsal:smoke` proves the shipped remote client path from a scrubbed
 external-like child-process environment. It uses HTTPS `/api/mcp`, `recallant connect-remote`,

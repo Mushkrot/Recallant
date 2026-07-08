@@ -18,11 +18,11 @@ This contract covers:
 - graph lifecycle states;
 - compatibility with the current `edges` table;
 - provenance, scope, confidence, extraction, review, and safety requirements;
-- the current graph candidate, Markdown vault bridge, and memory keeper candidate surfaces.
+- the current graph candidate, Markdown vault bridge, memory keeper candidate, and graph retrieval
+  profile surfaces.
 
 This contract does not implement:
 
-- graph retrieval profiles;
 - graph database migration;
 - Workbench topology or graph visualization.
 
@@ -239,6 +239,56 @@ The public smoke gate for this surface is `npm run memory-keeper:smoke`. It chec
 without database configuration, confirm-gated writes, source refs, `needs_review` lifecycle on
 unsafe fixtures, CLI and stored-payload leak scans, and default retrieval isolation.
 
+## Graph Retrieval Profiles
+
+Recallant includes the first named graph retrieval profile slice for `memory_search`. This is still
+edge-based and one-hop: it expands from ordinary seed chunk hits through accepted `edges` rows and
+returns additional chunk hits. It does not traverse graph candidate rows, promote accepted
+candidates, create first-class graph nodes, or evaluate a dedicated graph database.
+
+The MCP `memory_search` input accepts:
+
+- `graph_expand` - legacy compatibility boolean. When it is `true` and no explicit profile is
+  supplied, Recallant uses `edge_neighborhood`.
+- `graph_retrieval_profile` - optional explicit profile name.
+- `graph_budget_nodes` - bounded count for expanded graph neighbors.
+
+The first profile names are:
+
+| Profile | Relation policy |
+|---------|-----------------|
+| `edge_neighborhood` | Legacy one-hop edge neighborhood. It preserves compatibility with existing free-form relation names. |
+| `same_topic` | `same_topic_as`, `about`, and `mentions`. |
+| `source_neighborhood` | `derived_from`, `mentions`, and `about`. |
+| `decision_cluster` | `supports`, `conflicts_with`, `caused_by`, `derived_from`, and `about`. |
+| `preference_chain` | `supports`, `supersedes`, `superseded_by`, `same_topic_as`, and `about`. |
+| `conflict_check` | `conflicts_with`. |
+| `supersession_trace` | `supersedes` and `superseded_by`. |
+| `project_context` | `belongs_to_project`, `about`, and `same_topic_as`. |
+
+All B4 profiles are one-hop, exclude archived chunks unless `include_archived` is explicitly true,
+preserve the same project, developer, scope, audience, and source filters as seed search, and keep
+graph candidate tables out of retrieval. Unknown profile names must fail with a bounded validation
+error that lists allowed profile names without echoing raw request bodies.
+
+Graph-expanded hits keep the legacy `why: "graph"` marker and add `graph_trace` metadata:
+
+- `profile`;
+- `seed_chunk_id`;
+- `edge_id`;
+- `relation_type`;
+- `direction`;
+- `inclusion_reason`;
+- `max_hops`;
+- `weight`.
+
+Responses also include a compact `graph_retrieval` summary with the profile, one-hop policy,
+allowed relation types, budget, included count, excluded-by-policy count, and budget cutoff count.
+
+The public smoke gate for this surface is `npm run graph-retrieval-profiles:smoke`. It checks the
+profile matrix, trace metadata, legacy `graph_expand` compatibility, archived/scope/audience/source
+filter guards, graph candidate isolation, and forbidden fixture token absence.
+
 The first review actions are:
 
 - `accept`;
@@ -279,10 +329,11 @@ Every generated graph node or edge must preserve governance before it can affect
 
 Graph is a retrieval and governance substrate, not just visualization.
 
-Current graph-expanded search can add related chunks through bounded one-hop expansion. Future
-retrieval profiles may use this contract to request relation-aware neighborhoods such as decision
-clusters, preference chains, source neighborhoods, contradiction checks, or supersession chains.
-Those future profiles must preserve provenance and explain why each graph result was retrieved.
+Current graph-expanded search can add related chunks through bounded one-hop expansion. The first
+named retrieval profiles request relation-aware neighborhoods such as decision clusters, preference
+chains, source neighborhoods, conflict checks, and supersession traces. Profile expansion must
+preserve provenance, scope, audience, source filters, archive policy, and compact trace metadata for
+why each graph result was retrieved.
 
 ## Review Contract
 
@@ -299,6 +350,7 @@ should show:
 ## Phase Boundary
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
-Markdown vault bridge, and deterministic keeper candidate slices. It does not add graph retrieval
-profiles, create a graph visualization, promote accepted candidates into active graph state, add
-passive vault sync, ingest raw media, or migrate Recallant to a dedicated graph database.
+Markdown vault bridge, deterministic keeper candidate, and named one-hop graph retrieval profile
+slices. It does not create a graph visualization, promote accepted candidates into active graph
+state, add passive vault sync, ingest raw media, implement graph hygiene/maintenance workflows, or
+migrate Recallant to a dedicated graph database.
