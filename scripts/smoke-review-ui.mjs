@@ -2628,6 +2628,22 @@ try {
   if (purgedProject.rowCount !== 0) {
     throw new Error(`Project purge confirm left project row behind: ${purgeProjectId}`);
   }
+  const purgedProjectDashboard = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${purgeProjectId}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const purgedProjectDashboardJson = await purgedProjectDashboard.json();
+  if (
+    purgedProjectDashboard.status !== 200 ||
+    purgedProjectDashboardJson.current_project_id === purgeProjectId ||
+    purgedProjectDashboardJson.projects.some((project) => project.project_id === purgeProjectId)
+  ) {
+    throw new Error(
+      `Purged project dashboard fallback failed: ${JSON.stringify(purgedProjectDashboardJson)}`
+    );
+  }
   const postPurgeDashboard = await db.getReviewDashboard({ project_id: projectId });
   if (postPurgeDashboard.projects.some((project) => project.project_id === purgeProjectId)) {
     throw new Error(

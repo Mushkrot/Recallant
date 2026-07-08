@@ -8477,7 +8477,7 @@ export class RecallantDb {
     rule_memory_domain?: string | null;
   }) {
     const context = await this.ensureProject();
-    const dashboardProjectId = input?.project_id ?? context.projectId;
+    let dashboardProjectId = input?.project_id ?? context.projectId;
     const projects = await this.pool.query(
       `
         WITH project_usage AS (
@@ -8572,8 +8572,16 @@ export class RecallantDb {
       memory_profile: memorySpaceProfile(project),
       sources: sourcesByProject.get(String(project.project_id)) ?? []
     }));
-    const currentProject =
+    let currentProject =
       projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
+    if (!currentProject && input?.project_id) {
+      dashboardProjectId =
+        projects.rows.find((project) => project.project_id === context.projectId)?.project_id ??
+        projects.rows[0]?.project_id ??
+        context.projectId;
+      currentProject =
+        projects.rows.find((project) => project.project_id === dashboardProjectId) ?? null;
+    }
     const currentSources = Array.isArray(currentProject?.sources)
       ? (currentProject.sources as Array<Record<string, unknown>>)
       : [];
