@@ -2171,6 +2171,11 @@ function isGraphReviewRequest(body: Record<string, unknown>) {
   );
 }
 
+function isGraphPromotionRequest(body: Record<string, unknown>) {
+  const action = optionalInput(body.action);
+  return action === "promote" || action === "promote_candidate";
+}
+
 function numberFormInput(value: unknown) {
   if (value === null || value === undefined || value === "") return undefined;
   return Number(value);
@@ -2223,6 +2228,18 @@ function buildGraphReviewInput(body: Record<string, unknown>): WorkbenchGraphRev
     patch: graphReviewPatch(action, body),
     merge_target_id: optionalInput(body.merge_target_id) ?? targetGraphCandidateId,
     superseded_by: optionalInput(body.superseded_by) ?? targetGraphCandidateId,
+    metadata: graphReviewMetadata(body)
+  };
+}
+
+function buildGraphPromotionInput(body: Record<string, unknown>) {
+  const graphCandidateId = graphReviewTargetId(body);
+  if (!graphCandidateId) throw new Error("VALIDATION_ERROR: graph_candidate_id is required");
+  return {
+    project_id: optionalInput(body.project_id),
+    graph_candidate_id: graphCandidateId,
+    actor_kind: "user" as const,
+    note: optionalInput(body.note),
     metadata: graphReviewMetadata(body)
   };
 }
@@ -4890,6 +4907,11 @@ function renderGraphReviewHistory(actions: Array<Record<string, unknown>>) {
   </div>`;
 }
 
+function graphPromotionStatus(candidate: Record<string, unknown>) {
+  const readiness = asRecord(candidate.promotion_readiness);
+  return optionalInput(readiness.status) ?? "not checked";
+}
+
 function renderGraphActionForm(
   candidate: Record<string, unknown>,
   projectId: unknown,
@@ -4906,6 +4928,44 @@ function renderGraphActionForm(
     ${extra}
     <button type="submit">${escapeHtml(label)}</button>
   </form>`;
+}
+
+function renderGraphPromotionState(candidate: Record<string, unknown>, projectId: unknown) {
+  const readiness = asRecord(candidate.promotion_readiness);
+  const status = graphPromotionStatus(candidate);
+  const blockedReason = optionalInput(readiness.blocked_reason);
+  const blockedDetail = optionalInput(readiness.blocked_detail);
+  const promotedEdgeId = optionalInput(readiness.promoted_edge_id);
+  const active = status === "promotable";
+  const promotedEdgeLabel = promotedEdgeId
+    ? publicScreenshotMode()
+      ? "Active edge recorded"
+      : `edge ${shortId(promotedEdgeId)}`
+    : "none";
+  return `<div class="graph-promotion-state ${active ? "ready" : "blocked"}">
+    <div>
+      <span>Promotion readiness</span>
+      <strong>${escapeHtml(humanStatus(status))}</strong>
+      <p>${escapeHtml(
+        active
+          ? "This accepted compatible edge can be promoted into active graph retrieval."
+          : (blockedDetail ?? "This candidate is not eligible for active graph promotion.")
+      )}</p>
+      ${blockedReason ? `<p class="graph-promotion-reason">Blocked reason: ${escapeHtml(blockedReason)}</p>` : ""}
+      ${promotedEdgeId ? `<p class="graph-promotion-edge">Promoted edge: ${escapeHtml(promotedEdgeLabel)}</p>` : ""}
+    </div>
+    ${
+      active
+        ? renderGraphActionForm(
+            candidate,
+            projectId,
+            "promote",
+            "Promote candidate",
+            `<input type="hidden" name="note" value="Workbench explicit graph promotion" />`
+          )
+        : ""
+    }
+  </div>`;
 }
 
 function renderGraphCandidateActions(candidate: Record<string, unknown>, projectId: unknown) {
@@ -4980,6 +5040,7 @@ function renderGraphCandidateCard(
         ["State", humanStatus(candidate.lifecycle_state)],
         ["Kind", kind],
         ["Confidence", graphConfidence(candidate.confidence)],
+        ["Promotion", humanStatus(graphPromotionStatus(candidate))],
         ["Method", String(candidate.extraction_method ?? "").replaceAll("_", " ")],
         ["Sources", candidate.source_ref_count ?? asArray(candidate.source_refs).length],
         ["Actions", candidate.review_action_count ?? asArray(candidate.review_actions).length]
@@ -5006,7 +5067,7 @@ function renderGraphCandidateDetail(selected: Record<string, unknown>, projectId
     <div class="graph-detail-head">
       <span>${escapeHtml(graphCandidateLabel(selected))}</span>
       <strong>${escapeHtml(selected.title ?? "Selected graph candidate")}</strong>
-      <p>Accepted candidates remain staged review records and are not retrieval-active by themselves.</p>
+      <p>Accepted candidates remain staged review records; compatible accepted edges become retrieval-active only after Promote.</p>
     </div>
     ${renderMeta([
       ["Lifecycle", humanStatus(selected.lifecycle_state)],
@@ -5018,6 +5079,8 @@ function renderGraphCandidateDetail(selected: Record<string, unknown>, projectId
       ["Created by", selected.created_by],
       ["Updated", formatDate(selected.updated_at)]
     ])}
+    <h4>Promotion</h4>
+    ${renderGraphPromotionState(selected, projectId)}
     <h4>Source evidence</h4>
     ${renderGraphSourceRefs(sourceRefs)}
     <h4>Review history</h4>
@@ -5051,6 +5114,8 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
   const selected = asRecord(graph.selected_candidate);
   const selectedId = selected.graph_candidate_id;
   const counts = asRecord(graph.counts);
+  const hygiene = asRecord(graph.hygiene);
+  const hygieneCounts = asRecord(hygiene.counts);
   const candidateKindCounts = asRecord(counts.candidate_kind);
   const lifecycleCounts = asRecord(counts.lifecycle_state);
   const nodeCandidates = candidates.filter((candidate) => candidate.candidate_kind === "node");
@@ -5060,13 +5125,17 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
       <div>
         <span>Graph candidates</span>
         <h3>Graph candidates</h3>
-        <p>Accepted candidates remain staged review records and are not retrieval-active by themselves.</p>
+        <p>Accepted candidates remain staged review records; compatible accepted edges become retrieval-active only after Promote.</p>
       </div>
       <div class="graph-review-counts">
         <span><strong>${escapeHtml(counts.total ?? candidates.length)}</strong> total</span>
         <span><strong>${escapeHtml(candidateKindCounts.node ?? 0)}</strong> node</span>
         <span><strong>${escapeHtml(candidateKindCounts.edge ?? 0)}</strong> edge</span>
         <span><strong>${escapeHtml(lifecycleCounts.accepted ?? 0)}</strong> accepted</span>
+        <span><strong>${escapeHtml(hygieneCounts.promotable ?? 0)}</strong> promotable</span>
+        <span><strong>${escapeHtml(hygieneCounts.promoted ?? 0)}</strong> promoted</span>
+        <span><strong>${escapeHtml(hygieneCounts.blocked ?? 0)}</strong> blocked</span>
+        <span><strong>${escapeHtml(hygieneCounts.duplicate ?? 0)}</strong> duplicate</span>
       </div>
     </div>
     <div class="graph-review-grid">
@@ -6168,6 +6237,13 @@ function renderDashboard(
     .graph-candidate-shape strong { color: #20242c; overflow-wrap: anywhere; }
     .graph-detail-head strong { display: block; font-size: 15px; line-height: 1.25; margin: 2px 0 5px; overflow-wrap: anywhere; }
     .graph-candidate-detail h4 { margin: 10px 0 6px; font-size: 12px; color: #4f5867; text-transform: uppercase; }
+    .graph-promotion-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid #dfe6ee; border-radius: 7px; padding: 9px; background: #fbfcfe; }
+    .graph-promotion-state.ready { border-color: #a7d0c5; background: #f4fbf8; }
+    .graph-promotion-state span { display: block; color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .graph-promotion-state strong { display: block; margin: 2px 0 4px; font-size: 14px; color: #20242c; }
+    .graph-promotion-state p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.38; overflow-wrap: anywhere; }
+    .graph-promotion-state .graph-promotion-reason, .graph-promotion-state .graph-promotion-edge { margin-top: 4px; color: #5f6875; }
+    .graph-promotion-state form { margin: 0; }
     .graph-actions, .graph-target-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .graph-action-detail { border-top: 1px solid #edf1f5; margin-top: 8px; padding-top: 8px; }
     .graph-action-detail summary { font-size: 12px; font-weight: 700; }
@@ -6177,6 +6253,7 @@ function renderDashboard(
     @media (max-width: 760px) {
       .graph-review-head, .graph-review-grid { display: grid; grid-template-columns: 1fr; }
       .graph-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .graph-promotion-state { grid-template-columns: 1fr; }
       .graph-actions, .graph-target-actions, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
     }
     .review-action-group { border-bottom: 1px solid #e3e8ef; padding-bottom: 8px; margin-bottom: 8px; }
@@ -7547,7 +7624,9 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = (await readJson(request)) as Record<string, unknown>;
         if (isGraphReviewRequest(body)) {
           try {
-            const result = await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            const result = isGraphPromotionRequest(body)
+              ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
+              : await database.reviewGraphCandidate(buildGraphReviewInput(body));
             write(response, 200, JSON.stringify(result), "application/json");
           } catch (error) {
             write(
@@ -7575,7 +7654,9 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = await readForm(request);
         if (isGraphReviewRequest(body)) {
           try {
-            const result = await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            const result = isGraphPromotionRequest(body)
+              ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
+              : await database.reviewGraphCandidate(buildGraphReviewInput(body));
             const location = graphReviewRedirectPath(body, result.graph_candidate_id);
             write(response, 303, "See other", "text/plain", { location });
           } catch (error) {

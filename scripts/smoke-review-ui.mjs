@@ -808,6 +808,89 @@ const graphEdgeCandidate = await db.createGraphCandidate({
   ],
   metadata: { smoke: "review-ui-graph" }
 });
+const graphPromotableCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI graph chunk source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI graph chunk destination" },
+  title: "Review UI graph promotable edge candidate",
+  summary: "Compatible accepted graph edge fixture for explicit Workbench promotion.",
+  confidence: 0.88,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded promotable graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-promotable" }
+});
+const graphStaleCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI stale chunk source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI stale chunk destination" },
+  title: "Review UI stale graph edge candidate",
+  summary: "Stale graph edge fixture should not show active promotion.",
+  lifecycle_state: "stale",
+  confidence: 0.52,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded stale graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-stale" }
+});
+const graphRejectedCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI rejected chunk source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI rejected chunk destination" },
+  title: "Review UI rejected graph edge candidate",
+  summary: "Rejected graph edge fixture should not show active promotion.",
+  lifecycle_state: "rejected",
+  confidence: 0.5,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded rejected graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-rejected" }
+});
+const graphArchivedCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI archived chunk source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI archived chunk destination" },
+  title: "Review UI archived graph edge candidate",
+  summary: "Archived graph edge fixture should not show active promotion.",
+  lifecycle_state: "archived",
+  confidence: 0.48,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded archived graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-archived" }
+});
 const otherProjectGraphCandidate = await sandboxDb.createGraphCandidate({
   project_id: sandboxProjectId,
   candidate_kind: "node",
@@ -845,6 +928,40 @@ let emptyStarterDocsExcerpt = null;
 let healthyPostureExcerpt = null;
 let workbenchPostureExcerpt = "";
 let graphReviewExcerpt = null;
+
+async function graphCandidateHtml(candidateId) {
+  const response = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${candidateId}`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const text = await response.text();
+  if (response.status !== 200) {
+    throw new Error(`Graph candidate HTML failed for ${candidateId}: ${response.status}`);
+  }
+  return text;
+}
+
+async function assertGraphPromoteAction(candidateId, label) {
+  const html = await graphCandidateHtml(candidateId);
+  if (
+    !html.includes("Promotion readiness") ||
+    !html.includes("Promote candidate") ||
+    !html.includes('name="action" value="promote"')
+  ) {
+    throw new Error(`${label} did not render an active promote action`);
+  }
+  return html;
+}
+
+async function assertNoGraphPromoteAction(candidateId, label) {
+  const html = await graphCandidateHtml(candidateId);
+  if (!html.includes("Promotion readiness") || html.includes('name="action" value="promote"')) {
+    throw new Error(`${label} rendered an active promote action unexpectedly`);
+  }
+  return html;
+}
 
 try {
   const unauthorized = await fetch(`${baseUrl}/review`);
@@ -1479,9 +1596,15 @@ try {
   );
   const graphDashboardJson = await graphDashboardApi.json();
   const graphDashboardText = JSON.stringify(graphDashboardJson.graph_candidates ?? {});
+  const graphDashboardHygiene = graphDashboardJson.graph_candidates?.hygiene;
+  const graphNodeReadiness =
+    graphDashboardJson.graph_candidates?.selected_candidate?.promotion_readiness;
   if (
     graphDashboardApi.status !== 200 ||
     !graphDashboardJson.graph_candidates ||
+    graphDashboardHygiene?.governance?.read_only !== true ||
+    graphDashboardHygiene?.counts?.blocked < 1 ||
+    !Array.isArray(graphDashboardHygiene?.readiness) ||
     graphDashboardJson.graph_candidates.counts?.candidate_kind?.node < 1 ||
     graphDashboardJson.graph_candidates.counts?.candidate_kind?.edge < 1 ||
     graphDashboardJson.graph_candidates.filters?.candidate_kind !== "node" ||
@@ -1493,6 +1616,8 @@ try {
     graphDashboardJson.graph_candidates.selected_candidate?.graph_candidate_id !==
       graphNodeCandidate.graph_candidate_id ||
     graphDashboardJson.graph_candidates.selected_candidate?.source_ref_count !== 1 ||
+    graphNodeReadiness?.status !== "blocked" ||
+    graphNodeReadiness?.blocked_reason !== "candidate_kind_not_edge" ||
     graphDashboardText.includes(otherProjectGraphCandidate.graph_candidate_id)
   ) {
     throw new Error(`Graph dashboard API smoke failed: ${graphDashboardText}`);
@@ -1518,6 +1643,38 @@ try {
     graphActionJson.review_actions?.length < 1
   ) {
     throw new Error(`Graph review action smoke failed: ${JSON.stringify(graphActionJson)}`);
+  }
+  const graphPromotableAccept = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      graph_candidate_id: graphPromotableCandidate.graph_candidate_id,
+      action: "accept",
+      note: "review ui graph promotable accept smoke"
+    })
+  });
+  const graphPromotableAcceptJson = await graphPromotableAccept.json();
+  const graphEdgesAfterAcceptActions = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  if (
+    graphPromotableAccept.status !== 200 ||
+    graphPromotableAcceptJson.lifecycle_state !== "accepted" ||
+    graphEdgesAfterAcceptActions.rows[0]?.count !== graphEdgesBeforeReviewAction.rows[0]?.count
+  ) {
+    throw new Error(
+      `Graph promotable accept smoke failed: ${JSON.stringify({
+        graphPromotableAcceptJson,
+        edgesBefore: graphEdgesBeforeReviewAction.rows[0]?.count,
+        edgesAfterAccept: graphEdgesAfterAcceptActions.rows[0]?.count
+      })}`
+    );
   }
   const graphActionError = await fetch(`${baseUrl}/api/review-action`, {
     method: "POST",
@@ -1548,6 +1705,8 @@ try {
     }
   );
   const graphAcceptedJson = await graphAcceptedDashboard.json();
+  const graphAcceptedReadiness =
+    graphAcceptedJson.graph_candidates?.selected_candidate?.promotion_readiness;
   const graphEdgesAfterReviewAction = await db.pool.query(
     "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
     [projectId]
@@ -1557,6 +1716,9 @@ try {
     graphAcceptedJson.graph_candidates?.selected_candidate?.graph_candidate_id !==
       graphEdgeCandidate.graph_candidate_id ||
     graphAcceptedJson.graph_candidates?.selected_candidate?.review_actions?.length < 1 ||
+    graphAcceptedJson.graph_candidates?.hygiene?.governance?.read_only !== true ||
+    graphAcceptedReadiness?.status !== "blocked" ||
+    graphAcceptedReadiness?.blocked_reason !== "unsupported_endpoint" ||
     graphAcceptedJson.graph_candidates?.filters?.lifecycle_state !== "accepted" ||
     graphAcceptedJson.graph_candidates?.filters?.candidate_kind !== "edge" ||
     graphEdgesAfterReviewAction.rows[0]?.count !== graphEdgesBeforeReviewAction.rows[0]?.count
@@ -1569,12 +1731,151 @@ try {
       })}`
     );
   }
+  const graphPromotableDashboard = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&graph_candidate_id=${graphPromotableCandidate.graph_candidate_id}&graph_lifecycle_state=accepted&graph_candidate_kind=edge`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const graphPromotableJson = await graphPromotableDashboard.json();
+  const graphPromotableReadiness =
+    graphPromotableJson.graph_candidates?.selected_candidate?.promotion_readiness;
+  const graphPromotableHtml = await assertGraphPromoteAction(
+    graphPromotableCandidate.graph_candidate_id,
+    "Promotable graph candidate"
+  );
+  await assertNoGraphPromoteAction(graphNodeCandidate.graph_candidate_id, "Node graph candidate");
+  await assertNoGraphPromoteAction(
+    graphEdgeCandidate.graph_candidate_id,
+    "Unsupported graph candidate"
+  );
+  await assertNoGraphPromoteAction(graphStaleCandidate.graph_candidate_id, "Stale graph candidate");
+  await assertNoGraphPromoteAction(
+    graphRejectedCandidate.graph_candidate_id,
+    "Rejected graph candidate"
+  );
+  await assertNoGraphPromoteAction(
+    graphArchivedCandidate.graph_candidate_id,
+    "Archived graph candidate"
+  );
+  if (
+    graphPromotableDashboard.status !== 200 ||
+    graphPromotableReadiness?.status !== "promotable" ||
+    graphPromotableJson.graph_candidates?.hygiene?.counts?.promotable < 1 ||
+    !graphPromotableHtml.includes("This accepted compatible edge can be promoted")
+  ) {
+    throw new Error(
+      `Graph promotable dashboard smoke failed: ${JSON.stringify(
+        graphPromotableJson.graph_candidates
+      )}`
+    );
+  }
+  const graphPromotion = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      graph_candidate_id: graphPromotableCandidate.graph_candidate_id,
+      action: "promote",
+      note: "review ui graph promotion smoke"
+    })
+  });
+  const graphPromotionJson = await graphPromotion.json();
+  const graphEdgesAfterPromotion = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  if (
+    graphPromotion.status !== 200 ||
+    graphPromotionJson.status !== "promoted" ||
+    graphPromotionJson.retrieval_active !== true ||
+    !graphPromotionJson.promoted_edge_id ||
+    graphEdgesAfterPromotion.rows[0]?.count !== graphEdgesBeforeReviewAction.rows[0]?.count + 1
+  ) {
+    throw new Error(
+      `Graph promotion action smoke failed: ${JSON.stringify({
+        graphPromotionJson,
+        edgesBefore: graphEdgesBeforeReviewAction.rows[0]?.count,
+        edgesAfterPromotion: graphEdgesAfterPromotion.rows[0]?.count
+      })}`
+    );
+  }
+  const graphRepeatPromotion = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      graph_candidate_id: graphPromotableCandidate.graph_candidate_id,
+      action: "promote",
+      note: "review ui graph repeat promotion smoke"
+    })
+  });
+  const graphRepeatPromotionJson = await graphRepeatPromotion.json();
+  const graphEdgesAfterRepeatPromotion = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  if (
+    graphRepeatPromotion.status !== 200 ||
+    graphRepeatPromotionJson.status !== "already_promoted" ||
+    graphRepeatPromotionJson.promoted_edge_id !== graphPromotionJson.promoted_edge_id ||
+    graphEdgesAfterRepeatPromotion.rows[0]?.count !== graphEdgesAfterPromotion.rows[0]?.count
+  ) {
+    throw new Error(
+      `Graph repeat promotion smoke failed: ${JSON.stringify({
+        graphRepeatPromotionJson,
+        firstPromotedEdgeId: graphPromotionJson.promoted_edge_id,
+        edgesAfterPromotion: graphEdgesAfterPromotion.rows[0]?.count,
+        edgesAfterRepeatPromotion: graphEdgesAfterRepeatPromotion.rows[0]?.count
+      })}`
+    );
+  }
+  const graphPromotedDashboard = await fetch(
+    `${baseUrl}/api/review-dashboard?project_id=${projectId}&graph_candidate_id=${graphPromotableCandidate.graph_candidate_id}&graph_lifecycle_state=accepted&graph_candidate_kind=edge`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const graphPromotedJson = await graphPromotedDashboard.json();
+  const graphPromotedReadiness =
+    graphPromotedJson.graph_candidates?.selected_candidate?.promotion_readiness;
+  await assertNoGraphPromoteAction(
+    graphPromotableCandidate.graph_candidate_id,
+    "Already-promoted graph candidate"
+  );
+  if (
+    graphPromotedDashboard.status !== 200 ||
+    graphPromotedReadiness?.status !== "promoted" ||
+    graphPromotedReadiness?.promoted_edge_id !== graphPromotionJson.promoted_edge_id ||
+    graphPromotedJson.graph_candidates?.hygiene?.counts?.promoted < 1
+  ) {
+    throw new Error(
+      `Graph promoted dashboard smoke failed: ${JSON.stringify(graphPromotedJson.graph_candidates)}`
+    );
+  }
   graphReviewExcerpt = {
     api_status: graphDashboardApi.status,
     counts: graphDashboardJson.graph_candidates.counts,
     filters: graphDashboardJson.graph_candidates.filters,
     selected_kind: graphDashboardJson.graph_candidates.selected_candidate.candidate_kind,
+    hygiene_counts: graphDashboardHygiene.counts,
+    selected_promotion_readiness: graphNodeReadiness,
+    accepted_promotion_readiness: graphAcceptedReadiness,
+    promotable_promotion_readiness: graphPromotableReadiness,
+    promoted_promotion_readiness: graphPromotedReadiness,
     action_lifecycle: graphActionJson.lifecycle_state,
+    promotion_status: graphPromotionJson.status,
+    repeat_promotion_status: graphRepeatPromotionJson.status,
+    promoted_edge_reused:
+      graphRepeatPromotionJson.promoted_edge_id === graphPromotionJson.promoted_edge_id,
     action_error_status: graphActionError.status,
     review_history_count:
       graphAcceptedJson.graph_candidates.selected_candidate.review_actions.length,
@@ -1583,7 +1884,10 @@ try {
     ),
     accepted_retrieval_active: false,
     edges_before: graphEdgesBeforeReviewAction.rows[0]?.count,
-    edges_after: graphEdgesAfterReviewAction.rows[0]?.count
+    edges_after_accept: graphEdgesAfterAcceptActions.rows[0]?.count,
+    edges_after_unsupported_accept: graphEdgesAfterReviewAction.rows[0]?.count,
+    edges_after_promote: graphEdgesAfterPromotion.rows[0]?.count,
+    edges_after_repeat_promote: graphEdgesAfterRepeatPromotion.rows[0]?.count
   };
 
   const emptyPostureApi = await fetch(

@@ -15,8 +15,10 @@ import {
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
   type CreateGraphCandidateInput,
+  type GetGraphCandidateHygieneInput,
   type GetGraphCandidateInput,
   type ListGraphCandidatesInput,
+  type PromoteGraphCandidateInput,
   type ReviewGraphCandidateInput
 } from "@recallant/contracts";
 import {
@@ -180,6 +182,8 @@ export type RecallantToolName =
   | "memory_list_graph_candidates"
   | "memory_get_graph_candidate"
   | "memory_review_graph_candidate"
+  | "memory_promote_graph_candidate"
+  | "memory_graph_hygiene"
   | "memory_promote"
   | "memory_archive"
   | "memory_forget"
@@ -1351,6 +1355,99 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         governance: {
           candidate_storage_only: true,
           retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_promote_graph_candidate",
+    title: "Promote Graph Candidate",
+    description:
+      "Explicitly promote one accepted, compatible graph edge candidate into the active edges table. Accepting a candidate remains review-only; this tool is the activation path.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      graph_candidate_id: uuidString,
+      actor_kind: z.enum(["agent", "user", "system"]).default("agent"),
+      note: nullableString,
+      metadata
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const result = await database.promoteGraphCandidate(
+          scoped.input as PromoteGraphCandidateInput & GraphCandidateScopedInput
+        );
+        return {
+          ...result,
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_promote_graph_candidate", {
+        graph_candidate_id: args.graph_candidate_id,
+        status: "blocked",
+        retrieval_active: false,
+        promoted_edge_id: null,
+        blocked_reason: "unsupported_endpoint",
+        blocked_detail:
+          "Stub runtime cannot promote graph candidates without a configured database.",
+        governance: {
+          explicit_promotion: true,
+          accept_remains_review_only: true,
+          active_graph_table: "edges",
+          retrieval_active: false,
+          supported_endpoint_policy: "chunk_to_chunk"
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_graph_hygiene",
+    title: "Graph Hygiene",
+    description:
+      "Return read-only graph candidate hygiene counts, duplicate groups, and promotion readiness for the scoped project. This tool does not mutate graph candidates or edges.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      developer_id: uuidString.nullable().optional(),
+      limit: z.number().int().positive().max(1000).default(500)
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (database) {
+        const result = await database.getGraphCandidateHygiene(
+          scoped.input as GetGraphCandidateHygieneInput & GraphCandidateScopedInput
+        );
+        return {
+          ...result,
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_graph_hygiene", {
+        generated_at: nowIso(),
+        counts: {
+          total: 0,
+          promotable: 0,
+          blocked: 0,
+          duplicate: 0,
+          stale: 0,
+          promoted: 0,
+          conflict_review: 0,
+          blocked_reasons: {}
+        },
+        readiness: [],
+        duplicate_groups: [],
+        governance: {
+          read_only: true,
+          mutates_candidates: false,
+          mutates_edges: false,
+          supported_endpoint_policy: "chunk_to_chunk"
         },
         ...projectScopeDiagnosticOutput(scoped)
       });

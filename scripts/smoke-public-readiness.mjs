@@ -245,7 +245,10 @@ mustInclude(
 );
 mustNotInclude(
   quickstart,
-  ["then writes only remote\nMCP client config locally", "then writes only remote MCP client config locally"],
+  [
+    "then writes only remote\nMCP client config locally",
+    "then writes only remote MCP client config locally"
+  ],
   "docs/QUICKSTART.md retired remote-only-config wording"
 );
 mustAppearBefore(
@@ -564,28 +567,45 @@ mustInclude(
     "`graph_relation_type`",
     "`graph_candidates`",
     "`selected_candidate`",
+    "`promotion_readiness`",
+    "`hygiene`",
     "`available_actions`",
     "`governance`",
     "/review?view=review",
     "/api/review-action",
     "/review-action",
     "`target_kind=graph_candidate`",
+    "`action=promote`",
     "not default retrieval input",
-    "not promoted into `edges`"
+    "`accept` does not promote them into `edges`",
+    "`Promote candidate`",
+    "`memory_promote_graph_candidate`",
+    "`memory_graph_hygiene`",
+    "`recallant graph hygiene`",
+    "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
+    "npm run graph-promotion:smoke"
   ],
   "GRAPH_TREE_CONTRACT graph review"
 );
 mustInclude(
   contractStatus,
   [
-    "Working B5 Workbench graph review slice",
+    "Working B6 explicit graph promotion slice",
     "Workbench graph review fields/actions",
     "`graph_candidates` payload",
-    "selected-candidate source refs and review history",
+    "hygiene counts",
+    "promotion readiness",
+    "selected-candidate source refs, review history",
     "/review?view=review",
     "/api/review-action",
     "/review-action",
-    "without inserting rows into `edges`",
+    "`action=promote`",
+    "`memory_promote_graph_candidate`",
+    "`memory_graph_hygiene`",
+    "`recallant graph hygiene`",
+    "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
+    "keeps unpromoted graph candidates out of retrieval",
+    "npm run graph-promotion:smoke",
     "npm run graph-candidates:smoke",
     "npm run graph-retrieval-profiles:smoke",
     "npm run review-ui:smoke",
@@ -827,8 +847,7 @@ assert(
   "smoke:core must include documentation-posture:smoke"
 );
 assert(
-  packageJson.scripts?.["remote-connect-cli:smoke"] ===
-    "node scripts/smoke-remote-connect-cli.mjs",
+  packageJson.scripts?.["remote-connect-cli:smoke"] === "node scripts/smoke-remote-connect-cli.mjs",
   "package.json must expose remote-connect-cli:smoke"
 );
 assert(
@@ -841,9 +860,7 @@ assert(
   "package.json must expose remote-client-cleanup:smoke"
 );
 assert(
-  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
-    "npm run remote-client-cleanup:smoke"
-  ),
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run remote-client-cleanup:smoke"),
   "smoke:core must include remote-client-cleanup:smoke"
 );
 assert(

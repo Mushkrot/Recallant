@@ -25,7 +25,8 @@ This contract does not implement:
 
 - graph database migration;
 - Workbench topology or graph visualization;
-- promotion from reviewed candidates into active graph state.
+- automatic promotion from reviewed candidates into active graph state;
+- first-class graph-node storage beyond the current bounded `edges` table.
 
 ## Current Compatibility Surface
 
@@ -120,6 +121,12 @@ review history, and are exposed through MCP tools, the Workbench review dashboar
 review action routes. Accepting a candidate records the reviewed lifecycle state; it does not insert
 rows into `edges`, create first-class graph nodes, or change default retrieval by itself.
 
+B6 adds an explicit promotion path for the compatible edge subset. Promotion is separate from
+review: accepted candidates remain review-only until a caller uses `memory_promote_graph_candidate`,
+`recallant graph promote-candidate <graph-candidate-id> --confirm`, or the Workbench `Promote
+candidate` action. Promotion creates or reuses a retrieval-active `edges` row only for accepted
+chunk-to-chunk edge candidates.
+
 The first typed candidate kinds are:
 
 - `node` - a proposed graph node such as a topic, entity, project, decision cluster, open question,
@@ -171,8 +178,9 @@ reviewed.
 
 ## Workbench Graph Review Surface
 
-The Workbench graph review slice is a human review surface for staged graph candidates. It is not a
-topology browser, graph mutation engine, graph hygiene workflow, or candidate promotion path.
+The Workbench graph review slice is a human review surface for staged graph candidates and explicit
+B6 promotion readiness. It is not a topology browser, automatic graph mutation engine, or broad
+graph maintenance workflow.
 
 The dashboard API accepts graph filters alongside the existing Review UI filters:
 
@@ -194,20 +202,68 @@ The dashboard response exposes graph review data under `graph_candidates`:
   review-action count;
 - `selected_candidate` - optional detail for the requested graph candidate, including source refs
   and review history;
+- `promotion_readiness` - per-candidate status attached to queue rows and the selected candidate;
+- `hygiene` - read-only graph candidate hygiene counts, readiness rows, and duplicate groups;
 - `available_actions` - the bounded action set the UI may present;
 - `governance` - explicit flags that candidate storage is staged only and not retrieval-active.
 
 The `/review?view=review` Workbench view renders node and edge candidate lanes, selected candidate
-detail, source evidence, review history, empty state copy, and action forms. The UI must make the
-staged boundary visible: graph candidates can be reviewed, but they are not default retrieval input
-and are not promoted into `edges` by the dashboard or review forms.
+detail, promotion readiness, hygiene counts, source evidence, review history, empty state copy, and
+action forms. The UI must make the staged boundary visible: graph candidates can be reviewed, but
+they are not default retrieval input and `accept` does not promote them into `edges`. Only the
+explicit `Promote candidate` action may activate a compatible accepted edge.
 
 Workbench review actions are accepted through `/api/review-action` and `/review-action` when the
 request names a graph candidate, for example with `graph_candidate_id` or
-`target_kind=graph_candidate`. The supported actions are the graph review action set below. Review
-requests must remain project-scoped, validate candidate ids and action-specific metadata, preserve
-source refs and review history, and return bounded validation errors without echoing raw request
-bodies.
+`target_kind=graph_candidate`. The supported review actions are the graph review action set below.
+The separate promotion action uses `action=promote`. Review and promotion requests must remain
+project-scoped, validate candidate ids and action-specific metadata, preserve source refs and
+review history, and return bounded validation errors without echoing raw request bodies.
+
+## Graph Hygiene And Explicit Promotion
+
+Graph hygiene is a read-only report. It does not mutate graph candidates or `edges`. The report
+returns these buckets:
+
+- `total` - scoped graph candidates considered by the report;
+- `promotable` - accepted chunk-to-chunk edge candidates that can become active edges;
+- `blocked` - candidates that cannot be promoted because of kind, lifecycle, endpoints, or similar
+  validation;
+- `duplicate` - later candidates with the same project, endpoints, and relation as an earlier
+  candidate;
+- `stale` - stale or archived candidates;
+- `promoted` - candidates with an already active or recorded promoted edge;
+- `conflict_review` - candidates whose metadata or review state indicates conflict review is
+  needed;
+- `blocked_reasons` - counts grouped by bounded reason codes.
+
+The current promotable subset is intentionally narrow:
+
+- candidate kind must be `edge`;
+- lifecycle state must be `accepted`;
+- `src.kind` and `dst.kind` must both be `chunk`;
+- source and destination chunk ids must be present and must not be the same chunk;
+- `relation_type` must be present.
+
+Node candidates, non-accepted candidates, stale candidates, archived candidates, rejected
+candidates, missing endpoints, unsupported endpoint kinds, self-loops, and unsafe payloads stay
+blocked. Promotion creates an `edges` row when no equivalent active edge exists and reuses the
+existing edge on repeat promotion.
+
+The exact B6 promotion and hygiene surfaces are:
+
+- MCP: `memory_promote_graph_candidate`;
+- MCP: `memory_graph_hygiene`;
+- CLI: `recallant graph hygiene`;
+- CLI: `recallant graph promote-candidate <graph-candidate-id> --confirm`;
+- Workbench: `Promote candidate`;
+- HTTP: `/api/review-action` or `/review-action` with `target_kind=graph_candidate` and
+  `action=promote`.
+
+The public smoke gate for this slice is `npm run graph-promotion:smoke`. It proves accept-only
+non-activation, explicit retrieval activation, idempotent promotion, hygiene count transitions,
+blocked node and unsupported endpoint cases, project isolation, and forbidden fixture token
+absence.
 
 ## Markdown Vault Bridge
 
@@ -275,7 +331,9 @@ copied into proposal JSON or stored graph candidate rows.
 
 Confirmed keeper writes call the same graph candidate storage used by other candidate sources.
 Stored keeper candidates remain staged review records. They are not part of default retrieval, and
-accepting or reviewing a candidate still does not by itself insert a row into `edges`.
+accepting or reviewing a candidate still does not by itself insert a row into `edges`. Compatible
+accepted chunk-to-chunk edge candidates require the explicit B6 promotion path before they can
+become active graph retrieval edges.
 
 The public smoke gate for this surface is `npm run memory-keeper:smoke`. It checks dry-run behavior
 without database configuration, confirm-gated writes, source refs, `needs_review` lifecycle on
@@ -284,9 +342,9 @@ unsafe fixtures, CLI and stored-payload leak scans, and default retrieval isolat
 ## Graph Retrieval Profiles
 
 Recallant includes the first named graph retrieval profile slice for `memory_search`. This is still
-edge-based and one-hop: it expands from ordinary seed chunk hits through accepted `edges` rows and
-returns additional chunk hits. It does not traverse graph candidate rows, promote accepted
-candidates, create first-class graph nodes, or evaluate a dedicated graph database.
+edge-based and one-hop: it expands from ordinary seed chunk hits through active `edges` rows and
+returns additional chunk hits. It does not traverse graph candidate rows, automatically promote
+accepted candidates, create first-class graph nodes, or evaluate a dedicated graph database.
 
 The MCP `memory_search` input accepts:
 
@@ -346,6 +404,9 @@ The first review actions are:
 Review actions must preserve source refs and review history. Merge and supersession paths should
 record their target metadata without physically deleting the original candidate row.
 
+Promotion is intentionally not part of the review action enum. It is an explicit activation path
+with its own result status: `promoted`, `already_promoted`, or `blocked`.
+
 ## Governance Requirements
 
 Every generated graph node or edge must preserve governance before it can affect retrieval:
@@ -392,7 +453,8 @@ should show:
 ## Phase Boundary
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
-Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile, and
-Workbench graph review slices. It does not create a graph visualization, promote accepted candidates
-into active graph state, add passive vault sync, ingest raw media, implement graph
-hygiene/maintenance workflows, or migrate Recallant to a dedicated graph database.
+Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
+explicit chunk-to-chunk candidate promotion, read-only hygiene report, and Workbench graph review
+slices. It does not create a graph visualization, automatic promotion, first-class graph node
+storage, passive vault sync, raw media ingestion, broad graph maintenance workflows, or a dedicated
+graph database migration.

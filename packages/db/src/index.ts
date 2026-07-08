@@ -14,9 +14,11 @@ import {
   parseGraphRetrievalProfile,
   type CreateGraphCandidateInput,
   type CreateGraphCandidateResult,
+  type GetGraphCandidateHygieneInput,
   type GetGraphCandidateInput,
   type GetGraphCandidateResult,
   type GraphCandidateEndpointRef,
+  type GraphCandidateHygieneResult,
   type GraphCandidateRecord,
   type GraphCandidateReviewPatch,
   type GraphCandidateReviewRecord,
@@ -25,6 +27,8 @@ import {
   type GraphTreeNodeKind,
   type ListGraphCandidatesInput,
   type ListGraphCandidatesResult,
+  type PromoteGraphCandidateInput,
+  type PromoteGraphCandidateResult,
   type ReviewGraphCandidateInput,
   type ReviewGraphCandidateResult
 } from "@recallant/contracts";
@@ -1046,6 +1050,8 @@ export type GraphCandidateScopedInput = {
 type GraphCandidateListInput = ListGraphCandidatesInput & GraphCandidateScopedInput;
 type GraphCandidateGetInput = GetGraphCandidateInput & GraphCandidateScopedInput;
 type GraphCandidateReviewInput = ReviewGraphCandidateInput & GraphCandidateScopedInput;
+type GraphCandidatePromoteInput = PromoteGraphCandidateInput & GraphCandidateScopedInput;
+type GraphCandidateHygieneInput = GetGraphCandidateHygieneInput & GraphCandidateScopedInput;
 
 type GraphCandidateDbRow = {
   id: string;
@@ -1843,6 +1849,34 @@ function graphCandidateReviewStateForAction(
   if (action === "edit")
     return patch?.lifecycle_state ?? (previousState as GraphTreeLifecycleState);
   throw new Error(`VALIDATION_ERROR: unsupported graph candidate review action ${action}`);
+}
+
+function graphCandidateDuplicateKey(
+  relationType: string | null | undefined,
+  src: Pick<GraphCandidateEndpointRef, "kind" | "id">,
+  dst: Pick<GraphCandidateEndpointRef, "kind" | "id">
+) {
+  return [
+    relationType ?? "",
+    src.kind ?? "unknown",
+    src.id ?? "",
+    dst.kind ?? "unknown",
+    dst.id ?? ""
+  ].join("::");
+}
+
+function graphCandidateNeedsConflictReview(candidate: GraphCandidateRecord) {
+  const relationType =
+    candidate.candidate_kind === "edge" ? candidate.relation_type.toLowerCase() : "";
+  if (
+    relationType === "conflicts_with" ||
+    relationType === "supersedes" ||
+    relationType === "superseded_by"
+  ) {
+    return true;
+  }
+  const metadataText = JSON.stringify(candidate.metadata ?? {}).toLowerCase();
+  return metadataText.includes("conflict") || metadataText.includes("supersede");
 }
 
 function importMemoryType(resultClasses: readonly string[]) {
@@ -6292,6 +6326,447 @@ export class RecallantDb {
     });
   }
 
+  async promoteGraphCandidate(
+    input: GraphCandidatePromoteInput
+  ): Promise<PromoteGraphCandidateResult> {
+    await this.ensureGraphCandidateSchema();
+    if (input.metadata && hasForbiddenCredentialField(input.metadata)) {
+      throw new Error(
+        "VALIDATION_ERROR: graph candidate promotion metadata contains forbidden fields"
+      );
+    }
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+
+    return withTransaction(this.pool, async (client) => {
+      const locked = await client.query<GraphCandidateDbRow>(
+        `
+          SELECT *
+          FROM graph_candidates
+          WHERE id = $1 AND project_id = $2 AND developer_id = $3
+          FOR UPDATE
+        `,
+        [input.graph_candidate_id, context.projectId, context.developerId]
+      );
+      const row = locked.rows[0];
+      if (!row) {
+        throw new Error("VALIDATION_ERROR: graph candidate not found");
+      }
+      const blocked = async (
+        blockedReason: NonNullable<PromoteGraphCandidateResult["blocked_reason"]>,
+        blockedDetail: string | null = null
+      ): Promise<PromoteGraphCandidateResult> => {
+        const candidate = await this.fetchGraphCandidateRecord(
+          client,
+          input.graph_candidate_id,
+          context
+        );
+        return {
+          graph_candidate_id: candidate.graph_candidate_id,
+          status: "blocked",
+          retrieval_active: false,
+          promoted_edge_id: null,
+          blocked_reason: blockedReason,
+          blocked_detail: blockedDetail,
+          candidate,
+          governance: {
+            explicit_promotion: true,
+            accept_remains_review_only: true,
+            active_graph_table: "edges",
+            retrieval_active: false,
+            supported_endpoint_policy: "chunk_to_chunk"
+          }
+        };
+      };
+
+      if (row.candidate_kind !== "edge") {
+        return blocked("candidate_kind_not_edge", "Only edge candidates can be promoted.");
+      }
+      if (row.lifecycle_state !== "accepted") {
+        return blocked("candidate_not_accepted", "Only accepted edge candidates can be promoted.");
+      }
+      const src = this.graphCandidateEndpointFromJson(row.src_endpoint);
+      const dst = this.graphCandidateEndpointFromJson(row.dst_endpoint);
+      const relationType = row.relation_type?.trim() ?? "";
+      if (
+        hasForbiddenGraphCandidatePayload({
+          relation_type: relationType,
+          src,
+          dst,
+          title: row.title,
+          summary: row.summary,
+          metadata: readObjectSetting(row.metadata) ?? {}
+        })
+      ) {
+        throw new Error(
+          "VALIDATION_ERROR: graph candidate promotion payload contains forbidden fields"
+        );
+      }
+      if (!src.id || !dst.id || !relationType) {
+        return blocked("missing_endpoint", "Promotion requires source, destination, and relation.");
+      }
+      if (src.kind !== "chunk" || dst.kind !== "chunk") {
+        return blocked(
+          "unsupported_endpoint",
+          "B6 promotion supports retrieval-active chunk-to-chunk edge candidates only."
+        );
+      }
+      if (src.kind === dst.kind && src.id === dst.id) {
+        return blocked("self_loop", "Self-loop graph candidate edges cannot be promoted.");
+      }
+
+      const existing = await client.query<{ id: string }>(
+        `
+          SELECT id
+          FROM edges
+          WHERE project_id = $1
+            AND src_kind = 'chunk'
+            AND src_id = $2
+            AND dst_kind = 'chunk'
+            AND dst_id = $3
+            AND relation_type = $4
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        `,
+        [context.projectId, src.id, dst.id, relationType]
+      );
+      const previousMetadata = readObjectSetting(row.metadata) ?? {};
+      const previousPromotion = readObjectSetting(previousMetadata.graph_promotion) ?? {};
+      const promotedAt = stringOrNull(previousPromotion.promoted_at) ?? new Date().toISOString();
+      let promotedEdgeId = existing.rows[0]?.id ?? null;
+      let status: PromoteGraphCandidateResult["status"] = "already_promoted";
+      if (!promotedEdgeId) {
+        const inserted = await client.query<{ id: string }>(
+          `
+            INSERT INTO edges (
+              project_id, src_kind, src_id, dst_kind, dst_id, relation_type, weight, metadata
+            )
+            VALUES ($1, 'chunk', $2, 'chunk', $3, $4, $5, $6)
+            RETURNING id
+          `,
+          [
+            context.projectId,
+            src.id,
+            dst.id,
+            relationType,
+            1,
+            JSON.stringify({
+              ...(input.metadata ?? {}),
+              graph_candidate_id: row.id,
+              promoted_from_graph_candidate: true,
+              promoted_at: promotedAt,
+              promotion_source: "graph_candidate",
+              promotion_endpoint_policy: "chunk_to_chunk"
+            })
+          ]
+        );
+        promotedEdgeId = inserted.rows[0]?.id ?? null;
+        status = "promoted";
+      }
+      if (!promotedEdgeId) {
+        throw new Error("Failed to promote graph candidate");
+      }
+
+      const actorKind = input.actor_kind ?? "agent";
+      const promotionMetadata = {
+        ...previousMetadata,
+        promoted_edge_id: promotedEdgeId,
+        promoted_at: promotedAt,
+        graph_promotion: {
+          ...previousPromotion,
+          promoted: true,
+          promoted_at: promotedAt,
+          promoted_edge_id: promotedEdgeId,
+          status,
+          retrieval_active: true,
+          active_graph_table: "edges",
+          endpoint_policy: "chunk_to_chunk",
+          actor_kind: actorKind
+        }
+      };
+      await client.query(
+        `
+          UPDATE graph_candidates
+          SET updated_at = now(), metadata = $4
+          WHERE id = $1 AND project_id = $2 AND developer_id = $3
+        `,
+        [row.id, context.projectId, context.developerId, JSON.stringify(promotionMetadata)]
+      );
+      await client.query(
+        `
+          INSERT INTO graph_candidate_review_actions (
+            graph_candidate_id, action, actor_kind, note, metadata
+          )
+          VALUES ($1, 'approve', $2, $3, $4)
+        `,
+        [
+          row.id,
+          actorKind,
+          input.note ?? null,
+          JSON.stringify({
+            ...(input.metadata ?? {}),
+            graph_promotion: true,
+            promotion_status: status,
+            promoted_edge_id: promotedEdgeId,
+            promoted_at: promotedAt,
+            active_graph_table: "edges",
+            endpoint_policy: "chunk_to_chunk"
+          })
+        ]
+      );
+      const candidate = await this.fetchGraphCandidateRecord(client, row.id, context);
+      return {
+        graph_candidate_id: candidate.graph_candidate_id,
+        status,
+        retrieval_active: true,
+        promoted_edge_id: promotedEdgeId,
+        blocked_reason: null,
+        blocked_detail: null,
+        candidate,
+        governance: {
+          explicit_promotion: true,
+          accept_remains_review_only: true,
+          active_graph_table: "edges",
+          retrieval_active: true,
+          supported_endpoint_policy: "chunk_to_chunk"
+        }
+      };
+    });
+  }
+
+  async getGraphCandidateHygiene(
+    input: GraphCandidateHygieneInput = {}
+  ): Promise<GraphCandidateHygieneResult> {
+    await this.ensureGraphCandidateSchema();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      return this.emptyGraphCandidateHygiene(context.projectId);
+    }
+    const limit = Math.min(Math.max(input.limit ?? 500, 1), 1000);
+    const result = await this.pool.query<GraphCandidateDbRow>(
+      `
+        SELECT
+          gc.*,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs,
+          (
+            SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.created_at DESC), '[]'::jsonb)
+            FROM graph_candidate_review_actions a
+            WHERE a.graph_candidate_id = gc.id
+          ) AS review_actions
+        FROM graph_candidates gc
+        LEFT JOIN graph_candidate_source_refs r ON r.graph_candidate_id = gc.id
+        WHERE gc.project_id = $1 AND gc.developer_id = $2
+        GROUP BY gc.id
+        ORDER BY gc.updated_at DESC, gc.created_at DESC
+        LIMIT $3::int
+      `,
+      [context.projectId, context.developerId, limit]
+    );
+    const candidates = result.rows.map((row) => this.graphCandidateRecordFromRow(row));
+    const edgeRows = await this.pool.query<{
+      id: string;
+      src_kind: string;
+      src_id: string;
+      dst_kind: string;
+      dst_id: string;
+      relation_type: string;
+    }>(
+      `
+        SELECT id::text, src_kind, src_id, dst_kind, dst_id, relation_type
+        FROM edges
+        WHERE project_id = $1
+      `,
+      [context.projectId]
+    );
+    const activeEdges = new Map<string, string>();
+    for (const edge of edgeRows.rows) {
+      activeEdges.set(
+        graphCandidateDuplicateKey(
+          edge.relation_type,
+          { kind: edge.src_kind as GraphCandidateEndpointRef["kind"], id: edge.src_id },
+          { kind: edge.dst_kind as GraphCandidateEndpointRef["kind"], id: edge.dst_id }
+        ),
+        edge.id
+      );
+    }
+    const duplicateMap = new Map<string, GraphCandidateRecord[]>();
+    for (const candidate of candidates) {
+      if (candidate.candidate_kind !== "edge") continue;
+      const key = graphCandidateDuplicateKey(candidate.relation_type, candidate.src, candidate.dst);
+      const group = duplicateMap.get(key) ?? [];
+      group.push(candidate);
+      duplicateMap.set(key, group);
+    }
+    const duplicateGroups = Array.from(duplicateMap.entries())
+      .filter(([, group]) => group.length > 1)
+      .map(([duplicateKey, group]) => {
+        const first = group[0] as Extract<GraphCandidateRecord, { candidate_kind: "edge" }>;
+        return {
+          duplicate_key: duplicateKey,
+          relation_type: first.relation_type,
+          src: first.src,
+          dst: first.dst,
+          candidate_ids: group.map((candidate) => candidate.graph_candidate_id).sort(),
+          count: group.length
+        };
+      })
+      .sort((left, right) => left.duplicate_key.localeCompare(right.duplicate_key));
+    const firstDuplicateIds = new Set(
+      duplicateGroups.map((group) => [...group.candidate_ids].sort()[0]).filter(Boolean)
+    );
+    const readiness: GraphCandidateHygieneResult["readiness"] = [];
+    const counts: GraphCandidateHygieneResult["counts"] = {
+      total: candidates.length,
+      promotable: 0,
+      blocked: 0,
+      duplicate: 0,
+      stale: 0,
+      promoted: 0,
+      conflict_review: 0,
+      blocked_reasons: {}
+    };
+    const incrementBlocked = (reason: string) => {
+      counts.blocked += 1;
+      counts.blocked_reasons[reason] = (counts.blocked_reasons[reason] ?? 0) + 1;
+    };
+    for (const candidate of candidates) {
+      const base = {
+        graph_candidate_id: candidate.graph_candidate_id,
+        candidate_kind: candidate.candidate_kind,
+        lifecycle_state: candidate.lifecycle_state,
+        conflict_review: graphCandidateNeedsConflictReview(candidate),
+        relation_type: candidate.candidate_kind === "edge" ? candidate.relation_type : null,
+        duplicate_key:
+          candidate.candidate_kind === "edge"
+            ? graphCandidateDuplicateKey(candidate.relation_type, candidate.src, candidate.dst)
+            : null
+      };
+      if (base.conflict_review) counts.conflict_review += 1;
+      if (candidate.lifecycle_state === "stale" || candidate.lifecycle_state === "archived") {
+        counts.stale += 1;
+        readiness.push({
+          ...base,
+          status: "stale",
+          promoted_edge_id: null,
+          blocked_reason: "candidate_not_accepted",
+          blocked_detail: "Stale or archived graph candidates are not promotable."
+        });
+        continue;
+      }
+      if (candidate.candidate_kind !== "edge") {
+        incrementBlocked("candidate_kind_not_edge");
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: "candidate_kind_not_edge",
+          blocked_detail: "Only edge candidates can be promoted."
+        });
+        continue;
+      }
+      if (candidate.lifecycle_state !== "accepted") {
+        incrementBlocked("candidate_not_accepted");
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: "candidate_not_accepted",
+          blocked_detail: "Only accepted edge candidates can be promoted."
+        });
+        continue;
+      }
+      if (!candidate.src.id || !candidate.dst.id || !candidate.relation_type) {
+        incrementBlocked("missing_endpoint");
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: "missing_endpoint",
+          blocked_detail: "Promotion requires source, destination, and relation."
+        });
+        continue;
+      }
+      if (candidate.src.kind !== "chunk" || candidate.dst.kind !== "chunk") {
+        incrementBlocked("unsupported_endpoint");
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: "unsupported_endpoint",
+          blocked_detail:
+            "B6 promotion supports retrieval-active chunk-to-chunk edge candidates only."
+        });
+        continue;
+      }
+      if (candidate.src.kind === candidate.dst.kind && candidate.src.id === candidate.dst.id) {
+        incrementBlocked("self_loop");
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: "self_loop",
+          blocked_detail: "Self-loop graph candidate edges cannot be promoted."
+        });
+        continue;
+      }
+      const promotedEdgeId =
+        stringOrNull(candidate.metadata?.promoted_edge_id) ??
+        stringOrNull(readObjectSetting(candidate.metadata?.graph_promotion)?.promoted_edge_id) ??
+        activeEdges.get(base.duplicate_key ?? "");
+      if (promotedEdgeId) {
+        counts.promoted += 1;
+        readiness.push({
+          ...base,
+          status: "promoted",
+          promoted_edge_id: promotedEdgeId,
+          blocked_reason: null,
+          blocked_detail: null
+        });
+        continue;
+      }
+      const duplicateGroup = duplicateMap.get(base.duplicate_key ?? "") ?? [];
+      if (duplicateGroup.length > 1 && !firstDuplicateIds.has(candidate.graph_candidate_id)) {
+        counts.duplicate += 1;
+        readiness.push({
+          ...base,
+          status: "duplicate",
+          promoted_edge_id: null,
+          blocked_reason: "duplicate_candidate",
+          blocked_detail: "Another candidate has the same project, endpoints, and relation."
+        });
+        continue;
+      }
+      counts.promotable += 1;
+      readiness.push({
+        ...base,
+        status: "promotable",
+        promoted_edge_id: null,
+        blocked_reason: null,
+        blocked_detail: null
+      });
+    }
+    return {
+      generated_at: new Date().toISOString(),
+      project_id: context.projectId,
+      counts,
+      readiness,
+      duplicate_groups: duplicateGroups,
+      governance: {
+        read_only: true,
+        mutates_candidates: false,
+        mutates_edges: false,
+        supported_endpoint_policy: "chunk_to_chunk"
+      }
+    };
+  }
+
   async getContextPack(input: ContextPackInput) {
     const context = await this.contextForSession(input.session_id);
     if (input.project_id && input.project_id !== context.projectId) {
@@ -8871,6 +9346,13 @@ export class RecallantDb {
             throw error;
           })))
         : (graphRows[0] ?? null);
+    const graphHygiene = await this.getGraphCandidateHygiene({
+      project_id: dashboardProjectId,
+      limit: 500
+    });
+    const graphReadinessById = new Map(
+      graphHygiene.readiness.map((readiness) => [readiness.graph_candidate_id, readiness])
+    );
     const graphCandidatesDashboard = {
       filters: {
         lifecycle_state: graphFilters.lifecycle_state ?? "all",
@@ -8884,15 +9366,18 @@ export class RecallantDb {
       candidates: graphRows.map((candidate) => ({
         ...candidate,
         review_action_count: candidate.review_actions?.length ?? 0,
-        source_ref_count: candidate.source_refs.length
+        source_ref_count: candidate.source_refs.length,
+        promotion_readiness: graphReadinessById.get(candidate.graph_candidate_id) ?? null
       })),
       selected_candidate: graphSelected
         ? {
             ...graphSelected,
             review_action_count: graphSelected.review_actions?.length ?? 0,
-            source_ref_count: graphSelected.source_refs.length
+            source_ref_count: graphSelected.source_refs.length,
+            promotion_readiness: graphReadinessById.get(graphSelected.graph_candidate_id) ?? null
           }
         : null,
+      hygiene: graphHygiene,
       available_actions: [
         "accept",
         "reject",
@@ -8901,7 +9386,8 @@ export class RecallantDb {
         "mark_stale",
         "edit",
         "merge",
-        "supersede"
+        "supersede",
+        "promote"
       ],
       governance: {
         candidate_storage_only: true,
@@ -9366,6 +9852,31 @@ export class RecallantDb {
         throw new Error("VALIDATION_ERROR: graph candidate source_ref contains forbidden fields");
       }
     }
+  }
+
+  private emptyGraphCandidateHygiene(projectId?: string | null): GraphCandidateHygieneResult {
+    return {
+      generated_at: new Date().toISOString(),
+      project_id: projectId ?? null,
+      counts: {
+        total: 0,
+        promotable: 0,
+        blocked: 0,
+        duplicate: 0,
+        stale: 0,
+        promoted: 0,
+        conflict_review: 0,
+        blocked_reasons: {}
+      },
+      readiness: [],
+      duplicate_groups: [],
+      governance: {
+        read_only: true,
+        mutates_candidates: false,
+        mutates_edges: false,
+        supported_endpoint_policy: "chunk_to_chunk"
+      }
+    };
   }
 
   private async fetchGraphCandidateRecord(

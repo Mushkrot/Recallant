@@ -293,6 +293,97 @@ export type ReviewGraphCandidateInput = {
   metadata?: GraphCandidateMetadata;
 };
 
+export type PromoteGraphCandidateInput = {
+  graph_candidate_id: string;
+  actor_kind?: "agent" | "user" | "system";
+  note?: string | null;
+  metadata?: GraphCandidateMetadata;
+};
+
+export type PromoteGraphCandidateStatus = "promoted" | "already_promoted" | "blocked";
+
+export type PromoteGraphCandidateBlockedReason =
+  | "candidate_kind_not_edge"
+  | "candidate_not_accepted"
+  | "missing_endpoint"
+  | "unsupported_endpoint"
+  | "self_loop";
+
+export type PromoteGraphCandidateResult = {
+  graph_candidate_id: string;
+  status: PromoteGraphCandidateStatus;
+  retrieval_active: boolean;
+  promoted_edge_id?: string | null;
+  blocked_reason?: PromoteGraphCandidateBlockedReason | null;
+  blocked_detail?: string | null;
+  candidate: GraphCandidateRecord;
+  governance: {
+    explicit_promotion: true;
+    accept_remains_review_only: true;
+    active_graph_table: "edges";
+    retrieval_active: boolean;
+    supported_endpoint_policy: "chunk_to_chunk";
+  };
+};
+
+export type GraphCandidatePromotionReadinessStatus =
+  | "promotable"
+  | "blocked"
+  | "duplicate"
+  | "promoted"
+  | "stale";
+
+export type GraphCandidatePromotionReadiness = {
+  graph_candidate_id: string;
+  candidate_kind: GraphCandidateKind;
+  lifecycle_state: GraphTreeLifecycleState;
+  status: GraphCandidatePromotionReadinessStatus;
+  relation_type?: string | null;
+  duplicate_key?: string | null;
+  promoted_edge_id?: string | null;
+  blocked_reason?: PromoteGraphCandidateBlockedReason | "duplicate_candidate" | null;
+  blocked_detail?: string | null;
+  conflict_review: boolean;
+};
+
+export type GraphCandidateDuplicateGroup = {
+  duplicate_key: string;
+  relation_type: string;
+  src: GraphCandidateEndpointRef;
+  dst: GraphCandidateEndpointRef;
+  candidate_ids: string[];
+  count: number;
+};
+
+export type GraphCandidateHygieneResult = {
+  generated_at: string;
+  project_id?: string | null;
+  counts: {
+    total: number;
+    promotable: number;
+    blocked: number;
+    duplicate: number;
+    stale: number;
+    promoted: number;
+    conflict_review: number;
+    blocked_reasons: Record<string, number>;
+  };
+  readiness: GraphCandidatePromotionReadiness[];
+  duplicate_groups: GraphCandidateDuplicateGroup[];
+  governance: {
+    read_only: true;
+    mutates_candidates: false;
+    mutates_edges: false;
+    supported_endpoint_policy: "chunk_to_chunk";
+  };
+};
+
+export type GetGraphCandidateHygieneInput = {
+  project_id?: string;
+  developer_id?: string;
+  limit?: number;
+};
+
 export type GraphCandidateReviewRecord = {
   review_action_id?: string;
   graph_candidate_id: string;

@@ -18,6 +18,8 @@ const expectedTools = [
   "memory_list_graph_candidates",
   "memory_get_graph_candidate",
   "memory_review_graph_candidate",
+  "memory_promote_graph_candidate",
+  "memory_graph_hygiene",
   "memory_promote",
   "memory_archive",
   "memory_forget",
@@ -138,28 +140,48 @@ try {
   const recallMemoryTool = list.tools?.find((tool) => tool.name === "memory_recall_agent_memories");
   assert(createMemoryTool, "tools/list missing memory_create_agent_memory");
   assert(recallMemoryTool, "tools/list missing memory_recall_agent_memories");
-  const graphCreateTool = list.tools?.find(
-    (tool) => tool.name === "memory_create_graph_candidate"
-  );
+  const graphCreateTool = list.tools?.find((tool) => tool.name === "memory_create_graph_candidate");
   const graphListTool = list.tools?.find((tool) => tool.name === "memory_list_graph_candidates");
   const graphGetTool = list.tools?.find((tool) => tool.name === "memory_get_graph_candidate");
-  const graphReviewTool = list.tools?.find(
-    (tool) => tool.name === "memory_review_graph_candidate"
+  const graphReviewTool = list.tools?.find((tool) => tool.name === "memory_review_graph_candidate");
+  const graphPromoteTool = list.tools?.find(
+    (tool) => tool.name === "memory_promote_graph_candidate"
   );
+  const graphHygieneTool = list.tools?.find((tool) => tool.name === "memory_graph_hygiene");
   assert(graphCreateTool, "tools/list missing memory_create_graph_candidate");
   assert(graphListTool, "tools/list missing memory_list_graph_candidates");
   assert(graphGetTool, "tools/list missing memory_get_graph_candidate");
   assert(graphReviewTool, "tools/list missing memory_review_graph_candidate");
+  assert(graphPromoteTool, "tools/list missing memory_promote_graph_candidate");
+  assert(graphHygieneTool, "tools/list missing memory_graph_hygiene");
   mustInclude(
-    JSON.stringify([graphCreateTool, graphListTool, graphGetTool, graphReviewTool]),
-    ["governed", "staging", "do not affect default retrieval", "review"],
+    JSON.stringify([
+      graphCreateTool,
+      graphListTool,
+      graphGetTool,
+      graphReviewTool,
+      graphPromoteTool,
+      graphHygieneTool
+    ]),
+    ["governed", "staging", "do not affect default retrieval", "review", "promote", "read-only"],
     "graph candidate tools/list excerpt"
   );
   graphCandidateToolsListExcerpt = {
-    names: [graphCreateTool.name, graphListTool.name, graphGetTool.name, graphReviewTool.name],
+    names: [
+      graphCreateTool.name,
+      graphListTool.name,
+      graphGetTool.name,
+      graphReviewTool.name,
+      graphPromoteTool.name,
+      graphHygieneTool.name
+    ],
     create_description: graphCreateTool.description,
     review_description: graphReviewTool.description,
-    create_properties: Object.keys(graphCreateTool.inputSchema?.properties ?? {})
+    promote_description: graphPromoteTool.description,
+    hygiene_description: graphHygieneTool.description,
+    create_properties: Object.keys(graphCreateTool.inputSchema?.properties ?? {}),
+    promote_properties: Object.keys(graphPromoteTool.inputSchema?.properties ?? {}),
+    hygiene_properties: Object.keys(graphHygieneTool.inputSchema?.properties ?? {})
   };
   const createProperties = createMemoryTool.inputSchema?.properties ?? {};
   const recallProperties = recallMemoryTool.inputSchema?.properties ?? {};
@@ -352,31 +374,67 @@ try {
     { timeout: 5_000 }
   );
   const graphReview = JSON.parse(graphReviewCall.content?.[0]?.text ?? "{}");
+  const graphPromoteCall = await client.callTool(
+    {
+      name: "memory_promote_graph_candidate",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        graph_candidate_id: graphCreate.graph_candidate_id,
+        actor_kind: "agent",
+        note: "stub smoke promote"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphPromote = JSON.parse(graphPromoteCall.content?.[0]?.text ?? "{}");
+  const graphHygieneCall = await client.callTool(
+    {
+      name: "memory_graph_hygiene",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        limit: 5
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphHygiene = JSON.parse(graphHygieneCall.content?.[0]?.text ?? "{}");
   if (
     graphCreate.tool !== "memory_create_graph_candidate" ||
     graphCreate.governance?.retrieval_active !== false ||
     graphList.tool !== "memory_list_graph_candidates" ||
     graphList.governance?.candidate_storage_only !== true ||
     graphReview.tool !== "memory_review_graph_candidate" ||
-    graphReview.review_actions?.length !== 1
+    graphReview.review_actions?.length !== 1 ||
+    graphPromote.tool !== "memory_promote_graph_candidate" ||
+    graphPromote.governance?.explicit_promotion !== true ||
+    graphPromote.retrieval_active !== false ||
+    graphHygiene.tool !== "memory_graph_hygiene" ||
+    graphHygiene.governance?.read_only !== true ||
+    graphHygiene.governance?.mutates_edges !== false
   ) {
     throw new Error(
       `Graph candidate stub responses were unsafe: ${JSON.stringify({
         graphCreate,
         graphList,
-        graphReview
+        graphReview,
+        graphPromote,
+        graphHygiene
       })}`
     );
   }
   mustNotContain(
-    JSON.stringify({ graphCreate, graphList, graphReview }),
+    JSON.stringify({ graphCreate, graphList, graphReview, graphPromote, graphHygiene }),
     forbiddenOutputFixtures,
     "graph candidate stub responses"
   );
   graphCandidateStubResponses = {
     create: graphCreate,
     list: graphList,
-    review: graphReview
+    review: graphReview,
+    promote: graphPromote,
+    hygiene: graphHygiene
   };
 
   const call = await client.callTool(

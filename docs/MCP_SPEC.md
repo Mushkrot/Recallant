@@ -242,9 +242,10 @@ relation type, direction, inclusion reason, hop limit, and edge weight. Response
 `graph_retrieval` summary counts for included hits, excluded-by-policy edges, and budget cutoff.
 
 Graph candidate rows are not queried by `memory_search`. Accepting or reviewing a graph candidate
-does not make it retrieval-active by itself. Unknown `graph_retrieval_profile` values fail input
-validation with a bounded error listing allowed profiles and the `graph_retrieval_profile` path,
-without echoing raw request bodies.
+does not make it retrieval-active by itself; compatible accepted edge candidates become
+retrieval-active only after explicit promotion into `edges`. Unknown `graph_retrieval_profile`
+values fail input validation with a bounded error listing allowed profiles and the
+`graph_retrieval_profile` path, without echoing raw request bodies.
 
 ## 3e) Governed Graph Candidate Tools
 
@@ -263,11 +264,21 @@ The first candidate tools are:
   the scoped project.
 - `memory_review_graph_candidate` - record review actions such as accept, reject, archive,
   unarchive, mark stale, edit, merge, or supersede while preserving the original candidate row.
+- `memory_promote_graph_candidate` - explicitly promote one accepted compatible chunk-to-chunk edge
+  candidate into the active `edges` table. Accepting a candidate remains review-only; promotion
+  returns `promoted`, `already_promoted`, or `blocked` plus governance metadata.
+- `memory_graph_hygiene` - return read-only scoped counts, candidate-level promotion readiness, and
+  duplicate groups. It must report `read_only: true` and must not mutate graph candidates or edges.
 
 Agent-generated and import-generated candidates require source refs. Tool handlers must keep project
 scope explicit, reject wrong-project access, and block raw secrets, database URLs, provider tokens,
 raw credentials, raw artifacts, customer data, private keys, backups, auth headers, cookies, and
 private deployment details from candidate payloads and responses.
+
+The matching CLI and Workbench labels are `recallant graph hygiene`, `recallant graph
+promote-candidate <graph-candidate-id> --confirm`, and Workbench `Promote candidate`. Workbench and
+HTTP form/API promotion use `/review-action` or `/api/review-action` with
+`target_kind=graph_candidate` and `action=promote`.
 
 ## 3f) External Rehearsal
 

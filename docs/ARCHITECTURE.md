@@ -125,18 +125,21 @@ memory was derived from, what decision it supports, what it supersedes, which to
 belongs to, and which candidates still need review. It must keep provenance, scope, confidence,
 extraction method, and review state attached before graph output can influence recall.
 
-Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, and
-a deterministic `recallant keeper candidates` path for keeper-generated candidate proposals. It also
+Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, a
+deterministic `recallant keeper candidates` path for keeper-generated candidate proposals, read-only
+graph hygiene reporting, and explicit promotion for accepted chunk-to-chunk edge candidates. It also
 has named one-hop graph retrieval profiles on `memory_search`, including `same_topic`,
 `source_neighborhood`, `decision_cluster`, `preference_chain`, `conflict_check`,
 `supersession_trace`, and `project_context`, with legacy `graph_expand: true` preserved through the
 `edge_neighborhood` profile. These surfaces stay review-first: candidates preserve source refs,
-confidence, extraction method, lifecycle state, and provenance, and they do not become
-retrieval-active by default.
+confidence, extraction method, lifecycle state, and provenance. Accepting a candidate remains
+review-only; retrieval activation requires explicit promotion through the MCP, CLI, or Workbench
+promotion path.
 
-Recallant does not yet have automatic promotion from accepted candidates into active graph state, a
-dedicated graph database, passive vault sync, raw media ingestion, graph hygiene workflows, or a
-Workbench topology view. Those remain future slices layered on top of the governed graph vocabulary.
+Recallant does not yet have automatic promotion policies, a dedicated graph database, passive vault
+sync, raw media ingestion, broad graph maintenance workflows, support for promotion endpoint kinds
+beyond the B6 chunk-to-chunk subset, or a Workbench topology view. Those remain future slices
+layered on top of the governed graph vocabulary.
 
 ## Safety Model
 

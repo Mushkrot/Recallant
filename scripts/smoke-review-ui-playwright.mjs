@@ -70,7 +70,10 @@ async function assertResponsiveBounds(page, label) {
         return {
           tag: element.tagName.toLowerCase(),
           className: String(element.className ?? ""),
-          text: String(element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+          text: String(element.textContent ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 90),
           left: rect.left,
           right: rect.right,
           width: rect.width,
@@ -79,8 +82,7 @@ async function assertResponsiveBounds(page, label) {
       })
       .filter((item) => item.width > 0)
       .filter(
-        (item) =>
-          item.left < -2 || item.right > item.viewport + 2 || item.width > item.viewport + 2
+        (item) => item.left < -2 || item.right > item.viewport + 2 || item.width > item.viewport + 2
       )
       .slice(0, 8);
   });
@@ -98,7 +100,10 @@ async function assertResponsiveBounds(page, label) {
       .map((element) => ({
         tag: element.tagName.toLowerCase(),
         className: String(element.className ?? ""),
-        text: String(element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+        text: String(element.textContent ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 90),
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth
       }))
@@ -290,8 +295,7 @@ async function run() {
     await db.attachProjectSource({
       project_id: projectId,
       source_kind: "virtual",
-      label:
-        "Virtual memory space input for operations planning, onboarding, and later review",
+      label: "Virtual memory space input for operations planning, onboarding, and later review",
       metadata: {
         smoke: "playwright",
         purpose: "dense virtual source with long label",
@@ -319,8 +323,7 @@ async function run() {
     await db.attachProjectSource({
       project_id: projectId,
       source_kind: "document_collection",
-      label:
-        "Customer research summaries, support notes, and release planning documents",
+      label: "Customer research summaries, support notes, and release planning documents",
       uri: "demo-docs://customer-research-release-planning",
       metadata: {
         smoke: "playwright",
@@ -490,8 +493,8 @@ async function run() {
     project_id: projectId,
     candidate_kind: "edge",
     relation_type: "supports",
-    src: { kind: "topic", id: "playwright-graph", label: "Playwright graph source endpoint" },
-    dst: { kind: "decision_cluster", id: "review-workbench", label: "Review Workbench graph destination" },
+    src: { kind: "chunk", id: randomUUID(), label: "Playwright graph source endpoint" },
+    dst: { kind: "chunk", id: randomUUID(), label: "Review Workbench graph destination" },
     title: "Playwright graph edge candidate",
     summary: "Graph edge candidate for focused Review view screenshots.",
     confidence: 0.79,
@@ -530,8 +533,7 @@ async function run() {
       memory_type: index % 3 === 0 ? "decision" : index % 3 === 1 ? "action" : "test_result",
       scope: "project",
       title,
-      body:
-        "Dense Workbench QA uses this synthetic record to prove long human-readable text remains scannable in Activity / Replay and Review without showing raw database fields.",
+      body: "Dense Workbench QA uses this synthetic record to prove long human-readable text remains scannable in Activity / Replay and Review without showing raw database fields.",
       created_by: "agent",
       confidence: index === denseActivityTitles.length - 1 ? 0.45 : 0.78,
       metadata: {
@@ -691,8 +693,7 @@ async function run() {
     memory_type: "environment_fact",
     scope: "project",
     title: "Possible overlapping guidance about source review",
-    body:
-      "This synthetic conflict proves the Workbench can keep conflict review readable in a crowded state.",
+    body: "This synthetic conflict proves the Workbench can keep conflict review readable in a crowded state.",
     created_by: "agent",
     confidence: 0.52,
     metadata: {
@@ -922,7 +923,8 @@ async function run() {
     );
     const visibleSourceListText = await desktop.locator("#sources .source-list").innerText();
     assert(
-      !visibleSourceListText.includes(projectPath) && !visibleSourceListText.includes(missingSourcePath),
+      !visibleSourceListText.includes(projectPath) &&
+        !visibleSourceListText.includes(missingSourcePath),
       `visible source list leaked exact paths instead of keeping them in Technical details: ${visibleSourceListText}`
     );
     await absent(desktop.locator("#ask-recallant"), "focused Sources Ask panel");
@@ -960,8 +962,12 @@ async function run() {
     await desktop.getByRole("heading", { name: "Recording flow" }).waitFor();
     await desktop.getByRole("heading", { name: "Memory updates" }).waitFor();
     await desktop.getByRole("heading", { name: "Checkpoints" }).waitFor();
-    await desktop.locator("#activity-replay .activity-summary", { hasText: "source-linked" }).waitFor();
-    await desktop.getByText("Session starts and context reads prove the agent is entering Recallant.").waitFor();
+    await desktop
+      .locator("#activity-replay .activity-summary", { hasText: "source-linked" })
+      .waitFor();
+    await desktop
+      .getByText("Session starts and context reads prove the agent is entering Recallant.")
+      .waitFor();
     await desktop.getByText("Source: Team handbook").first().waitFor();
     await desktop.getByText("Context was read").waitFor();
     await absent(desktop.locator("#ask-recallant"), "focused Activity Ask panel");
@@ -1024,6 +1030,9 @@ async function run() {
     await desktop.getByText("Source evidence").first().waitFor();
     await desktop.getByText("Review history").first().waitFor();
     await desktop.getByText("Accepted candidates remain staged review records").first().waitFor();
+    await desktop.getByText("Promotion readiness").first().waitFor();
+    await desktop.getByText("This accepted compatible edge can be promoted").first().waitFor();
+    await desktop.getByRole("button", { name: "Promote candidate" }).waitFor();
     const migrationQueue = desktop.locator("#review .migration-review");
     await visibleBox(migrationQueue, "desktop migration review queue");
     await desktop.getByText("Migration review queue").waitFor();
@@ -1064,7 +1073,9 @@ async function run() {
       `dense Review should include imported evidence rows, found ${importedLaneCount}`
     );
     const conflictLane = desktop.locator(".review-lane").filter({ hasText: "Possible conflicts" });
-    const conflictLaneCount = Number(await conflictLane.first().locator("summary strong").innerText());
+    const conflictLaneCount = Number(
+      await conflictLane.first().locator("summary strong").innerText()
+    );
     assert(
       conflictLaneCount >= 1,
       `dense Review should include a possible conflict row, found ${conflictLaneCount}`
@@ -1187,6 +1198,8 @@ async function run() {
     await mobile.getByText("Node candidates").waitFor();
     await mobile.getByText("Edge candidates").waitFor();
     await mobile.getByText("Playwright graph edge candidate").first().waitFor();
+    await mobile.getByText("Promotion readiness").first().waitFor();
+    await mobile.getByRole("button", { name: "Promote candidate" }).waitFor();
     await saveScreenshotPair(
       mobile,
       join(reportDir, "recallant-workbench-mobile-focused-review.png"),

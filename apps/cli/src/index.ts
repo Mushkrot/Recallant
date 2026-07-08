@@ -300,6 +300,7 @@ function positionalArgs(argv: readonly string[]) {
     "--expires-at",
     "--source-kind",
     "--source-id",
+    "--graph-candidate-id",
     "--label",
     "--uri",
     "--query",
@@ -10435,6 +10436,117 @@ type KeeperCandidateTextPlan = Omit<KeeperCliPlan, "dry_run" | "writes_database"
   proposals: Array<KeeperCliPlan["proposals"][number] & { persisted?: string | null }>;
 };
 
+function parseGraphFormat(argv: readonly string[]) {
+  const format = parseFlag(argv, "--format") ?? "json";
+  if (format !== "json" && format !== "text") {
+    throw new Error("VALIDATION_ERROR: graph --format must be json or text");
+  }
+  return format;
+}
+
+function formatGraphHygieneText(
+  report: Awaited<ReturnType<RecallantDb["getGraphCandidateHygiene"]>>
+) {
+  return [
+    "Recallant graph hygiene",
+    `Read only: ${report.governance.read_only}`,
+    `Project id: ${report.project_id ?? "current"}`,
+    `Total: ${report.counts.total}`,
+    `Promotable: ${report.counts.promotable}`,
+    `Blocked: ${report.counts.blocked}`,
+    `Duplicate: ${report.counts.duplicate}`,
+    `Stale: ${report.counts.stale}`,
+    `Promoted: ${report.counts.promoted}`,
+    `Conflict review: ${report.counts.conflict_review}`,
+    `Duplicate groups: ${report.duplicate_groups.length}`,
+    ""
+  ].join("\n");
+}
+
+function formatGraphPromotionText(
+  result: Awaited<ReturnType<RecallantDb["promoteGraphCandidate"]>>
+) {
+  return [
+    "Recallant graph candidate promotion",
+    `Candidate: ${result.graph_candidate_id}`,
+    `Status: ${result.status}`,
+    `Retrieval active: ${result.retrieval_active}`,
+    `Promoted edge: ${result.promoted_edge_id ?? "none"}`,
+    result.blocked_reason ? `Blocked reason: ${result.blocked_reason}` : null,
+    result.blocked_detail ? `Blocked detail: ${result.blocked_detail}` : null,
+    ""
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function createGraphDatabase(argv: readonly string[], projectDir: string) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID,
+    projectId: parseFlag(argv, "--project-id") ?? process.env.RECALLANT_PROJECT_ID,
+    projectPath: projectDir
+  });
+}
+
+async function runGraphCommand(argv: readonly string[]) {
+  let database: RecallantDb | null = null;
+  try {
+    const subcommand = argv[3] ?? "hygiene";
+    const format = parseGraphFormat(argv);
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const projectId = parseFlag(argv, "--project-id") ?? null;
+    const scope = projectId
+      ? { project_id: projectId, project_path: projectDir }
+      : { project_path: projectDir };
+    database = createGraphDatabase(argv, projectDir);
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for graph commands");
+
+    if (subcommand === "hygiene" || subcommand === "health") {
+      const report = await database.getGraphCandidateHygiene({
+        ...scope,
+        limit: Number(parseFlag(argv, "--limit") ?? 500)
+      });
+      process.stdout.write(
+        format === "text" ? formatGraphHygieneText(report) : `${JSON.stringify(report, null, 2)}\n`
+      );
+      return;
+    }
+
+    if (subcommand === "promote-candidate" || subcommand === "promote") {
+      const args = positionalArgs(argv);
+      const candidateId = args[1] ?? parseFlag(argv, "--graph-candidate-id");
+      if (!candidateId) {
+        throw new Error("VALIDATION_ERROR: graph promote-candidate requires a candidate id");
+      }
+      if (!argv.includes("--confirm")) {
+        throw new Error("VALIDATION_ERROR: graph candidate promotion requires --confirm");
+      }
+      const result = await database.promoteGraphCandidate({
+        ...scope,
+        graph_candidate_id: candidateId,
+        actor_kind: "user"
+      });
+      process.stdout.write(
+        format === "text"
+          ? formatGraphPromotionText(result)
+          : `${JSON.stringify(result, null, 2)}\n`
+      );
+      return;
+    }
+
+    throw new Error("VALIDATION_ERROR: graph supports hygiene|promote-candidate");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  } finally {
+    await database?.close();
+  }
+}
+
 function parseKeeperFormat(argv: readonly string[]) {
   const format = parseFlag(argv, "--format") ?? "json";
   if (format !== "json" && format !== "text") {
@@ -10879,7 +10991,19 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  if (command === "graph") {
+    return [
+      "Usage: recallant graph <hygiene|promote-candidate> [candidate-id] [--project-id <id>] [--developer-id <id>] [--project-dir <dir>] [--format json|text] [--confirm]",
+      "",
+      "Inspect graph candidate hygiene or explicitly promote one accepted compatible edge candidate. Hygiene is read-only. Promotion requires --confirm and never happens through accept alone.",
+      "",
+      "Examples:",
+      "  recallant graph hygiene --project-dir .",
+      "  recallant graph promote-candidate <graph-candidate-id> --project-id <project-id> --confirm",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -10936,6 +11060,7 @@ async function main(argv: readonly string[]) {
   if (command === "source" || command === "project-source") return runSourceCommand(argv);
   if (command === "vault") return runVaultCommand(argv);
   if (command === "keeper") return runKeeperCommand(argv);
+  if (command === "graph") return runGraphCommand(argv);
   if (command === "local-cleanup" || command === "sandbox-local-cleanup")
     return runLocalCleanup(argv);
   if (command === "init") return runInit(argv);
