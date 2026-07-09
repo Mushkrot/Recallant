@@ -19,7 +19,7 @@ This contract covers:
 - compatibility with the current `edges` table;
 - provenance, scope, confidence, extraction, review, and safety requirements;
 - the current graph candidate, Markdown vault bridge, memory keeper candidate, graph retrieval
-  profile, Workbench graph review, and Workbench graph topology surfaces.
+  profile, Workbench graph review, Workbench graph topology, and graph maintenance surfaces.
 
 This contract does not implement:
 
@@ -178,8 +178,9 @@ reviewed.
 ## Workbench Graph Review Surface
 
 The Workbench graph review slice is a human review surface for staged graph candidates, explicit B6
-promotion readiness, and B7 read-only topology visualization. It is not an automatic graph mutation
-engine, first-class graph-node store, graph database migration, or broad graph maintenance workflow.
+promotion readiness, B7 read-only topology visualization, and B8 governed maintenance workflows. It
+is not an automatic graph mutation engine, first-class graph-node store, or graph database
+migration.
 
 The dashboard API accepts graph filters alongside the existing Review UI filters:
 
@@ -206,17 +207,21 @@ The dashboard response exposes graph review data under `graph_candidates`:
 - `topology` - read-only topology nodes, links, groups, summary counts, truncation/omitted counts,
   and governance flags derived from graph candidates, source refs, promotion readiness, and active
   `edges`;
+- `maintenance` - governed graph maintenance counts, lanes, recommendations, and governance flags
+  for candidate lifecycle cleanup;
 - `available_actions` - the bounded action set the UI may present;
 - `governance` - explicit flags that candidate storage is staged only and not retrieval-active.
 
 The `/review?view=review` Workbench view renders node and edge candidate lanes, selected candidate
-detail, promotion readiness, hygiene counts, the `Graph topology` panel, source evidence, review
-history, empty state copy, and action forms. The topology panel uses exact visible lanes named
-`Active promoted links`, `Candidate links`, `Blocked states`, and `Source-backed evidence`. Its
-empty state is `No graph topology is visible for this project yet.` The UI must make the staged
-boundary visible: graph candidates can be reviewed, but they are not default retrieval input and
-`accept` does not promote them into `edges`. Only the explicit `Promote candidate` action may
-activate a compatible accepted edge.
+detail, promotion readiness, hygiene counts, the `Graph topology` panel, the `Graph maintenance`
+panel, source evidence, review history, empty state copy, and action forms. The topology panel uses
+exact visible lanes named `Active promoted links`, `Candidate links`, `Blocked states`, and
+`Source-backed evidence`. Its empty state is `No graph topology is visible for this project yet.`
+The maintenance panel uses exact empty state copy
+`No graph maintenance actions are recommended for this project.` The UI must make the staged
+boundary visible: graph candidates can be reviewed and explicitly maintained, but they are not
+default retrieval input and `accept` does not promote them into `edges`. Only the explicit
+`Promote candidate` action may activate a compatible accepted edge.
 
 ## Workbench Graph Topology
 
@@ -297,6 +302,46 @@ The public smoke gates for this slice include `npm run graph-promotion:smoke` an
 activation, idempotent promotion, hygiene count transitions, promoted active topology links, staged
 candidate topology links, source-ref markers, blocked node and unsupported endpoint cases,
 read-only topology counts, deterministic truncation, project isolation, and forbidden fixture token
+absence.
+
+## Graph Maintenance
+
+B8 graph maintenance is an explicit candidate lifecycle workflow. The default path is a read-only
+maintenance plan. Apply operations require an explicit candidate id, an action kind, and confirmation
+before any lifecycle review action is appended. Merge and supersede actions also require an explicit
+target graph candidate id.
+
+The maintenance plan returns:
+
+- `counts` - total recommendation counts plus duplicate, stale or archived, blocked,
+  conflict-review, promoted-cleanup, omitted, and truncation counts;
+- `lanes` - deterministic recommendation groups named `duplicates`, `stale_or_archived`, `blocked`,
+  `conflict_review`, and `promoted_cleanup`;
+- `recommendations` - stable action ids, action kinds, candidate ids, optional target candidate ids,
+  reason codes, summaries, lifecycle states, readiness statuses, and risk levels;
+- `governance` - explicit `read_only_plan`, `dry_run_default`, `apply_requires_confirm`,
+  `deletes_candidates: false`, `mutates_edges: false`, `retrieval_semantics_changed: false`, and
+  `preserves_source_refs: true` flags.
+
+The exact B8 maintenance surfaces are:
+
+- MCP: `memory_graph_maintenance`;
+- CLI preview: `recallant graph maintenance`;
+- CLI apply:
+  `recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm`;
+- Workbench: `Graph maintenance`;
+- HTTP: `/api/review-action` or `/review-action` with `action=maintenance`.
+
+Maintenance actions may archive duplicates, mark candidates stale, archive candidates, unarchive
+candidates, merge duplicate candidates, or mark one candidate as superseded by another. They append
+bounded review history and update candidate lifecycle state. They do not delete candidate rows, do
+not delete source refs, do not insert/update/delete `edges`, do not auto-promote candidates, and do
+not change retrieval semantics.
+
+The public smoke gates for this slice include `npm run graph-candidates:smoke`,
+`npm run mcp:smoke`, and `npm run review-ui:smoke`. They prove read-only maintenance planning,
+confirm-gated apply, target validation, idempotent/no-op repeat handling, source-ref preservation,
+edge-count stability, Workbench labels and forms, project isolation, and forbidden fixture token
 absence.
 
 ## Markdown Vault Bridge
@@ -488,7 +533,7 @@ should show:
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
 Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
-explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review, and
-Workbench graph topology slices. It does not create automatic promotion, first-class graph node
-storage, passive vault sync, raw media ingestion, broad graph maintenance workflows, or a dedicated
-graph database migration.
+explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review,
+Workbench graph topology, and governed graph maintenance workflow slices. It does not create
+automatic promotion, first-class graph node storage, passive vault sync, raw media ingestion, or a
+dedicated graph database migration.

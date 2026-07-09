@@ -7,6 +7,7 @@ import {
   buildRecallantReadinessContract,
   graphCandidateExtractionMethodValues,
   graphCandidateKindValues,
+  graphCandidateMaintenanceActionKindValues,
   graphCandidateReviewActionValues,
   graphCandidateSourceRefKindValues,
   graphRetrievalProfileValues,
@@ -15,6 +16,8 @@ import {
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
   type CreateGraphCandidateInput,
+  type GraphCandidateMaintenanceApplyInput,
+  type GetGraphCandidateMaintenancePlanInput,
   type GetGraphCandidateHygieneInput,
   type GetGraphCandidateInput,
   type ListGraphCandidatesInput,
@@ -71,6 +74,7 @@ const graphLifecycleState = z.enum(graphTreeLifecycleStateValues);
 const graphExtractionMethod = z.enum(graphCandidateExtractionMethodValues);
 const graphSourceRefKind = z.enum(graphCandidateSourceRefKindValues);
 const graphReviewAction = z.enum(graphCandidateReviewActionValues);
+const graphMaintenanceActionKind = z.enum(graphCandidateMaintenanceActionKindValues);
 const graphRetrievalProfile = z.enum(graphRetrievalProfileValues);
 const graphCandidateScope = z.enum(["project", "developer", "domain", "all"]);
 const graphCandidateAudience = z
@@ -184,6 +188,7 @@ export type RecallantToolName =
   | "memory_review_graph_candidate"
   | "memory_promote_graph_candidate"
   | "memory_graph_hygiene"
+  | "memory_graph_maintenance"
   | "memory_promote"
   | "memory_archive"
   | "memory_forget"
@@ -1448,6 +1453,130 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           mutates_candidates: false,
           mutates_edges: false,
           supported_endpoint_policy: "chunk_to_chunk"
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      });
+    }
+  },
+  {
+    name: "memory_graph_maintenance",
+    title: "Graph Maintenance",
+    description:
+      "Preview governed graph candidate maintenance recommendations or apply one explicit lifecycle maintenance action. Plan mode is read-only. Apply mode requires confirm: true and never mutates active edges or retrieval semantics.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      developer_id: uuidString.nullable().optional(),
+      mode: z.enum(["plan", "apply"]).default("plan"),
+      limit: z.number().int().positive().max(200).default(50),
+      action_kind: graphMaintenanceActionKind.optional(),
+      graph_candidate_id: uuidString.optional(),
+      target_graph_candidate_id: uuidString.nullable().optional(),
+      confirm: z.boolean().default(false),
+      dry_run: z.boolean().optional(),
+      actor_kind: z.enum(["agent", "user", "system"]).default("agent"),
+      note: nullableString,
+      metadata
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      if (args.mode === "apply") {
+        if (args.confirm !== true) {
+          throw new Error(
+            "VALIDATION_ERROR: memory_graph_maintenance apply requires confirm: true"
+          );
+        }
+        if (!args.action_kind || !args.graph_candidate_id) {
+          throw new Error(
+            "VALIDATION_ERROR: memory_graph_maintenance apply requires action_kind and graph_candidate_id"
+          );
+        }
+        if (
+          (args.action_kind === "merge_duplicate" || args.action_kind === "supersede_candidate") &&
+          !args.target_graph_candidate_id
+        ) {
+          throw new Error(
+            "VALIDATION_ERROR: memory_graph_maintenance apply requires target_graph_candidate_id"
+          );
+        }
+        if (database) {
+          const result = await database.applyGraphCandidateMaintenance(
+            scoped.input as GraphCandidateMaintenanceApplyInput & GraphCandidateScopedInput
+          );
+          return {
+            tool: "memory_graph_maintenance",
+            mode: "apply",
+            ...result,
+            ...projectScopeDiagnosticOutput(scoped)
+          };
+        }
+        return stubResponse("memory_graph_maintenance", {
+          mode: "apply",
+          generated_at: nowIso(),
+          action_kind: args.action_kind,
+          graph_candidate_id: args.graph_candidate_id,
+          target_graph_candidate_id: args.target_graph_candidate_id ?? null,
+          status: "dry_run",
+          mutation: {
+            dry_run: true,
+            confirmed: true,
+            mutates_candidates: false,
+            review_action_appended: false,
+            deletes_candidates: false,
+            mutates_edges: false,
+            retrieval_semantics_changed: false
+          },
+          governance: {
+            read_only_plan: false,
+            dry_run_default: true,
+            apply_requires_confirm: true,
+            deletes_candidates: false,
+            mutates_edges: false,
+            retrieval_semantics_changed: false,
+            preserves_source_refs: true
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        });
+      }
+      if (database) {
+        const result = await database.getGraphCandidateMaintenancePlan(
+          scoped.input as GetGraphCandidateMaintenancePlanInput & GraphCandidateScopedInput
+        );
+        return {
+          tool: "memory_graph_maintenance",
+          mode: "plan",
+          ...result,
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+      return stubResponse("memory_graph_maintenance", {
+        mode: "plan",
+        generated_at: nowIso(),
+        counts: {
+          total_recommendations: 0,
+          duplicates: 0,
+          stale_or_archived: 0,
+          blocked: 0,
+          conflict_review: 0,
+          promoted_cleanup: 0,
+          omitted_recommendations: 0,
+          truncated: false,
+          limits: {
+            recommendations: args.limit ?? 50
+          }
+        },
+        lanes: [],
+        governance: {
+          read_only_plan: true,
+          dry_run_default: true,
+          apply_requires_confirm: true,
+          deletes_candidates: false,
+          mutates_edges: false,
+          retrieval_semantics_changed: false,
+          preserves_source_refs: true,
+          mutates_candidates: false
         },
         ...projectScopeDiagnosticOutput(scoped)
       });

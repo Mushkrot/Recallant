@@ -105,10 +105,10 @@ dependable before expanding the product surface.
   without turning recalled discussion into binding instructions automatically.
 - Governed graph next slices after the shipped candidate storage, Workbench review surface,
   explicit chunk-to-chunk promotion, read-only hygiene report, Markdown vault bridge, memory keeper
-  candidate pipeline, named one-hop retrieval profiles, and read-only Workbench topology
-  visualization: broader keeper source integration, richer review ergonomics, first-class graph
-  storage decisions, broader graph hygiene/maintenance workflows, human-memory expansion, more
-  endpoint kinds, and automatic promotion policy decisions.
+  candidate pipeline, named one-hop retrieval profiles, read-only Workbench topology visualization,
+  and governed graph maintenance workflows: broader keeper source integration, richer review
+  ergonomics, first-class graph storage decisions, human-memory expansion, more endpoint kinds, and
+  automatic promotion policy decisions.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

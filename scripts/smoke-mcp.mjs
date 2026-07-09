@@ -20,6 +20,7 @@ const expectedTools = [
   "memory_review_graph_candidate",
   "memory_promote_graph_candidate",
   "memory_graph_hygiene",
+  "memory_graph_maintenance",
   "memory_promote",
   "memory_archive",
   "memory_forget",
@@ -83,6 +84,7 @@ let governedMemoryValidationErrors = {};
 let governedMemoryExamples = {};
 let graphCandidateToolsListExcerpt = null;
 let graphCandidateStubResponses = {};
+let graphMaintenanceValidationErrors = {};
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -148,12 +150,14 @@ try {
     (tool) => tool.name === "memory_promote_graph_candidate"
   );
   const graphHygieneTool = list.tools?.find((tool) => tool.name === "memory_graph_hygiene");
+  const graphMaintenanceTool = list.tools?.find((tool) => tool.name === "memory_graph_maintenance");
   assert(graphCreateTool, "tools/list missing memory_create_graph_candidate");
   assert(graphListTool, "tools/list missing memory_list_graph_candidates");
   assert(graphGetTool, "tools/list missing memory_get_graph_candidate");
   assert(graphReviewTool, "tools/list missing memory_review_graph_candidate");
   assert(graphPromoteTool, "tools/list missing memory_promote_graph_candidate");
   assert(graphHygieneTool, "tools/list missing memory_graph_hygiene");
+  assert(graphMaintenanceTool, "tools/list missing memory_graph_maintenance");
   mustInclude(
     JSON.stringify([
       graphCreateTool,
@@ -161,9 +165,19 @@ try {
       graphGetTool,
       graphReviewTool,
       graphPromoteTool,
-      graphHygieneTool
+      graphHygieneTool,
+      graphMaintenanceTool
     ]),
-    ["governed", "staging", "do not affect default retrieval", "review", "promote", "read-only"],
+    [
+      "governed",
+      "staging",
+      "do not affect default retrieval",
+      "review",
+      "promote",
+      "read-only",
+      "Graph Maintenance",
+      "confirm"
+    ],
     "graph candidate tools/list excerpt"
   );
   graphCandidateToolsListExcerpt = {
@@ -173,15 +187,18 @@ try {
       graphGetTool.name,
       graphReviewTool.name,
       graphPromoteTool.name,
-      graphHygieneTool.name
+      graphHygieneTool.name,
+      graphMaintenanceTool.name
     ],
     create_description: graphCreateTool.description,
     review_description: graphReviewTool.description,
     promote_description: graphPromoteTool.description,
     hygiene_description: graphHygieneTool.description,
+    maintenance_description: graphMaintenanceTool.description,
     create_properties: Object.keys(graphCreateTool.inputSchema?.properties ?? {}),
     promote_properties: Object.keys(graphPromoteTool.inputSchema?.properties ?? {}),
-    hygiene_properties: Object.keys(graphHygieneTool.inputSchema?.properties ?? {})
+    hygiene_properties: Object.keys(graphHygieneTool.inputSchema?.properties ?? {}),
+    maintenance_properties: Object.keys(graphMaintenanceTool.inputSchema?.properties ?? {})
   };
   const createProperties = createMemoryTool.inputSchema?.properties ?? {};
   const recallProperties = recallMemoryTool.inputSchema?.properties ?? {};
@@ -271,6 +288,30 @@ try {
       const result = await client.callTool(
         {
           name: "memory_create_agent_memory",
+          arguments: args
+        },
+        undefined,
+        { timeout: 5_000 }
+      );
+      output = JSON.stringify(result);
+      sawValidationError = Boolean(result.isError);
+    } catch (error) {
+      sawValidationError = true;
+      output = error instanceof Error ? error.message : String(error);
+    }
+    assert(sawValidationError, `${label} should have failed validation`);
+    mustInclude(output, markers, label);
+    mustNotContain(output, forbiddenOutputFixtures, label);
+    return output.slice(0, 1000);
+  }
+
+  async function expectToolValidationError(toolName, label, args, markers) {
+    let sawValidationError = false;
+    let output = "";
+    try {
+      const result = await client.callTool(
+        {
+          name: toolName,
           arguments: args
         },
         undefined,
@@ -400,6 +441,60 @@ try {
     { timeout: 5_000 }
   );
   const graphHygiene = JSON.parse(graphHygieneCall.content?.[0]?.text ?? "{}");
+  const graphMaintenancePlanCall = await client.callTool(
+    {
+      name: "memory_graph_maintenance",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        mode: "plan",
+        limit: 5
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphMaintenancePlan = JSON.parse(graphMaintenancePlanCall.content?.[0]?.text ?? "{}");
+  graphMaintenanceValidationErrors = {
+    confirm_required: await expectToolValidationError(
+      "memory_graph_maintenance",
+      "graph maintenance confirm validation",
+      {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        mode: "apply",
+        action_kind: "archive_duplicate",
+        graph_candidate_id: graphCreate.graph_candidate_id
+      },
+      ["confirm"]
+    ),
+    target_required: await expectToolValidationError(
+      "memory_graph_maintenance",
+      "graph maintenance target validation",
+      {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        mode: "apply",
+        action_kind: "merge_duplicate",
+        graph_candidate_id: graphCreate.graph_candidate_id,
+        confirm: true
+      },
+      ["target_graph_candidate_id"]
+    )
+  };
+  const graphMaintenanceApplyCall = await client.callTool(
+    {
+      name: "memory_graph_maintenance",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-graph-candidate",
+        mode: "apply",
+        action_kind: "archive_duplicate",
+        graph_candidate_id: graphCreate.graph_candidate_id,
+        confirm: true,
+        note: "stub smoke maintenance apply"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const graphMaintenanceApply = JSON.parse(graphMaintenanceApplyCall.content?.[0]?.text ?? "{}");
   if (
     graphCreate.tool !== "memory_create_graph_candidate" ||
     graphCreate.governance?.retrieval_active !== false ||
@@ -412,7 +507,15 @@ try {
     graphPromote.retrieval_active !== false ||
     graphHygiene.tool !== "memory_graph_hygiene" ||
     graphHygiene.governance?.read_only !== true ||
-    graphHygiene.governance?.mutates_edges !== false
+    graphHygiene.governance?.mutates_edges !== false ||
+    graphMaintenancePlan.tool !== "memory_graph_maintenance" ||
+    graphMaintenancePlan.mode !== "plan" ||
+    graphMaintenancePlan.governance?.read_only_plan !== true ||
+    graphMaintenancePlan.governance?.mutates_edges !== false ||
+    graphMaintenanceApply.tool !== "memory_graph_maintenance" ||
+    graphMaintenanceApply.mode !== "apply" ||
+    graphMaintenanceApply.mutation?.confirmed !== true ||
+    graphMaintenanceApply.mutation?.mutates_edges !== false
   ) {
     throw new Error(
       `Graph candidate stub responses were unsafe: ${JSON.stringify({
@@ -420,12 +523,23 @@ try {
         graphList,
         graphReview,
         graphPromote,
-        graphHygiene
+        graphHygiene,
+        graphMaintenancePlan,
+        graphMaintenanceApply
       })}`
     );
   }
   mustNotContain(
-    JSON.stringify({ graphCreate, graphList, graphReview, graphPromote, graphHygiene }),
+    JSON.stringify({
+      graphCreate,
+      graphList,
+      graphReview,
+      graphPromote,
+      graphHygiene,
+      graphMaintenancePlan,
+      graphMaintenanceApply,
+      graphMaintenanceValidationErrors
+    }),
     forbiddenOutputFixtures,
     "graph candidate stub responses"
   );
@@ -434,7 +548,10 @@ try {
     list: graphList,
     review: graphReview,
     promote: graphPromote,
-    hygiene: graphHygiene
+    hygiene: graphHygiene,
+    maintenance_plan: graphMaintenancePlan,
+    maintenance_apply: graphMaintenanceApply,
+    maintenance_validation_errors: graphMaintenanceValidationErrors
   };
 
   const call = await client.callTool(

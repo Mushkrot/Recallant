@@ -59,9 +59,11 @@ import {
   resolveRemoteMcpStoredCredential,
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig,
+  graphCandidateMaintenanceActionKindValues,
   graphCandidateSourceRefKindValues,
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
+  type GraphCandidateMaintenanceActionKind,
   type GraphCandidateSourceRefKind,
   type RemoteMcpDoctorReport,
   type RemoteAgentConsentScope
@@ -301,6 +303,9 @@ function positionalArgs(argv: readonly string[]) {
     "--source-kind",
     "--source-id",
     "--graph-candidate-id",
+    "--target-graph-candidate-id",
+    "--target-id",
+    "--action-kind",
     "--label",
     "--uri",
     "--query",
@@ -10480,6 +10485,61 @@ function formatGraphPromotionText(
     .join("\n");
 }
 
+function formatGraphMaintenanceText(
+  plan: Awaited<ReturnType<RecallantDb["getGraphCandidateMaintenancePlan"]>>
+) {
+  const laneLines = plan.lanes.map(
+    (lane) =>
+      `- ${lane.label}: ${lane.count} recommendation${lane.count === 1 ? "" : "s"}${
+        lane.truncated ? ` (${lane.omitted_count} omitted)` : ""
+      }`
+  );
+  return [
+    "Recallant graph maintenance",
+    `Read-only plan: ${plan.governance.read_only_plan}`,
+    `Apply requires confirm: ${plan.governance.apply_requires_confirm}`,
+    `Mutates edges: ${plan.governance.mutates_edges}`,
+    `Retrieval semantics changed: ${plan.governance.retrieval_semantics_changed}`,
+    `Project id: ${plan.project_id ?? "current"}`,
+    `Total recommendations: ${plan.counts.total_recommendations}`,
+    `Omitted recommendations: ${plan.counts.omitted_recommendations}`,
+    ...laneLines,
+    ""
+  ].join("\n");
+}
+
+function formatGraphMaintenanceApplyText(
+  result: Awaited<ReturnType<RecallantDb["applyGraphCandidateMaintenance"]>>
+) {
+  return [
+    "Recallant graph maintenance apply",
+    `Candidate: ${result.graph_candidate_id}`,
+    `Action: ${result.action_kind}`,
+    `Status: ${result.status}`,
+    `Target: ${result.target_graph_candidate_id ?? "none"}`,
+    `Dry run: ${result.mutation.dry_run}`,
+    `Confirmed: ${result.mutation.confirmed}`,
+    `Review action appended: ${result.mutation.review_action_appended}`,
+    `Mutates edges: ${result.mutation.mutates_edges}`,
+    `Retrieval semantics changed: ${result.mutation.retrieval_semantics_changed}`,
+    ""
+  ].join("\n");
+}
+
+function parseGraphMaintenanceActionKind(
+  raw: string | undefined
+): GraphCandidateMaintenanceActionKind {
+  if (
+    !raw ||
+    !graphCandidateMaintenanceActionKindValues.includes(raw as GraphCandidateMaintenanceActionKind)
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: graph maintenance action must be one of ${graphCandidateMaintenanceActionKindValues.join(", ")}`
+    );
+  }
+  return raw as GraphCandidateMaintenanceActionKind;
+}
+
 function createGraphDatabase(argv: readonly string[], projectDir: string) {
   const databaseUrl = process.env.RECALLANT_DATABASE_URL;
   if (!databaseUrl) return null;
@@ -10498,9 +10558,10 @@ async function runGraphCommand(argv: readonly string[]) {
     const format = parseGraphFormat(argv);
     const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
     const projectId = parseFlag(argv, "--project-id") ?? null;
+    const developerId = parseFlag(argv, "--developer-id") ?? null;
     const scope = projectId
-      ? { project_id: projectId, project_path: projectDir }
-      : { project_path: projectDir };
+      ? { project_id: projectId, project_path: projectDir, developer_id: developerId ?? undefined }
+      : { project_path: projectDir, developer_id: developerId ?? undefined };
     database = createGraphDatabase(argv, projectDir);
     if (!database) throw new Error("RECALLANT_DATABASE_URL is required for graph commands");
 
@@ -10511,6 +10572,73 @@ async function runGraphCommand(argv: readonly string[]) {
       });
       process.stdout.write(
         format === "text" ? formatGraphHygieneText(report) : `${JSON.stringify(report, null, 2)}\n`
+      );
+      return;
+    }
+
+    if (subcommand === "maintenance") {
+      const args = positionalArgs(argv);
+      const mode = args[1] === "apply" ? "apply" : "plan";
+      if (mode === "apply") {
+        const actionKind = parseGraphMaintenanceActionKind(
+          args[2] ?? parseFlag(argv, "--action-kind")
+        );
+        const candidateId = args[3] ?? parseFlag(argv, "--graph-candidate-id");
+        if (!candidateId) {
+          throw new Error("VALIDATION_ERROR: graph maintenance apply requires a candidate id");
+        }
+        if (!argv.includes("--confirm")) {
+          throw new Error("VALIDATION_ERROR: graph maintenance apply requires --confirm");
+        }
+        const targetGraphCandidateId =
+          parseFlag(argv, "--target-graph-candidate-id") ?? parseFlag(argv, "--target-id");
+        if (
+          (actionKind === "merge_duplicate" || actionKind === "supersede_candidate") &&
+          !targetGraphCandidateId
+        ) {
+          throw new Error(
+            "VALIDATION_ERROR: graph maintenance apply requires --target-graph-candidate-id for merge/supersede"
+          );
+        }
+        const result =
+          actionKind === "merge_duplicate" || actionKind === "supersede_candidate"
+            ? await (() => {
+                const requiredTargetGraphCandidateId = targetGraphCandidateId;
+                if (!requiredTargetGraphCandidateId) {
+                  throw new Error(
+                    "VALIDATION_ERROR: graph maintenance apply requires --target-graph-candidate-id for merge/supersede"
+                  );
+                }
+                return database.applyGraphCandidateMaintenance({
+                  ...scope,
+                  graph_candidate_id: candidateId,
+                  action_kind: actionKind,
+                  target_graph_candidate_id: requiredTargetGraphCandidateId,
+                  confirm: true,
+                  actor_kind: "user"
+                });
+              })()
+            : await database.applyGraphCandidateMaintenance({
+                ...scope,
+                graph_candidate_id: candidateId,
+                action_kind: actionKind,
+                target_graph_candidate_id: targetGraphCandidateId ?? null,
+                confirm: true,
+                actor_kind: "user"
+              });
+        process.stdout.write(
+          format === "text"
+            ? formatGraphMaintenanceApplyText(result)
+            : `${JSON.stringify(result, null, 2)}\n`
+        );
+        return;
+      }
+      const plan = await database.getGraphCandidateMaintenancePlan({
+        ...scope,
+        limit: Number(parseFlag(argv, "--limit") ?? 50)
+      });
+      process.stdout.write(
+        format === "text" ? formatGraphMaintenanceText(plan) : `${JSON.stringify(plan, null, 2)}\n`
       );
       return;
     }
@@ -10537,7 +10665,7 @@ async function runGraphCommand(argv: readonly string[]) {
       return;
     }
 
-    throw new Error("VALIDATION_ERROR: graph supports hygiene|promote-candidate");
+    throw new Error("VALIDATION_ERROR: graph supports hygiene|maintenance|promote-candidate");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${message}\n`);
@@ -10993,12 +11121,15 @@ function usageText(command?: string) {
   }
   if (command === "graph") {
     return [
-      "Usage: recallant graph <hygiene|promote-candidate> [candidate-id] [--project-id <id>] [--developer-id <id>] [--project-dir <dir>] [--format json|text] [--confirm]",
+      "Usage: recallant graph <hygiene|maintenance|promote-candidate> [candidate-id] [--project-id <id>] [--developer-id <id>] [--project-dir <dir>] [--format json|text] [--limit <n>] [--confirm]",
+      "       recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm",
       "",
-      "Inspect graph candidate hygiene or explicitly promote one accepted compatible edge candidate. Hygiene is read-only. Promotion requires --confirm and never happens through accept alone.",
+      "Inspect graph candidate hygiene, preview governed graph maintenance, or explicitly promote one accepted compatible edge candidate. Hygiene and maintenance preview are read-only. Maintenance apply and promotion require --confirm.",
       "",
       "Examples:",
       "  recallant graph hygiene --project-dir .",
+      "  recallant graph maintenance --project-dir .",
+      "  recallant graph maintenance apply archive_duplicate <graph-candidate-id> --target-graph-candidate-id <canonical-id> --confirm",
       "  recallant graph promote-candidate <graph-candidate-id> --project-id <project-id> --confirm",
       ""
     ].join("\n");

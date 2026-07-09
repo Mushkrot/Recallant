@@ -269,16 +269,23 @@ The first candidate tools are:
   returns `promoted`, `already_promoted`, or `blocked` plus governance metadata.
 - `memory_graph_hygiene` - return read-only scoped counts, candidate-level promotion readiness, and
   duplicate groups. It must report `read_only: true` and must not mutate graph candidates or edges.
+- `memory_graph_maintenance` - preview governed graph candidate maintenance recommendations or
+  apply one explicit lifecycle maintenance action. Plan mode is read-only. Apply mode requires
+  `confirm: true`, merge and supersede actions require `target_graph_candidate_id`, and maintenance
+  never mutates active `edges` or retrieval semantics.
 
 Agent-generated and import-generated candidates require source refs. Tool handlers must keep project
 scope explicit, reject wrong-project access, and block raw secrets, database URLs, provider tokens,
 raw credentials, raw artifacts, customer data, private keys, backups, auth headers, cookies, and
 private deployment details from candidate payloads and responses.
 
-The matching CLI and Workbench labels are `recallant graph hygiene`, `recallant graph
-promote-candidate <graph-candidate-id> --confirm`, and Workbench `Promote candidate`. Workbench and
-HTTP form/API promotion use `/review-action` or `/api/review-action` with
-`target_kind=graph_candidate` and `action=promote`.
+The matching CLI and Workbench labels are `recallant graph hygiene`,
+`recallant graph maintenance`, `recallant graph maintenance apply <action> <graph-candidate-id>
+[--target-graph-candidate-id <id>] --confirm`,
+`recallant graph promote-candidate <graph-candidate-id> --confirm`, Workbench `Graph maintenance`,
+and Workbench `Promote candidate`. Workbench and HTTP form/API promotion use `/review-action` or
+`/api/review-action` with `target_kind=graph_candidate` and `action=promote`; Workbench and HTTP
+form/API maintenance use the same protected routes with `action=maintenance`.
 
 ## 3f) External Rehearsal
 

@@ -23,6 +23,7 @@ import {
   remoteMcpProvisioningOutput,
   remoteMcpPayloadLimits,
   remoteMcpRequiredHeaders,
+  type GraphCandidateMaintenanceApplyInput,
   type ReviewGraphCandidateInput,
   type RemoteMcpProvisioningAction,
   type RemoteMcpProvisioningOutput,
@@ -2158,6 +2159,10 @@ type WorkbenchGraphReviewInput = ReviewGraphCandidateInput & {
   project_id?: string | null;
 };
 
+type WorkbenchGraphMaintenanceInput = GraphCandidateMaintenanceApplyInput & {
+  project_id?: string | null;
+};
+
 function graphReviewTargetId(body: Record<string, unknown>) {
   return optionalInput(body.graph_candidate_id) ?? optionalInput(body.candidate_id);
 }
@@ -2174,6 +2179,16 @@ function isGraphReviewRequest(body: Record<string, unknown>) {
 function isGraphPromotionRequest(body: Record<string, unknown>) {
   const action = optionalInput(body.action);
   return action === "promote" || action === "promote_candidate";
+}
+
+function isGraphMaintenanceRequest(body: Record<string, unknown>) {
+  const action = optionalInput(body.action);
+  return (
+    action === "maintenance" ||
+    action === "graph_maintenance" ||
+    Boolean(optionalInput(body.maintenance_action_kind)) ||
+    optionalInput(body.review_kind) === "graph_maintenance"
+  );
 }
 
 function numberFormInput(value: unknown) {
@@ -2242,6 +2257,38 @@ function buildGraphPromotionInput(body: Record<string, unknown>) {
     note: optionalInput(body.note),
     metadata: graphReviewMetadata(body)
   };
+}
+
+function formBoolean(value: unknown) {
+  return value === true || value === "true" || value === "1" || value === "on";
+}
+
+function buildGraphMaintenanceInput(body: Record<string, unknown>): WorkbenchGraphMaintenanceInput {
+  const graphCandidateId = graphReviewTargetId(body);
+  if (!graphCandidateId) throw new Error("VALIDATION_ERROR: graph_candidate_id is required");
+  const actionKind =
+    optionalInput(body.maintenance_action_kind) ??
+    optionalInput(body.action_kind) ??
+    optionalInput(body.graph_maintenance_action_kind);
+  if (!actionKind) throw new Error("VALIDATION_ERROR: graph maintenance action_kind is required");
+  const targetGraphCandidateId =
+    optionalInput(body.target_graph_candidate_id) ??
+    optionalInput(body.target_candidate_id) ??
+    optionalInput(body.merge_target_id) ??
+    optionalInput(body.superseded_by);
+  return {
+    project_id: optionalInput(body.project_id),
+    graph_candidate_id: graphCandidateId,
+    action_kind: actionKind as WorkbenchGraphMaintenanceInput["action_kind"],
+    target_graph_candidate_id: targetGraphCandidateId,
+    confirm: formBoolean(body.confirm),
+    actor_kind: "user",
+    note: optionalInput(body.note),
+    metadata: {
+      ...graphReviewMetadata(body),
+      maintenance_workbench: true
+    }
+  } as WorkbenchGraphMaintenanceInput;
 }
 
 function graphReviewRedirectPath(body: Record<string, unknown>, graphCandidateId: string) {
@@ -5108,6 +5155,102 @@ function renderGraphCandidateLane(
   </details>`;
 }
 
+function graphMaintenanceActionLabel(actionKind: unknown) {
+  return humanStatus(String(actionKind ?? "maintenance"));
+}
+
+function renderGraphMaintenanceForm(recommendation: Record<string, unknown>, projectId: unknown) {
+  const targetGraphCandidateId = optionalInput(recommendation.target_graph_candidate_id);
+  return `<form method="post" action="/review-action" class="graph-maintenance-form">
+    <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+    <input type="hidden" name="target_kind" value="graph_candidate" />
+    <input type="hidden" name="review_kind" value="graph_maintenance" />
+    <input type="hidden" name="action" value="maintenance" />
+    <input type="hidden" name="maintenance_action_kind" value="${escapeHtml(recommendation.action_kind)}" />
+    <input type="hidden" name="graph_candidate_id" value="${escapeHtml(recommendation.graph_candidate_id)}" />
+    ${
+      targetGraphCandidateId
+        ? `<input type="hidden" name="target_graph_candidate_id" value="${escapeHtml(targetGraphCandidateId)}" />`
+        : ""
+    }
+    <input type="hidden" name="confirm" value="true" />
+    <input type="hidden" name="view" value="review" />
+    <input type="hidden" name="note" value="Workbench graph maintenance" />
+    <button type="submit">${escapeHtml(graphMaintenanceActionLabel(recommendation.action_kind))}</button>
+  </form>`;
+}
+
+function renderGraphMaintenanceRecommendation(
+  recommendation: Record<string, unknown>,
+  projectId: unknown
+) {
+  return `<article class="graph-maintenance-recommendation">
+    <div>
+      <span>${escapeHtml(graphMaintenanceActionLabel(recommendation.action_kind))}</span>
+      <strong>${escapeHtml(recommendation.summary ?? "Graph maintenance recommendation")}</strong>
+      ${renderBadges([
+        ["Risk", humanStatus(recommendation.risk_level)],
+        ["State", humanStatus(recommendation.lifecycle_state)],
+        ["Readiness", humanStatus(recommendation.readiness_status)],
+        ["Reason", humanStatus(recommendation.reason_code)]
+      ])}
+    </div>
+    ${renderGraphMaintenanceForm(recommendation, projectId)}
+  </article>`;
+}
+
+function renderGraphMaintenance(data: ReviewDashboardData) {
+  const graph = asRecord(data.graph_candidates);
+  const maintenance = asRecord(graph.maintenance);
+  const counts = asRecord(maintenance.counts);
+  const lanes = asArray(maintenance.lanes).map(asRecord);
+  const totalRecommendations = Number(counts.total_recommendations ?? 0);
+  return `<section class="graph-maintenance" aria-label="Graph maintenance" data-graph-maintenance>
+    <div class="graph-maintenance-head">
+      <div>
+        <span>Graph maintenance</span>
+        <h3>Graph maintenance</h3>
+      </div>
+      <div class="graph-maintenance-counts">
+        <span><strong>${escapeHtml(totalRecommendations)}</strong> recommended</span>
+        <span><strong>${escapeHtml(counts.duplicates ?? 0)}</strong> duplicate</span>
+        <span><strong>${escapeHtml(counts.blocked ?? 0)}</strong> blocked</span>
+        <span><strong>${escapeHtml(counts.promoted_cleanup ?? 0)}</strong> promoted</span>
+      </div>
+    </div>
+    ${
+      totalRecommendations <= 0
+        ? `<p class="empty">No graph maintenance actions are recommended for this project.</p>`
+        : `<div class="graph-maintenance-lanes">
+            ${lanes
+              .filter((lane) => Number(lane.count ?? 0) > 0)
+              .map((lane) => {
+                const recommendations = asArray(lane.recommendations).map(asRecord);
+                return `<div class="graph-maintenance-lane">
+                  <div class="graph-maintenance-lane-head">
+                    <span>${escapeHtml(lane.label ?? humanStatus(lane.lane))}</span>
+                    <strong>${escapeHtml(lane.count ?? recommendations.length)}</strong>
+                  </div>
+                  ${
+                    recommendations.length > 0
+                      ? recommendations
+                          .map((recommendation) =>
+                            renderGraphMaintenanceRecommendation(
+                              recommendation,
+                              data.current_project_id
+                            )
+                          )
+                          .join("")
+                      : `<p class="empty">${escapeHtml(lane.omitted_count ?? 0)} recommendations omitted by the current limit.</p>`
+                  }
+                </div>`;
+              })
+              .join("")}
+          </div>`
+    }
+  </section>`;
+}
+
 function graphTopologyLabel(row: Record<string, unknown>) {
   const safe = optionalInput(row.public_safe_label);
   const label = optionalInput(row.label);
@@ -5258,6 +5401,7 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
         <span><strong>${escapeHtml(hygieneCounts.duplicate ?? 0)}</strong> duplicate</span>
       </div>
     </div>
+    ${renderGraphMaintenance(data)}
     ${renderGraphTopology(data)}
     <div class="graph-review-grid">
       <div class="graph-review-lanes">
@@ -6346,6 +6490,23 @@ function renderDashboard(
     .graph-review-counts { display: grid; grid-template-columns: repeat(2, minmax(88px, 1fr)); gap: 6px; min-width: 220px; }
     .graph-review-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #fff; color: #4f5867; text-transform: none; }
     .graph-review-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-maintenance { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fff; min-width: 0; }
+    .graph-maintenance-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.62fr); gap: 10px; align-items: start; margin-bottom: 10px; }
+    .graph-maintenance-head span { display: block; color: #166454; font-size: 11px; font-weight: 760; text-transform: uppercase; }
+    .graph-maintenance-head h3 { margin: 2px 0 5px; font-size: 15px; }
+    .graph-maintenance-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .graph-maintenance-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #f8fafc; color: #4f5867; font-size: 12px; }
+    .graph-maintenance-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-maintenance-lanes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: start; min-width: 0; }
+    .graph-maintenance-lane { display: grid; align-content: start; gap: 7px; border: 1px solid #dfe6ee; border-radius: 7px; padding: 8px; background: #fbfcfe; min-width: 0; min-height: 164px; }
+    .graph-maintenance-lane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .graph-maintenance-lane-head span { color: #303845; font-size: 12px; font-weight: 760; overflow-wrap: anywhere; }
+    .graph-maintenance-lane-head strong { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; background: #fff; color: #445064; font-size: 11px; }
+    .graph-maintenance-recommendation { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; border: 1px solid #e2e8ef; border-radius: 7px; padding: 8px; background: #fff; min-width: 0; }
+    .graph-maintenance-recommendation span { color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .graph-maintenance-recommendation strong { display: block; margin: 2px 0 6px; color: #20242c; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+    .graph-maintenance-form { margin: 0; }
+    .graph-maintenance-form button { width: 100%; }
     .graph-topology { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fff; min-width: 0; }
     .graph-topology-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.62fr); gap: 10px; align-items: start; margin-bottom: 10px; }
     .graph-topology-head span { display: block; color: #166454; font-size: 11px; font-weight: 760; text-transform: uppercase; }
@@ -6397,8 +6558,9 @@ function renderDashboard(
     .graph-action-detail label, .graph-target-actions label { display: grid; gap: 3px; color: #5f6875; font-size: 11px; min-width: min(190px, 100%); }
     .graph-action-detail input, .graph-target-actions input { max-width: 100%; min-width: 0; }
     @media (max-width: 760px) {
-      .graph-review-head, .graph-review-grid, .graph-topology-head { display: grid; grid-template-columns: 1fr; }
+      .graph-review-head, .graph-review-grid, .graph-maintenance-head, .graph-topology-head { display: grid; grid-template-columns: 1fr; }
       .graph-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .graph-maintenance-lanes { grid-template-columns: 1fr; }
       .graph-topology-map { grid-template-columns: 1fr; }
       .graph-promotion-state { grid-template-columns: 1fr; }
       .graph-actions, .graph-target-actions, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
@@ -7773,9 +7935,11 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = (await readJson(request)) as Record<string, unknown>;
         if (isGraphReviewRequest(body)) {
           try {
-            const result = isGraphPromotionRequest(body)
-              ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
-              : await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            const result = isGraphMaintenanceRequest(body)
+              ? await database.applyGraphCandidateMaintenance(buildGraphMaintenanceInput(body))
+              : isGraphPromotionRequest(body)
+                ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
+                : await database.reviewGraphCandidate(buildGraphReviewInput(body));
             write(response, 200, JSON.stringify(result), "application/json");
           } catch (error) {
             write(
@@ -7803,9 +7967,11 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const body = await readForm(request);
         if (isGraphReviewRequest(body)) {
           try {
-            const result = isGraphPromotionRequest(body)
-              ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
-              : await database.reviewGraphCandidate(buildGraphReviewInput(body));
+            const result = isGraphMaintenanceRequest(body)
+              ? await database.applyGraphCandidateMaintenance(buildGraphMaintenanceInput(body))
+              : isGraphPromotionRequest(body)
+                ? await database.promoteGraphCandidate(buildGraphPromotionInput(body))
+                : await database.reviewGraphCandidate(buildGraphReviewInput(body));
             const location = graphReviewRedirectPath(body, result.graph_candidate_id);
             write(response, 303, "See other", "text/plain", { location });
           } catch (error) {

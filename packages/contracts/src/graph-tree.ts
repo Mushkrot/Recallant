@@ -384,6 +384,159 @@ export type GetGraphCandidateHygieneInput = {
   limit?: number;
 };
 
+export const graphCandidateMaintenanceActionKindValues = [
+  "archive_duplicate",
+  "archive_candidate",
+  "mark_stale",
+  "merge_duplicate",
+  "supersede_candidate",
+  "unarchive_candidate"
+] as const;
+
+export type GraphCandidateMaintenanceActionKind =
+  (typeof graphCandidateMaintenanceActionKindValues)[number];
+
+export type GraphCandidateMaintenanceLaneKey =
+  | "duplicates"
+  | "stale_or_archived"
+  | "blocked"
+  | "conflict_review"
+  | "promoted_cleanup";
+
+export type GraphCandidateMaintenanceRiskLevel = "low" | "medium" | "high";
+
+export type GraphCandidateMaintenanceReasonCode =
+  | "duplicate_candidate"
+  | "stale_candidate"
+  | "archived_candidate"
+  | "blocked_promotion"
+  | "conflict_review"
+  | "already_promoted"
+  | "restore_candidate";
+
+export type GraphCandidateMaintenanceGovernance = {
+  read_only_plan: boolean;
+  dry_run_default: true;
+  apply_requires_confirm: true;
+  deletes_candidates: false;
+  mutates_edges: false;
+  retrieval_semantics_changed: false;
+  preserves_source_refs: true;
+};
+
+export type GraphCandidateMaintenanceRecommendation = {
+  action_id: string;
+  action_kind: GraphCandidateMaintenanceActionKind;
+  lane: GraphCandidateMaintenanceLaneKey;
+  graph_candidate_id: string;
+  target_graph_candidate_id?: string | null;
+  reason_code: GraphCandidateMaintenanceReasonCode;
+  summary: string;
+  lifecycle_state: GraphTreeLifecycleState;
+  readiness_status?: GraphCandidatePromotionReadinessStatus | null;
+  risk_level: GraphCandidateMaintenanceRiskLevel;
+};
+
+export type GraphCandidateMaintenanceLane = {
+  lane: GraphCandidateMaintenanceLaneKey;
+  label: string;
+  count: number;
+  recommendations: GraphCandidateMaintenanceRecommendation[];
+  omitted_count: number;
+  truncated: boolean;
+};
+
+export type GraphCandidateMaintenanceCounts = {
+  total_recommendations: number;
+  duplicates: number;
+  stale_or_archived: number;
+  blocked: number;
+  conflict_review: number;
+  promoted_cleanup: number;
+  omitted_recommendations: number;
+  truncated: boolean;
+  limits: {
+    recommendations: number;
+  };
+};
+
+export type GraphCandidateMaintenancePlan = {
+  generated_at: string;
+  project_id?: string | null;
+  developer_id?: string | null;
+  scope: {
+    project_id?: string | null;
+    developer_id?: string | null;
+  };
+  counts: GraphCandidateMaintenanceCounts;
+  lanes: GraphCandidateMaintenanceLane[];
+  governance: GraphCandidateMaintenanceGovernance & {
+    read_only_plan: true;
+    mutates_candidates: false;
+  };
+};
+
+export type GetGraphCandidateMaintenancePlanInput = {
+  project_id?: string;
+  developer_id?: string;
+  limit?: number;
+};
+
+type GraphCandidateMaintenanceApplyBase = {
+  action_kind: GraphCandidateMaintenanceActionKind;
+  graph_candidate_id: string;
+  project_id?: string;
+  developer_id?: string;
+  actor_kind?: "agent" | "user" | "system";
+  note?: string | null;
+  metadata?: GraphCandidateMetadata;
+  confirm?: boolean;
+  dry_run?: boolean;
+};
+
+export type GraphCandidateMaintenanceApplyInput =
+  | (GraphCandidateMaintenanceApplyBase & {
+      action_kind: "archive_duplicate" | "archive_candidate" | "mark_stale" | "unarchive_candidate";
+      target_graph_candidate_id?: string | null;
+    })
+  | (GraphCandidateMaintenanceApplyBase & {
+      action_kind: "merge_duplicate" | "supersede_candidate";
+      target_graph_candidate_id: string;
+    });
+
+export type GraphCandidateMaintenanceApplyStatus =
+  | "dry_run"
+  | "applied"
+  | "already_applied"
+  | "rejected";
+
+export type GraphCandidateMaintenanceMutationFlags = {
+  dry_run: boolean;
+  confirmed: boolean;
+  mutates_candidates: boolean;
+  review_action_appended: boolean;
+  deletes_candidates: false;
+  mutates_edges: false;
+  retrieval_semantics_changed: false;
+};
+
+export type GraphCandidateMaintenanceApplyResult = {
+  generated_at: string;
+  project_id?: string | null;
+  developer_id?: string | null;
+  action_kind: GraphCandidateMaintenanceActionKind;
+  graph_candidate_id: string;
+  target_graph_candidate_id?: string | null;
+  status: GraphCandidateMaintenanceApplyStatus;
+  previous_lifecycle_state?: GraphTreeLifecycleState | null;
+  next_lifecycle_state?: GraphTreeLifecycleState | null;
+  candidate?: GraphCandidateRecord | null;
+  mutation: GraphCandidateMaintenanceMutationFlags;
+  governance: GraphCandidateMaintenanceGovernance & {
+    read_only_plan: false;
+  };
+};
+
 export type GraphTopologyNodeKind = "candidate" | "endpoint" | "source";
 
 export type GraphTopologyLinkKind = "candidate_edge" | "active_edge" | "source_ref";
@@ -522,6 +675,9 @@ const graphCandidateKindSet = new Set<string>(graphCandidateKindValues);
 const graphCandidateExtractionMethodSet = new Set<string>(graphCandidateExtractionMethodValues);
 const graphCandidateSourceRefKindSet = new Set<string>(graphCandidateSourceRefKindValues);
 const graphCandidateReviewActionSet = new Set<string>(graphCandidateReviewActionValues);
+const graphCandidateMaintenanceActionKindSet = new Set<string>(
+  graphCandidateMaintenanceActionKindValues
+);
 
 export function isGraphTreeNodeKind(value: unknown): value is GraphTreeNodeKind {
   return typeof value === "string" && graphTreeNodeKindSet.has(value);
@@ -592,4 +748,10 @@ export function isGraphCandidateSourceRefKind(
 
 export function isGraphCandidateReviewAction(value: unknown): value is GraphCandidateReviewAction {
   return typeof value === "string" && graphCandidateReviewActionSet.has(value);
+}
+
+export function isGraphCandidateMaintenanceActionKind(
+  value: unknown
+): value is GraphCandidateMaintenanceActionKind {
+  return typeof value === "string" && graphCandidateMaintenanceActionKindSet.has(value);
 }

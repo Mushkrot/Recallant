@@ -9,18 +9,29 @@ import {
   graphCandidateSourceRefKindValues,
   graphRetrievalProfileForGraphExpand,
   graphRetrievalProfilePolicy,
+  isGraphCandidateMaintenanceActionKind,
   graphTreeLifecycleStateValues,
   graphTreeNodeKindValues,
   parseGraphRetrievalProfile,
   type CreateGraphCandidateInput,
   type CreateGraphCandidateResult,
+  type GraphCandidateMaintenanceApplyInput,
+  type GraphCandidateMaintenanceApplyResult,
+  type GetGraphCandidateMaintenancePlanInput,
   type GetGraphCandidateHygieneInput,
   type GetGraphCandidateInput,
   type GetGraphCandidateResult,
   type GetGraphTopologyInput,
   type GraphCandidateEndpointRef,
   type GraphCandidateHygieneResult,
+  type GraphCandidateMaintenanceActionKind,
+  type GraphCandidateMaintenanceLane,
+  type GraphCandidateMaintenanceLaneKey,
+  type GraphCandidateMaintenancePlan,
+  type GraphCandidateMaintenanceRecommendation,
+  type GraphCandidateMaintenanceRiskLevel,
   type GraphCandidateRecord,
+  type GraphCandidateReviewAction,
   type GraphCandidateReviewPatch,
   type GraphCandidateReviewRecord,
   type GraphTopologyLink,
@@ -1057,6 +1068,10 @@ type GraphCandidateGetInput = GetGraphCandidateInput & GraphCandidateScopedInput
 type GraphCandidateReviewInput = ReviewGraphCandidateInput & GraphCandidateScopedInput;
 type GraphCandidatePromoteInput = PromoteGraphCandidateInput & GraphCandidateScopedInput;
 type GraphCandidateHygieneInput = GetGraphCandidateHygieneInput & GraphCandidateScopedInput;
+type GraphCandidateMaintenanceInput = GetGraphCandidateMaintenancePlanInput &
+  GraphCandidateScopedInput;
+type GraphCandidateMaintenanceApplyDbInput = GraphCandidateMaintenanceApplyInput &
+  GraphCandidateScopedInput;
 type GraphTopologyInput = GetGraphTopologyInput & GraphCandidateScopedInput;
 
 type GraphCandidateDbRow = {
@@ -1897,6 +1912,93 @@ function graphCandidateNeedsConflictReview(candidate: GraphCandidateRecord) {
 function graphTopologyStableId(prefix: string, ...values: unknown[]) {
   const digest = createHash("sha1").update(JSON.stringify(values)).digest("hex").slice(0, 16);
   return `${prefix}:${digest}`;
+}
+
+const graphCandidateMaintenanceLaneLabels: Record<GraphCandidateMaintenanceLaneKey, string> = {
+  duplicates: "Duplicate candidates",
+  stale_or_archived: "Stale or archived candidates",
+  blocked: "Blocked candidates",
+  conflict_review: "Conflict review candidates",
+  promoted_cleanup: "Promoted cleanup"
+};
+
+const graphCandidateMaintenanceLaneOrder: GraphCandidateMaintenanceLaneKey[] = [
+  "duplicates",
+  "stale_or_archived",
+  "blocked",
+  "conflict_review",
+  "promoted_cleanup"
+];
+
+function graphCandidateMaintenanceGovernance(readOnlyPlan: boolean) {
+  return {
+    read_only_plan: readOnlyPlan,
+    dry_run_default: true,
+    apply_requires_confirm: true,
+    deletes_candidates: false,
+    mutates_edges: false,
+    retrieval_semantics_changed: false,
+    preserves_source_refs: true
+  } as const;
+}
+
+function graphCandidateMaintenanceReviewAction(
+  actionKind: GraphCandidateMaintenanceActionKind
+): GraphCandidateReviewAction {
+  if (actionKind === "archive_duplicate" || actionKind === "archive_candidate") return "archive";
+  if (actionKind === "mark_stale") return "mark_stale";
+  if (actionKind === "merge_duplicate") return "merge";
+  if (actionKind === "supersede_candidate") return "supersede";
+  return "unarchive";
+}
+
+function graphCandidateMaintenanceSummary(
+  actionKind: GraphCandidateMaintenanceActionKind,
+  candidateId: string,
+  targetId?: string | null
+) {
+  const candidate = candidateId.slice(0, 8);
+  const target = targetId ? targetId.slice(0, 8) : null;
+  if (actionKind === "archive_duplicate") {
+    return target
+      ? `Archive duplicate graph candidate ${candidate} in favor of ${target}.`
+      : `Archive duplicate graph candidate ${candidate}.`;
+  }
+  if (actionKind === "archive_candidate") {
+    return `Archive graph candidate ${candidate} after maintenance review.`;
+  }
+  if (actionKind === "mark_stale") {
+    return `Mark graph candidate ${candidate} stale for maintenance review.`;
+  }
+  if (actionKind === "merge_duplicate") {
+    return target
+      ? `Merge graph candidate ${candidate} into ${target}.`
+      : `Merge graph candidate ${candidate}.`;
+  }
+  if (actionKind === "supersede_candidate") {
+    return target
+      ? `Supersede graph candidate ${candidate} with ${target}.`
+      : `Supersede graph candidate ${candidate}.`;
+  }
+  return `Restore archived graph candidate ${candidate}.`;
+}
+
+function emptyGraphCandidateMaintenanceCounts(
+  limit: number
+): GraphCandidateMaintenancePlan["counts"] {
+  return {
+    total_recommendations: 0,
+    duplicates: 0,
+    stale_or_archived: 0,
+    blocked: 0,
+    conflict_review: 0,
+    promoted_cleanup: 0,
+    omitted_recommendations: 0,
+    truncated: false,
+    limits: {
+      recommendations: limit
+    }
+  };
 }
 
 function graphTopologyBoundedLabel(value: unknown, fallback: string, maxLength = 72) {
@@ -6844,6 +6946,331 @@ export class RecallantDb {
     };
   }
 
+  async getGraphCandidateMaintenancePlan(
+    input: GraphCandidateMaintenanceInput = {}
+  ): Promise<GraphCandidateMaintenancePlan> {
+    await this.ensureGraphCandidateSchema();
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      return this.emptyGraphCandidateMaintenancePlan(context.projectId, input.developer_id, limit);
+    }
+
+    const [{ candidates }, hygiene] = await Promise.all([
+      this.listGraphCandidates({
+        project_id: context.projectId,
+        developer_id: context.developerId,
+        limit: 1000
+      }),
+      this.getGraphCandidateHygiene({
+        project_id: context.projectId,
+        developer_id: context.developerId,
+        limit: 1000
+      })
+    ]);
+    const candidateById = new Map(
+      candidates.map((candidate) => [candidate.graph_candidate_id, candidate])
+    );
+    const readinessById = new Map(
+      hygiene.readiness.map((readiness) => [readiness.graph_candidate_id, readiness])
+    );
+    const duplicateTargetById = new Map<string, string>();
+    for (const group of hygiene.duplicate_groups) {
+      const sorted = [...group.candidate_ids].sort();
+      const targetId = sorted[0];
+      if (!targetId) continue;
+      for (const candidateId of sorted.slice(1)) {
+        duplicateTargetById.set(candidateId, targetId);
+      }
+    }
+
+    const recommendations: Record<
+      GraphCandidateMaintenanceLaneKey,
+      GraphCandidateMaintenanceRecommendation[]
+    > = {
+      duplicates: [],
+      stale_or_archived: [],
+      blocked: [],
+      conflict_review: [],
+      promoted_cleanup: []
+    };
+    const pushRecommendation = (
+      lane: GraphCandidateMaintenanceLaneKey,
+      candidate: GraphCandidateRecord,
+      actionKind: GraphCandidateMaintenanceActionKind,
+      reasonCode: GraphCandidateMaintenanceRecommendation["reason_code"],
+      riskLevel: GraphCandidateMaintenanceRiskLevel,
+      targetGraphCandidateId?: string | null
+    ) => {
+      const readiness = readinessById.get(candidate.graph_candidate_id);
+      recommendations[lane].push({
+        action_id: graphTopologyStableId(
+          "maintenance",
+          lane,
+          actionKind,
+          candidate.graph_candidate_id,
+          targetGraphCandidateId ?? null,
+          reasonCode
+        ),
+        action_kind: actionKind,
+        lane,
+        graph_candidate_id: candidate.graph_candidate_id,
+        target_graph_candidate_id: targetGraphCandidateId ?? null,
+        reason_code: reasonCode,
+        summary: graphCandidateMaintenanceSummary(
+          actionKind,
+          candidate.graph_candidate_id,
+          targetGraphCandidateId
+        ),
+        lifecycle_state: candidate.lifecycle_state,
+        readiness_status: readiness?.status ?? null,
+        risk_level: riskLevel
+      });
+    };
+
+    for (const [candidateId, targetId] of duplicateTargetById.entries()) {
+      const candidate = candidateById.get(candidateId);
+      if (!candidate) continue;
+      pushRecommendation(
+        "duplicates",
+        candidate,
+        "archive_duplicate",
+        "duplicate_candidate",
+        "low",
+        targetId
+      );
+    }
+
+    for (const candidate of candidates) {
+      const readiness = readinessById.get(candidate.graph_candidate_id);
+      if (candidate.lifecycle_state === "stale") {
+        pushRecommendation(
+          "stale_or_archived",
+          candidate,
+          "archive_candidate",
+          "stale_candidate",
+          "low"
+        );
+      } else if (candidate.lifecycle_state === "archived") {
+        pushRecommendation(
+          "stale_or_archived",
+          candidate,
+          "unarchive_candidate",
+          "restore_candidate",
+          "medium"
+        );
+      }
+      if (
+        readiness?.status === "blocked" &&
+        candidate.lifecycle_state !== "stale" &&
+        candidate.lifecycle_state !== "archived"
+      ) {
+        pushRecommendation(
+          "blocked",
+          candidate,
+          "mark_stale",
+          "blocked_promotion",
+          readiness.blocked_reason === "unsupported_endpoint" ? "medium" : "low"
+        );
+      }
+      if (readiness?.conflict_review || graphCandidateNeedsConflictReview(candidate)) {
+        pushRecommendation("conflict_review", candidate, "mark_stale", "conflict_review", "high");
+      }
+      if (readiness?.status === "promoted") {
+        pushRecommendation(
+          "promoted_cleanup",
+          candidate,
+          "archive_candidate",
+          "already_promoted",
+          "low"
+        );
+      }
+    }
+
+    let remaining = limit;
+    let omittedRecommendations = 0;
+    const lanes: GraphCandidateMaintenanceLane[] = graphCandidateMaintenanceLaneOrder.map(
+      (lane) => {
+        const laneRecommendations = recommendations[lane].sort((left, right) =>
+          left.action_id.localeCompare(right.action_id)
+        );
+        const visible = laneRecommendations.slice(0, remaining);
+        remaining = Math.max(0, remaining - visible.length);
+        const omitted = Math.max(0, laneRecommendations.length - visible.length);
+        omittedRecommendations += omitted;
+        return {
+          lane,
+          label: graphCandidateMaintenanceLaneLabels[lane],
+          count: laneRecommendations.length,
+          recommendations: visible,
+          omitted_count: omitted,
+          truncated: omitted > 0
+        };
+      }
+    );
+    const counts = emptyGraphCandidateMaintenanceCounts(limit);
+    counts.duplicates = recommendations.duplicates.length;
+    counts.stale_or_archived = recommendations.stale_or_archived.length;
+    counts.blocked = recommendations.blocked.length;
+    counts.conflict_review = recommendations.conflict_review.length;
+    counts.promoted_cleanup = recommendations.promoted_cleanup.length;
+    counts.total_recommendations =
+      counts.duplicates +
+      counts.stale_or_archived +
+      counts.blocked +
+      counts.conflict_review +
+      counts.promoted_cleanup;
+    counts.omitted_recommendations = omittedRecommendations;
+    counts.truncated = omittedRecommendations > 0;
+
+    return {
+      generated_at: new Date().toISOString(),
+      project_id: context.projectId,
+      developer_id: context.developerId,
+      scope: {
+        project_id: context.projectId,
+        developer_id: context.developerId
+      },
+      counts,
+      lanes,
+      governance: {
+        ...graphCandidateMaintenanceGovernance(true),
+        read_only_plan: true,
+        mutates_candidates: false
+      }
+    };
+  }
+
+  async applyGraphCandidateMaintenance(
+    input: GraphCandidateMaintenanceApplyDbInput
+  ): Promise<GraphCandidateMaintenanceApplyResult> {
+    await this.ensureGraphCandidateSchema();
+    if (!isGraphCandidateMaintenanceActionKind(input.action_kind)) {
+      throw new Error("VALIDATION_ERROR: graph maintenance action_kind is not allowed");
+    }
+    const targetRequired =
+      input.action_kind === "merge_duplicate" || input.action_kind === "supersede_candidate";
+    const targetGraphCandidateId = stringOrNull(input.target_graph_candidate_id);
+    if (targetRequired && !targetGraphCandidateId) {
+      throw new Error("VALIDATION_ERROR: graph maintenance target_graph_candidate_id is required");
+    }
+    if (input.metadata && hasForbiddenCredentialField(input.metadata)) {
+      throw new Error("VALIDATION_ERROR: graph maintenance metadata contains forbidden fields");
+    }
+    if (input.note && hasForbiddenCredentialField(input.note)) {
+      throw new Error("VALIDATION_ERROR: graph maintenance note contains forbidden fields");
+    }
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    if (input.developer_id && input.developer_id !== context.developerId) {
+      throw new Error("VALIDATION_ERROR: graph candidate not found");
+    }
+    const candidate = await this.fetchGraphCandidateRecord(
+      this.pool,
+      input.graph_candidate_id,
+      context
+    );
+    if (targetGraphCandidateId) {
+      await this.fetchGraphCandidateRecord(this.pool, targetGraphCandidateId, context);
+    }
+
+    const reviewAction = graphCandidateMaintenanceReviewAction(input.action_kind);
+    const nextLifecycleState = graphCandidateReviewStateForAction(
+      candidate.lifecycle_state,
+      reviewAction
+    );
+    const dryRun = input.confirm !== true || input.dry_run === true;
+    const buildResult = (
+      status: GraphCandidateMaintenanceApplyResult["status"],
+      resultCandidate: GraphCandidateRecord | null,
+      mutation: Omit<
+        GraphCandidateMaintenanceApplyResult["mutation"],
+        "deletes_candidates" | "mutates_edges" | "retrieval_semantics_changed"
+      >
+    ): GraphCandidateMaintenanceApplyResult => ({
+      generated_at: new Date().toISOString(),
+      project_id: context.projectId,
+      developer_id: context.developerId,
+      action_kind: input.action_kind,
+      graph_candidate_id: input.graph_candidate_id,
+      target_graph_candidate_id: targetGraphCandidateId,
+      status,
+      previous_lifecycle_state: candidate.lifecycle_state,
+      next_lifecycle_state: nextLifecycleState,
+      candidate: resultCandidate,
+      mutation: {
+        ...mutation,
+        deletes_candidates: false,
+        mutates_edges: false,
+        retrieval_semantics_changed: false
+      },
+      governance: {
+        ...graphCandidateMaintenanceGovernance(false),
+        read_only_plan: false
+      }
+    });
+
+    if (dryRun) {
+      return buildResult("dry_run", candidate, {
+        dry_run: true,
+        confirmed: input.confirm === true,
+        mutates_candidates: false,
+        review_action_appended: false
+      });
+    }
+
+    const alreadyApplied =
+      candidate.lifecycle_state === nextLifecycleState &&
+      (!targetGraphCandidateId ||
+        stringOrNull(candidate.metadata?.merge_target_id) === targetGraphCandidateId ||
+        stringOrNull(candidate.metadata?.superseded_by) === targetGraphCandidateId ||
+        reviewAction === "archive" ||
+        reviewAction === "mark_stale" ||
+        reviewAction === "unarchive");
+    if (alreadyApplied) {
+      return buildResult("already_applied", candidate, {
+        dry_run: false,
+        confirmed: true,
+        mutates_candidates: false,
+        review_action_appended: false
+      });
+    }
+
+    const metadata = {
+      ...(input.metadata ?? {}),
+      maintenance_workflow: {
+        workflow: "graph_candidate_maintenance",
+        action_kind: input.action_kind,
+        previous_lifecycle_state: candidate.lifecycle_state,
+        next_lifecycle_state: nextLifecycleState,
+        target_graph_candidate_id: targetGraphCandidateId,
+        reason: input.note ?? null,
+        dry_run: false,
+        confirm: true
+      }
+    };
+    const reviewed = await this.reviewGraphCandidate({
+      project_id: context.projectId,
+      graph_candidate_id: input.graph_candidate_id,
+      action: reviewAction,
+      actor_kind: input.actor_kind ?? "agent",
+      note: input.note ?? `Graph maintenance ${input.action_kind}`,
+      merge_target_id: input.action_kind === "merge_duplicate" ? targetGraphCandidateId : null,
+      superseded_by: input.action_kind === "supersede_candidate" ? targetGraphCandidateId : null,
+      metadata
+    });
+
+    return buildResult("applied", reviewed, {
+      dry_run: false,
+      confirmed: true,
+      mutates_candidates: true,
+      review_action_appended: true
+    });
+  }
+
   async getGraphTopology(input: GraphTopologyInput = {}): Promise<GraphTopologyResult> {
     await this.ensureGraphCandidateSchema();
     const context = input.project_id
@@ -9849,6 +10276,10 @@ export class RecallantDb {
       max_nodes: 160,
       max_links: 220
     });
+    const graphMaintenance = await this.getGraphCandidateMaintenancePlan({
+      project_id: dashboardProjectId,
+      limit: 50
+    });
     const graphReadinessById = new Map(
       graphHygiene.readiness.map((readiness) => [readiness.graph_candidate_id, readiness])
     );
@@ -9878,6 +10309,7 @@ export class RecallantDb {
         : null,
       hygiene: graphHygiene,
       topology: graphTopology,
+      maintenance: graphMaintenance,
       available_actions: [
         "accept",
         "reject",
@@ -10375,6 +10807,36 @@ export class RecallantDb {
         mutates_candidates: false,
         mutates_edges: false,
         supported_endpoint_policy: "chunk_to_chunk"
+      }
+    };
+  }
+
+  private emptyGraphCandidateMaintenancePlan(
+    projectId?: string | null,
+    developerId?: string | null,
+    limit = 50
+  ): GraphCandidateMaintenancePlan {
+    return {
+      generated_at: new Date().toISOString(),
+      project_id: projectId ?? null,
+      developer_id: developerId ?? null,
+      scope: {
+        project_id: projectId ?? null,
+        developer_id: developerId ?? null
+      },
+      counts: emptyGraphCandidateMaintenanceCounts(limit),
+      lanes: graphCandidateMaintenanceLaneOrder.map((lane) => ({
+        lane,
+        label: graphCandidateMaintenanceLaneLabels[lane],
+        count: 0,
+        recommendations: [],
+        omitted_count: 0,
+        truncated: false
+      })),
+      governance: {
+        ...graphCandidateMaintenanceGovernance(true),
+        read_only_plan: true,
+        mutates_candidates: false
       }
     };
   }

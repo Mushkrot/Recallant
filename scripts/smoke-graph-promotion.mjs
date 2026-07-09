@@ -78,6 +78,19 @@ async function edgeCount(db, targetProjectId) {
   return Number(result.rows[0]?.count ?? 0);
 }
 
+async function graphCandidateReviewActionCount(db, targetProjectId) {
+  const result = await db.pool.query(
+    `
+      SELECT count(a.id)::int AS count
+      FROM graph_candidate_review_actions a
+      JOIN graph_candidates gc ON gc.id = a.graph_candidate_id
+      WHERE gc.project_id = $1
+    `,
+    [targetProjectId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 function graphHits(searchResult) {
   return searchResult.hits.filter((hit) => hit.why === "graph");
 }
@@ -267,6 +280,48 @@ try {
     `Unexpected hygiene after promotion: ${JSON.stringify(hygieneAfter)}`
   );
 
+  const edgesBeforeMaintenance = await edgeCount(db, projectId);
+  const reviewActionsBeforeMaintenance = await graphCandidateReviewActionCount(db, projectId);
+  const maintenanceAfterPromotion = await db.applyGraphCandidateMaintenance({
+    project_id: projectId,
+    graph_candidate_id: candidate.graph_candidate_id,
+    action_kind: "archive_candidate",
+    confirm: true,
+    actor_kind: "agent",
+    note: "graph promotion smoke maintenance after promotion"
+  });
+  const edgesAfterMaintenance = await edgeCount(db, projectId);
+  const reviewActionsAfterMaintenance = await graphCandidateReviewActionCount(db, projectId);
+  const afterMaintenanceSearch = await db.search({
+    session_id: started.session_id,
+    query: seedToken,
+    mode: "lexical_only",
+    top_k: 1,
+    graph_retrieval_profile: "same_topic",
+    graph_budget_nodes: 8,
+    max_chars_total: 12_000
+  });
+  assert(
+    maintenanceAfterPromotion.status === "applied" &&
+      maintenanceAfterPromotion.mutation.mutates_edges === false &&
+      maintenanceAfterPromotion.mutation.retrieval_semantics_changed === false &&
+      maintenanceAfterPromotion.next_lifecycle_state === "archived" &&
+      reviewActionsAfterMaintenance === reviewActionsBeforeMaintenance + 1 &&
+      edgesAfterMaintenance === edgesBeforeMaintenance,
+    `Maintenance after promotion changed retrieval state or edge counts: ${JSON.stringify({
+      maintenanceAfterPromotion,
+      edgesBeforeMaintenance,
+      edgesAfterMaintenance,
+      reviewActionsBeforeMaintenance,
+      reviewActionsAfterMaintenance
+    })}`
+  );
+  assert(
+    hasChunk(afterMaintenanceSearch, neighbor.chunk_ids[0]) &&
+      graphHits(afterMaintenanceSearch).some((hit) => hit.chunk_id === neighbor.chunk_ids[0]),
+    `Maintenance after promotion removed graph retrieval: ${JSON.stringify(afterMaintenanceSearch)}`
+  );
+
   const nodeCandidate = await db.createGraphCandidate({
     project_id: projectId,
     candidate_kind: "node",
@@ -382,13 +437,25 @@ try {
       before_accept: edgesBeforeAccept,
       after_accept: edgesAfterAccept,
       after_promote: edgesAfterPromotion,
-      after_repeat_promote: edgesAfterRepeat
+      after_repeat_promote: edgesAfterRepeat,
+      before_maintenance: edgesBeforeMaintenance,
+      after_maintenance: edgesAfterMaintenance
     },
     promotion: {
       first_status: firstPromotion.status,
       repeat_status: repeatPromotion.status,
       promoted_edge_reused: repeatPromotion.promoted_edge_id === firstPromotion.promoted_edge_id,
       retrieval_active: firstPromotion.retrieval_active === true
+    },
+    maintenance_after_promotion: {
+      status: maintenanceAfterPromotion.status,
+      action_kind: maintenanceAfterPromotion.action_kind,
+      next_lifecycle_state: maintenanceAfterPromotion.next_lifecycle_state,
+      review_actions_before: reviewActionsBeforeMaintenance,
+      review_actions_after: reviewActionsAfterMaintenance,
+      mutates_edges: maintenanceAfterPromotion.mutation.mutates_edges,
+      retrieval_semantics_changed: maintenanceAfterPromotion.mutation.retrieval_semantics_changed,
+      retrieval_after_maintenance: searchExcerpt(afterMaintenanceSearch, neighbor.chunk_ids[0])
     },
     blocked: {
       node: nodePromotion.blocked_reason,
@@ -412,6 +479,7 @@ try {
   assertNoForbidden(summary, "graph promotion smoke summary");
   assertNoForbidden(beforeSearch, "before promotion retrieval");
   assertNoForbidden(afterSearch, "after promotion retrieval");
+  assertNoForbidden(afterMaintenanceSearch, "after maintenance retrieval");
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 } finally {
   await db.close();

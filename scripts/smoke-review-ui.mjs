@@ -828,6 +828,46 @@ const graphPromotableCandidate = await db.createGraphCandidate({
   ],
   metadata: { smoke: "review-ui-graph-promotable" }
 });
+const graphDuplicateTargetCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI duplicate target source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI duplicate target destination" },
+  title: "Review UI graph duplicate target edge candidate",
+  summary: "Canonical duplicate-pair graph edge fixture for Workbench maintenance.",
+  confidence: 0.84,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded duplicate target graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-duplicate-target" }
+});
+const graphDuplicateCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: graphDuplicateTargetCandidate.src,
+  dst: graphDuplicateTargetCandidate.dst,
+  title: "Review UI graph duplicate edge candidate",
+  summary: "Duplicate graph edge fixture for Workbench maintenance.",
+  confidence: 0.83,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded duplicate graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-duplicate" }
+});
 const graphStaleCandidate = await db.createGraphCandidate({
   project_id: projectId,
   candidate_kind: "edge",
@@ -890,6 +930,66 @@ const graphArchivedCandidate = await db.createGraphCandidate({
     }
   ],
   metadata: { smoke: "review-ui-graph-archived" }
+});
+const graphConflictCandidate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "conflicts_with",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI conflict chunk source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI conflict chunk destination" },
+  title: "Review UI conflict graph edge candidate",
+  summary: "Conflict-like graph edge fixture for Workbench maintenance.",
+  confidence: 0.58,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded conflict graph edge evidence for review UI."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-conflict", possible_conflict: true }
+});
+const graphMaintenanceRouteTarget = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: { kind: "chunk", id: randomUUID(), label: "Review UI maintenance route source" },
+  dst: { kind: "chunk", id: randomUUID(), label: "Review UI maintenance route destination" },
+  title: "Review UI maintenance route target",
+  summary: "Canonical graph edge fixture for maintenance route.",
+  confidence: 0.82,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded maintenance route target evidence."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-maintenance-route-target" }
+});
+const graphMaintenanceRouteDuplicate = await db.createGraphCandidate({
+  project_id: projectId,
+  candidate_kind: "edge",
+  relation_type: "same_topic_as",
+  src: graphMaintenanceRouteTarget.src,
+  dst: graphMaintenanceRouteTarget.dst,
+  title: "Review UI maintenance route duplicate",
+  summary: "Duplicate graph edge fixture for maintenance route.",
+  confidence: 0.81,
+  extraction_method: "keeper",
+  created_by: "agent",
+  source_refs: [
+    {
+      source_kind: "agent_memory",
+      source_id: sourceLinkedDetail.memory_id,
+      quote: "Bounded maintenance route duplicate evidence."
+    }
+  ],
+  metadata: { smoke: "review-ui-graph-maintenance-route-duplicate" }
 });
 const otherProjectGraphCandidate = await sandboxDb.createGraphCandidate({
   project_id: sandboxProjectId,
@@ -1317,6 +1417,9 @@ try {
     ".source-workspace-grid { display: grid",
     ".review-overview { display: grid",
     ".review-lanes { display: grid",
+    ".graph-maintenance { border:",
+    ".graph-maintenance-lanes { display: grid",
+    ".graph-maintenance-form button { width: 100%; }",
     ".activity-summary { display: grid",
     ".audit-summary { display: grid",
     ".audit-filter-form { display: grid",
@@ -1325,6 +1428,7 @@ try {
     ".secondary-workspace { display: block",
     ".operation-panels { display: grid",
     ".chat-answer { border-top",
+    ".graph-maintenance-lanes { grid-template-columns: 1fr; }",
     "max-height: 680px",
     "@media (max-width: 1180px)",
     "@media (max-width: 760px)"
@@ -1597,6 +1701,13 @@ try {
   const graphDashboardJson = await graphDashboardApi.json();
   const graphDashboardText = JSON.stringify(graphDashboardJson.graph_candidates ?? {});
   const graphDashboardHygiene = graphDashboardJson.graph_candidates?.hygiene;
+  const graphDashboardMaintenance = graphDashboardJson.graph_candidates?.maintenance;
+  const graphDashboardMaintenanceLanes = (graphDashboardMaintenance?.lanes ?? []).map(
+    (lane) => lane.lane
+  );
+  const graphDashboardMaintenanceRecommendations = (graphDashboardMaintenance?.lanes ?? []).flatMap(
+    (lane) => lane.recommendations ?? []
+  );
   const graphNodeReadiness =
     graphDashboardJson.graph_candidates?.selected_candidate?.promotion_readiness;
   if (
@@ -1612,6 +1723,27 @@ try {
     graphDashboardJson.graph_candidates.filters?.source_kind !== "source" ||
     !graphDashboardJson.graph_candidates.candidates.some(
       (candidate) => candidate.graph_candidate_id === graphNodeCandidate.graph_candidate_id
+    ) ||
+    graphDashboardMaintenance?.governance?.read_only_plan !== true ||
+    graphDashboardMaintenance?.governance?.mutates_candidates !== false ||
+    graphDashboardMaintenance?.governance?.mutates_edges !== false ||
+    graphDashboardMaintenance?.counts?.duplicates < 1 ||
+    graphDashboardMaintenance?.counts?.stale_or_archived < 2 ||
+    graphDashboardMaintenance?.counts?.blocked < 1 ||
+    graphDashboardMaintenance?.counts?.conflict_review < 1 ||
+    !["duplicates", "stale_or_archived", "blocked", "conflict_review", "promoted_cleanup"].every(
+      (lane) => graphDashboardMaintenanceLanes.includes(lane)
+    ) ||
+    !graphDashboardMaintenanceRecommendations.some(
+      (recommendation) =>
+        recommendation.lane === "duplicates" &&
+        (recommendation.graph_candidate_id === graphDuplicateCandidate.graph_candidate_id ||
+          recommendation.target_graph_candidate_id === graphDuplicateCandidate.graph_candidate_id)
+    ) ||
+    !graphDashboardMaintenanceRecommendations.some(
+      (recommendation) =>
+        recommendation.lane === "conflict_review" &&
+        recommendation.graph_candidate_id === graphConflictCandidate.graph_candidate_id
     ) ||
     graphDashboardJson.graph_candidates.selected_candidate?.graph_candidate_id !==
       graphNodeCandidate.graph_candidate_id ||
@@ -1698,6 +1830,50 @@ try {
       `Graph review action error smoke failed: ${JSON.stringify(graphActionErrorJson)}`
     );
   }
+  const graphMaintenanceEdgesBefore = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  const graphMaintenanceRoute = await fetch(`${baseUrl}/api/review-action`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      project_id: projectId,
+      target_kind: "graph_candidate",
+      review_kind: "graph_maintenance",
+      action: "maintenance",
+      graph_candidate_id: graphMaintenanceRouteDuplicate.graph_candidate_id,
+      maintenance_action_kind: "archive_duplicate",
+      target_graph_candidate_id: graphMaintenanceRouteTarget.graph_candidate_id,
+      confirm: true,
+      note: "review ui graph maintenance smoke"
+    })
+  });
+  const graphMaintenanceRouteJson = await graphMaintenanceRoute.json();
+  const graphMaintenanceEdgesAfter = await db.pool.query(
+    "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
+    [projectId]
+  );
+  if (
+    graphMaintenanceRoute.status !== 200 ||
+    graphMaintenanceRouteJson.status !== "applied" ||
+    graphMaintenanceRouteJson.candidate?.lifecycle_state !== "archived" ||
+    graphMaintenanceRouteJson.mutation?.mutates_edges !== false ||
+    graphMaintenanceRouteJson.mutation?.deletes_candidates !== false ||
+    graphMaintenanceRouteJson.mutation?.review_action_appended !== true ||
+    graphMaintenanceEdgesAfter.rows[0]?.count !== graphMaintenanceEdgesBefore.rows[0]?.count
+  ) {
+    throw new Error(
+      `Graph maintenance route smoke failed: ${JSON.stringify({
+        graphMaintenanceRouteJson,
+        edgesBefore: graphMaintenanceEdgesBefore.rows[0]?.count,
+        edgesAfter: graphMaintenanceEdgesAfter.rows[0]?.count
+      })}`
+    );
+  }
   const graphAcceptedDashboard = await fetch(
     `${baseUrl}/api/review-dashboard?project_id=${projectId}&graph_candidate_id=${graphEdgeCandidate.graph_candidate_id}&graph_lifecycle_state=accepted&graph_candidate_kind=edge`,
     {
@@ -1744,6 +1920,20 @@ try {
     graphPromotableCandidate.graph_candidate_id,
     "Promotable graph candidate"
   );
+  const maintenanceHtmlMarkers = [
+    "Graph maintenance",
+    "Duplicate candidates",
+    "Stale or archived candidates",
+    "Blocked candidates",
+    "Conflict review candidates",
+    'name="maintenance_action_kind"',
+    'name="graph_candidate_id"',
+    'name="target_graph_candidate_id"',
+    'name="action" value="maintenance"'
+  ];
+  const missingMaintenanceHtmlMarkers = maintenanceHtmlMarkers.filter(
+    (marker) => !graphPromotableHtml.includes(marker)
+  );
   await assertNoGraphPromoteAction(graphNodeCandidate.graph_candidate_id, "Node graph candidate");
   await assertNoGraphPromoteAction(
     graphEdgeCandidate.graph_candidate_id,
@@ -1762,12 +1952,14 @@ try {
     graphPromotableDashboard.status !== 200 ||
     graphPromotableReadiness?.status !== "promotable" ||
     graphPromotableJson.graph_candidates?.hygiene?.counts?.promotable < 1 ||
-    !graphPromotableHtml.includes("This accepted compatible edge can be promoted")
+    !graphPromotableHtml.includes("This accepted compatible edge can be promoted") ||
+    missingMaintenanceHtmlMarkers.length > 0
   ) {
     throw new Error(
-      `Graph promotable dashboard smoke failed: ${JSON.stringify(
-        graphPromotableJson.graph_candidates
-      )}`
+      `Graph promotable dashboard smoke failed: ${JSON.stringify({
+        graph_candidates: graphPromotableJson.graph_candidates,
+        missingMaintenanceHtmlMarkers
+      })}`
     );
   }
   const graphPromotion = await fetch(`${baseUrl}/api/review-action`, {
@@ -1847,6 +2039,7 @@ try {
   const graphPromotedJson = await graphPromotedDashboard.json();
   const graphPromotedReadiness =
     graphPromotedJson.graph_candidates?.selected_candidate?.promotion_readiness;
+  const graphPromotedMaintenance = graphPromotedJson.graph_candidates?.maintenance;
   const graphTopology = graphPromotedJson.graph_candidates?.topology;
   const graphTopologyText = JSON.stringify(graphTopology ?? {});
   const graphTopologyLinkKinds = Array.from(
@@ -1866,6 +2059,16 @@ try {
     "Blocked states",
     "Source-backed evidence"
   ];
+  const promotedMaintenanceHtmlMarkers = [
+    "Graph maintenance",
+    "Promoted cleanup",
+    'name="maintenance_action_kind"',
+    'name="graph_candidate_id"',
+    'name="action" value="maintenance"'
+  ];
+  const missingPromotedMaintenanceHtmlMarkers = promotedMaintenanceHtmlMarkers.filter(
+    (marker) => !graphPromotedHtmlText.includes(marker)
+  );
   const emptyTopologyHtml = await fetch(
     `${baseUrl}/review?project_id=${humanMemorySpace.project_id}&view=review`,
     {
@@ -1882,6 +2085,8 @@ try {
     graphPromotedReadiness?.status !== "promoted" ||
     graphPromotedReadiness?.promoted_edge_id !== graphPromotionJson.promoted_edge_id ||
     graphPromotedJson.graph_candidates?.hygiene?.counts?.promoted < 1 ||
+    graphPromotedMaintenance?.counts?.promoted_cleanup < 1 ||
+    graphPromotedMaintenance?.governance?.mutates_edges !== false ||
     graphTopology?.governance?.read_only !== true ||
     graphTopology?.governance?.mutates_candidates !== false ||
     graphTopology?.governance?.mutates_edges !== false ||
@@ -1894,7 +2099,11 @@ try {
     graphTopologyText.includes(otherProjectGraphCandidate.graph_candidate_id) ||
     graphPromotedHtml.status !== 200 ||
     !topologyHtmlMarkers.every((marker) => graphPromotedHtmlText.includes(marker)) ||
-    !emptyTopologyHtmlText.includes("No graph topology is visible for this project yet.")
+    missingPromotedMaintenanceHtmlMarkers.length > 0 ||
+    !emptyTopologyHtmlText.includes("No graph topology is visible for this project yet.") ||
+    !emptyTopologyHtmlText.includes(
+      "No graph maintenance actions are recommended for this project."
+    )
   ) {
     throw new Error(
       `Graph promoted dashboard smoke failed: ${JSON.stringify({
@@ -1902,8 +2111,12 @@ try {
         topology_markers: topologyHtmlMarkers.filter((marker) =>
           graphPromotedHtmlText.includes(marker)
         ),
+        missingPromotedMaintenanceHtmlMarkers,
         empty_topology_present: emptyTopologyHtmlText.includes(
           "No graph topology is visible for this project yet."
+        ),
+        empty_maintenance_present: emptyTopologyHtmlText.includes(
+          "No graph maintenance actions are recommended for this project."
         )
       })}`
     );
@@ -1914,6 +2127,12 @@ try {
     filters: graphDashboardJson.graph_candidates.filters,
     selected_kind: graphDashboardJson.graph_candidates.selected_candidate.candidate_kind,
     hygiene_counts: graphDashboardHygiene.counts,
+    maintenance_counts: graphDashboardMaintenance.counts,
+    maintenance_lanes: graphDashboardMaintenanceLanes,
+    maintenance_html_markers: maintenanceHtmlMarkers,
+    promoted_maintenance_counts: graphPromotedMaintenance.counts,
+    promoted_maintenance_html_markers: promotedMaintenanceHtmlMarkers,
+    empty_maintenance_state: "No graph maintenance actions are recommended for this project.",
     selected_promotion_readiness: graphNodeReadiness,
     accepted_promotion_readiness: graphAcceptedReadiness,
     promotable_promotion_readiness: graphPromotableReadiness,
@@ -1923,6 +2142,7 @@ try {
     topology_html_markers: topologyHtmlMarkers,
     empty_topology_state: "No graph topology is visible for this project yet.",
     action_lifecycle: graphActionJson.lifecycle_state,
+    maintenance_action_status: graphMaintenanceRouteJson.status,
     promotion_status: graphPromotionJson.status,
     repeat_promotion_status: graphRepeatPromotionJson.status,
     promoted_edge_reused:
@@ -1937,6 +2157,7 @@ try {
     edges_before: graphEdgesBeforeReviewAction.rows[0]?.count,
     edges_after_accept: graphEdgesAfterAcceptActions.rows[0]?.count,
     edges_after_unsupported_accept: graphEdgesAfterReviewAction.rows[0]?.count,
+    edges_after_maintenance: graphMaintenanceEdgesAfter.rows[0]?.count,
     edges_after_promote: graphEdgesAfterPromotion.rows[0]?.count,
     edges_after_repeat_promote: graphEdgesAfterRepeatPromotion.rows[0]?.count
   };

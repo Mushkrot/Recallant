@@ -88,6 +88,19 @@ async function graphCandidateCount(db, projectId) {
   return Number(result.rows[0]?.count ?? 0);
 }
 
+async function graphCandidateReviewActionCount(db, projectId) {
+  const result = await db.pool.query(
+    `
+      SELECT count(a.id)::int AS count
+      FROM graph_candidate_review_actions a
+      JOIN graph_candidates gc ON gc.id = a.graph_candidate_id
+      WHERE gc.project_id = $1
+    `,
+    [projectId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 function runCli(args) {
   return spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: process.cwd(),
@@ -475,6 +488,86 @@ try {
   );
   const hygieneProjectTwo = await db.getGraphCandidateHygiene({ project_id: projectTwo });
   assert(hygieneProjectTwo.counts.total === 0, "Graph hygiene must preserve project isolation");
+
+  const maintenanceCandidateCountBefore = await graphCandidateCount(db, projectOne);
+  const maintenanceReviewActionCountBefore = await graphCandidateReviewActionCount(db, projectOne);
+  const maintenanceEdgeCountBefore = await edgeCount(db, projectOne);
+  const maintenancePlan = await db.getGraphCandidateMaintenancePlan({
+    project_id: projectOne,
+    limit: 50
+  });
+  const maintenanceLimitedPlan = await db.getGraphCandidateMaintenancePlan({
+    project_id: projectOne,
+    limit: 2
+  });
+  const maintenanceWrongDeveloperPlan = await db.getGraphCandidateMaintenancePlan({
+    project_id: projectOne,
+    developer_id: randomUUID()
+  });
+  const maintenanceProjectTwoPlan = await db.getGraphCandidateMaintenancePlan({
+    project_id: projectTwo
+  });
+  const maintenanceCandidateCountAfter = await graphCandidateCount(db, projectOne);
+  const maintenanceReviewActionCountAfter = await graphCandidateReviewActionCount(db, projectOne);
+  const maintenanceEdgeCountAfter = await edgeCount(db, projectOne);
+  assert(
+    maintenanceCandidateCountAfter === maintenanceCandidateCountBefore &&
+      maintenanceReviewActionCountAfter === maintenanceReviewActionCountBefore &&
+      maintenanceEdgeCountAfter === maintenanceEdgeCountBefore,
+    "Graph candidate maintenance planner should be read-only"
+  );
+  assert(
+    maintenancePlan.governance?.read_only_plan === true &&
+      maintenancePlan.governance?.mutates_candidates === false &&
+      maintenancePlan.governance?.mutates_edges === false &&
+      maintenancePlan.governance?.retrieval_semantics_changed === false,
+    "Graph maintenance plan should expose dry-run/read-only governance"
+  );
+  assert(
+    maintenancePlan.lanes.map((lane) => lane.lane).join(",") ===
+      "duplicates,stale_or_archived,blocked,conflict_review,promoted_cleanup",
+    "Graph maintenance plan should return stable lane order"
+  );
+  assert(maintenancePlan.counts.duplicates >= 1, "Maintenance plan should flag duplicates");
+  assert(
+    maintenancePlan.counts.stale_or_archived >= 2,
+    "Maintenance plan should flag stale and archived candidates"
+  );
+  assert(maintenancePlan.counts.blocked >= 1, "Maintenance plan should flag blocked candidates");
+  assert(
+    maintenancePlan.counts.conflict_review >= 1,
+    "Maintenance plan should flag conflict-review candidates"
+  );
+  assert(
+    maintenanceLimitedPlan.counts.truncated === true &&
+      maintenanceLimitedPlan.counts.omitted_recommendations >= 1,
+    "Maintenance plan should report truncation when bounded by limit"
+  );
+  assert(
+    maintenanceWrongDeveloperPlan.counts.total_recommendations === 0 &&
+      maintenanceWrongDeveloperPlan.lanes.every((lane) => lane.recommendations.length === 0),
+    "Maintenance plan should be empty for a mismatched developer"
+  );
+  assert(
+    maintenanceProjectTwoPlan.counts.total_recommendations === 0,
+    "Maintenance plan should preserve project isolation"
+  );
+  const maintenanceRecommendations = maintenancePlan.lanes.flatMap((lane) => lane.recommendations);
+  assert(
+    maintenanceRecommendations.every(
+      (recommendation) =>
+        recommendation.action_id &&
+        recommendation.action_kind &&
+        recommendation.graph_candidate_id &&
+        recommendation.reason_code &&
+        recommendation.summary &&
+        recommendation.lifecycle_state &&
+        recommendation.risk_level
+    ),
+    "Maintenance recommendations should include the stable required fields"
+  );
+  assertNoForbidden(JSON.stringify(maintenancePlan), "graph maintenance plan");
+
   const unacceptedPromotion = await db.promoteGraphCandidate({
     project_id: projectOne,
     graph_candidate_id: unacceptedPromotionCandidate.graph_candidate_id,
@@ -569,10 +662,37 @@ try {
   );
   const promotedDuplicateKey = hygieneBeforePromotion.duplicate_groups[0]?.duplicate_key;
   const hygieneAfterPromotion = await db.getGraphCandidateHygiene({ project_id: projectOne });
+  const maintenancePromotedCandidateCountBefore = await graphCandidateCount(db, projectOne);
+  const maintenancePromotedReviewActionCountBefore = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  const maintenancePromotedEdgeCountBefore = await edgeCount(db, projectOne);
+  const maintenanceAfterPromotion = await db.getGraphCandidateMaintenancePlan({
+    project_id: projectOne,
+    limit: 50
+  });
+  const maintenancePromotedCandidateCountAfter = await graphCandidateCount(db, projectOne);
+  const maintenancePromotedReviewActionCountAfter = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  const maintenancePromotedEdgeCountAfter = await edgeCount(db, projectOne);
   assert(
     hygieneAfterPromotion.counts.promoted >= 1,
     "Hygiene should count promoted candidates after promotion"
   );
+  assert(
+    maintenancePromotedCandidateCountAfter === maintenancePromotedCandidateCountBefore &&
+      maintenancePromotedReviewActionCountAfter === maintenancePromotedReviewActionCountBefore &&
+      maintenancePromotedEdgeCountAfter === maintenancePromotedEdgeCountBefore,
+    "Graph maintenance planner should remain read-only after promotion"
+  );
+  assert(
+    maintenanceAfterPromotion.counts.promoted_cleanup >= 1,
+    "Maintenance plan should flag promoted candidates for cleanup"
+  );
+  assertNoForbidden(JSON.stringify(maintenanceAfterPromotion), "graph maintenance promoted plan");
   assert(
     !hygieneAfterPromotion.readiness.some(
       (item) => item.duplicate_key === promotedDuplicateKey && item.status === "promotable"
@@ -674,6 +794,144 @@ try {
     cliPathHygiene.project_id === projectOne && cliPathHygiene.governance?.read_only === true,
     "CLI graph hygiene should resolve project-dir in the current developer scope"
   );
+  const cliMaintenancePreview = parseCliJson(
+    runCli([
+      "graph",
+      "maintenance",
+      "--project-id",
+      projectOne,
+      "--project-dir",
+      projectOnePath,
+      "--format",
+      "json",
+      "--limit",
+      "5"
+    ]),
+    "graph maintenance preview"
+  );
+  assert(
+    cliMaintenancePreview.governance?.read_only_plan === true &&
+      cliMaintenancePreview.governance?.mutates_edges === false &&
+      cliMaintenancePreview.counts?.total_recommendations >= 1,
+    "CLI graph maintenance preview should return a read-only plan"
+  );
+  const cliMaintenanceTextPreview = runCli([
+    "graph",
+    "maintenance",
+    "--project-id",
+    projectOne,
+    "--project-dir",
+    projectOnePath,
+    "--format",
+    "text",
+    "--limit",
+    "5"
+  ]);
+  assert(
+    cliMaintenanceTextPreview.status === 0 &&
+      cliMaintenanceTextPreview.stdout.includes("Recallant graph maintenance") &&
+      cliMaintenanceTextPreview.stdout.includes("Apply requires confirm: true"),
+    "CLI graph maintenance text preview should render bounded text"
+  );
+  assertNoForbidden(
+    `${cliMaintenanceTextPreview.stdout}\n${cliMaintenanceTextPreview.stderr}`,
+    "graph maintenance text preview"
+  );
+  const cliMaintenanceSrc = randomUUID();
+  const cliMaintenanceDst = randomUUID();
+  const cliMaintenanceTarget = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "edge",
+    relation_type: "same_topic_as",
+    src: { kind: "chunk", id: cliMaintenanceSrc, label: "CLI maintenance source chunk" },
+    dst: { kind: "chunk", id: cliMaintenanceDst, label: "CLI maintenance destination chunk" },
+    title: `${marker} CLI maintenance target candidate`,
+    summary: `${marker} CLI maintenance target`,
+    confidence: 0.82,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "chunk", source_id: cliMaintenanceSrc }],
+    metadata: { smoke: true, maintenance_case: "cli_target" }
+  });
+  const cliMaintenanceDuplicate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "edge",
+    relation_type: "same_topic_as",
+    src: { kind: "chunk", id: cliMaintenanceSrc, label: "CLI maintenance source duplicate" },
+    dst: { kind: "chunk", id: cliMaintenanceDst, label: "CLI maintenance destination duplicate" },
+    title: `${marker} CLI maintenance duplicate candidate`,
+    summary: `${marker} CLI maintenance duplicate`,
+    confidence: 0.81,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "chunk", source_id: cliMaintenanceDst }],
+    metadata: { smoke: true, maintenance_case: "cli_duplicate" }
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: cliMaintenanceTarget.graph_candidate_id,
+    action: "accept",
+    actor_kind: "agent",
+    note: "CLI maintenance smoke target accept"
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: cliMaintenanceDuplicate.graph_candidate_id,
+    action: "accept",
+    actor_kind: "agent",
+    note: "CLI maintenance smoke duplicate accept"
+  });
+  const cliMaintenanceWithoutConfirm = runCli([
+    "graph",
+    "maintenance",
+    "apply",
+    "archive_duplicate",
+    cliMaintenanceDuplicate.graph_candidate_id,
+    "--project-id",
+    projectOne,
+    "--project-dir",
+    projectOnePath,
+    "--target-graph-candidate-id",
+    cliMaintenanceTarget.graph_candidate_id,
+    "--format",
+    "json"
+  ]);
+  assert(
+    cliMaintenanceWithoutConfirm.status !== 0 &&
+      `${cliMaintenanceWithoutConfirm.stderr}\n${cliMaintenanceWithoutConfirm.stdout}`.includes(
+        "--confirm"
+      ),
+    "CLI graph maintenance apply should require --confirm"
+  );
+  assertNoForbidden(
+    `${cliMaintenanceWithoutConfirm.stderr}\n${cliMaintenanceWithoutConfirm.stdout}`,
+    "graph maintenance no-confirm output"
+  );
+  const cliMaintenanceApply = parseCliJson(
+    runCli([
+      "graph",
+      "maintenance",
+      "apply",
+      "archive_duplicate",
+      cliMaintenanceDuplicate.graph_candidate_id,
+      "--project-id",
+      projectOne,
+      "--project-dir",
+      projectOnePath,
+      "--target-graph-candidate-id",
+      cliMaintenanceTarget.graph_candidate_id,
+      "--format",
+      "json",
+      "--confirm"
+    ]),
+    "graph maintenance apply"
+  );
+  assert(
+    cliMaintenanceApply.status === "applied" &&
+      cliMaintenanceApply.mutation?.confirmed === true &&
+      cliMaintenanceApply.mutation?.mutates_edges === false,
+    "CLI graph maintenance apply should confirm one lifecycle action without mutating edges"
+  );
 
   const listProjectOne = await db.listGraphCandidates({ project_id: projectOne, limit: 20 });
   const listProjectTwo = await db.listGraphCandidates({ project_id: projectTwo, limit: 20 });
@@ -741,6 +999,333 @@ try {
     "Checkpoint included graph candidate ids"
   );
 
+  const maintenanceApplySrc = randomUUID();
+  const maintenanceApplyDst = randomUUID();
+  const maintenanceApplyTarget = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "edge",
+    relation_type: "same_topic_as",
+    src: { kind: "chunk", id: maintenanceApplySrc, label: "maintenance source chunk" },
+    dst: { kind: "chunk", id: maintenanceApplyDst, label: "maintenance destination chunk" },
+    title: `${marker} maintenance canonical edge`,
+    summary: `${marker} maintenance target candidate`,
+    confidence: 0.8,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "chunk", source_id: maintenanceApplySrc }],
+    metadata: { smoke: true, maintenance_case: "canonical" }
+  });
+  const maintenanceApplyDuplicate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "edge",
+    relation_type: "same_topic_as",
+    src: { kind: "chunk", id: maintenanceApplySrc, label: "maintenance source chunk duplicate" },
+    dst: {
+      kind: "chunk",
+      id: maintenanceApplyDst,
+      label: "maintenance destination chunk duplicate"
+    },
+    title: `${marker} maintenance duplicate edge`,
+    summary: `${marker} maintenance duplicate candidate`,
+    confidence: 0.79,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "chunk", source_id: maintenanceApplyDst }],
+    metadata: { smoke: true, maintenance_case: "duplicate" }
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyTarget.graph_candidate_id,
+    action: "accept",
+    actor_kind: "agent",
+    note: "maintenance smoke target accept"
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyDuplicate.graph_candidate_id,
+    action: "accept",
+    actor_kind: "agent",
+    note: "maintenance smoke duplicate accept"
+  });
+  const maintenanceStaleCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "topic",
+    title: `${marker} maintenance mark stale candidate`,
+    summary: `${marker} maintenance mark stale target`,
+    confidence: 0.7,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-stale` }],
+    metadata: { smoke: true, maintenance_case: "mark_stale" }
+  });
+  const maintenanceArchiveCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "entity",
+    title: `${marker} maintenance archive candidate`,
+    summary: `${marker} maintenance archive target`,
+    confidence: 0.7,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-archive` }],
+    metadata: { smoke: true, maintenance_case: "archive_candidate" }
+  });
+  const maintenanceMergeTarget = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "decision_cluster",
+    title: `${marker} maintenance merge target`,
+    summary: `${marker} maintenance merge target candidate`,
+    confidence: 0.72,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-merge-target` }],
+    metadata: { smoke: true, maintenance_case: "merge_target" }
+  });
+  const maintenanceMergeCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "decision_cluster",
+    title: `${marker} maintenance merge candidate`,
+    summary: `${marker} maintenance merge source candidate`,
+    confidence: 0.71,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-merge` }],
+    metadata: { smoke: true, maintenance_case: "merge_candidate" }
+  });
+  const maintenanceSupersedeTarget = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "procedure",
+    title: `${marker} maintenance supersede target`,
+    summary: `${marker} maintenance supersede target candidate`,
+    confidence: 0.75,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-supersede-target` }],
+    metadata: { smoke: true, maintenance_case: "supersede_target" }
+  });
+  const maintenanceSupersedeCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "procedure",
+    title: `${marker} maintenance supersede candidate`,
+    summary: `${marker} maintenance supersede source candidate`,
+    confidence: 0.74,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-supersede` }],
+    metadata: { smoke: true, maintenance_case: "supersede_candidate" }
+  });
+  const maintenanceRestoreCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "node",
+    node_kind: "preference",
+    title: `${marker} maintenance restore candidate`,
+    summary: `${marker} maintenance restore target`,
+    confidence: 0.7,
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [{ source_kind: "external", source_id: `${marker}:maintenance-restore` }],
+    metadata: { smoke: true, maintenance_case: "restore_candidate" }
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceRestoreCandidate.graph_candidate_id,
+    action: "archive",
+    actor_kind: "agent",
+    note: "maintenance smoke archive before restore"
+  });
+
+  const maintenanceApplyCandidateCountBefore = await graphCandidateCount(db, projectOne);
+  const maintenanceApplyReviewActionCountBefore = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  const maintenanceApplyEdgeCountBefore = await edgeCount(db, projectOne);
+  const dryRunArchive = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyDuplicate.graph_candidate_id,
+    action_kind: "archive_duplicate",
+    target_graph_candidate_id: maintenanceApplyTarget.graph_candidate_id,
+    actor_kind: "agent",
+    note: "maintenance smoke dry run archive duplicate"
+  });
+  const maintenanceApplyReviewActionCountAfterDryRun = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  const maintenanceApplyEdgeCountAfterDryRun = await edgeCount(db, projectOne);
+  const duplicateBeforeConfirm = await db.getGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyDuplicate.graph_candidate_id
+  });
+  assert(
+    dryRunArchive.status === "dry_run" &&
+      dryRunArchive.mutation?.mutates_candidates === false &&
+      dryRunArchive.mutation?.review_action_appended === false,
+    "Maintenance apply should default to dry-run without confirm"
+  );
+  assert(
+    maintenanceApplyReviewActionCountAfterDryRun === maintenanceApplyReviewActionCountBefore &&
+      maintenanceApplyEdgeCountAfterDryRun === maintenanceApplyEdgeCountBefore,
+    "Maintenance dry-run should not append review actions or mutate edges"
+  );
+  const confirmedArchive = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyDuplicate.graph_candidate_id,
+    action_kind: "archive_duplicate",
+    target_graph_candidate_id: maintenanceApplyTarget.graph_candidate_id,
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke confirm archive duplicate"
+  });
+  const maintenanceApplyReviewActionCountAfterConfirm = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  const maintenanceApplyEdgeCountAfterConfirm = await edgeCount(db, projectOne);
+  assert(
+    confirmedArchive.status === "applied" &&
+      confirmedArchive.candidate?.lifecycle_state === "archived" &&
+      confirmedArchive.mutation?.review_action_appended === true,
+    "Maintenance confirm should archive duplicate through review history"
+  );
+  assert(
+    (confirmedArchive.candidate?.source_refs?.length ?? 0) ===
+      duplicateBeforeConfirm.source_refs.length,
+    "Maintenance apply should preserve source refs"
+  );
+  assert(
+    maintenanceApplyReviewActionCountAfterConfirm === maintenanceApplyReviewActionCountBefore + 1 &&
+      maintenanceApplyEdgeCountAfterConfirm === maintenanceApplyEdgeCountBefore,
+    "Maintenance confirm should append one review action without changing edges"
+  );
+  const repeatArchive = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceApplyDuplicate.graph_candidate_id,
+    action_kind: "archive_duplicate",
+    target_graph_candidate_id: maintenanceApplyTarget.graph_candidate_id,
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke repeat archive duplicate"
+  });
+  const maintenanceApplyReviewActionCountAfterRepeat = await graphCandidateReviewActionCount(
+    db,
+    projectOne
+  );
+  assert(
+    repeatArchive.status === "already_applied" &&
+      maintenanceApplyReviewActionCountAfterRepeat ===
+        maintenanceApplyReviewActionCountAfterConfirm,
+    "Maintenance repeat should be idempotent without duplicate review history"
+  );
+  const markStaleResult = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceStaleCandidate.graph_candidate_id,
+    action_kind: "mark_stale",
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke mark stale"
+  });
+  const archiveCandidateResult = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceArchiveCandidate.graph_candidate_id,
+    action_kind: "archive_candidate",
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke archive candidate"
+  });
+  const mergeResult = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceMergeCandidate.graph_candidate_id,
+    action_kind: "merge_duplicate",
+    target_graph_candidate_id: maintenanceMergeTarget.graph_candidate_id,
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke merge duplicate"
+  });
+  const supersedeResult = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceSupersedeCandidate.graph_candidate_id,
+    action_kind: "supersede_candidate",
+    target_graph_candidate_id: maintenanceSupersedeTarget.graph_candidate_id,
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke supersede"
+  });
+  const unarchiveResult = await db.applyGraphCandidateMaintenance({
+    project_id: projectOne,
+    graph_candidate_id: maintenanceRestoreCandidate.graph_candidate_id,
+    action_kind: "unarchive_candidate",
+    confirm: true,
+    actor_kind: "agent",
+    note: "maintenance smoke unarchive"
+  });
+  await expectReject(
+    "maintenance merge missing target",
+    () =>
+      db.applyGraphCandidateMaintenance({
+        project_id: projectOne,
+        graph_candidate_id: maintenanceMergeCandidate.graph_candidate_id,
+        action_kind: "merge_duplicate",
+        confirm: true,
+        actor_kind: "agent"
+      }),
+    "target_graph_candidate_id"
+  );
+  await expectReject(
+    "maintenance forbidden metadata",
+    () =>
+      db.applyGraphCandidateMaintenance({
+        project_id: projectOne,
+        graph_candidate_id: maintenanceStaleCandidate.graph_candidate_id,
+        action_kind: "mark_stale",
+        confirm: true,
+        actor_kind: "agent",
+        metadata: { provider_token: forbiddenToken }
+      }),
+    "forbidden fields"
+  );
+  const maintenanceApplyCandidateCountAfter = await graphCandidateCount(db, projectOne);
+  const maintenanceApplyEdgeCountAfter = await edgeCount(db, projectOne);
+  assert(
+    markStaleResult.candidate?.lifecycle_state === "stale" &&
+      archiveCandidateResult.candidate?.lifecycle_state === "archived" &&
+      mergeResult.candidate?.lifecycle_state === "archived" &&
+      supersedeResult.candidate?.lifecycle_state === "stale" &&
+      unarchiveResult.candidate?.lifecycle_state === "candidate",
+    "Maintenance apply should support stale/archive/merge/supersede/unarchive lifecycles"
+  );
+  assert(
+    maintenanceApplyCandidateCountAfter === maintenanceApplyCandidateCountBefore &&
+      maintenanceApplyEdgeCountAfter === maintenanceApplyEdgeCountBefore,
+    "Maintenance apply should preserve candidate rows and edges"
+  );
+  const maintenanceApplyProof = {
+    dry_run_status: dryRunArchive.status,
+    confirm_status: confirmedArchive.status,
+    repeat_status: repeatArchive.status,
+    mark_stale_state: markStaleResult.candidate?.lifecycle_state,
+    archive_state: archiveCandidateResult.candidate?.lifecycle_state,
+    merge_state: mergeResult.candidate?.lifecycle_state,
+    supersede_state: supersedeResult.candidate?.lifecycle_state,
+    unarchive_state: unarchiveResult.candidate?.lifecycle_state,
+    source_refs_preserved:
+      (confirmedArchive.candidate?.source_refs?.length ?? 0) ===
+      duplicateBeforeConfirm.source_refs.length,
+    review_actions_before: maintenanceApplyReviewActionCountBefore,
+    review_actions_after_confirm: maintenanceApplyReviewActionCountAfterConfirm,
+    review_actions_after_repeat: maintenanceApplyReviewActionCountAfterRepeat,
+    edges_before: maintenanceApplyEdgeCountBefore,
+    edges_after: maintenanceApplyEdgeCountAfter,
+    candidates_before: maintenanceApplyCandidateCountBefore,
+    candidates_after: maintenanceApplyCandidateCountAfter
+  };
+  assertNoForbidden(JSON.stringify(maintenanceApplyProof), "graph maintenance apply proof");
+
   const storedRows = await db.pool.query(
     `
       SELECT gc.*, coalesce(jsonb_agg(to_jsonb(r)) FILTER (WHERE r.id IS NOT NULL), '[]'::jsonb) AS source_refs
@@ -783,6 +1368,10 @@ try {
       promotion_forbidden_metadata_rejected: true,
       hygiene_read_only: true,
       hygiene_project_isolated: true,
+      maintenance_plan_read_only: true,
+      maintenance_plan_lanes_passed: true,
+      maintenance_apply_confirm_required: true,
+      maintenance_apply_lifecycle_actions_passed: true,
       cli_promotion_confirm_required: true,
       cli_promotion_and_hygiene_passed: true,
       leak_scan_passed: true
@@ -823,13 +1412,54 @@ try {
         edges_after: hygieneEdgeCountAfter
       }
     },
+    maintenance: {
+      before_promotion_counts: maintenancePlan.counts,
+      after_promotion_counts: maintenanceAfterPromotion.counts,
+      lanes: maintenancePlan.lanes.map((lane) => lane.lane),
+      sample_actions: maintenanceRecommendations.slice(0, 5).map((recommendation) => ({
+        action_id: recommendation.action_id,
+        action_kind: recommendation.action_kind,
+        lane: recommendation.lane,
+        reason_code: recommendation.reason_code,
+        risk_level: recommendation.risk_level,
+        readiness_status: recommendation.readiness_status
+      })),
+      read_only_counts: {
+        candidates_before: maintenanceCandidateCountBefore,
+        candidates_after: maintenanceCandidateCountAfter,
+        review_actions_before: maintenanceReviewActionCountBefore,
+        review_actions_after: maintenanceReviewActionCountAfter,
+        edges_before: maintenanceEdgeCountBefore,
+        edges_after: maintenanceEdgeCountAfter
+      },
+      promoted_read_only_counts: {
+        candidates_before: maintenancePromotedCandidateCountBefore,
+        candidates_after: maintenancePromotedCandidateCountAfter,
+        review_actions_before: maintenancePromotedReviewActionCountBefore,
+        review_actions_after: maintenancePromotedReviewActionCountAfter,
+        edges_before: maintenancePromotedEdgeCountBefore,
+        edges_after: maintenancePromotedEdgeCountAfter
+      },
+      project_two_total: maintenanceProjectTwoPlan.counts.total_recommendations,
+      wrong_developer_total: maintenanceWrongDeveloperPlan.counts.total_recommendations,
+      limited_omitted: maintenanceLimitedPlan.counts.omitted_recommendations
+    },
+    maintenance_apply: maintenanceApplyProof,
     cli_graph: {
       no_confirm_rejected: cliWithoutConfirm.status !== 0,
       promotion_status: cliPromotion.status,
       promotion_retrieval_active: cliPromotion.retrieval_active,
       hygiene_read_only: cliHygiene.governance?.read_only,
       hygiene_promoted: cliHygiene.counts?.promoted,
-      project_dir_hygiene_resolved: cliPathHygiene.project_id === projectOne
+      project_dir_hygiene_resolved: cliPathHygiene.project_id === projectOne,
+      maintenance_preview_total: cliMaintenancePreview.counts?.total_recommendations,
+      maintenance_text_preview: cliMaintenanceTextPreview.stdout
+        .split("\n")
+        .filter(Boolean)
+        .slice(0, 4),
+      maintenance_no_confirm_rejected: cliMaintenanceWithoutConfirm.status !== 0,
+      maintenance_apply_status: cliMaintenanceApply.status,
+      maintenance_apply_mutates_edges: cliMaintenanceApply.mutation?.mutates_edges
     },
     lifecycle_states: stateCounts
   };
