@@ -573,6 +573,17 @@ mustInclude(
     "`maintenance`",
     "`available_actions`",
     "`governance`",
+    "B9 review ergonomics",
+    "`Graph review workload`",
+    "`Graph review filters`",
+    "`Next graph action`",
+    "`Recommended graph decision`",
+    "`Open candidate detail`",
+    "does not add first-class graph storage",
+    "automatic promotion policies",
+    "additional endpoint kinds",
+    "keeper-source expansion",
+    "retrieval semantics changes",
     "Workbench Graph Topology",
     "Graph Maintenance",
     "/review?view=review",
@@ -614,12 +625,14 @@ mustInclude(
 mustInclude(
   contractStatus,
   [
-    "Working B8 governed graph maintenance slice",
+    "Working B9 review ergonomics slice",
+    "B9 review workload and decision guidance",
     "Workbench graph review fields/actions",
     "read-only topology nodes/links/groups/summary",
     "topology result types",
     "graph maintenance plan/apply result types",
     "`graph_candidates` payload",
+    "derived priority and next-action cues",
     "hygiene counts",
     "topology",
     "maintenance counts/lanes/recommendations",
@@ -640,6 +653,11 @@ mustInclude(
     "`Blocked states`",
     "`Source-backed evidence`",
     "`Graph maintenance`",
+    "`Graph review workload`",
+    "`Graph review filters`",
+    "`Next graph action`",
+    "`Recommended graph decision`",
+    "`Open candidate detail`",
     "No graph maintenance actions are recommended for this project.",
     "does not create first-class graph nodes",
     "auto-promote candidates",
@@ -802,6 +820,7 @@ mustInclude(
     "external-machine evidence bundles",
     "Remote existing-project pilot hardening",
     "Read-only Workbench graph topology visualization",
+    "Workbench graph review ergonomics",
     "`graph_candidates.topology`",
     "`Graph topology`",
     "`Active promoted links`",
@@ -819,7 +838,25 @@ mustInclude(
   ],
   "ROADMAP"
 );
-mustNotInclude(roadmap, ["Workbench topology visualization, richer review ergonomics"], "ROADMAP");
+mustNotInclude(
+  graphTreeContract,
+  ["richer graph review ergonomics", "richer review ergonomics"],
+  "GRAPH_TREE_CONTRACT stale B9 wording"
+);
+mustNotInclude(
+  contractStatus,
+  ["richer graph review ergonomics", "richer review ergonomics"],
+  "CONTRACT_STATUS stale B9 wording"
+);
+mustNotInclude(
+  roadmap,
+  [
+    "Workbench topology visualization, richer review ergonomics",
+    "richer graph review ergonomics",
+    "richer review ergonomics"
+  ],
+  "ROADMAP stale B9 wording"
+);
 
 const universalConnectSurfaces = [
   ["README.md", readme],

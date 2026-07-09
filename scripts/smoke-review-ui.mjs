@@ -107,6 +107,7 @@ if (humanMemorySpace.memory_profile?.profile_key !== "personal_work_operations")
 }
 const rawProviderSecret = `sk-review-ui-${randomUUID()}`;
 const rawDatabaseSecret = `postgres://recallant:${randomUUID()}@db/recallant_agent_work`;
+const forbiddenGraphFixtureToken = `forbidden-graph-review-token-${randomUUID()}`;
 const expectedDocumentationStrategyOptions = [
   "keep_current_docs",
   "canonicalize_for_recallant",
@@ -996,7 +997,7 @@ const otherProjectGraphCandidate = await sandboxDb.createGraphCandidate({
   candidate_kind: "node",
   node_kind: "topic",
   title: "Other project graph candidate",
-  summary: "This candidate must not leak into the selected project dashboard.",
+  summary: `This candidate must not leak into the selected project dashboard. ${forbiddenGraphFixtureToken}`,
   confidence: 0.63,
   extraction_method: "deterministic_rule",
   created_by: "agent",
@@ -1004,11 +1005,23 @@ const otherProjectGraphCandidate = await sandboxDb.createGraphCandidate({
     {
       source_kind: "source",
       source_id: randomUUID(),
-      quote: "Other project graph evidence."
+      quote: `Other project graph evidence ${forbiddenGraphFixtureToken}.`
     }
   ],
   metadata: { smoke: "review-ui-graph-other-project" }
 });
+const graphFixtureSeparation = {
+  promotion_fixture: graphPromotableCandidate.graph_candidate_id,
+  duplicate_fixture: graphDuplicateCandidate.graph_candidate_id,
+  duplicate_target_fixture: graphDuplicateTargetCandidate.graph_candidate_id,
+  conflict_fixture: graphConflictCandidate.graph_candidate_id,
+  maintenance_route_duplicate_fixture: graphMaintenanceRouteDuplicate.graph_candidate_id,
+  maintenance_route_target_fixture: graphMaintenanceRouteTarget.graph_candidate_id
+};
+const graphFixtureIds = Object.values(graphFixtureSeparation);
+if (new Set(graphFixtureIds).size !== graphFixtureIds.length) {
+  throw new Error(`Graph fixture separation failed: ${JSON.stringify(graphFixtureSeparation)}`);
+}
 const graphEdgesBeforeReviewAction = await db.pool.query(
   "SELECT count(*)::int AS count FROM edges WHERE project_id = $1",
   [projectId]
@@ -1047,6 +1060,9 @@ async function assertGraphPromoteAction(candidateId, label) {
   const html = await graphCandidateHtml(candidateId);
   if (
     !html.includes("Promotion readiness") ||
+    !html.includes("Recommended graph decision") ||
+    !html.includes("Decision status") ||
+    !html.includes("Safety boundary") ||
     !html.includes("Promote candidate") ||
     !html.includes('name="action" value="promote"')
   ) {
@@ -1057,7 +1073,12 @@ async function assertGraphPromoteAction(candidateId, label) {
 
 async function assertNoGraphPromoteAction(candidateId, label) {
   const html = await graphCandidateHtml(candidateId);
-  if (!html.includes("Promotion readiness") || html.includes('name="action" value="promote"')) {
+  if (
+    !html.includes("Promotion readiness") ||
+    !html.includes("Recommended graph decision") ||
+    !html.includes("Decision status") ||
+    html.includes('name="action" value="promote"')
+  ) {
     throw new Error(`${label} rendered an active promote action unexpectedly`);
   }
   return html;
@@ -1121,7 +1142,11 @@ try {
   });
   const htmlText = await html.text();
   workbenchPostureExcerpt = htmlTextExcerpt(htmlText, "Documentation posture");
-  if (htmlText.includes(rawProviderSecret) || htmlText.includes(rawDatabaseSecret)) {
+  if (
+    htmlText.includes(rawProviderSecret) ||
+    htmlText.includes(rawDatabaseSecret) ||
+    htmlText.includes(forbiddenGraphFixtureToken)
+  ) {
     throw new Error("Review UI HTML leaked raw secret setting values");
   }
   const requiredHtml = [
@@ -1213,6 +1238,33 @@ try {
     "Attach a source to selected space",
     "Detach source",
     "Review decision guide",
+    "Graph review workload",
+    "Maintenance recommendations",
+    "Promotion-ready edges",
+    "Blocked or conflict",
+    "Source-backed topology",
+    "Selected candidate",
+    "Graph review filters",
+    "No graph filters active.",
+    "All graph candidates",
+    "Next graph action",
+    "Source refs",
+    "Review actions",
+    "Promotion readiness",
+    "data-graph-review-priority",
+    'aria-current="true"',
+    "Recommended graph decision",
+    "Decision status",
+    "Safety boundary",
+    "Context bounds",
+    "Merge / supersede",
+    "No target candidate is preselected.",
+    "Target candidate id",
+    "Open candidate detail",
+    "Target candidate",
+    "Confirm-gated lifecycle review action",
+    "active edges are not mutated.",
+    "Read-only topology item",
     "Imported evidence",
     "Needs your decision",
     "Possible conflicts",
@@ -1417,6 +1469,19 @@ try {
     ".source-workspace-grid { display: grid",
     ".review-overview { display: grid",
     ".review-lanes { display: grid",
+    ".graph-review-overview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));",
+    ".graph-review-overview article { border:",
+    ".graph-review-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr);",
+    ".graph-review-filter-panel p { margin: 0;",
+    ".graph-review-overview { grid-template-columns: 1fr; }",
+    ".graph-candidate-card { display: grid;",
+    ".graph-candidate-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));",
+    ".graph-candidate-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
+    ".graph-detail-decision { display: grid;",
+    ".graph-action-groups { display: grid;",
+    ".graph-action-group { border:",
+    ".graph-maintenance-context { display: flex;",
+    ".graph-topology-candidate-link, .graph-topology-readonly { display: inline-flex;",
     ".graph-maintenance { border:",
     ".graph-maintenance-lanes { display: grid",
     ".graph-maintenance-form button { width: 100%; }",
@@ -1526,6 +1591,7 @@ try {
     api.status !== 200 ||
     serializedDashboard.includes(rawProviderSecret) ||
     serializedDashboard.includes(rawDatabaseSecret) ||
+    serializedDashboard.includes(forbiddenGraphFixtureToken) ||
     !json.settings.some(
       (setting) =>
         setting.key === "provider_api_key" &&
@@ -1708,6 +1774,12 @@ try {
   const graphDashboardMaintenanceRecommendations = (graphDashboardMaintenance?.lanes ?? []).flatMap(
     (lane) => lane.recommendations ?? []
   );
+  const duplicateMaintenanceUsesPromotionFixture = graphDashboardMaintenanceRecommendations.some(
+    (recommendation) =>
+      recommendation.lane === "duplicates" &&
+      (recommendation.graph_candidate_id === graphPromotableCandidate.graph_candidate_id ||
+        recommendation.target_graph_candidate_id === graphPromotableCandidate.graph_candidate_id)
+  );
   const graphNodeReadiness =
     graphDashboardJson.graph_candidates?.selected_candidate?.promotion_readiness;
   if (
@@ -1750,9 +1822,81 @@ try {
     graphDashboardJson.graph_candidates.selected_candidate?.source_ref_count !== 1 ||
     graphNodeReadiness?.status !== "blocked" ||
     graphNodeReadiness?.blocked_reason !== "candidate_kind_not_edge" ||
-    graphDashboardText.includes(otherProjectGraphCandidate.graph_candidate_id)
+    duplicateMaintenanceUsesPromotionFixture ||
+    graphDashboardText.includes(otherProjectGraphCandidate.graph_candidate_id) ||
+    graphDashboardText.includes(forbiddenGraphFixtureToken)
   ) {
     throw new Error(`Graph dashboard API smoke failed: ${graphDashboardText}`);
+  }
+  const filteredGraphReviewHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${graphNodeCandidate.graph_candidate_id}&graph_candidate_kind=node&graph_node_kind=topic&graph_source_kind=source`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const filteredGraphReviewText = await filteredGraphReviewHtml.text();
+  const filteredGraphMarkers = [
+    "Graph review filters",
+    "Candidate kind: node",
+    "Node kind: topic",
+    "Source kind: source",
+    "filter-chip active",
+    'aria-current="true"',
+    "Selected candidate",
+    "Source refs",
+    "Review actions",
+    "Promotion readiness",
+    "data-graph-review-priority",
+    "Recommended graph decision",
+    "Decision status",
+    "Safety boundary",
+    "Normal review actions",
+    "Merge / supersede",
+    "No target candidate is preselected.",
+    'name="target_graph_candidate_id" required value=""',
+    `href="/review?project_id=${projectId}&amp;view=review&amp;graph_candidate_id=${graphNodeCandidate.graph_candidate_id}&amp;graph_candidate_kind=node&amp;graph_source_kind=source&amp;graph_node_kind=topic"`,
+    'name="graph_candidate_kind" value="node"',
+    'name="graph_source_kind" value="source"',
+    'name="graph_node_kind" value="topic"',
+    `project_id=${projectId}&amp;view=review&amp;graph_candidate_id=${graphNodeCandidate.graph_candidate_id}`,
+    `graph_candidate_id=${graphNodeCandidate.graph_candidate_id}&amp;graph_source_kind=source`,
+    "Node candidates"
+  ];
+  const missingFilteredGraphMarkers = filteredGraphMarkers.filter(
+    (marker) => !filteredGraphReviewText.includes(marker)
+  );
+  const allGraphFilterHtml = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=review&graph_candidate_id=${graphNodeCandidate.graph_candidate_id}&graph_candidate_kind=all&graph_lifecycle_state=all`,
+    {
+      headers: { authorization: `Bearer ${token}` }
+    }
+  );
+  const allGraphFilterText = await allGraphFilterHtml.text();
+  if (
+    filteredGraphReviewHtml.status !== 200 ||
+    missingFilteredGraphMarkers.length > 0 ||
+    allGraphFilterHtml.status !== 200 ||
+    !allGraphFilterText.includes("No graph filters active.") ||
+    filteredGraphReviewText.includes(forbiddenGraphFixtureToken) ||
+    allGraphFilterText.includes(forbiddenGraphFixtureToken) ||
+    allGraphFilterText.includes("Candidate kind: all") ||
+    allGraphFilterText.includes("Lifecycle: all")
+  ) {
+    throw new Error(
+      `Graph review filter HTML smoke failed: ${JSON.stringify({
+        filtered_status: filteredGraphReviewHtml.status,
+        all_status: allGraphFilterHtml.status,
+        missingFilteredGraphMarkers,
+        all_filter_rendered:
+          allGraphFilterText.includes("Candidate kind: all") ||
+          allGraphFilterText.includes("Lifecycle: all"),
+        forbidden_graph_fixture_token_leaked:
+          filteredGraphReviewText.includes(forbiddenGraphFixtureToken) ||
+          allGraphFilterText.includes(forbiddenGraphFixtureToken),
+        filtered_excerpt: htmlTextExcerpt(filteredGraphReviewText, "Graph review filters"),
+        all_excerpt: htmlTextExcerpt(allGraphFilterText, "Graph review filters")
+      })}`
+    );
   }
   const graphAction = await fetch(`${baseUrl}/api/review-action`, {
     method: "POST",
@@ -1926,6 +2070,10 @@ try {
     "Stale or archived candidates",
     "Blocked candidates",
     "Conflict review candidates",
+    "Open candidate detail",
+    "Target candidate",
+    "Confirm-gated lifecycle review action",
+    "active edges are not mutated.",
     'name="maintenance_action_kind"',
     'name="graph_candidate_id"',
     'name="target_graph_candidate_id"',
@@ -2057,7 +2205,9 @@ try {
     "Active promoted links",
     "Candidate links",
     "Blocked states",
-    "Source-backed evidence"
+    "Source-backed evidence",
+    "Open candidate detail",
+    "Read-only topology item"
   ];
   const promotedMaintenanceHtmlMarkers = [
     "Graph maintenance",
@@ -2097,9 +2247,15 @@ try {
     !graphTopologyLinkKinds.includes("candidate_edge") ||
     !graphTopologyLinkKinds.includes("source_ref") ||
     graphTopologyText.includes(otherProjectGraphCandidate.graph_candidate_id) ||
+    graphTopologyText.includes(forbiddenGraphFixtureToken) ||
     graphPromotedHtml.status !== 200 ||
+    graphPromotedHtmlText.includes(forbiddenGraphFixtureToken) ||
     !topologyHtmlMarkers.every((marker) => graphPromotedHtmlText.includes(marker)) ||
     missingPromotedMaintenanceHtmlMarkers.length > 0 ||
+    !emptyTopologyHtmlText.includes("Review decision guide") ||
+    !emptyTopologyHtmlText.includes("No graph decisions are queued.") ||
+    !emptyTopologyHtmlText.includes("Graph review filters") ||
+    !emptyTopologyHtmlText.includes("No graph filters active.") ||
     !emptyTopologyHtmlText.includes("No graph topology is visible for this project yet.") ||
     !emptyTopologyHtmlText.includes(
       "No graph maintenance actions are recommended for this project."
@@ -2112,6 +2268,14 @@ try {
           graphPromotedHtmlText.includes(marker)
         ),
         missingPromotedMaintenanceHtmlMarkers,
+        forbidden_graph_fixture_token_leaked:
+          graphTopologyText.includes(forbiddenGraphFixtureToken) ||
+          graphPromotedHtmlText.includes(forbiddenGraphFixtureToken),
+        empty_review_guide_present: emptyTopologyHtmlText.includes("Review decision guide"),
+        empty_graph_overview_present: emptyTopologyHtmlText.includes(
+          "No graph decisions are queued."
+        ),
+        empty_filter_state_present: emptyTopologyHtmlText.includes("No graph filters active."),
         empty_topology_present: emptyTopologyHtmlText.includes(
           "No graph topology is visible for this project yet."
         ),
@@ -2130,6 +2294,12 @@ try {
     maintenance_counts: graphDashboardMaintenance.counts,
     maintenance_lanes: graphDashboardMaintenanceLanes,
     maintenance_html_markers: maintenanceHtmlMarkers,
+    fixture_separation: graphFixtureSeparation,
+    duplicate_maintenance_uses_promotion_fixture: duplicateMaintenanceUsesPromotionFixture,
+    filtered_graph_html_markers: filteredGraphMarkers,
+    no_all_filter_chip:
+      !allGraphFilterText.includes("Candidate kind: all") &&
+      !allGraphFilterText.includes("Lifecycle: all"),
     promoted_maintenance_counts: graphPromotedMaintenance.counts,
     promoted_maintenance_html_markers: promotedMaintenanceHtmlMarkers,
     empty_maintenance_state: "No graph maintenance actions are recommended for this project.",
@@ -2140,7 +2310,27 @@ try {
     topology_summary: graphTopology.summary,
     topology_link_kinds: graphTopologyLinkKinds,
     topology_html_markers: topologyHtmlMarkers,
+    empty_graph_overview_state: "No graph decisions are queued.",
     empty_topology_state: "No graph topology is visible for this project yet.",
+    b9_marker_coverage: {
+      overview: [
+        "Graph review workload",
+        "Maintenance recommendations",
+        "Promotion-ready edges",
+        "Blocked or conflict",
+        "Source-backed topology",
+        "Graph review filters"
+      ],
+      queue: filteredGraphMarkers,
+      selected_detail: ["Recommended graph decision", "Decision status", "Safety boundary"],
+      maintenance: maintenanceHtmlMarkers,
+      topology: topologyHtmlMarkers,
+      empty: [
+        "No graph topology is visible for this project yet.",
+        "No graph maintenance actions are recommended for this project.",
+        "No graph decisions are queued."
+      ]
+    },
     action_lifecycle: graphActionJson.lifecycle_state,
     maintenance_action_status: graphMaintenanceRouteJson.status,
     promotion_status: graphPromotionJson.status,
@@ -2153,6 +2343,14 @@ try {
     cross_project_leaked: graphDashboardText.includes(
       otherProjectGraphCandidate.graph_candidate_id
     ),
+    forbidden_graph_fixture_token_absent:
+      !serializedDashboard.includes(forbiddenGraphFixtureToken) &&
+      !htmlText.includes(forbiddenGraphFixtureToken) &&
+      !graphDashboardText.includes(forbiddenGraphFixtureToken) &&
+      !filteredGraphReviewText.includes(forbiddenGraphFixtureToken) &&
+      !allGraphFilterText.includes(forbiddenGraphFixtureToken) &&
+      !graphTopologyText.includes(forbiddenGraphFixtureToken) &&
+      !graphPromotedHtmlText.includes(forbiddenGraphFixtureToken),
     accepted_retrieval_active: false,
     edges_before: graphEdgesBeforeReviewAction.rows[0]?.count,
     edges_after_accept: graphEdgesAfterAcceptActions.rows[0]?.count,

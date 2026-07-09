@@ -4959,12 +4959,336 @@ function graphPromotionStatus(candidate: Record<string, unknown>) {
   return optionalInput(readiness.status) ?? "not checked";
 }
 
+function graphMaintenanceRecommendationsByCandidate(data: ReviewDashboardData) {
+  const graph = asRecord(data.graph_candidates);
+  const maintenance = asRecord(graph.maintenance);
+  const lanes = asArray(maintenance.lanes).map(asRecord);
+  const recommendationsByCandidate = new Map<string, Array<Record<string, unknown>>>();
+  for (const lane of lanes) {
+    for (const recommendation of asArray(lane.recommendations).map(asRecord)) {
+      const candidateId = optionalInput(recommendation.graph_candidate_id);
+      if (!candidateId) continue;
+      const existing = recommendationsByCandidate.get(candidateId) ?? [];
+      existing.push({
+        ...recommendation,
+        lane: recommendation.lane ?? lane.lane,
+        lane_label: recommendation.lane_label ?? lane.label
+      });
+      recommendationsByCandidate.set(candidateId, existing);
+    }
+  }
+  return recommendationsByCandidate;
+}
+
+function graphReviewCue(
+  candidate: Record<string, unknown>,
+  maintenanceRecommendations: Array<Record<string, unknown>> = []
+) {
+  const readiness = asRecord(candidate.promotion_readiness);
+  const promotionStatus = graphPromotionStatus(candidate);
+  const lifecycleState = optionalInput(candidate.lifecycle_state) ?? "candidate";
+  const sourceRefCount = Number(
+    candidate.source_ref_count ?? asArray(candidate.source_refs).length ?? 0
+  );
+  const reviewActionCount = Number(
+    candidate.review_action_count ?? asArray(candidate.review_actions).length ?? 0
+  );
+  const firstMaintenance = maintenanceRecommendations[0] ?? {};
+  const maintenanceLane = optionalInput(firstMaintenance.lane);
+  const maintenanceRisk = optionalInput(firstMaintenance.risk_level);
+  const maintenanceReason = optionalInput(firstMaintenance.reason_code);
+  const conflictReview =
+    readiness.conflict_review === true ||
+    maintenanceLane === "conflict_review" ||
+    maintenanceReason === "conflict_review";
+  const duplicateReview =
+    promotionStatus === "duplicate" ||
+    maintenanceLane === "duplicates" ||
+    maintenanceReason === "duplicate_candidate";
+  const staleOrArchived =
+    lifecycleState === "stale" ||
+    lifecycleState === "archived" ||
+    maintenanceLane === "stale_or_archived";
+  let score = 0;
+  const reasons: string[] = [];
+  if (maintenanceRisk === "high" || conflictReview) {
+    score += 3;
+    reasons.push("conflict or high-risk maintenance");
+  }
+  if (promotionStatus === "promotable") {
+    score += 3;
+    reasons.push("accepted compatible edge");
+  }
+  if (duplicateReview || staleOrArchived || maintenanceRecommendations.length > 0) {
+    score += 2;
+    reasons.push("maintenance recommendation");
+  }
+  if (promotionStatus === "blocked") {
+    score += 1;
+    reasons.push("blocked promotion readiness");
+  }
+  if (sourceRefCount === 0) {
+    score += 1;
+    reasons.push("no source refs");
+  }
+  if (reviewActionCount === 0 && lifecycleState === "candidate") {
+    score += 1;
+    reasons.push("not reviewed yet");
+  }
+  const priority = score >= 3 ? "high" : score > 0 ? "medium" : "low";
+  let nextAction = "Review candidate";
+  let status = "Needs review";
+  if (conflictReview) {
+    nextAction = "Resolve conflict review";
+    status = "Conflict review";
+  } else if (promotionStatus === "promotable") {
+    nextAction = "Promote accepted edge";
+    status = "Promotion ready";
+  } else if (promotionStatus === "promoted") {
+    nextAction =
+      maintenanceRecommendations.length > 0 ? "Review promoted cleanup" : "Monitor active edge";
+    status = "Promoted";
+  } else if (duplicateReview) {
+    nextAction = "Review duplicate maintenance";
+    status = "Duplicate review";
+  } else if (staleOrArchived) {
+    nextAction = "Review lifecycle cleanup";
+    status = "Lifecycle cleanup";
+  } else if (promotionStatus === "blocked") {
+    nextAction = "Review blocked reason";
+    status = "Blocked";
+  } else if (lifecycleState === "accepted") {
+    nextAction = "Keep staged or edit";
+    status = "Accepted staged";
+  }
+  const reason =
+    reasons.length > 0
+      ? `${reasons.slice(0, 2).join("; ")}. Sources ${sourceRefCount}, actions ${reviewActionCount}.`
+      : `No urgent graph action. Sources ${sourceRefCount}, actions ${reviewActionCount}.`;
+  return {
+    priority,
+    nextAction,
+    status,
+    reason,
+    sourceRefCount,
+    reviewActionCount,
+    maintenanceCount: maintenanceRecommendations.length
+  };
+}
+
+const graphReviewFilterParamNames: Record<string, string> = {
+  lifecycle_state: "graph_lifecycle_state",
+  candidate_kind: "graph_candidate_kind",
+  extraction_method: "graph_extraction_method",
+  source_kind: "graph_source_kind",
+  node_kind: "graph_node_kind",
+  relation_type: "graph_relation_type"
+};
+
+const graphReviewFilterLabels: Record<string, string> = {
+  lifecycle_state: "Lifecycle",
+  candidate_kind: "Candidate kind",
+  extraction_method: "Extraction",
+  source_kind: "Source kind",
+  node_kind: "Node kind",
+  relation_type: "Relation"
+};
+
+function graphReviewFilterParams(
+  filters: Record<string, unknown>,
+  selectedId: unknown,
+  omittedFilter?: string
+) {
+  const params: Record<string, unknown> = { view: "review" };
+  if (selectedId) params.graph_candidate_id = selectedId;
+  for (const [filterKey, queryKey] of Object.entries(graphReviewFilterParamNames)) {
+    if (filterKey === omittedFilter) continue;
+    const value = optionalInput(filters[filterKey]);
+    if (!value || value === "all") continue;
+    params[queryKey] = value;
+  }
+  return params;
+}
+
+function graphReviewActiveFilters(filters: Record<string, unknown>) {
+  return Object.keys(graphReviewFilterParamNames)
+    .map((filterKey) => ({
+      key: filterKey,
+      label: graphReviewFilterLabels[filterKey] ?? humanStatus(filterKey),
+      value: optionalInput(filters[filterKey])
+    }))
+    .filter((filter) => filter.value && filter.value !== "all");
+}
+
+function renderGraphReviewFilterHiddenInputs(filters: Record<string, unknown>) {
+  return Object.entries(graphReviewFilterParamNames)
+    .map(([filterKey, queryKey]) => {
+      const value = optionalInput(filters[filterKey]);
+      if (!value || value === "all") return "";
+      return `<input type="hidden" name="${escapeHtml(queryKey)}" value="${escapeHtml(value)}" />`;
+    })
+    .join("");
+}
+
+function graphReviewNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function renderGraphReviewFilterPanel(
+  data: ReviewDashboardData,
+  filters: Record<string, unknown>,
+  selectedId: unknown
+) {
+  const activeFilters = graphReviewActiveFilters(filters);
+  const activeFilterChips =
+    activeFilters.length > 0
+      ? activeFilters
+          .map((filter) => {
+            const href = reviewPathWithParams(
+              data.current_project_id,
+              graphReviewFilterParams(filters, selectedId, filter.key)
+            );
+            return `<a class="filter-chip active" href="${escapeHtml(href)}">${escapeHtml(filter.label)}: ${escapeHtml(filter.value)}</a>`;
+          })
+          .join("")
+      : `<span class="graph-filter-empty">No graph filters active.</span>`;
+  const quickLinks = [
+    {
+      label: "All graph candidates",
+      params: { view: "review", graph_candidate_id: selectedId }
+    },
+    {
+      label: "Accepted edges",
+      params: {
+        view: "review",
+        graph_candidate_id: selectedId,
+        graph_lifecycle_state: "accepted",
+        graph_candidate_kind: "edge"
+      }
+    },
+    {
+      label: "Node candidates",
+      params: { view: "review", graph_candidate_id: selectedId, graph_candidate_kind: "node" }
+    },
+    {
+      label: "Source-backed candidates",
+      params: { view: "review", graph_candidate_id: selectedId, graph_source_kind: "source" }
+    },
+    {
+      label: "Deterministic candidates",
+      params: {
+        view: "review",
+        graph_candidate_id: selectedId,
+        graph_extraction_method: "deterministic_rule"
+      }
+    }
+  ];
+  return `<div class="graph-review-filter-panel" data-b9-graph-filter-panel>
+    <div class="graph-review-filter-row">
+      <strong>Graph review filters</strong>
+      <div>${activeFilterChips}</div>
+    </div>
+    <p>Active filters narrow the queue without changing the selected graph candidate.</p>
+    <div class="graph-review-filter-links">
+      ${quickLinks
+        .map(
+          (link) =>
+            `<a class="filter-chip" href="${escapeHtml(reviewPathWithParams(data.current_project_id, link.params))}">${escapeHtml(link.label)}</a>`
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function renderGraphReviewOverview(
+  data: ReviewDashboardData,
+  maintenanceByCandidate: Map<string, Array<Record<string, unknown>>>,
+  selectedMaintenance: Array<Record<string, unknown>>
+) {
+  const graph = asRecord(data.graph_candidates);
+  const candidates = asArray(graph.candidates).map(asRecord);
+  const selected = asRecord(graph.selected_candidate);
+  const selectedId = selected.graph_candidate_id;
+  const filters = asRecord(graph.filters);
+  const hygiene = asRecord(graph.hygiene);
+  const hygieneCounts = asRecord(hygiene.counts);
+  const topology = asRecord(graph.topology);
+  const topologySummary = asRecord(topology.summary);
+  const maintenance = asRecord(graph.maintenance);
+  const maintenanceCounts = asRecord(maintenance.counts);
+  const candidatesWithMaintenance = maintenanceByCandidate.size;
+  const totalMaintenance = graphReviewNumber(maintenanceCounts.total_recommendations);
+  const promotionReady = graphReviewNumber(hygieneCounts.promotable);
+  const blockedOrConflict =
+    graphReviewNumber(hygieneCounts.blocked) +
+    graphReviewNumber(hygieneCounts.duplicate) +
+    graphReviewNumber(maintenanceCounts.conflict_review);
+  const sourceBacked = graphReviewNumber(topologySummary.source_ref_count);
+  const selectedCue = selected.graph_candidate_id
+    ? graphReviewCue(selected, selectedMaintenance)
+    : null;
+  return `<div class="graph-review-workload" data-b9-graph-review-workload>
+    <div class="graph-review-workload-head">
+      <strong>Graph review workload</strong>
+    </div>
+    <div class="graph-review-overview" data-b9-graph-review-overview>
+      ${renderReviewSummaryTile(
+        "Maintenance recommendations",
+        totalMaintenance,
+        totalMaintenance > 0
+          ? `${candidatesWithMaintenance} candidate queues duplicate, stale, blocked, conflict, or promoted-cleanup recommendations.`
+          : "No graph maintenance recommendation needs action."
+      )}
+      ${renderReviewSummaryTile(
+        "Promotion-ready edges",
+        promotionReady,
+        promotionReady > 0
+          ? "Accepted compatible edges can be promoted into active graph retrieval."
+          : "No accepted edge is ready for promotion."
+      )}
+      ${renderReviewSummaryTile(
+        "Blocked or conflict",
+        blockedOrConflict,
+        blockedOrConflict > 0
+          ? "Resolve blocked readiness, duplicates, or conflict-review candidates first."
+          : "No blocked or conflict graph candidate is visible."
+      )}
+      ${renderReviewSummaryTile(
+        "Source-backed topology",
+        sourceBacked,
+        sourceBacked > 0
+          ? "Topology links include source evidence that can anchor graph decisions."
+          : "No source-backed topology is visible yet."
+      )}
+      ${renderReviewSummaryTile(
+        "Selected candidate",
+        selected.graph_candidate_id ? 1 : 0,
+        selected.graph_candidate_id
+          ? `${selectedCue?.status ?? "Needs review"}: ${selectedCue?.nextAction ?? "Review candidate"} for ${graphCandidateLabel(selected)}.`
+          : "Choose a graph candidate to see decision context."
+      )}
+      ${
+        candidates.length === 0
+          ? `<article class="graph-review-empty-state">
+              <span>Graph review workload</span>
+              <strong>No graph decisions are queued.</strong>
+              <p>Graph candidates, topology, and maintenance actions will appear after source-backed extraction records candidate nodes or edges.</p>
+            </article>`
+          : ""
+      }
+    </div>
+    ${renderGraphReviewFilterPanel(data, filters, selectedId)}
+  </div>`;
+}
+
 function renderGraphActionForm(
   candidate: Record<string, unknown>,
   projectId: unknown,
   action: string,
   label: string,
-  extra = ""
+  extra = "",
+  filters: Record<string, unknown> = {}
 ) {
   return `<form method="post" action="/review-action">
     <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
@@ -4972,12 +5296,17 @@ function renderGraphActionForm(
     <input type="hidden" name="graph_candidate_id" value="${escapeHtml(candidate.graph_candidate_id)}" />
     <input type="hidden" name="action" value="${escapeHtml(action)}" />
     <input type="hidden" name="view" value="review" />
+    ${renderGraphReviewFilterHiddenInputs(filters)}
     ${extra}
     <button type="submit">${escapeHtml(label)}</button>
   </form>`;
 }
 
-function renderGraphPromotionState(candidate: Record<string, unknown>, projectId: unknown) {
+function renderGraphPromotionState(
+  candidate: Record<string, unknown>,
+  projectId: unknown,
+  filters: Record<string, unknown> = {}
+) {
   const readiness = asRecord(candidate.promotion_readiness);
   const status = graphPromotionStatus(candidate);
   const blockedReason = optionalInput(readiness.blocked_reason);
@@ -5008,89 +5337,117 @@ function renderGraphPromotionState(candidate: Record<string, unknown>, projectId
             projectId,
             "promote",
             "Promote candidate",
-            `<input type="hidden" name="note" value="Workbench explicit graph promotion" />`
+            `<input type="hidden" name="note" value="Workbench explicit graph promotion" />`,
+            filters
           )
         : ""
     }
   </div>`;
 }
 
-function renderGraphCandidateActions(candidate: Record<string, unknown>, projectId: unknown) {
-  return `<div class="graph-actions">
-    ${renderGraphActionForm(candidate, projectId, "accept", "Accept")}
-    ${renderGraphActionForm(candidate, projectId, "reject", "Reject")}
-    ${renderGraphActionForm(candidate, projectId, "mark_stale", "Mark stale")}
-    ${renderGraphActionForm(candidate, projectId, "archive", "Archive")}
-    ${renderGraphActionForm(candidate, projectId, "unarchive", "Unarchive")}
-  </div>
-  <details class="graph-action-detail">
-    <summary>Edit candidate</summary>
-    <form method="post" action="/review-action">
-      <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
-      <input type="hidden" name="target_kind" value="graph_candidate" />
-      <input type="hidden" name="graph_candidate_id" value="${escapeHtml(candidate.graph_candidate_id)}" />
-      <input type="hidden" name="action" value="edit" />
-      <input type="hidden" name="view" value="review" />
-      <label>Title <input name="title" value="${escapeHtml(candidate.title ?? "")}" /></label>
-      <label>Summary <input name="summary" value="${escapeHtml(candidate.summary ?? "")}" /></label>
-      <label>Confidence <input name="confidence" inputmode="decimal" value="${escapeHtml(candidate.confidence ?? "")}" /></label>
-      <label>Lifecycle <input name="lifecycle_state" value="${escapeHtml(candidate.lifecycle_state ?? "")}" /></label>
-      <label>Note <input name="note" value="" /></label>
-      <button type="submit">Save edit</button>
-    </form>
-  </details>
-  <details class="graph-action-detail">
-    <summary>Merge or supersede</summary>
-    <div class="graph-target-actions">
-      ${renderGraphActionForm(
-        candidate,
-        projectId,
-        "merge",
-        "Merge",
-        `<label>Target <input name="target_graph_candidate_id" value="" /></label><label>Note <input name="note" value="" /></label>`
-      )}
-      ${renderGraphActionForm(
-        candidate,
-        projectId,
-        "supersede",
-        "Supersede",
-        `<label>Target <input name="target_graph_candidate_id" value="" /></label><label>Note <input name="note" value="" /></label>`
-      )}
-    </div>
-  </details>`;
+function renderGraphCandidateActions(
+  candidate: Record<string, unknown>,
+  projectId: unknown,
+  filters: Record<string, unknown> = {}
+) {
+  const targetInput = `<label>Target candidate id <input name="target_graph_candidate_id" required value="" placeholder="graph_candidate_id" autocomplete="off" /></label><label>Note <input name="note" value="" /></label>`;
+  return `<div class="graph-action-groups">
+    <section class="graph-action-group">
+      <h4>Normal review actions</h4>
+      <p>Use these to stage, reject, stale, archive, or restore the selected candidate.</p>
+      <div class="graph-actions">
+        ${renderGraphActionForm(candidate, projectId, "accept", "Accept", "", filters)}
+        ${renderGraphActionForm(candidate, projectId, "reject", "Reject", "", filters)}
+        ${renderGraphActionForm(candidate, projectId, "mark_stale", "Mark stale", "", filters)}
+        ${renderGraphActionForm(candidate, projectId, "archive", "Archive", "", filters)}
+        ${renderGraphActionForm(candidate, projectId, "unarchive", "Unarchive", "", filters)}
+      </div>
+    </section>
+    <section class="graph-action-group">
+      <h4>Edit candidate</h4>
+      <form method="post" action="/review-action" class="graph-edit-form">
+        <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
+        <input type="hidden" name="target_kind" value="graph_candidate" />
+        <input type="hidden" name="graph_candidate_id" value="${escapeHtml(candidate.graph_candidate_id)}" />
+        <input type="hidden" name="action" value="edit" />
+        <input type="hidden" name="view" value="review" />
+        ${renderGraphReviewFilterHiddenInputs(filters)}
+        <label>Title <input name="title" value="${escapeHtml(candidate.title ?? "")}" /></label>
+        <label>Summary <input name="summary" value="${escapeHtml(candidate.summary ?? "")}" /></label>
+        <label>Confidence <input name="confidence" inputmode="decimal" value="${escapeHtml(candidate.confidence ?? "")}" /></label>
+        <label>Lifecycle <input name="lifecycle_state" value="${escapeHtml(candidate.lifecycle_state ?? "")}" /></label>
+        <label>Note <input name="note" value="" /></label>
+        <button type="submit">Save edit</button>
+      </form>
+    </section>
+    <section class="graph-action-group">
+      <h4>Merge / supersede</h4>
+      <p>No target candidate is preselected. Enter an explicit target graph candidate id before applying either action.</p>
+      <div class="graph-target-actions">
+        ${renderGraphActionForm(candidate, projectId, "merge", "Merge", targetInput, filters)}
+        ${renderGraphActionForm(
+          candidate,
+          projectId,
+          "supersede",
+          "Supersede",
+          targetInput,
+          filters
+        )}
+      </div>
+    </section>
+  </div>`;
 }
 
 function renderGraphCandidateCard(
   candidate: Record<string, unknown>,
   projectId: unknown,
-  selectedId: unknown
+  selectedId: unknown,
+  filters: Record<string, unknown>,
+  maintenanceRecommendations: Array<Record<string, unknown>> = []
 ) {
   const selected = String(candidate.graph_candidate_id ?? "") === String(selectedId ?? "");
+  const cue = graphReviewCue(candidate, maintenanceRecommendations);
   const kind = String(candidate.candidate_kind ?? "node");
   const title =
     optionalInput(candidate.title) ??
     (kind === "edge"
       ? `${graphEndpointLabel(candidate.src)} ${candidate.relation_type ?? "relates to"} ${graphEndpointLabel(candidate.dst)}`
       : "Untitled graph candidate");
-  const href = reviewPathWithParams(projectId, {
-    view: "review",
-    graph_candidate_id: candidate.graph_candidate_id
-  });
-  return `<article class="graph-candidate-card${selected ? " selected" : ""}">
+  const href = reviewPathWithParams(
+    projectId,
+    graphReviewFilterParams(filters, candidate.graph_candidate_id)
+  );
+  return `<article class="graph-candidate-card${selected ? " selected" : ""}" data-graph-review-priority="${escapeHtml(cue.priority)}"${selected ? ' aria-current="true"' : ""}>
     <div class="graph-candidate-main">
       <div>
         <span class="graph-candidate-id">${escapeHtml(graphCandidateLabel(candidate))}</span>
+        ${selected ? `<span class="graph-selected-cue">Selected candidate</span>` : ""}
         <h3><a href="${escapeHtml(href)}">${escapeHtml(title)}</a></h3>
         <p>${escapeHtml(candidate.summary ?? "No summary recorded.")}</p>
+        <div class="graph-candidate-metrics" aria-label="Graph candidate review facts">
+          <span><strong>${escapeHtml(cue.sourceRefCount)}</strong> Source refs</span>
+          <span><strong>${escapeHtml(cue.reviewActionCount)}</strong> Review actions</span>
+          <span><strong>${escapeHtml(humanStatus(graphPromotionStatus(candidate)))}</strong> Promotion readiness</span>
+          <span><strong>${escapeHtml(cue.maintenanceCount)}</strong> Maintenance</span>
+          <span><strong>${escapeHtml(humanStatus(cue.priority))}</strong> Priority</span>
+        </div>
+        <div class="graph-review-cue ${escapeHtml(cue.priority)}">
+          <span>Next graph action</span>
+          <strong>${escapeHtml(cue.nextAction)}</strong>
+          <p>${escapeHtml(cue.reason)}</p>
+        </div>
       </div>
       ${renderBadges([
+        ["Priority", humanStatus(cue.priority)],
+        ["Cue", cue.status],
         ["State", humanStatus(candidate.lifecycle_state)],
         ["Kind", kind],
         ["Confidence", graphConfidence(candidate.confidence)],
         ["Promotion", humanStatus(graphPromotionStatus(candidate))],
         ["Method", String(candidate.extraction_method ?? "").replaceAll("_", " ")],
         ["Sources", candidate.source_ref_count ?? asArray(candidate.source_refs).length],
-        ["Actions", candidate.review_action_count ?? asArray(candidate.review_actions).length]
+        ["Actions", cue.reviewActionCount],
+        ["Maintenance", cue.maintenanceCount]
       ])}
     </div>
     <div class="graph-candidate-shape">
@@ -5106,15 +5463,37 @@ function renderGraphCandidateCard(
   </article>`;
 }
 
-function renderGraphCandidateDetail(selected: Record<string, unknown>, projectId: unknown) {
+function renderGraphCandidateDetail(
+  selected: Record<string, unknown>,
+  projectId: unknown,
+  maintenanceRecommendations: Array<Record<string, unknown>> = [],
+  filters: Record<string, unknown> = {}
+) {
   if (!selected.graph_candidate_id) return "";
   const sourceRefs = asArray(selected.source_refs).map(asRecord);
   const reviewActions = asArray(selected.review_actions).map(asRecord);
+  const cue = graphReviewCue(selected, maintenanceRecommendations);
+  const promotionStatus = humanStatus(graphPromotionStatus(selected));
   return `<section class="graph-candidate-detail" aria-label="Selected graph candidate">
     <div class="graph-detail-head">
       <span>${escapeHtml(graphCandidateLabel(selected))}</span>
       <strong>${escapeHtml(selected.title ?? "Selected graph candidate")}</strong>
       <p>Accepted candidates remain staged review records; compatible accepted edges become retrieval-active only after Promote.</p>
+    </div>
+    <div class="graph-review-cue ${escapeHtml(cue.priority)}">
+      <span>Recommended graph decision</span>
+      <strong>${escapeHtml(cue.nextAction)}</strong>
+      <p>${escapeHtml(cue.reason)}</p>
+      ${renderBadges([
+        ["Priority", humanStatus(cue.priority)],
+        ["Cue", cue.status],
+        ["Maintenance", cue.maintenanceCount]
+      ])}
+    </div>
+    <div class="graph-detail-decision">
+      <p><strong>Decision status</strong> ${escapeHtml(cue.status)}. Promotion readiness: ${escapeHtml(promotionStatus)}.</p>
+      <p><strong>Safety boundary</strong> Review actions update staged candidates only; active graph retrieval changes only through an eligible Promote candidate action.</p>
+      <p><strong>Context bounds</strong> Showing up to 4 source evidence refs and 6 review history actions.</p>
     </div>
     ${renderMeta([
       ["Lifecycle", humanStatus(selected.lifecycle_state)],
@@ -5127,13 +5506,13 @@ function renderGraphCandidateDetail(selected: Record<string, unknown>, projectId
       ["Updated", formatDate(selected.updated_at)]
     ])}
     <h4>Promotion</h4>
-    ${renderGraphPromotionState(selected, projectId)}
+    ${renderGraphPromotionState(selected, projectId, filters)}
     <h4>Source evidence</h4>
     ${renderGraphSourceRefs(sourceRefs)}
     <h4>Review history</h4>
     ${renderGraphReviewHistory(reviewActions)}
     <h4>Actions</h4>
-    ${renderGraphCandidateActions(selected, projectId)}
+    ${renderGraphCandidateActions(selected, projectId, filters)}
   </section>`;
 }
 
@@ -5141,7 +5520,9 @@ function renderGraphCandidateLane(
   title: string,
   rows: Array<Record<string, unknown>>,
   projectId: unknown,
-  selectedId: unknown
+  selectedId: unknown,
+  filters: Record<string, unknown>,
+  maintenanceByCandidate = new Map<string, Array<Record<string, unknown>>>()
 ) {
   return `<details class="review-lane graph-candidate-lane" open>
     <summary>
@@ -5150,7 +5531,17 @@ function renderGraphCandidateLane(
     </summary>
     ${rows.length === 0 ? `<p class="empty">No graph candidates match the current filters.</p>` : ""}
     <div class="graph-candidate-list">
-      ${rows.map((row) => renderGraphCandidateCard(row, projectId, selectedId)).join("")}
+      ${rows
+        .map((row) =>
+          renderGraphCandidateCard(
+            row,
+            projectId,
+            selectedId,
+            filters,
+            maintenanceByCandidate.get(String(row.graph_candidate_id ?? "")) ?? []
+          )
+        )
+        .join("")}
     </div>
   </details>`;
 }
@@ -5176,6 +5567,7 @@ function renderGraphMaintenanceForm(recommendation: Record<string, unknown>, pro
     <input type="hidden" name="confirm" value="true" />
     <input type="hidden" name="view" value="review" />
     <input type="hidden" name="note" value="Workbench graph maintenance" />
+    <p>Confirm-gated lifecycle review action. Applies one candidate action; active edges are not mutated.</p>
     <button type="submit">${escapeHtml(graphMaintenanceActionLabel(recommendation.action_kind))}</button>
   </form>`;
 }
@@ -5184,10 +5576,33 @@ function renderGraphMaintenanceRecommendation(
   recommendation: Record<string, unknown>,
   projectId: unknown
 ) {
+  const graphCandidateId = optionalInput(recommendation.graph_candidate_id);
+  const targetGraphCandidateId = optionalInput(recommendation.target_graph_candidate_id);
+  const candidateHref = graphCandidateId
+    ? reviewPathWithParams(projectId, { view: "review", graph_candidate_id: graphCandidateId })
+    : "";
+  const targetHref = targetGraphCandidateId
+    ? reviewPathWithParams(projectId, {
+        view: "review",
+        graph_candidate_id: targetGraphCandidateId
+      })
+    : "";
   return `<article class="graph-maintenance-recommendation">
     <div>
       <span>${escapeHtml(graphMaintenanceActionLabel(recommendation.action_kind))}</span>
       <strong>${escapeHtml(recommendation.summary ?? "Graph maintenance recommendation")}</strong>
+      <p class="graph-maintenance-context">
+        ${
+          graphCandidateId
+            ? `<a href="${escapeHtml(candidateHref)}">Open candidate detail</a>`
+            : `<span>Candidate detail unavailable</span>`
+        }
+        ${
+          targetGraphCandidateId
+            ? `<span>Target candidate <a href="${escapeHtml(targetHref)}">${escapeHtml(shortId(targetGraphCandidateId))}</a></span>`
+            : `<span>No target candidate.</span>`
+        }
+      </p>
       ${renderBadges([
         ["Risk", humanStatus(recommendation.risk_level)],
         ["State", humanStatus(recommendation.lifecycle_state)],
@@ -5268,17 +5683,31 @@ function graphTopologyNodeLabels(nodes: Array<Record<string, unknown>>) {
 function renderGraphTopologyLink(
   link: Record<string, unknown>,
   nodeLabels: Map<string, string>,
-  tone: string
+  tone: string,
+  projectId: unknown
 ) {
   const source = nodeLabels.get(String(link.source_node_id ?? "")) ?? "source";
   const target = nodeLabels.get(String(link.target_node_id ?? "")) ?? "target";
   const status = optionalInput(link.promotion_status) ?? (link.active ? "active" : "candidate");
+  const graphCandidateId = optionalInput(link.graph_candidate_id);
+  const canOpenCandidate = link.link_kind === "candidate_edge" && graphCandidateId;
+  const candidateHref = canOpenCandidate
+    ? reviewPathWithParams(projectId, {
+        view: "review",
+        graph_candidate_id: graphCandidateId
+      })
+    : "";
   return `<article class="graph-topology-link ${escapeHtml(tone)}">
     <div>
       <strong>${escapeHtml(source)}</strong>
       <span>${escapeHtml(graphTopologyLabel(link))}</span>
       <strong>${escapeHtml(target)}</strong>
     </div>
+    ${
+      canOpenCandidate
+        ? `<a class="graph-topology-candidate-link" href="${escapeHtml(candidateHref)}">Open candidate detail</a>`
+        : `<span class="graph-topology-readonly">Read-only topology item</span>`
+    }
     ${renderBadges([
       ["Status", humanStatus(status)],
       ["Kind", String(link.link_kind ?? "link").replaceAll("_", " ")],
@@ -5292,14 +5721,15 @@ function renderGraphTopologyLane(
   rows: Array<Record<string, unknown>>,
   nodeLabels: Map<string, string>,
   tone: string,
-  emptyLabel: string
+  emptyLabel: string,
+  projectId: unknown
 ) {
   return `<div class="graph-topology-lane ${escapeHtml(tone)}">
     <div class="graph-topology-lane-head">
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(rows.length)}</strong>
     </div>
-    ${rows.length === 0 ? `<p class="empty">${escapeHtml(emptyLabel)}</p>` : rows.map((row) => renderGraphTopologyLink(row, nodeLabels, tone)).join("")}
+    ${rows.length === 0 ? `<p class="empty">${escapeHtml(emptyLabel)}</p>` : rows.map((row) => renderGraphTopologyLink(row, nodeLabels, tone, projectId)).join("")}
   </div>`;
 }
 
@@ -5341,28 +5771,32 @@ function renderGraphTopology(data: ReviewDashboardData) {
               sourceLinks,
               nodeLabels,
               "source-backed",
-              "No source evidence links are visible."
+              "No source evidence links are visible.",
+              data.current_project_id
             )}
             ${renderGraphTopologyLane(
               "Candidate links",
               candidateLinks,
               nodeLabels,
               "candidate",
-              "No staged candidate links are visible."
+              "No staged candidate links are visible.",
+              data.current_project_id
             )}
             ${renderGraphTopologyLane(
               "Active promoted links",
               activeLinks,
               nodeLabels,
               "active",
-              "No active promoted links are visible."
+              "No active promoted links are visible.",
+              data.current_project_id
             )}
             ${renderGraphTopologyLane(
               "Blocked states",
               blockedLinks,
               nodeLabels,
               "blocked",
-              "No blocked topology states are visible."
+              "No blocked topology states are visible.",
+              data.current_project_id
             )}
           </div>
           ${summary.truncated ? `<p class="graph-topology-note">Topology is bounded; omitted candidates ${escapeHtml(summary.omitted_candidate_count ?? 0)}, nodes ${escapeHtml(summary.omitted_node_count ?? 0)}, links ${escapeHtml(summary.omitted_link_count ?? 0)}.</p>` : ""}`
@@ -5381,8 +5815,12 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
   const hygieneCounts = asRecord(hygiene.counts);
   const candidateKindCounts = asRecord(counts.candidate_kind);
   const lifecycleCounts = asRecord(counts.lifecycle_state);
+  const filters = asRecord(graph.filters);
   const nodeCandidates = candidates.filter((candidate) => candidate.candidate_kind === "node");
   const edgeCandidates = candidates.filter((candidate) => candidate.candidate_kind === "edge");
+  const maintenanceByCandidate = graphMaintenanceRecommendationsByCandidate(data);
+  const selectedMaintenance =
+    maintenanceByCandidate.get(String(selected.graph_candidate_id ?? "")) ?? [];
   return `<section class="graph-review" aria-label="Graph candidates">
     <div class="graph-review-head">
       <div>
@@ -5401,14 +5839,29 @@ function renderGraphCandidateReview(data: ReviewDashboardData) {
         <span><strong>${escapeHtml(hygieneCounts.duplicate ?? 0)}</strong> duplicate</span>
       </div>
     </div>
+    ${renderGraphReviewOverview(data, maintenanceByCandidate, selectedMaintenance)}
     ${renderGraphMaintenance(data)}
     ${renderGraphTopology(data)}
     <div class="graph-review-grid">
       <div class="graph-review-lanes">
-        ${renderGraphCandidateLane("Node candidates", nodeCandidates, data.current_project_id, selectedId)}
-        ${renderGraphCandidateLane("Edge candidates", edgeCandidates, data.current_project_id, selectedId)}
+        ${renderGraphCandidateLane(
+          "Node candidates",
+          nodeCandidates,
+          data.current_project_id,
+          selectedId,
+          filters,
+          maintenanceByCandidate
+        )}
+        ${renderGraphCandidateLane(
+          "Edge candidates",
+          edgeCandidates,
+          data.current_project_id,
+          selectedId,
+          filters,
+          maintenanceByCandidate
+        )}
       </div>
-      ${renderGraphCandidateDetail(selected, data.current_project_id)}
+      ${renderGraphCandidateDetail(selected, data.current_project_id, selectedMaintenance, filters)}
     </div>
   </section>`;
 }
@@ -6490,6 +6943,21 @@ function renderDashboard(
     .graph-review-counts { display: grid; grid-template-columns: repeat(2, minmax(88px, 1fr)); gap: 6px; min-width: 220px; }
     .graph-review-counts span { border: 1px solid #dce3ec; border-radius: 7px; padding: 7px; background: #fff; color: #4f5867; text-transform: none; }
     .graph-review-counts strong { display: block; color: #20242c; font-size: 15px; }
+    .graph-review-workload { display: grid; gap: 8px; margin: 10px 0; min-width: 0; }
+    .graph-review-workload-head strong { color: #303845; font-size: 12px; text-transform: uppercase; }
+    .graph-review-overview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+    .graph-review-overview article { border: 1px solid #dce3ec; border-radius: 7px; padding: 10px; background: #fff; min-width: 0; }
+    .graph-review-overview span { display: block; color: #5f6875; font-size: 11px; font-weight: 750; margin-bottom: 4px; text-transform: uppercase; }
+    .graph-review-overview strong { display: block; color: #20242c; font-size: 16px; line-height: 1.2; margin-bottom: 5px; overflow-wrap: anywhere; }
+    .graph-review-overview p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .graph-review-empty-state { grid-column: 1 / -1; background: #f8fafc !important; }
+    .graph-review-filter-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; border: 1px solid #dfe8e4; border-radius: 7px; padding: 9px; background: #fff; min-width: 0; }
+    .graph-review-filter-row { display: grid; grid-template-columns: minmax(130px, auto) minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
+    .graph-review-filter-row > div, .graph-review-filter-links { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+    .graph-review-filter-row strong { color: #303845; font-size: 12px; }
+    .graph-review-filter-panel p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .filter-chip.active { border-color: #87b7aa; background: #eef8f5; color: #0f5c4e; font-weight: 700; }
+    .graph-filter-empty { color: #6a7280; font-size: 12px; overflow-wrap: anywhere; }
     .graph-maintenance { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fff; min-width: 0; }
     .graph-maintenance-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.62fr); gap: 10px; align-items: start; margin-bottom: 10px; }
     .graph-maintenance-head span { display: block; color: #166454; font-size: 11px; font-weight: 760; text-transform: uppercase; }
@@ -6505,7 +6973,11 @@ function renderDashboard(
     .graph-maintenance-recommendation { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; border: 1px solid #e2e8ef; border-radius: 7px; padding: 8px; background: #fff; min-width: 0; }
     .graph-maintenance-recommendation span { color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
     .graph-maintenance-recommendation strong { display: block; margin: 2px 0 6px; color: #20242c; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+    .graph-maintenance-context { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; color: #4f5867; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+    .graph-maintenance-context a, .graph-topology-candidate-link { border: 1px solid #cfd8e5; border-radius: 999px; padding: 2px 7px; background: #f8fafc; color: #303845; text-decoration: none; }
+    .graph-maintenance-context span { color: #5f6875; text-transform: none; }
     .graph-maintenance-form { margin: 0; }
+    .graph-maintenance-form p { margin: 0 0 6px; color: #6a4b16; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
     .graph-maintenance-form button { width: 100%; }
     .graph-topology { border: 1px solid #dfe8e4; border-radius: 7px; padding: 10px; margin: 10px 0; background: #fff; min-width: 0; }
     .graph-topology-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.62fr); gap: 10px; align-items: start; margin-bottom: 10px; }
@@ -6528,6 +7000,8 @@ function renderDashboard(
     .graph-topology-link > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
     .graph-topology-link strong { color: #20242c; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
     .graph-topology-link span { color: #5f6875; font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-topology-candidate-link, .graph-topology-readonly { display: inline-flex; width: fit-content; max-width: 100%; margin: 6px 0; font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-topology-readonly { border: 1px solid #d6dde7; border-radius: 999px; padding: 2px 7px; background: #f8fafc; color: #6a7280; }
     .graph-topology-link.active { background: #eef8f5; border-color: #bdd8cf; }
     .graph-topology-link.blocked { background: #fff4ed; border-color: #e1b59b; }
     .graph-topology-link.source-backed { background: #fff9e8; border-color: #e3d3a5; }
@@ -6535,14 +7009,29 @@ function renderDashboard(
     .graph-review-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr); gap: 10px; align-items: start; }
     .graph-review-lanes, .graph-candidate-list, .graph-source-refs, .graph-review-history { display: grid; gap: 8px; }
     .graph-candidate-card, .graph-candidate-detail, .graph-source-refs article, .graph-review-history article { border: 1px solid #dfe6ee; border-radius: 7px; background: #fff; padding: 9px; min-width: 0; }
+    .graph-candidate-card { display: grid; gap: 8px; min-height: 216px; }
     .graph-candidate-card.selected { border-color: #7eb4a8; box-shadow: 0 0 0 1px rgba(23, 107, 93, 0.12); }
     .graph-candidate-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
     .graph-candidate-id, .graph-detail-head span { display: block; color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .graph-selected-cue { display: inline-flex; width: fit-content; border: 1px solid #9ac6ba; border-radius: 999px; padding: 2px 7px; margin: 4px 0; background: #eef8f5; color: #0f5c4e; font-size: 11px; font-weight: 760; }
     .graph-candidate-card h3 { margin: 2px 0 5px; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
     .graph-candidate-card p, .graph-source-refs p, .graph-review-history p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.38; overflow-wrap: anywhere; }
+    .graph-candidate-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin: 8px 0 0; min-width: 0; }
+    .graph-candidate-metrics span { border: 1px solid #e0e7ef; border-radius: 6px; padding: 6px; background: #fbfcfe; color: #5f6875; font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-candidate-metrics strong { display: block; color: #20242c; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
+    .graph-review-cue { display: grid; gap: 4px; border: 1px solid #dfe6ee; border-radius: 7px; padding: 8px; margin-top: 8px; background: #fbfcfe; min-width: 0; }
+    .graph-review-cue.high { border-color: #e0b19a; background: #fff7f2; }
+    .graph-review-cue.medium { border-color: #d7c78d; background: #fffbea; }
+    .graph-review-cue.low { border-color: #cfd8e5; background: #f8fafc; }
+    .graph-review-cue span { color: #5f6875; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .graph-review-cue strong { display: block; color: #20242c; font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+    .graph-review-cue p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
     .graph-candidate-shape { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; border-top: 1px solid #edf1f5; margin-top: 8px; padding-top: 8px; font-size: 12px; color: #4f5867; overflow-wrap: anywhere; }
     .graph-candidate-shape strong { color: #20242c; overflow-wrap: anywhere; }
     .graph-detail-head strong { display: block; font-size: 15px; line-height: 1.25; margin: 2px 0 5px; overflow-wrap: anywhere; }
+    .graph-detail-decision { display: grid; gap: 5px; border: 1px solid #dfe6ee; border-radius: 7px; padding: 8px; margin-top: 8px; background: #fbfcfe; min-width: 0; }
+    .graph-detail-decision p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.38; overflow-wrap: anywhere; }
+    .graph-detail-decision strong { color: #303845; }
     .graph-candidate-detail h4 { margin: 10px 0 6px; font-size: 12px; color: #4f5867; text-transform: uppercase; }
     .graph-promotion-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid #dfe6ee; border-radius: 7px; padding: 9px; background: #fbfcfe; }
     .graph-promotion-state.ready { border-color: #a7d0c5; background: #f4fbf8; }
@@ -6551,19 +7040,26 @@ function renderDashboard(
     .graph-promotion-state p { margin: 0; color: #4f5867; font-size: 12px; line-height: 1.38; overflow-wrap: anywhere; }
     .graph-promotion-state .graph-promotion-reason, .graph-promotion-state .graph-promotion-edge { margin-top: 4px; color: #5f6875; }
     .graph-promotion-state form { margin: 0; }
-    .graph-actions, .graph-target-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .graph-action-groups { display: grid; gap: 8px; min-width: 0; }
+    .graph-action-group { border: 1px solid #e2e8ef; border-radius: 7px; padding: 8px; background: #fbfcfe; min-width: 0; }
+    .graph-action-group h4 { margin-top: 0; }
+    .graph-action-group p { margin: 0 0 7px; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .graph-actions, .graph-target-actions, .graph-edit-form { display: flex; flex-wrap: wrap; gap: 6px; }
     .graph-action-detail { border-top: 1px solid #edf1f5; margin-top: 8px; padding-top: 8px; }
     .graph-action-detail summary { font-size: 12px; font-weight: 700; }
     .graph-action-detail form { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; margin-top: 8px; }
-    .graph-action-detail label, .graph-target-actions label { display: grid; gap: 3px; color: #5f6875; font-size: 11px; min-width: min(190px, 100%); }
-    .graph-action-detail input, .graph-target-actions input { max-width: 100%; min-width: 0; }
+    .graph-action-detail label, .graph-target-actions label, .graph-edit-form label { display: grid; gap: 3px; color: #5f6875; font-size: 11px; min-width: min(190px, 100%); }
+    .graph-action-detail input, .graph-target-actions input, .graph-edit-form input { max-width: 100%; min-width: 0; }
     @media (max-width: 760px) {
       .graph-review-head, .graph-review-grid, .graph-maintenance-head, .graph-topology-head { display: grid; grid-template-columns: 1fr; }
       .graph-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .graph-review-overview { grid-template-columns: 1fr; }
+      .graph-review-filter-row { grid-template-columns: 1fr; }
+      .graph-candidate-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .graph-maintenance-lanes { grid-template-columns: 1fr; }
       .graph-topology-map { grid-template-columns: 1fr; }
       .graph-promotion-state { grid-template-columns: 1fr; }
-      .graph-actions, .graph-target-actions, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
+      .graph-actions, .graph-target-actions, .graph-edit-form, .graph-action-detail form { display: grid; grid-template-columns: 1fr; }
     }
     .review-action-group { border-bottom: 1px solid #e3e8ef; padding-bottom: 8px; margin-bottom: 8px; }
     .risky-action-group { border: 1px solid #e5c7bf; border-radius: 7px; padding: 8px; background: #fffaf8; }
@@ -7208,6 +7704,8 @@ function renderDashboard(
       .audit-row,
       .summary-grid,
       .review-overview,
+      .graph-review-overview,
+      .graph-review-filter-panel,
       .signal-strip { grid-template-columns: 1fr; }
       .ask-work { padding: 16px; }
       .ask-work h2 { font-size: 29px; }
@@ -7259,7 +7757,10 @@ function renderDashboard(
       .source-workspace-grid, .source-management, .source-list,
       .review-workspace, .review-guide, .migration-review, .migration-review-lanes, .review-lanes,
       .graph-review, .graph-topology, .graph-topology-map, .graph-topology-lane,
-      .graph-topology-link,
+      .graph-topology-link, .graph-review-overview, .graph-review-filter-panel,
+      .graph-candidate-list, .graph-candidate-card, .graph-candidate-metrics,
+      .graph-candidate-detail, .graph-detail-decision, .graph-action-groups, .graph-action-group,
+      .graph-maintenance-context, .graph-topology-candidate-link, .graph-topology-readonly,
       .activity-list, .activity-group, .operation-panels, .operation-panel,
       .command-grid, .summary-grid, .signal-strip, .first-screen-snapshot {
         max-width: 100%;

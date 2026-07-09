@@ -37,6 +37,7 @@ async function noHorizontalScroll(page, label) {
       metrics.bodyScrollWidth <= metrics.innerWidth + 2,
     `${label} has horizontal overflow: ${JSON.stringify(metrics)}`
   );
+  return metrics;
 }
 
 async function assertResponsiveBounds(page, label) {
@@ -122,6 +123,39 @@ async function visibleBox(locator, label) {
   assert(box, `${label} has no bounding box`);
   assert(box.width > 0 && box.height > 0, `${label} is not visible: ${JSON.stringify(box)}`);
   return box;
+}
+
+function boxesIntersect(first, second) {
+  return !(
+    first.x + first.width <= second.x + 1 ||
+    second.x + second.width <= first.x + 1 ||
+    first.y + first.height <= second.y + 1 ||
+    second.y + second.height <= first.y + 1
+  );
+}
+
+function assertNonIntersectingBoxes(namedBoxes, label) {
+  const entries = Object.entries(namedBoxes);
+  const overlaps = [];
+  for (let outer = 0; outer < entries.length; outer += 1) {
+    for (let inner = outer + 1; inner < entries.length; inner += 1) {
+      const [firstName, firstBox] = entries[outer];
+      const [secondName, secondBox] = entries[inner];
+      if (boxesIntersect(firstBox, secondBox)) {
+        overlaps.push({ firstName, secondName, firstBox, secondBox });
+      }
+    }
+  }
+  assert(overlaps.length === 0, `${label} has intersecting B9 boxes: ${JSON.stringify(overlaps)}`);
+}
+
+function compactBox(box) {
+  return {
+    x: Math.round(box.x),
+    y: Math.round(box.y),
+    width: Math.round(box.width),
+    height: Math.round(box.height)
+  };
 }
 
 async function absent(locator, label) {
@@ -228,6 +262,26 @@ async function run() {
     "sk-",
     "postgres://"
   ];
+  const b9ReviewErgonomics = {
+    check_names: ["b9_review_ergonomics_desktop", "b9_review_ergonomics_mobile"],
+    screenshots: {
+      desktop: join(reportDir, "recallant-workbench-desktop-focused-review.png"),
+      desktop_public: publicScreenshots.review,
+      mobile: join(reportDir, "recallant-workbench-mobile-focused-review.png"),
+      mobile_public: publicScreenshots.reviewMobile
+    },
+    no_horizontal_overflow: {},
+    boxes: {},
+    markers: [
+      "Graph review workload",
+      "Next graph action",
+      "Recommended graph decision",
+      "Open candidate detail",
+      "Source evidence",
+      "Review history",
+      "Promote candidate"
+    ]
+  };
 
   process.env.RECALLANT_AUTH_TOKEN = token;
   process.env.RECALLANT_SESSION_SECRET = `review-playwright-session-${randomUUID()}`;
@@ -1011,19 +1065,63 @@ async function run() {
       }
     );
     await desktop.getByRole("heading", { name: "Review", exact: true }).waitFor();
-    await noHorizontalScroll(desktop, "desktop focused Review view");
+    b9ReviewErgonomics.no_horizontal_overflow.desktop = await noHorizontalScroll(
+      desktop,
+      "desktop focused Review view"
+    );
     await assertResponsiveBounds(desktop, "desktop focused Review view");
     await visibleBox(desktop.locator("#review"), "desktop focused Review");
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
-    await visibleBox(desktop.locator("#review .graph-review"), "desktop graph review");
-    await visibleBox(
+    await desktop.getByText("Graph review workload").first().waitFor();
+    await desktop.getByText("Next graph action").first().waitFor();
+    await desktop.getByText("Recommended graph decision").first().waitFor();
+    await desktop.getByText("Open candidate detail").first().waitFor();
+    const desktopGraphReviewBox = await visibleBox(
+      desktop.locator("#review .graph-review"),
+      "desktop graph review"
+    );
+    const desktopGraphOverviewBox = await visibleBox(
+      desktop.locator("#review .graph-review-overview"),
+      "desktop B9 graph review overview"
+    );
+    const desktopGraphCandidateListBox = await visibleBox(
+      desktop.locator("#review .graph-candidate-list").first(),
+      "desktop B9 graph candidate list"
+    );
+    const desktopGraphDetailBox = await visibleBox(
       desktop.locator("#review .graph-candidate-detail"),
       "desktop graph candidate detail"
     );
+    const desktopGraphMaintenanceBox = await visibleBox(
+      desktop.locator("#review .graph-maintenance"),
+      "desktop B9 graph maintenance"
+    );
+    const desktopGraphTopologyBox = await visibleBox(
+      desktop.locator("#review .graph-topology"),
+      "desktop B9 graph topology"
+    );
+    assertNonIntersectingBoxes(
+      {
+        overview: desktopGraphOverviewBox,
+        candidate_list: desktopGraphCandidateListBox,
+        selected_detail: desktopGraphDetailBox,
+        maintenance: desktopGraphMaintenanceBox,
+        topology: desktopGraphTopologyBox
+      },
+      "desktop focused Review"
+    );
+    b9ReviewErgonomics.boxes.desktop = {
+      graph_review: compactBox(desktopGraphReviewBox),
+      overview: compactBox(desktopGraphOverviewBox),
+      candidate_list: compactBox(desktopGraphCandidateListBox),
+      selected_detail: compactBox(desktopGraphDetailBox),
+      maintenance: compactBox(desktopGraphMaintenanceBox),
+      topology: compactBox(desktopGraphTopologyBox)
+    };
     await desktop.getByText("Graph candidates").first().waitFor();
-    await desktop.getByText("Node candidates").waitFor();
-    await desktop.getByText("Edge candidates").waitFor();
+    await desktop.getByText("Node candidates").first().waitFor();
+    await desktop.getByText("Edge candidates").first().waitFor();
     await desktop.getByText("Playwright graph node candidate").first().waitFor();
     await desktop.getByText("Playwright graph source endpoint").first().waitFor();
     await desktop.getByText("Review Workbench graph destination").first().waitFor();
@@ -1187,16 +1285,60 @@ async function run() {
       { waitUntil: "networkidle" }
     );
     await mobile.getByRole("heading", { name: "Review", exact: true }).waitFor();
-    await noHorizontalScroll(mobile, "mobile focused Review graph view");
+    b9ReviewErgonomics.no_horizontal_overflow.mobile = await noHorizontalScroll(
+      mobile,
+      "mobile focused Review graph view"
+    );
     await assertResponsiveBounds(mobile, "mobile focused Review graph view");
-    await visibleBox(mobile.locator("#review .graph-review"), "mobile graph review");
-    await visibleBox(
+    await mobile.getByText("Graph review workload").first().waitFor();
+    await mobile.getByText("Next graph action").first().waitFor();
+    await mobile.getByText("Recommended graph decision").first().waitFor();
+    await mobile.getByText("Open candidate detail").first().waitFor();
+    const mobileGraphReviewBox = await visibleBox(
+      mobile.locator("#review .graph-review"),
+      "mobile graph review"
+    );
+    const mobileGraphOverviewBox = await visibleBox(
+      mobile.locator("#review .graph-review-overview"),
+      "mobile B9 graph review overview"
+    );
+    const mobileGraphCandidateListBox = await visibleBox(
+      mobile.locator("#review .graph-candidate-list").first(),
+      "mobile B9 graph candidate list"
+    );
+    const mobileGraphDetailBox = await visibleBox(
       mobile.locator("#review .graph-candidate-detail"),
       "mobile graph candidate detail"
     );
+    const mobileGraphMaintenanceBox = await visibleBox(
+      mobile.locator("#review .graph-maintenance"),
+      "mobile B9 graph maintenance"
+    );
+    const mobileGraphTopologyBox = await visibleBox(
+      mobile.locator("#review .graph-topology"),
+      "mobile B9 graph topology"
+    );
+    assertNonIntersectingBoxes(
+      {
+        overview: mobileGraphOverviewBox,
+        candidate_list: mobileGraphCandidateListBox,
+        selected_detail: mobileGraphDetailBox,
+        maintenance: mobileGraphMaintenanceBox,
+        topology: mobileGraphTopologyBox
+      },
+      "mobile focused Review"
+    );
+    b9ReviewErgonomics.boxes.mobile = {
+      graph_review: compactBox(mobileGraphReviewBox),
+      overview: compactBox(mobileGraphOverviewBox),
+      candidate_list: compactBox(mobileGraphCandidateListBox),
+      selected_detail: compactBox(mobileGraphDetailBox),
+      maintenance: compactBox(mobileGraphMaintenanceBox),
+      topology: compactBox(mobileGraphTopologyBox)
+    };
     await mobile.getByText("Graph candidates").first().waitFor();
-    await mobile.getByText("Node candidates").waitFor();
-    await mobile.getByText("Edge candidates").waitFor();
+    await mobile.getByText("Node candidates").first().waitFor();
+    await mobile.getByText("Edge candidates").first().waitFor();
     await mobile.getByText("Playwright graph edge candidate").first().waitFor();
     await mobile.getByText("Promotion readiness").first().waitFor();
     await mobile.getByRole("button", { name: "Promote candidate" }).waitFor();
@@ -1244,6 +1386,7 @@ async function run() {
             join(reportDir, "recallant-workbench-mobile-chat.png")
           ],
           public_safe_screenshot_candidates: Object.values(publicScreenshots),
+          b9_review_ergonomics: b9ReviewErgonomics,
           checks: [
             "auth_required",
             "desktop_no_horizontal_scroll",
@@ -1256,6 +1399,11 @@ async function run() {
             "review_decision_workflow",
             "graph_review_workbench_desktop",
             "graph_review_workbench_mobile",
+            "b9_review_ergonomics_desktop",
+            "b9_review_ergonomics_mobile",
+            "b9_review_no_horizontal_overflow",
+            "b9_review_non_intersecting_boxes",
+            "b9_review_public_safe_screenshots",
             "migration_review_queue_browser_qa",
             "public_safe_screenshot_candidates",
             "desktop_focused_source_filtered_activity_view",

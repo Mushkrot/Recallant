@@ -53,6 +53,11 @@ dependable before expanding the product surface.
   review lanes, selected candidate source refs and review history, promotion readiness, read-only
   hygiene counts, form/API review actions, explicit Promote candidate controls for compatible
   accepted edges, browser smoke coverage, and an explicit accept-is-review-only boundary.
+- Workbench graph review ergonomics, with `Graph review workload`, active `Graph review filters`,
+  candidate priority and `Next graph action` cues, selected `Recommended graph decision` guidance,
+  safer maintenance/topology `Open candidate detail` links, source evidence/history context,
+  public-safe focused Review screenshots, no-horizontal-overflow checks, and non-intersecting
+  desktop/mobile panel bounds.
 - Explicit graph candidate promotion for accepted chunk-to-chunk edge candidates through
   `memory_promote_graph_candidate`, `recallant graph promote-candidate <graph-candidate-id>
   --confirm`, and Workbench `Promote candidate`, with `memory_graph_hygiene` and `recallant graph
@@ -106,8 +111,8 @@ dependable before expanding the product surface.
 - Governed graph next slices after the shipped candidate storage, Workbench review surface,
   explicit chunk-to-chunk promotion, read-only hygiene report, Markdown vault bridge, memory keeper
   candidate pipeline, named one-hop retrieval profiles, read-only Workbench topology visualization,
-  and governed graph maintenance workflows: broader keeper source integration, richer review
-  ergonomics, first-class graph storage decisions, human-memory expansion, more endpoint kinds, and
+  governed graph maintenance workflows, and B9 review ergonomics: broader keeper source
+  integration, first-class graph storage decisions, human-memory expansion, more endpoint kinds, and
   automatic promotion policy decisions.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale

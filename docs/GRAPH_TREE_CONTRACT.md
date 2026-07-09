@@ -178,9 +178,9 @@ reviewed.
 ## Workbench Graph Review Surface
 
 The Workbench graph review slice is a human review surface for staged graph candidates, explicit B6
-promotion readiness, B7 read-only topology visualization, and B8 governed maintenance workflows. It
-is not an automatic graph mutation engine, first-class graph-node store, or graph database
-migration.
+promotion readiness, B7 read-only topology visualization, B8 governed maintenance workflows, and B9
+review ergonomics. It is not an automatic graph mutation engine, first-class graph-node store, or
+graph database migration.
 
 The dashboard API accepts graph filters alongside the existing Review UI filters:
 
@@ -198,8 +198,8 @@ The dashboard response exposes graph review data under `graph_candidates`:
 - `counts` - total candidate count plus grouped counts by candidate kind, lifecycle state,
   extraction method, source kind, node kind, and relation type;
 - `candidates` - project-scoped queue rows with candidate identity, kind, lifecycle, confidence,
-  extraction method, title, summary, endpoint labels for edge candidates, source-ref count, and
-  review-action count;
+  extraction method, title, summary, endpoint labels for edge candidates, source-ref count,
+  review-action count, and derived priority/next-action cues;
 - `selected_candidate` - optional detail for the requested graph candidate, including source refs
   and review history;
 - `promotion_readiness` - per-candidate status attached to queue rows and the selected candidate;
@@ -222,6 +222,13 @@ The maintenance panel uses exact empty state copy
 boundary visible: graph candidates can be reviewed and explicitly maintained, but they are not
 default retrieval input and `accept` does not promote them into `edges`. Only the explicit
 `Promote candidate` action may activate a compatible accepted edge.
+
+B9 review ergonomics add exact public Review labels including `Graph review workload`,
+`Graph review filters`, `Next graph action`, `Recommended graph decision`, and
+`Open candidate detail`.
+These labels are display and workflow guidance only. B9 does not add first-class graph storage,
+automatic promotion policies, additional endpoint kinds, keeper-source expansion, or retrieval
+semantics changes.
 
 ## Workbench Graph Topology
 
@@ -534,6 +541,7 @@ should show:
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
 Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
 explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review,
-Workbench graph topology, and governed graph maintenance workflow slices. It does not create
-automatic promotion, first-class graph node storage, passive vault sync, raw media ingestion, or a
+Workbench graph topology, governed graph maintenance workflow, and B9 review ergonomics slices. It
+does not create automatic promotion, first-class graph node storage, passive vault sync, raw media
+ingestion, keeper-source expansion, additional endpoint kinds, retrieval semantics changes, or a
 dedicated graph database migration.
