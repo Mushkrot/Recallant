@@ -63,8 +63,10 @@ dependable before expanding the product surface.
   --confirm`, and Workbench `Promote candidate`, with `memory_graph_hygiene` and `recallant graph
   hygiene` for read-only readiness reporting.
 - Deterministic memory keeper graph candidate generation through `recallant keeper candidates`,
-  with dry-run defaults, confirm-gated candidate persistence, source refs, keeper extraction
-  metadata, unsafe-input redaction to `needs_review`, and retrieval-isolation smoke coverage.
+  with dry-run defaults, confirm-gated candidate persistence, text/file inputs, B10
+  source-selected `--from-source <project-source-id>` inputs over bounded governed Recallant
+  evidence, source refs, keeper extraction metadata, unsafe-input redaction to `needs_review`, MCP
+  `memory_keeper_candidates`, and retrieval-isolation smoke coverage.
 - Named one-hop graph retrieval profiles on `memory_search`, with profile-specific relation
   allowlists, legacy `graph_expand` compatibility through `edge_neighborhood`, trace metadata,
   scope/source/archive guard coverage, and graph candidate isolation.
@@ -111,9 +113,9 @@ dependable before expanding the product surface.
 - Governed graph next slices after the shipped candidate storage, Workbench review surface,
   explicit chunk-to-chunk promotion, read-only hygiene report, Markdown vault bridge, memory keeper
   candidate pipeline, named one-hop retrieval profiles, read-only Workbench topology visualization,
-  governed graph maintenance workflows, and B9 review ergonomics: broader keeper source
-  integration, first-class graph storage decisions, human-memory expansion, more endpoint kinds, and
-  automatic promotion policy decisions.
+  governed graph maintenance workflows, B9 review ergonomics, and B10 keeper source integration:
+  first-class graph storage decisions, human-memory expansion, more endpoint kinds, passive vault
+  sync, raw media ingestion, and automatic promotion policy decisions.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

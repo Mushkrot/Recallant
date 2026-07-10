@@ -44,6 +44,7 @@ import {
   type ReviewAgentMemoryInput,
   type StartSessionInput
 } from "@recallant/db";
+import { buildMemoryKeeperPlan, type MemoryKeeperSourceInput } from "@recallant/core";
 import { z } from "zod";
 
 type ToolDb = ReturnType<typeof createRecallantDbFromEnv>;
@@ -182,6 +183,7 @@ export type RecallantToolName =
   | "memory_search"
   | "memory_fetch_chunk"
   | "memory_link"
+  | "memory_keeper_candidates"
   | "memory_create_graph_candidate"
   | "memory_list_graph_candidates"
   | "memory_get_graph_candidate"
@@ -1149,6 +1151,152 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       if (database) return database.linkMemory(args as LinkMemoryInput);
       return stubResponse("memory_link", { edge_id: randomUUID() });
+    }
+  },
+  {
+    name: "memory_keeper_candidates",
+    title: "Generate Keeper Graph Candidates",
+    description:
+      "Dry-run or explicitly persist governed graph candidate proposals from controlled keeper text or bounded project-source evidence. Dry-run is the default. Do not paste raw secrets, credentials, customer data, raw artifacts, backups, or bulk project files.",
+    inputSchema: z.object({
+      project_id: uuidString.nullable().optional(),
+      project_path: nullableString,
+      project_dir: nullableString,
+      developer_id: uuidString.nullable().optional(),
+      text: z
+        .string()
+        .min(1)
+        .max(50_000)
+        .optional()
+        .describe("Controlled keeper source text. Do not include raw secrets or customer data."),
+      from_source_id: uuidString
+        .optional()
+        .describe(
+          "Project source id to resolve into bounded governed Recallant evidence. Requires database access."
+        ),
+      source_kind: graphSourceRefKind.default("external"),
+      source_id: nullableString,
+      source_path: nullableString,
+      label: nullableString,
+      max_source_chars: z.number().int().positive().max(50_000).optional(),
+      max_source_memories: z.number().int().positive().max(50).optional(),
+      write_candidates: z.boolean().default(false),
+      confirm: z.boolean().default(false)
+    }),
+    handler: async (args) => {
+      const scoped = scopedProjectInputWithDiagnostics(args);
+      const database = db();
+      const textInput = typeof args.text === "string" ? args.text : null;
+      const fromSourceId = typeof args.from_source_id === "string" ? args.from_source_id : null;
+      const sourcePath = stringInput(args.source_path);
+      const label = stringInput(args.label);
+      const sourceId = stringInput(args.source_id);
+      const maxSourceChars =
+        typeof args.max_source_chars === "number" ? args.max_source_chars : undefined;
+      const maxSourceMemories =
+        typeof args.max_source_memories === "number" ? args.max_source_memories : undefined;
+      const inputModeCount = [textInput !== null, fromSourceId !== null].filter(Boolean).length;
+      if (inputModeCount !== 1) {
+        throw validationError(
+          "memory_keeper_candidates requires exactly one of text or from_source_id"
+        );
+      }
+      if (args.write_candidates === true && args.confirm !== true) {
+        throw validationError(
+          "keeper candidate persistence requires write_candidates=true and confirm=true"
+        );
+      }
+      if ((fromSourceId || args.write_candidates === true) && !database) {
+        throw new Error(
+          fromSourceId
+            ? "RECALLANT_DATABASE_URL is required for keeper from_source_id source resolution"
+            : "RECALLANT_DATABASE_URL is required for keeper candidate writes"
+        );
+      }
+
+      let sourceInput: MemoryKeeperSourceInput;
+      if (fromSourceId) {
+        const resolved = await database!.resolveKeeperProjectSource({
+          source_id: fromSourceId,
+          project_id: (scoped.input.project_id as string | null | undefined) ?? null,
+          project_path: (scoped.input.project_path as string | null | undefined) ?? null,
+          max_source_chars: maxSourceChars,
+          max_source_memories: maxSourceMemories
+        });
+        sourceInput = {
+          input_kind: "source_excerpt",
+          text: resolved.text,
+          source_kind: "source",
+          source_id: resolved.source_id,
+          uri: resolved.uri,
+          path: sourcePath ?? resolved.path,
+          label: label ?? resolved.label,
+          metadata: {
+            ...resolved.metadata,
+            mcp_tool: "memory_keeper_candidates"
+          },
+          source_resolution: resolved.source_resolution
+        };
+      } else {
+        sourceInput = {
+          input_kind: "text",
+          text: textInput ?? "",
+          source_kind:
+            typeof args.source_kind === "string"
+              ? (args.source_kind as MemoryKeeperSourceInput["source_kind"])
+              : "external",
+          source_id: sourceId,
+          path: sourcePath,
+          label: label ?? "Keeper MCP text",
+          metadata: {
+            mcp_tool: "memory_keeper_candidates"
+          }
+        };
+      }
+
+      const plan = {
+        action: "keeper_candidates",
+        ...buildMemoryKeeperPlan(sourceInput)
+      };
+      if (args.write_candidates !== true) {
+        return {
+          ...plan,
+          governance: {
+            candidate_storage_only: true,
+            retrieval_active: false
+          },
+          ...projectScopeDiagnosticOutput(scoped)
+        };
+      }
+
+      const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
+      for (const proposal of plan.proposals) {
+        created.push(
+          await database!.createGraphCandidate({
+            ...proposal.candidate,
+            project_id: (scoped.input.project_id as string | null | undefined) ?? undefined,
+            project_path: (scoped.input.project_path as string | null | undefined) ?? undefined
+          })
+        );
+      }
+      return {
+        ...plan,
+        dry_run: false,
+        writes_database: true,
+        persisted: {
+          count: created.length,
+          graph_candidate_ids: created.map((candidate) => candidate.graph_candidate_id)
+        },
+        proposals: plan.proposals.map((proposal, index) => ({
+          ...proposal,
+          persisted: created[index]?.graph_candidate_id ?? null
+        })),
+        governance: {
+          candidate_storage_only: true,
+          retrieval_active: false
+        },
+        ...projectScopeDiagnosticOutput(scoped)
+      };
     }
   },
   {

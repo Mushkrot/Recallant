@@ -331,6 +331,12 @@ mustInclude(
     "`memory_get_readiness_status` returns the bounded readiness contract",
     "must not return raw memories, raw project files",
     "semantic proof timestamp is",
+    "`memory_keeper_candidates`",
+    "bounded project-source evidence",
+    "`from_source_id` resolves an active configured project source",
+    "Persistence requires `write_candidates:",
+    "It does not raw-read connector accounts",
+    "Stored source-selected keeper candidates remain staged",
     "agents must use the MCP",
     "memory lifecycle by default",
     "Bulk project import, raw logs, customer data, raw artifacts",
@@ -574,6 +580,14 @@ mustInclude(
     "`available_actions`",
     "`governance`",
     "B9 review ergonomics",
+    "The B10 source-selected path uses `--from-source` for source selection.",
+    "`memory_keeper_candidates`",
+    "requires `write_candidates: true` plus `confirm: true` before",
+    "database access even for dry-runs",
+    "bounded governed evidence that Recallant already stores",
+    "does not raw-read connector accounts",
+    "arbitrary URIs, server paths, local paths, raw artifacts, backups, passive vault sync",
+    "source-selected CLI and MCP leak scans",
     "`Graph review workload`",
     "`Graph review filters`",
     "`Next graph action`",
@@ -582,7 +596,6 @@ mustInclude(
     "does not add first-class graph storage",
     "automatic promotion policies",
     "additional endpoint kinds",
-    "keeper-source expansion",
     "retrieval semantics changes",
     "Workbench Graph Topology",
     "Graph Maintenance",
@@ -625,7 +638,8 @@ mustInclude(
 mustInclude(
   contractStatus,
   [
-    "Working B9 review ergonomics slice",
+    "Working B10 keeper source integration slice",
+    "B10 source-selected keeper source contract",
     "B9 review workload and decision guidance",
     "Workbench graph review fields/actions",
     "read-only topology nodes/links/groups/summary",
@@ -642,6 +656,7 @@ mustInclude(
     "/api/review-action",
     "/review-action",
     "`action=promote`",
+    "`memory_keeper_candidates`",
     "`memory_promote_graph_candidate`",
     "`memory_graph_hygiene`",
     "`recallant graph hygiene`",
@@ -665,6 +680,11 @@ mustInclude(
     "`memory_graph_maintenance`",
     "`recallant graph maintenance`",
     "`recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm`",
+    "`recallant keeper candidates --from-source <project-source-id>`",
+    "text/file dry-runs remain database-free",
+    "source-selected dry-runs require database-backed project-source resolution",
+    "consume bounded governed Recallant source evidence without raw-reading connectors",
+    "passive vault sync, or raw media",
     "do not delete candidates",
     "do not mutate `edges`",
     "do not change retrieval semantics",
@@ -745,6 +765,9 @@ mustInclude(
   architecture,
   [
     "read-only Workbench topology view",
+    "B10 `--from-source <project-source-id>` source selection",
+    "bounded governed Recallant evidence",
+    "does not raw-read connector accounts",
     "derived from graph candidates, source refs, promotion readiness",
     "active `edges`",
     "driven by unpromoted candidates"
@@ -821,6 +844,9 @@ mustInclude(
     "Remote existing-project pilot hardening",
     "Read-only Workbench graph topology visualization",
     "Workbench graph review ergonomics",
+    "B10 keeper source integration",
+    "source-selected `--from-source <project-source-id>` inputs",
+    "`memory_keeper_candidates`",
     "`graph_candidates.topology`",
     "`Graph topology`",
     "`Active promoted links`",
@@ -840,22 +866,23 @@ mustInclude(
 );
 mustNotInclude(
   graphTreeContract,
-  ["richer graph review ergonomics", "richer review ergonomics"],
-  "GRAPH_TREE_CONTRACT stale B9 wording"
+  ["richer graph review ergonomics", "richer review ergonomics", "keeper-source expansion"],
+  "GRAPH_TREE_CONTRACT stale graph wording"
 );
 mustNotInclude(
   contractStatus,
-  ["richer graph review ergonomics", "richer review ergonomics"],
-  "CONTRACT_STATUS stale B9 wording"
+  ["richer graph review ergonomics", "richer review ergonomics", "Broader keeper source integration"],
+  "CONTRACT_STATUS stale graph wording"
 );
 mustNotInclude(
   roadmap,
   [
     "Workbench topology visualization, richer review ergonomics",
     "richer graph review ergonomics",
-    "richer review ergonomics"
+    "richer review ergonomics",
+    "broader keeper source integration"
   ],
-  "ROADMAP stale B9 wording"
+  "ROADMAP stale graph wording"
 );
 
 const universalConnectSurfaces = [

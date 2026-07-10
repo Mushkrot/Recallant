@@ -10691,17 +10691,77 @@ function parseKeeperSourceKind(raw: string | undefined): GraphCandidateSourceRef
   return raw as GraphCandidateSourceRefKind;
 }
 
+function parseKeeperPositiveIntFlag(argv: readonly string[], name: string) {
+  const raw = parseFlag(argv, name);
+  if (raw === undefined) return undefined;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`VALIDATION_ERROR: ${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function createKeeperDatabase(argv: readonly string[], projectDir: string) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID,
+    projectId: parseFlag(argv, "--project-id") ?? process.env.RECALLANT_PROJECT_ID,
+    projectPath: projectDir
+  });
+}
+
 async function readKeeperSourceInput(
   argv: readonly string[],
-  projectDir: string
+  projectDir: string,
+  database?: RecallantDb | null
 ): Promise<MemoryKeeperSourceInput> {
   const text = parseFlag(argv, "--text");
   const fromFile = parseFlag(argv, "--from-file");
-  if (text !== undefined && fromFile !== undefined) {
-    throw new Error("VALIDATION_ERROR: keeper candidates accepts either --text or --from-file");
+  const fromSource = parseFlag(argv, "--from-source");
+  const inputModes = [text !== undefined, fromFile !== undefined, fromSource !== undefined].filter(
+    Boolean
+  ).length;
+  if (inputModes > 1) {
+    throw new Error(
+      "VALIDATION_ERROR: keeper candidates accepts exactly one of --text, --from-file, or --from-source"
+    );
   }
-  if (text === undefined && fromFile === undefined) {
-    throw new Error("VALIDATION_ERROR: keeper candidates requires --text or --from-file");
+  if (inputModes === 0) {
+    throw new Error(
+      "VALIDATION_ERROR: keeper candidates requires --text, --from-file, or --from-source"
+    );
+  }
+
+  if (fromSource !== undefined) {
+    if (!database) {
+      throw new Error(
+        "RECALLANT_DATABASE_URL is required for keeper --from-source source resolution"
+      );
+    }
+    const resolved = await database.resolveKeeperProjectSource({
+      source_id: fromSource,
+      project_id: parseFlag(argv, "--project-id") ?? null,
+      project_path: projectDir,
+      max_source_chars: parseKeeperPositiveIntFlag(argv, "--max-source-chars"),
+      max_source_memories: parseKeeperPositiveIntFlag(argv, "--max-source-memories")
+    });
+    return {
+      input_kind: "source_excerpt",
+      text: resolved.text,
+      source_kind: "source",
+      source_id: resolved.source_id,
+      uri: resolved.uri,
+      path: parseFlag(argv, "--source-path") ?? resolved.path,
+      label: parseFlag(argv, "--label") ?? resolved.label,
+      metadata: {
+        ...resolved.metadata,
+        cli_command: "keeper candidates",
+        project_dir: projectDir
+      },
+      source_resolution: resolved.source_resolution
+    };
   }
 
   const resolvedFile = fromFile ? resolve(fromFile) : null;
@@ -10730,12 +10790,18 @@ function formatKeeperCandidateText(plan: KeeperCandidateTextPlan) {
     `Input: ${plan.input.input_kind} source=${plan.input.source_kind} source_id=${plan.input.source_id ?? "none"}`,
     `Proposals: ${plan.summary.proposals} (${plan.summary.node_candidates} nodes, ${plan.summary.edge_candidates} edges)`,
     `Lifecycle states: ${plan.summary.lifecycle_states.join(", ")}`,
-    `Source refs required: ${plan.summary.source_refs_required}`,
-    ""
+    `Source refs required: ${plan.summary.source_refs_required}`
   ];
-  if (plan.persisted) {
-    lines.splice(8, 0, `Persisted: ${plan.persisted.count}`);
+  const sourceResolution = plan.input.source_resolution;
+  if (sourceResolution) {
+    lines.push(
+      `Source evidence: ${sourceResolution.evidence_count} used, ${sourceResolution.omitted_count} omitted, ${sourceResolution.text_chars}/${sourceResolution.max_source_chars} chars`
+    );
   }
+  if (plan.persisted) {
+    lines.push(`Persisted: ${plan.persisted.count}`);
+  }
+  lines.push("");
 
   for (const proposal of plan.proposals) {
     const candidate = proposal.candidate;
@@ -10764,37 +10830,50 @@ function formatKeeperCandidateText(plan: KeeperCandidateTextPlan) {
 }
 
 async function runKeeperCommand(argv: readonly string[]) {
-  const subcommand = argv[3] ?? "candidates";
-  if (subcommand !== "candidates" && subcommand !== "proposals") {
-    throw new Error("VALIDATION_ERROR: keeper supports candidates");
-  }
+  let database: RecallantDb | null = null;
+  try {
+    const subcommand = argv[3] ?? "candidates";
+    if (subcommand !== "candidates" && subcommand !== "proposals") {
+      throw new Error("VALIDATION_ERROR: keeper supports candidates");
+    }
 
-  const writeCandidates = argv.includes("--write-candidates");
-  if (writeCandidates && !argv.includes("--confirm")) {
-    throw new Error(
-      "VALIDATION_ERROR: keeper candidate persistence requires --write-candidates --confirm"
-    );
-  }
+    const writeCandidates = argv.includes("--write-candidates");
+    if (writeCandidates && !argv.includes("--confirm")) {
+      throw new Error(
+        "VALIDATION_ERROR: keeper candidate persistence requires --write-candidates --confirm"
+      );
+    }
 
-  const format = parseKeeperFormat(argv);
-  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
-  const sourceInput = await readKeeperSourceInput(argv, projectDir);
-  const plan: KeeperCliPlan = {
-    action: "keeper_candidates",
-    project_dir: projectDir,
-    ...buildMemoryKeeperPlan(sourceInput)
-  };
+    const format = parseKeeperFormat(argv);
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const fromSource = parseFlag(argv, "--from-source");
+    if (fromSource !== undefined || writeCandidates) {
+      database = createKeeperDatabase(argv, projectDir);
+      if (!database) {
+        throw new Error(
+          fromSource !== undefined
+            ? "RECALLANT_DATABASE_URL is required for keeper --from-source source resolution"
+            : "RECALLANT_DATABASE_URL is required for keeper candidate writes"
+        );
+      }
+    }
+    const sourceInput = await readKeeperSourceInput(argv, projectDir, database);
+    const plan: KeeperCliPlan = {
+      action: "keeper_candidates",
+      project_dir: projectDir,
+      ...buildMemoryKeeperPlan(sourceInput)
+    };
 
-  if (writeCandidates) {
-    const database = createRecallantDbFromEnv();
-    if (!database)
-      throw new Error("RECALLANT_DATABASE_URL is required for keeper candidate writes");
-    try {
+    if (writeCandidates) {
+      if (!database) {
+        throw new Error("RECALLANT_DATABASE_URL is required for keeper candidate writes");
+      }
       const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
       for (const proposal of plan.proposals) {
         created.push(
           await database.createGraphCandidate({
             ...proposal.candidate,
+            project_id: parseFlag(argv, "--project-id") ?? undefined,
             project_path: projectDir
           })
         );
@@ -10817,15 +10896,15 @@ async function runKeeperCommand(argv: readonly string[]) {
           ? formatKeeperCandidateText(persistedPlan)
           : `${JSON.stringify(persistedPlan, null, 2)}\n`
       );
-    } finally {
-      await database.close();
+      return;
     }
-    return;
-  }
 
-  process.stdout.write(
-    format === "text" ? formatKeeperCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
-  );
+    process.stdout.write(
+      format === "text" ? formatKeeperCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+    );
+  } finally {
+    await database?.close();
+  }
 }
 
 async function runVaultCommand(argv: readonly string[]) {
@@ -11113,9 +11192,9 @@ function usageText(command?: string) {
   }
   if (command === "keeper") {
     return [
-      "Usage: recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text] [--write-candidates --confirm]",
+      "Usage: recallant keeper candidates [--text <text>|--from-file <path>|--from-source <project-source-id>] [--project-dir <dir>] [--project-id <id>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--max-source-chars <n>] [--max-source-memories <n>] [--format json|text] [--write-candidates --confirm]",
       "",
-      "Extract governed graph candidate proposals from controlled source text. Dry-run is the default and does not require RECALLANT_DATABASE_URL.",
+      "Extract governed graph candidate proposals from controlled source text or bounded governed project-source evidence. Text/file dry-run does not require RECALLANT_DATABASE_URL; --from-source does.",
       ""
     ].join("\n");
   }

@@ -227,8 +227,7 @@ B9 review ergonomics add exact public Review labels including `Graph review work
 `Graph review filters`, `Next graph action`, `Recommended graph decision`, and
 `Open candidate detail`.
 These labels are display and workflow guidance only. B9 does not add first-class graph storage,
-automatic promotion policies, additional endpoint kinds, keeper-source expansion, or retrieval
-semantics changes.
+automatic promotion policies, additional endpoint kinds, or retrieval semantics changes.
 
 ## Workbench Graph Topology
 
@@ -392,12 +391,29 @@ The CLI surface is:
 ```bash
 recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text]
 recallant keeper candidates [--text <text>|--from-file <path>] [--project-dir <dir>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--format json|text] --write-candidates --confirm
+recallant keeper candidates --from-source <project-source-id> [--project-dir <dir>] [--project-id <id>] [--max-source-chars <n>] [--max-source-memories <n>] [--format json|text]
+recallant keeper candidates --from-source <project-source-id> [--project-dir <dir>] [--project-id <id>] [--max-source-chars <n>] [--max-source-memories <n>] [--format json|text] --write-candidates --confirm
 ```
 
 `keeper candidates` is dry-run by default and does not require `RECALLANT_DATABASE_URL` unless the
-caller explicitly passes both `--write-candidates` and `--confirm`. Dry-run output reports
-`dry_run: true`, `writes_database: false`, candidate counts, source refs, lifecycle states,
-confidence, extraction method `keeper`, and reason/provenance metadata.
+caller explicitly passes both `--write-candidates` and `--confirm`. The text/file dry-run path
+remains database-free. The exception is `--from-source`, which needs database access even for dry-runs because it resolves a configured project source to already-governed Recallant evidence. Dry-run output reports `dry_run: true`, `writes_database: false`, candidate counts, source refs,
+lifecycle states, confidence, extraction method `keeper`, and reason/provenance metadata.
+
+The B10 source-selected path uses `--from-source` for source selection. The older `--source-id`
+flag remains source-reference provenance for explicit `--text` and `--from-file` inputs. A
+source-selected keeper input has `input_kind: "source_excerpt"` and includes bounded source
+resolution metadata: project source id, project source kind and label, source status, evidence
+count, omitted count, source text character budget, memory count budget, and resolved text
+character count.
+
+The MCP companion is `memory_keeper_candidates`. It accepts controlled `text` or `from_source_id`,
+keeps dry-run as the default, requires `write_candidates: true` plus `confirm: true` before
+persistence, and returns the same staged proposal/governance shape as the CLI.
+
+Source-selected keeper input consumes bounded governed evidence that Recallant already stores, such
+as source-linked memory bodies and bounded source-reference quotes. It does not raw-read connector accounts, arbitrary URIs, server paths, local paths, raw artifacts, backups, passive vault sync streams, or raw media. If a source has no governed evidence, the source-selected path reports that
+state without inventing graph candidates from source metadata alone.
 
 The first deterministic extractor recognizes conservative, reviewable signals:
 
@@ -422,8 +438,9 @@ accepted chunk-to-chunk edge candidates require the explicit B6 promotion path b
 become active graph retrieval edges.
 
 The public smoke gate for this surface is `npm run memory-keeper:smoke`. It checks dry-run behavior
-without database configuration, confirm-gated writes, source refs, `needs_review` lifecycle on
-unsafe fixtures, CLI and stored-payload leak scans, and default retrieval isolation.
+without database configuration, database-required `--from-source` resolution, confirm-gated writes,
+source refs, `needs_review` lifecycle on unsafe fixtures, source-selected CLI and MCP leak scans,
+stored-payload leak scans, and default retrieval isolation.
 
 ## Graph Retrieval Profiles
 
@@ -541,7 +558,7 @@ should show:
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
 Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
 explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review,
-Workbench graph topology, governed graph maintenance workflow, and B9 review ergonomics slices. It
-does not create automatic promotion, first-class graph node storage, passive vault sync, raw media
-ingestion, keeper-source expansion, additional endpoint kinds, retrieval semantics changes, or a
-dedicated graph database migration.
+Workbench graph topology, governed graph maintenance workflow, B9 review ergonomics, and B10
+source-selected keeper integration slices. It does not create automatic promotion, first-class graph
+node storage, passive vault sync, raw media ingestion, human-memory expansion, additional endpoint
+kinds, retrieval semantics changes, or a dedicated graph database migration.

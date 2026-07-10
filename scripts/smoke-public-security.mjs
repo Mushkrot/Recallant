@@ -163,6 +163,59 @@ mustInclude(
   "docs/MCP_SPEC.md remote security boundary"
 );
 
+mustInclude(
+  mcpSpec,
+  [
+    "`memory_keeper_candidates`",
+    "bounded project-source evidence",
+    "It does not raw-read connector accounts",
+    "arbitrary URIs, server paths, local paths, raw artifacts, backups",
+    "Stored source-selected keeper candidates remain staged review records",
+    "do not affect default retrieval"
+  ],
+  "docs/MCP_SPEC.md keeper source security boundary"
+);
+
+const graphTreeContract = await read("docs/GRAPH_TREE_CONTRACT.md");
+mustInclude(
+  graphTreeContract,
+  [
+    "recallant keeper candidates --from-source <project-source-id>",
+    "text/file dry-run",
+    "database access even for dry-runs",
+    "bounded governed evidence that Recallant already stores",
+    "does not raw-read connector accounts",
+    "arbitrary URIs, server paths, local paths, raw artifacts, backups",
+    "source-selected CLI and MCP leak scans",
+    "Stored keeper candidates remain staged review records",
+    "not part of default retrieval"
+  ],
+  "docs/GRAPH_TREE_CONTRACT.md keeper source security boundary"
+);
+
+const keeperOverclaimPhrases = [
+  "source-selected keeper input raw-reads",
+  "`--from-source` raw-reads",
+  "memory_keeper_candidates raw-reads",
+  "keeper candidates automatically promote",
+  "keeper candidates are default retrieval",
+  "source-selected keeper candidates are retrieval-active",
+  "passive vault sync is shipped",
+  "raw media ingestion is shipped"
+];
+for (const [label, text] of [
+  ["docs/GRAPH_TREE_CONTRACT.md", graphTreeContract],
+  ["docs/MCP_SPEC.md", mcpSpec],
+  ["docs/CONTRACT_STATUS.md", await read("docs/CONTRACT_STATUS.md")],
+  ["docs/ROADMAP.md", await read("docs/ROADMAP.md")]
+]) {
+  mustNotMatch(
+    text,
+    keeperOverclaimPhrases.map((phrase) => new RegExp(phrase.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")),
+    label
+  );
+}
+
 process.stdout.write(
   `${JSON.stringify(
     {

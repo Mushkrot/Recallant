@@ -231,9 +231,236 @@ const db = new RecallantDb({
 });
 
 try {
+  const resolverContext = await db.ensureProject(projectPath);
+  const resolverSource = await db.attachProjectSource({
+    project_id: resolverContext.projectId,
+    source_kind: "manual",
+    label: `${marker} keeper resolver source`,
+    uri: `manual://${marker}/keeper-resolver`,
+    status: "active",
+    metadata: { created_by: "memory_keeper_smoke" }
+  });
+  assert(resolverSource?.id, `Resolver source was not created: ${JSON.stringify(resolverSource)}`);
+  await db.createAgentMemory({
+    project_id: resolverContext.projectId,
+    memory_type: "decision",
+    scope: "project",
+    scope_kind: "project",
+    scope_id: resolverContext.projectId,
+    audience: [{ kind: "all_agents", id: null }],
+    title: `${marker} resolver governed source evidence`,
+    body: keeperText(`${marker} source resolver`, `${marker} source-selected evidence`),
+    confidence: 0.82,
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "external",
+        source_id: resolverSource.id,
+        quote: `Topic: ${marker} source resolver`,
+        metadata: { project_source_id: resolverSource.id, source_path: resolverSource.label }
+      }
+    ],
+    metadata: { created_from: "memory_keeper_smoke" }
+  });
+  const resolvedSource = await db.resolveKeeperProjectSource({
+    project_id: resolverContext.projectId,
+    source_id: resolverSource.id,
+    max_source_chars: 2000,
+    max_source_memories: 3
+  });
+  const resolvedSourceText = JSON.stringify(resolvedSource);
+  assert(resolvedSource.input_kind === "source_excerpt", "resolved source should be source_excerpt");
+  assert(resolvedSource.source_kind === "source", "resolved source should use source ref kind");
+  assert(
+    resolvedSource.source_resolution.project_source_id === resolverSource.id,
+    "resolved source should preserve project source id"
+  );
+  assert(
+    resolvedSource.uri === null && resolvedSource.path === null,
+    `resolved source should not echo configured source URI/path: ${resolvedSourceText}`
+  );
+  assert(
+    resolvedSource.source_resolution.evidence_count === 1,
+    `resolved source should include one governed evidence memory: ${resolvedSourceText}`
+  );
+  assert(
+    resolvedSource.text.includes(`${marker} source resolver`),
+    `resolved source text should include governed evidence: ${resolvedSource.text}`
+  );
+  assertNoForbidden(resolvedSourceText, "resolved keeper source");
+  const otherContext = await db.ensureProject(`/tmp/recallant-memory-keeper-other-${projectId}`);
+  let crossProjectSourceRejected = false;
+  try {
+    await db.resolveKeeperProjectSource({
+      project_id: otherContext.projectId,
+      source_id: resolverSource.id
+    });
+  } catch (error) {
+    crossProjectSourceRejected = String(error).includes("keeper source not found");
+  }
+  assert(crossProjectSourceRejected, "cross-project keeper source resolution should be rejected");
+
+  const sourceDryRun = parseJsonOutput(
+    runCli([
+      "keeper",
+      "candidates",
+      "--from-source",
+      resolverSource.id,
+      "--project-id",
+      resolverContext.projectId,
+      "--project-dir",
+      projectPath,
+      "--format",
+      "json"
+    ]),
+    "keeper source dry-run"
+  );
+  assert(sourceDryRun.dry_run === true, "source dry-run should report dry_run=true");
+  assert(sourceDryRun.writes_database === false, "source dry-run should report writes_database=false");
+  assert(
+    !JSON.stringify(sourceDryRun).includes("manual://"),
+    "source dry-run should not echo configured project source URI"
+  );
+  assert(
+    sourceDryRun.input.source_resolution?.project_source_id === resolverSource.id,
+    `source dry-run should preserve source resolution: ${JSON.stringify(sourceDryRun.input)}`
+  );
+  assert(sourceDryRun.summary.proposals > 0, "source dry-run should produce proposals");
+  const sourceTextDryRun = runCli([
+    "keeper",
+    "candidates",
+    "--from-source",
+    resolverSource.id,
+    "--project-id",
+    resolverContext.projectId,
+    "--project-dir",
+    projectPath,
+    "--format",
+    "text"
+  ]);
+  assert(
+    sourceTextDryRun.stdout.includes("Source evidence:"),
+    `source text dry-run should include source evidence counts: ${sourceTextDryRun.stdout}`
+  );
+  const sourceMissingDb = runCli(
+    [
+      "keeper",
+      "candidates",
+      "--from-source",
+      resolverSource.id,
+      "--project-id",
+      resolverContext.projectId,
+      "--project-dir",
+      projectPath
+    ],
+    { expectFailure: true, env: noDbEnv }
+  );
+  assert(
+    `${sourceMissingDb.stdout}${sourceMissingDb.stderr}`.includes("RECALLANT_DATABASE_URL") &&
+      `${sourceMissingDb.stdout}${sourceMissingDb.stderr}`.includes("--from-source"),
+    "source missing-DB rejection should name RECALLANT_DATABASE_URL and --from-source"
+  );
+  const sourceMutualExclusion = runCli(
+    [
+      "keeper",
+      "candidates",
+      "--text",
+      controlledText,
+      "--from-source",
+      resolverSource.id,
+      "--project-id",
+      resolverContext.projectId,
+      "--project-dir",
+      projectPath
+    ],
+    { expectFailure: true }
+  );
+  assert(
+    `${sourceMutualExclusion.stdout}${sourceMutualExclusion.stderr}`.includes("exactly one"),
+    "source mutual exclusion should explain exactly one input mode"
+  );
+  const sourceWrite = parseJsonOutput(
+    runCli([
+      "keeper",
+      "candidates",
+      "--from-source",
+      resolverSource.id,
+      "--project-id",
+      resolverContext.projectId,
+      "--project-dir",
+      projectPath,
+      "--write-candidates",
+      "--confirm",
+      "--format",
+      "json"
+    ]),
+    "keeper source confirmed write"
+  );
+  assert(sourceWrite.dry_run === false, "source confirmed write should report dry_run=false");
+  assert(sourceWrite.writes_database === true, "source confirmed write should report writes_database=true");
+  assert(sourceWrite.persisted.count === sourceWrite.summary.proposals);
+  assert(
+    sourceWrite.proposals.every((proposal) =>
+      proposal.candidate.source_refs.some(
+        (ref) => ref.source_kind === "source" && ref.source_id === resolverSource.id
+      )
+    ),
+    "source confirmed write should persist project-source graph refs"
+  );
+  const sourceCliOutput = JSON.stringify({ sourceDryRun, sourceWrite });
+  assertNoForbidden(sourceCliOutput, "source CLI keeper output");
+  const resolverTools = toolMap(db, {
+    project_id: resolverContext.projectId,
+    developer_id: resolverContext.developerId
+  });
+  const mcpSourceDryRun = await callTool(resolverTools, "memory_keeper_candidates", {
+    project_id: resolverContext.projectId,
+    from_source_id: resolverSource.id,
+    max_source_chars: 2000,
+    max_source_memories: 3
+  });
+  assert(mcpSourceDryRun.dry_run === true, "MCP source dry-run should report dry_run=true");
+  assert(
+    mcpSourceDryRun.input.source_resolution?.project_source_id === resolverSource.id,
+    `MCP source dry-run should preserve source resolution: ${JSON.stringify(mcpSourceDryRun.input)}`
+  );
+  let mcpSourceNoConfirmRejected = false;
+  try {
+    await callTool(resolverTools, "memory_keeper_candidates", {
+      project_id: resolverContext.projectId,
+      from_source_id: resolverSource.id,
+      write_candidates: true
+    });
+  } catch (error) {
+    mcpSourceNoConfirmRejected =
+      String(error).includes("write_candidates") && String(error).includes("confirm");
+  }
+  assert(mcpSourceNoConfirmRejected, "MCP source write should require confirm");
+  const mcpSourceWrite = await callTool(resolverTools, "memory_keeper_candidates", {
+    project_id: resolverContext.projectId,
+    from_source_id: resolverSource.id,
+    write_candidates: true,
+    confirm: true
+  });
+  assert(mcpSourceWrite.dry_run === false, "MCP source write should report dry_run=false");
+  assert(mcpSourceWrite.writes_database === true, "MCP source write should report writes_database=true");
+  assert(mcpSourceWrite.persisted.count === mcpSourceWrite.summary.proposals);
+  assert(
+    mcpSourceWrite.proposals.every((proposal) =>
+      proposal.candidate.source_refs.some(
+        (ref) => ref.source_kind === "source" && ref.source_id === resolverSource.id
+      )
+    ),
+    "MCP source write should persist project-source graph refs"
+  );
+  const sourceMcpOutput = JSON.stringify({ mcpSourceDryRun, mcpSourceWrite });
+  assertNoForbidden(sourceMcpOutput, "source MCP keeper output");
+
   const allPersistedIds = [
     ...safeWrite.persisted.graph_candidate_ids,
-    ...unsafeWrite.persisted.graph_candidate_ids
+    ...unsafeWrite.persisted.graph_candidate_ids,
+    ...sourceWrite.persisted.graph_candidate_ids,
+    ...mcpSourceWrite.persisted.graph_candidate_ids
   ];
   const first = await db.getGraphCandidate({
     project_path: projectPath,
@@ -250,7 +477,9 @@ try {
     (candidate) =>
       candidate.extraction_method === "keeper" &&
       candidate.source_refs.length > 0 &&
-      candidate.source_refs.every((ref) => ref.source_id?.startsWith(marker))
+      candidate.source_refs.every(
+        (ref) => ref.source_id?.startsWith(marker) || ref.source_id === resolverSource.id
+      )
   );
   assert(sourceLinked, "stored keeper candidates should stay source-linked");
 
@@ -283,6 +512,32 @@ try {
           unsafe_stored_leak_scan_passed: !storedPayload.includes(forbiddenToken),
           unsafe_lifecycle_needs_review:
             unsafeWrite.summary.lifecycle_states.includes("needs_review"),
+          resolver_source_excerpt: resolvedSource.input_kind === "source_excerpt",
+          resolver_project_source_linked:
+            resolvedSource.source_resolution.project_source_id === resolverSource.id,
+          resolver_project_isolated: crossProjectSourceRejected,
+          resolver_leak_scan_passed: !resolvedSourceText.includes(forbiddenToken),
+          source_cli_dry_run: sourceDryRun.dry_run === true && sourceDryRun.writes_database === false,
+          source_cli_text_output: sourceTextDryRun.stdout.includes("Source evidence:"),
+          source_cli_missing_db_rejected: sourceMissingDb.status !== 0,
+          source_cli_mutual_exclusion_rejected: sourceMutualExclusion.status !== 0,
+          source_cli_confirmed_write: sourceWrite.persisted.count > 0,
+          source_cli_project_source_refs: sourceWrite.proposals.every((proposal) =>
+            proposal.candidate.source_refs.some(
+              (ref) => ref.source_kind === "source" && ref.source_id === resolverSource.id
+            )
+          ),
+          source_cli_leak_scan_passed: !sourceCliOutput.includes(forbiddenToken),
+          source_mcp_dry_run:
+            mcpSourceDryRun.dry_run === true && mcpSourceDryRun.writes_database === false,
+          source_mcp_confirm_gate_rejected: mcpSourceNoConfirmRejected,
+          source_mcp_confirmed_write: mcpSourceWrite.persisted.count > 0,
+          source_mcp_project_source_refs: mcpSourceWrite.proposals.every((proposal) =>
+            proposal.candidate.source_refs.some(
+              (ref) => ref.source_kind === "source" && ref.source_id === resolverSource.id
+            )
+          ),
+          source_mcp_leak_scan_passed: !sourceMcpOutput.includes(forbiddenToken),
           retrieval_isolation: !persistedCandidateIdsVisible
         },
         dry_run: {

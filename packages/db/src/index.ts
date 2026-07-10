@@ -1298,6 +1298,40 @@ export type ProjectSourceInput = {
   metadata?: JsonObject | null;
 };
 
+export type ResolveKeeperProjectSourceInput = {
+  source_id: string;
+  project_id?: string | null;
+  project_path?: string | null;
+  max_source_chars?: number | null;
+  max_source_memories?: number | null;
+};
+
+export type KeeperProjectSourceResolution = {
+  project_source_id: string;
+  project_source_kind: string;
+  project_source_label: string;
+  project_source_status: string;
+  evidence_count: number;
+  omitted_count: number;
+  max_source_chars: number;
+  max_source_memories: number;
+  text_chars: number;
+  empty: boolean;
+  risk_reasons?: string[];
+};
+
+export type ResolvedKeeperProjectSource = {
+  input_kind: "source_excerpt";
+  text: string;
+  source_kind: "source";
+  source_id: string;
+  uri: string | null;
+  path: string | null;
+  label: string;
+  metadata: JsonObject;
+  source_resolution: KeeperProjectSourceResolution;
+};
+
 type CaptureProfile = "light" | "standard" | "detailed" | "custom";
 
 type CapturePolicy = {
@@ -1379,6 +1413,17 @@ function readPositiveIntEnv(name: string, fallback: number) {
 
 function readBoundedPositiveIntEnv(name: string, fallback: number, max: number) {
   return Math.min(readPositiveIntEnv(name, fallback), max);
+}
+
+function boundedPositiveInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(Math.trunc(parsed), max));
 }
 
 function readPositiveFloatEnv(name: string, fallback: number) {
@@ -3548,6 +3593,194 @@ export class RecallantDb {
       [projectId]
     );
     return result.rows.map((row) => this.enrichProjectSource(row));
+  }
+
+  async resolveKeeperProjectSource(
+    input: ResolveKeeperProjectSourceInput
+  ): Promise<ResolvedKeeperProjectSource> {
+    if (!input.source_id) {
+      throw new Error("VALIDATION_ERROR: keeper source resolution requires source_id");
+    }
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject(input.project_path);
+    const maxSourceChars = boundedPositiveInt(input.max_source_chars, 12_000, 500, 50_000);
+    const maxSourceMemories = boundedPositiveInt(input.max_source_memories, 12, 1, 50);
+    const sourceResult = await this.pool.query(
+      `
+        SELECT id, project_id, source_kind, label, uri, is_primary, status, metadata,
+               created_at, updated_at
+        FROM project_sources
+        WHERE id = $1 AND project_id = $2
+      `,
+      [input.source_id, context.projectId]
+    );
+    const sourceRow = sourceResult.rows[0] as Record<string, unknown> | undefined;
+    if (!sourceRow) {
+      throw new Error("VALIDATION_ERROR: keeper source not found for this project");
+    }
+    const source = this.enrichProjectSource(sourceRow) as Record<string, unknown>;
+    const sourceStatus = String(source.status ?? "active");
+    if (sourceStatus !== "active") {
+      throw new Error(`VALIDATION_ERROR: keeper source must be active (status: ${sourceStatus})`);
+    }
+    const sourceFilter = await this.sourceFilter(input.source_id);
+    if (!sourceFilter) {
+      throw new Error("VALIDATION_ERROR: keeper source filter could not be resolved");
+    }
+
+    const clauses = [
+      "m.project_id = $1::uuid",
+      "m.developer_id = $2::uuid",
+      "m.status IN ('candidate', 'needs_review', 'accepted')",
+      "m.use_policy <> 'do_not_use'"
+    ];
+    const values: unknown[] = [context.projectId, context.developerId];
+    this.addSourceFilterClause(clauses, values, sourceFilter, "m");
+    values.push(maxSourceMemories);
+    const memoryRows = await this.pool.query<{
+      memory_id: string;
+      memory_type: string;
+      title: string;
+      body: string;
+      status: string;
+      use_policy: string;
+      created_by: string;
+      updated_at: Date;
+      source_refs: unknown;
+      total_count: number;
+    }>(
+      `
+        SELECT
+          m.id AS memory_id,
+          m.memory_type,
+          m.title,
+          m.body,
+          m.status,
+          m.use_policy,
+          m.created_by,
+          m.updated_at,
+          coalesce(
+            jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
+              FILTER (WHERE r.id IS NOT NULL),
+            '[]'::jsonb
+          ) AS source_refs,
+          count(*) OVER()::int AS total_count
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE ${clauses.join(" AND ")}
+        GROUP BY m.id
+        ORDER BY m.updated_at DESC, m.id
+        LIMIT $${values.length}::int
+      `,
+      values
+    );
+
+    const totalCount = Number(memoryRows.rows[0]?.total_count ?? 0);
+    const riskReasons = new Set<string>();
+    const sections: string[] = [];
+    let usedChars = 0;
+    let includedCount = 0;
+    let truncatedByBudget = false;
+
+    for (const [index, row] of memoryRows.rows.entries()) {
+      const sourceRefs = Array.isArray(row.source_refs)
+        ? row.source_refs.map((sourceRef) => this.redactSourceRef(sourceRef))
+        : [];
+      const rawQuotes = sourceRefs
+        .map((sourceRef) =>
+          sourceRef && typeof sourceRef === "object"
+            ? String((sourceRef as Record<string, unknown>).quote ?? "")
+            : ""
+        )
+        .filter(Boolean)
+        .slice(0, 3);
+      const rawEvidenceText = [row.title, row.body, ...rawQuotes].join("\n");
+      if (rawSecretLikeFindings(rawEvidenceText, "keeper_source_evidence").length > 0) {
+        riskReasons.add("source_evidence_secret_like_marker_redacted");
+      }
+      if (/\b(customer|patient|ssn|passport|credit card)\b/i.test(rawEvidenceText)) {
+        riskReasons.add("source_evidence_sensitive_personal_data_marker_detected");
+      }
+      if (/\b(raw artifact|backup dump|database dump)\b/i.test(rawEvidenceText)) {
+        riskReasons.add("source_evidence_raw_artifact_marker_detected");
+      }
+      const safeTitle = redactSecretValues(row.title ?? "Untitled memory");
+      const safeBody = redactSecretValues(row.body ?? "");
+      const safeQuotes = rawQuotes.map((quote) => redactSecretValues(quote));
+      const section = [
+        `Source evidence ${index + 1}`,
+        `Memory: ${safeTitle}`,
+        `Memory type: ${row.memory_type}`,
+        `Status: ${row.status}; use policy: ${row.use_policy}; created by: ${row.created_by}`,
+        safeBody,
+        ...safeQuotes.map((quote) => `Source quote: ${quote}`)
+      ]
+        .filter((line) => line.trim().length > 0)
+        .join("\n");
+      const separator = sections.length > 0 ? "\n\n" : "";
+      const remaining = maxSourceChars - usedChars - separator.length;
+      if (remaining <= 0) {
+        truncatedByBudget = true;
+        break;
+      }
+      const captured =
+        section.length > remaining
+          ? `${section.slice(0, remaining)}\n[truncated_source_evidence]`
+          : section;
+      sections.push(`${separator}${captured}`);
+      usedChars += separator.length + captured.length;
+      includedCount += 1;
+      if (section.length > remaining) {
+        truncatedByBudget = true;
+        break;
+      }
+    }
+
+    const text = sections.join("");
+    const sourceLabel = String(source.display_label ?? source.label ?? "Keeper source");
+    const sourceKind = String(source.source_kind ?? "source");
+    const omittedCount = Math.max(0, totalCount - includedCount);
+    const sourceResolution = {
+      project_source_id: String(source.id ?? input.source_id),
+      project_source_kind: sourceKind,
+      project_source_label: sourceLabel,
+      project_source_status: sourceStatus,
+      evidence_count: includedCount,
+      omitted_count: omittedCount,
+      max_source_chars: maxSourceChars,
+      max_source_memories: maxSourceMemories,
+      text_chars: text.length,
+      empty: includedCount === 0,
+      risk_reasons: Array.from(riskReasons)
+    };
+    return {
+      input_kind: "source_excerpt",
+      text,
+      source_kind: "source",
+      source_id: String(source.id ?? input.source_id),
+      uri: null,
+      path: null,
+      label: sourceLabel,
+      metadata: {
+        resolver: "keeper_project_source",
+        project_id: context.projectId,
+        developer_id: context.developerId,
+        project_source_id: String(source.id ?? input.source_id),
+        project_source_kind: sourceKind,
+        project_source_label: sourceLabel,
+        project_source_status: sourceStatus,
+        evidence_count: includedCount,
+        omitted_count: omittedCount,
+        max_source_chars: maxSourceChars,
+        max_source_memories: maxSourceMemories,
+        text_chars: text.length,
+        truncated_by_budget: truncatedByBudget,
+        risk_reasons: Array.from(riskReasons),
+        raw_read_policy: "bounded_governed_memory_evidence_only"
+      },
+      source_resolution: sourceResolution
+    };
   }
 
   async detachProjectSource(input: { source_id: string; reason?: string | null }) {

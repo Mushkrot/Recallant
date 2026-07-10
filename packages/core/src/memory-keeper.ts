@@ -38,6 +38,21 @@ export type MemoryKeeperSourceInput = {
   anchor?: string | null;
   label?: string | null;
   metadata?: Record<string, unknown>;
+  source_resolution?: MemoryKeeperSourceResolution | null;
+};
+
+export type MemoryKeeperSourceResolution = {
+  project_source_id: string;
+  project_source_kind: string;
+  project_source_label: string;
+  project_source_status: string;
+  evidence_count: number;
+  omitted_count: number;
+  max_source_chars: number;
+  max_source_memories: number;
+  text_chars: number;
+  empty: boolean;
+  risk_reasons?: string[];
 };
 
 export type MemoryKeeperPolicyResult = {
@@ -67,6 +82,7 @@ export type MemoryKeeperPlan = {
     source_id: string | null;
     path: string | null;
     anchor: string | null;
+    source_resolution: MemoryKeeperSourceResolution | null;
   };
   policy: MemoryKeeperPolicyResult;
   proposals: MemoryKeeperProposal[];
@@ -172,6 +188,28 @@ export function classifyMemoryKeeperInput(text: string): MemoryKeeperPolicyResul
   };
 }
 
+function sourceResolutionRiskReasons(input: MemoryKeeperSourceInput) {
+  const reasons = input.source_resolution?.risk_reasons;
+  return Array.isArray(reasons)
+    ? reasons.filter((reason): reason is string => typeof reason === "string" && reason.length > 0)
+    : [];
+}
+
+function applySourceResolutionRiskPolicy(
+  input: MemoryKeeperSourceInput,
+  policy: MemoryKeeperPolicyResult
+): MemoryKeeperPolicyResult {
+  const riskReasons = sourceResolutionRiskReasons(input);
+  if (riskReasons.length === 0) return policy;
+  return {
+    ...policy,
+    risk_level: policy.risk_level === "blocked" ? "blocked" : "needs_review",
+    lifecycle_state: "needs_review",
+    confidence_cap: Math.min(policy.confidence_cap, 0.42),
+    reasons: Array.from(new Set([...policy.reasons, ...riskReasons]))
+  };
+}
+
 export function keeperSourceRef(
   input: MemoryKeeperSourceInput,
   quoteText = input.text
@@ -186,7 +224,8 @@ export function keeperSourceRef(
     metadata: {
       ...(input.metadata ?? {}),
       input_kind: input.input_kind,
-      extraction_route: "memory_keeper"
+      extraction_route: "memory_keeper",
+      source_resolution: input.source_resolution ?? null
     }
   };
 }
@@ -509,7 +548,8 @@ function keeperSourceEndpoint(input: MemoryKeeperSourceInput): GraphCandidateEnd
       source_kind: input.source_kind ?? "external",
       source_id: input.source_id ?? null,
       path: input.path ?? null,
-      uri: input.uri ?? null
+      uri: input.uri ?? null,
+      source_resolution: input.source_resolution ?? null
     }
   };
 }
@@ -586,7 +626,7 @@ function relationProposal(
 }
 
 export function buildMemoryKeeperPlan(input: MemoryKeeperSourceInput): MemoryKeeperPlan {
-  const policy = classifyMemoryKeeperInput(input.text);
+  const policy = applySourceResolutionRiskPolicy(input, classifyMemoryKeeperInput(input.text));
   const signals = extractMemoryKeeperSignals(input).slice(0, 16);
   const proposals: MemoryKeeperProposal[] = signals.map((signal) =>
     signalNodeProposal(input, policy, signal)
@@ -683,7 +723,8 @@ export function summarizeMemoryKeeperPlan(
       source_kind: input.source_kind ?? "external",
       source_id: input.source_id ?? null,
       path: input.path ?? null,
-      anchor: input.anchor ?? null
+      anchor: input.anchor ?? null,
+      source_resolution: input.source_resolution ?? null
     },
     policy,
     proposals,

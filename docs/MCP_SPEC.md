@@ -255,6 +255,11 @@ state without automatically inserting an `edges` row.
 
 The first candidate tools are:
 
+- `memory_keeper_candidates` - dry-run or explicitly persist governed graph candidate proposals from
+  controlled keeper text or bounded project-source evidence. Text dry-run works without
+  `RECALLANT_DATABASE_URL`; `from_source_id` resolves an active configured project source through
+  database-backed Recallant evidence even for dry-runs. Persistence requires `write_candidates:
+  true` and `confirm: true`.
 - `memory_create_graph_candidate` - create a project-scoped node or edge candidate with lifecycle
   state, scope, audience, confidence, extraction method, creator provenance, bounded metadata, and
   source refs.
@@ -273,6 +278,10 @@ The first candidate tools are:
   apply one explicit lifecycle maintenance action. Plan mode is read-only. Apply mode requires
   `confirm: true`, merge and supersede actions require `target_graph_candidate_id`, and maintenance
   never mutates active `edges` or retrieval semantics.
+
+`memory_keeper_candidates` source-selected input consumes bounded governed evidence that Recallant
+already stores, such as source-linked memory bodies and bounded source-reference quotes. It does not raw-read connector accounts, arbitrary URIs, server paths, local paths, raw artifacts, backups, passive vault sync streams, or raw media. Stored source-selected keeper candidates remain staged review records and do not affect default retrieval until existing explicit promotion rules allow a
+compatible accepted edge into `edges`.
 
 Agent-generated and import-generated candidates require source refs. Tool handlers must keep project
 scope explicit, reject wrong-project access, and block raw secrets, database URLs, provider tokens,

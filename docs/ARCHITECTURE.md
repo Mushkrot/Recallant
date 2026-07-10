@@ -126,12 +126,12 @@ belongs to, and which candidates still need review. It must keep provenance, sco
 extraction method, and review state attached before graph output can influence recall.
 
 Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, a
-deterministic `recallant keeper candidates` path for keeper-generated candidate proposals, read-only
-graph hygiene reporting, explicit promotion for accepted chunk-to-chunk edge candidates, and a
-read-only Workbench topology view derived from graph candidates, source refs, promotion readiness,
-and active `edges`. It now also has governed graph maintenance workflows for read-only maintenance
-planning and confirm-gated candidate lifecycle actions, plus named one-hop graph retrieval profiles
-on `memory_search`, including `same_topic`,
+deterministic `recallant keeper candidates` path for keeper-generated candidate proposals, including
+B10 `--from-source <project-source-id>` source selection over bounded governed Recallant evidence,
+read-only graph hygiene reporting, explicit promotion for accepted chunk-to-chunk edge candidates,
+and a read-only Workbench topology view derived from graph candidates, source refs, promotion readiness, and active `edges`. It now also has governed graph maintenance workflows for read-only
+maintenance planning and confirm-gated candidate lifecycle actions, plus named one-hop graph
+retrieval profiles on `memory_search`, including `same_topic`,
 `source_neighborhood`, `decision_cluster`, `preference_chain`, `conflict_check`,
 `supersession_trace`, and `project_context`, with legacy `graph_expand: true` preserved through the
 `edge_neighborhood` profile. These surfaces stay review-first: candidates preserve source refs,
@@ -139,10 +139,13 @@ confidence, extraction method, lifecycle state, and provenance. Accepting a cand
 review-only; retrieval activation requires explicit promotion through the MCP, CLI, or Workbench
 promotion path.
 
+Source-selected keeper input resolves configured project sources to already-governed memory/source
+evidence. It does not raw-read connector accounts, arbitrary URIs, server paths, local paths, raw
+artifacts, backups, passive vault sync streams, or raw media.
+
 Recallant does not yet have automatic promotion policies, a dedicated graph database, passive vault
 sync, raw media ingestion, support for promotion endpoint kinds beyond the B6 chunk-to-chunk subset,
-first-class graph node storage, or graph retrieval semantics driven by unpromoted candidates. Those
-remain future slices layered on top of the governed graph vocabulary.
+first-class graph node storage, human-memory expansion, or graph retrieval semantics driven by unpromoted candidates. Those remain future slices layered on top of the governed graph vocabulary.
 
 ## Safety Model
 

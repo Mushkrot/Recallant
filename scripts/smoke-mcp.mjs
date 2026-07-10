@@ -14,6 +14,7 @@ const expectedTools = [
   "memory_search",
   "memory_fetch_chunk",
   "memory_link",
+  "memory_keeper_candidates",
   "memory_create_graph_candidate",
   "memory_list_graph_candidates",
   "memory_get_graph_candidate",
@@ -84,6 +85,8 @@ let governedMemoryValidationErrors = {};
 let governedMemoryExamples = {};
 let graphCandidateToolsListExcerpt = null;
 let graphCandidateStubResponses = {};
+let keeperToolListExcerpt = null;
+let keeperStubResponses = {};
 let graphMaintenanceValidationErrors = {};
 try {
   await server.connect(serverTransport);
@@ -151,6 +154,8 @@ try {
   );
   const graphHygieneTool = list.tools?.find((tool) => tool.name === "memory_graph_hygiene");
   const graphMaintenanceTool = list.tools?.find((tool) => tool.name === "memory_graph_maintenance");
+  const keeperTool = list.tools?.find((tool) => tool.name === "memory_keeper_candidates");
+  assert(keeperTool, "tools/list missing memory_keeper_candidates");
   assert(graphCreateTool, "tools/list missing memory_create_graph_candidate");
   assert(graphListTool, "tools/list missing memory_list_graph_candidates");
   assert(graphGetTool, "tools/list missing memory_get_graph_candidate");
@@ -160,6 +165,7 @@ try {
   assert(graphMaintenanceTool, "tools/list missing memory_graph_maintenance");
   mustInclude(
     JSON.stringify([
+      keeperTool,
       graphCreateTool,
       graphListTool,
       graphGetTool,
@@ -169,6 +175,10 @@ try {
       graphMaintenanceTool
     ]),
     [
+      "Dry-run",
+      "Do not paste raw secrets",
+      "from_source_id",
+      "write_candidates",
       "governed",
       "staging",
       "do not affect default retrieval",
@@ -180,6 +190,11 @@ try {
     ],
     "graph candidate tools/list excerpt"
   );
+  keeperToolListExcerpt = {
+    name: keeperTool.name,
+    description: keeperTool.description,
+    properties: Object.keys(keeperTool.inputSchema?.properties ?? {})
+  };
   graphCandidateToolsListExcerpt = {
     names: [
       graphCreateTool.name,
@@ -358,6 +373,56 @@ try {
       { ...validCreateMemoryArgs, body: undefined },
       ["body", "required", "raw secrets"]
     )
+  };
+
+  const keeperDryRunCall = await client.callTool(
+    {
+      name: "memory_keeper_candidates",
+      arguments: {
+        project_dir: "/tmp/recallant-mcp-keeper-candidate",
+        text: [
+          "Project: Recallant",
+          "Topic: MCP keeper smoke",
+          "Entity: Codex",
+          "Decision: MCP keeper dry-run stays staged"
+        ].join("\n"),
+        source_kind: "external",
+        source_id: "mcp-keeper-smoke",
+        label: "MCP keeper smoke"
+      }
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+  const keeperDryRun = JSON.parse(keeperDryRunCall.content?.[0]?.text ?? "{}");
+  if (
+    keeperDryRun.action !== "keeper_candidates" ||
+    keeperDryRun.dry_run !== true ||
+    keeperDryRun.writes_database !== false ||
+    keeperDryRun.summary?.proposals <= 0 ||
+    keeperDryRun.governance?.retrieval_active !== false
+  ) {
+    throw new Error(`Keeper MCP dry-run was unsafe: ${JSON.stringify(keeperDryRun)}`);
+  }
+  mustNotContain(JSON.stringify(keeperDryRun), forbiddenOutputFixtures, "keeper MCP dry-run");
+  const keeperNoConfirmError = await expectToolValidationError(
+    "memory_keeper_candidates",
+    "keeper write confirm validation",
+    {
+      project_dir: "/tmp/recallant-mcp-keeper-candidate",
+      text: "Project: Recallant\nTopic: MCP keeper confirm gate",
+      write_candidates: true
+    },
+    ["write_candidates", "confirm"]
+  );
+  keeperStubResponses = {
+    dry_run: {
+      action: keeperDryRun.action,
+      proposals: keeperDryRun.summary?.proposals,
+      writes_database: keeperDryRun.writes_database,
+      retrieval_active: keeperDryRun.governance?.retrieval_active
+    },
+    no_confirm_error: keeperNoConfirmError
   };
 
   const graphCreateCall = await client.callTool(
@@ -797,6 +862,10 @@ process.stdout.write(
       graph_candidate_tools: {
         tools_list_excerpt: graphCandidateToolsListExcerpt,
         stub_responses: graphCandidateStubResponses
+      },
+      keeper_candidate_tool: {
+        tools_list_excerpt: keeperToolListExcerpt,
+        stub_responses: keeperStubResponses
       }
     },
     null,
