@@ -1542,6 +1542,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       return stubResponse("memory_promote_graph_candidate", {
         graph_candidate_id: args.graph_candidate_id,
         status: "blocked",
+        active_edge: false,
         retrieval_active: false,
         promoted_edge_id: null,
         blocked_reason: "unsupported_endpoint",
@@ -1551,8 +1552,13 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           explicit_promotion: true,
           accept_remains_review_only: true,
           active_graph_table: "edges",
+          active_edge: false,
           retrieval_active: false,
-          supported_endpoint_policy: "chunk_to_chunk"
+          supported_endpoint_policy: "current_edges",
+          endpoint_capabilities: {
+            active_edge_supported: false,
+            chunk_retrieval_supported: false
+          }
         },
         ...projectScopeDiagnosticOutput(scoped)
       });
@@ -1600,7 +1606,9 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           read_only: true,
           mutates_candidates: false,
           mutates_edges: false,
-          supported_endpoint_policy: "chunk_to_chunk"
+          supported_endpoint_policy: "current_edges",
+          active_edge_endpoint_kinds: ["chunk", "event", "external"],
+          chunk_retrieval_endpoint_policy: "chunk_to_chunk"
         },
         ...projectScopeDiagnosticOutput(scoped)
       });

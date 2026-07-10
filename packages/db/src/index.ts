@@ -3,13 +3,17 @@ import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   buildRecallantReadinessContract,
+  graphActiveEdgeEndpointKindValues,
   graphCandidateExtractionMethodValues,
   graphCandidateKindValues,
   graphCandidateReviewActionValues,
   graphCandidateSourceRefKindValues,
+  graphCurrentEdgesPromotionEndpointPolicy,
+  graphEndpointPromotionCapabilities,
   graphRetrievalProfileForGraphExpand,
   graphRetrievalProfilePolicy,
   isGraphCandidateMaintenanceActionKind,
+  isGraphActiveEdgeEndpointKind,
   graphTreeLifecycleStateValues,
   graphTreeNodeKindValues,
   parseGraphRetrievalProfile,
@@ -101,6 +105,7 @@ const graphCandidateSourceRefKindSql = sqlStringList(graphCandidateSourceRefKind
 const graphCandidateReviewActionSql = sqlStringList(graphCandidateReviewActionValues);
 const graphCandidateKindSet = new Set<string>(graphCandidateKindValues);
 const graphTreeNodeKindSet = new Set<string>(graphTreeNodeKindValues);
+const graphActiveEdgeEndpointKindSet = new Set<string>(graphActiveEdgeEndpointKindValues);
 const graphTreeLifecycleStateSet = new Set<string>(graphTreeLifecycleStateValues);
 const graphCandidateExtractionMethodSet = new Set<string>(graphCandidateExtractionMethodValues);
 const graphCandidateSourceRefKindSet = new Set<string>(graphCandidateSourceRefKindValues);
@@ -1880,6 +1885,8 @@ function validateGraphCandidateEndpoint(endpoint: GraphCandidateEndpointRef, lab
   if (!endpoint.id || typeof endpoint.id !== "string") {
     throw new Error(`VALIDATION_ERROR: ${label} endpoint id is required`);
   }
+  assertMaxChars(`graph candidate ${label} endpoint id`, endpoint.id, 512);
+  assertMaxChars(`graph candidate ${label} endpoint label`, endpoint.label, 256);
 }
 
 function normalizeGraphCandidateScope(
@@ -2056,6 +2063,7 @@ function graphTopologyBoundedLabel(value: unknown, fallback: string, maxLength =
 
 function graphTopologyEndpointLabel(endpoint: GraphCandidateEndpointRef, publicSafe = false) {
   const kind = endpoint.kind || "endpoint";
+  if (kind === "external") return "External endpoint";
   if (publicSafe) return graphTopologyBoundedLabel(kind, "endpoint", 36);
   return graphTopologyBoundedLabel(
     endpoint.label ?? `${kind} ${endpoint.id.slice(0, 8)}`,
@@ -6777,6 +6785,7 @@ export class RecallantDb {
         return {
           graph_candidate_id: candidate.graph_candidate_id,
           status: "blocked",
+          active_edge: false,
           retrieval_active: false,
           promoted_edge_id: null,
           blocked_reason: blockedReason,
@@ -6786,8 +6795,13 @@ export class RecallantDb {
             explicit_promotion: true,
             accept_remains_review_only: true,
             active_graph_table: "edges",
+            active_edge: false,
             retrieval_active: false,
-            supported_endpoint_policy: "chunk_to_chunk"
+            supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+            endpoint_capabilities: {
+              active_edge_supported: false,
+              chunk_retrieval_supported: false
+            }
           }
         };
       };
@@ -6818,30 +6832,35 @@ export class RecallantDb {
       if (!src.id || !dst.id || !relationType) {
         return blocked("missing_endpoint", "Promotion requires source, destination, and relation.");
       }
-      if (src.kind !== "chunk" || dst.kind !== "chunk") {
+      const endpointCapabilities = graphEndpointPromotionCapabilities(src.kind, dst.kind);
+      if (!endpointCapabilities.active_edge_supported) {
         return blocked(
           "unsupported_endpoint",
-          "B6 promotion supports retrieval-active chunk-to-chunk edge candidates only."
+          "Promotion supports only chunk, event, and external edge endpoints."
         );
       }
       if (src.kind === dst.kind && src.id === dst.id) {
         return blocked("self_loop", "Self-loop graph candidate edges cannot be promoted.");
       }
+      const srcEndpointBlock = await this.graphPromotionEndpointBlock(client, src, context);
+      if (srcEndpointBlock) return blocked(srcEndpointBlock.reason, srcEndpointBlock.detail);
+      const dstEndpointBlock = await this.graphPromotionEndpointBlock(client, dst, context);
+      if (dstEndpointBlock) return blocked(dstEndpointBlock.reason, dstEndpointBlock.detail);
 
       const existing = await client.query<{ id: string }>(
         `
           SELECT id
           FROM edges
           WHERE project_id = $1
-            AND src_kind = 'chunk'
-            AND src_id = $2
-            AND dst_kind = 'chunk'
-            AND dst_id = $3
-            AND relation_type = $4
+            AND src_kind = $2
+            AND src_id = $3
+            AND dst_kind = $4
+            AND dst_id = $5
+            AND relation_type = $6
           ORDER BY created_at ASC, id ASC
           LIMIT 1
         `,
-        [context.projectId, src.id, dst.id, relationType]
+        [context.projectId, src.kind, src.id, dst.kind, dst.id, relationType]
       );
       const previousMetadata = readObjectSetting(row.metadata) ?? {};
       const previousPromotion = readObjectSetting(previousMetadata.graph_promotion) ?? {};
@@ -6854,12 +6873,14 @@ export class RecallantDb {
             INSERT INTO edges (
               project_id, src_kind, src_id, dst_kind, dst_id, relation_type, weight, metadata
             )
-            VALUES ($1, 'chunk', $2, 'chunk', $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
           `,
           [
             context.projectId,
+            src.kind,
             src.id,
+            dst.kind,
             dst.id,
             relationType,
             1,
@@ -6869,7 +6890,8 @@ export class RecallantDb {
               promoted_from_graph_candidate: true,
               promoted_at: promotedAt,
               promotion_source: "graph_candidate",
-              promotion_endpoint_policy: "chunk_to_chunk"
+              promotion_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+              endpoint_capabilities: endpointCapabilities
             })
           ]
         );
@@ -6891,9 +6913,11 @@ export class RecallantDb {
           promoted_at: promotedAt,
           promoted_edge_id: promotedEdgeId,
           status,
-          retrieval_active: true,
+          active_edge: true,
+          retrieval_active: endpointCapabilities.chunk_retrieval_supported,
           active_graph_table: "edges",
-          endpoint_policy: "chunk_to_chunk",
+          endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+          endpoint_capabilities: endpointCapabilities,
           actor_kind: actorKind
         }
       };
@@ -6923,7 +6947,8 @@ export class RecallantDb {
             promoted_edge_id: promotedEdgeId,
             promoted_at: promotedAt,
             active_graph_table: "edges",
-            endpoint_policy: "chunk_to_chunk"
+            endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+            endpoint_capabilities: endpointCapabilities
           })
         ]
       );
@@ -6931,7 +6956,8 @@ export class RecallantDb {
       return {
         graph_candidate_id: candidate.graph_candidate_id,
         status,
-        retrieval_active: true,
+        active_edge: true,
+        retrieval_active: endpointCapabilities.chunk_retrieval_supported,
         promoted_edge_id: promotedEdgeId,
         blocked_reason: null,
         blocked_detail: null,
@@ -6940,8 +6966,10 @@ export class RecallantDb {
           explicit_promotion: true,
           accept_remains_review_only: true,
           active_graph_table: "edges",
-          retrieval_active: true,
-          supported_endpoint_policy: "chunk_to_chunk"
+          active_edge: true,
+          retrieval_active: endpointCapabilities.chunk_retrieval_supported,
+          supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+          endpoint_capabilities: endpointCapabilities
         }
       };
     });
@@ -7033,6 +7061,13 @@ export class RecallantDb {
     const firstDuplicateIds = new Set(
       duplicateGroups.map((group) => [...group.candidate_ids].sort()[0]).filter(Boolean)
     );
+    const promotionEndpointBlocks = await this.graphPromotionEndpointBlocks(
+      this.pool,
+      candidates.flatMap((candidate) =>
+        candidate.candidate_kind === "edge" ? [candidate.src, candidate.dst] : []
+      ),
+      context
+    );
     const readiness: GraphCandidateHygieneResult["readiness"] = [];
     const counts: GraphCandidateHygieneResult["counts"] = {
       total: candidates.length,
@@ -7105,15 +7140,18 @@ export class RecallantDb {
         });
         continue;
       }
-      if (candidate.src.kind !== "chunk" || candidate.dst.kind !== "chunk") {
+      const endpointCapabilities = graphEndpointPromotionCapabilities(
+        candidate.src.kind,
+        candidate.dst.kind
+      );
+      if (!endpointCapabilities.active_edge_supported) {
         incrementBlocked("unsupported_endpoint");
         readiness.push({
           ...base,
           status: "blocked",
           promoted_edge_id: null,
           blocked_reason: "unsupported_endpoint",
-          blocked_detail:
-            "B6 promotion supports retrieval-active chunk-to-chunk edge candidates only."
+          blocked_detail: "Promotion supports only chunk, event, and external edge endpoints."
         });
         continue;
       }
@@ -7125,6 +7163,20 @@ export class RecallantDb {
           promoted_edge_id: null,
           blocked_reason: "self_loop",
           blocked_detail: "Self-loop graph candidate edges cannot be promoted."
+        });
+        continue;
+      }
+      const endpointBlock =
+        promotionEndpointBlocks.get(candidate.src.kind + ":" + candidate.src.id) ??
+        promotionEndpointBlocks.get(candidate.dst.kind + ":" + candidate.dst.id);
+      if (endpointBlock) {
+        incrementBlocked(endpointBlock.reason);
+        readiness.push({
+          ...base,
+          status: "blocked",
+          promoted_edge_id: null,
+          blocked_reason: endpointBlock.reason,
+          blocked_detail: endpointBlock.detail
         });
         continue;
       }
@@ -7174,7 +7226,9 @@ export class RecallantDb {
         read_only: true,
         mutates_candidates: false,
         mutates_edges: false,
-        supported_endpoint_policy: "chunk_to_chunk"
+        supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+        active_edge_endpoint_kinds: graphActiveEdgeEndpointKindValues,
+        chunk_retrieval_endpoint_policy: "chunk_to_chunk"
       }
     };
   }
@@ -7549,7 +7603,9 @@ export class RecallantDb {
           "promotion_readiness",
           "edges"
         ],
-        supported_endpoint_policy: "chunk_to_chunk",
+        supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+        active_edge_endpoint_kinds: graphActiveEdgeEndpointKindValues,
+        chunk_retrieval_endpoint_policy: "chunk_to_chunk",
         retrieval_semantics_changed: false
       }
     });
@@ -7789,8 +7845,14 @@ export class RecallantDb {
       const srcNodeId = addNode({
         topology_node_id: graphTopologyStableId("endpoint", edge.src_kind, edge.src_id),
         node_kind: "endpoint",
-        label: graphTopologyBoundedLabel(`${edge.src_kind} ${edge.src_id.slice(0, 8)}`, "endpoint"),
-        public_safe_label: graphTopologyBoundedLabel(edge.src_kind, "endpoint", 36),
+        label: graphTopologyEndpointLabel({
+          kind: edge.src_kind as GraphCandidateEndpointRef["kind"],
+          id: edge.src_id
+        }),
+        public_safe_label: graphTopologyEndpointLabel(
+          { kind: edge.src_kind as GraphCandidateEndpointRef["kind"], id: edge.src_id },
+          true
+        ),
         detail: graphTopologyBoundedLabel(edge.src_kind, "endpoint", 48),
         graph_node_kind: graphTreeNodeKindSet.has(edge.src_kind)
           ? (edge.src_kind as GraphTreeNodeKind)
@@ -7803,8 +7865,14 @@ export class RecallantDb {
       const dstNodeId = addNode({
         topology_node_id: graphTopologyStableId("endpoint", edge.dst_kind, edge.dst_id),
         node_kind: "endpoint",
-        label: graphTopologyBoundedLabel(`${edge.dst_kind} ${edge.dst_id.slice(0, 8)}`, "endpoint"),
-        public_safe_label: graphTopologyBoundedLabel(edge.dst_kind, "endpoint", 36),
+        label: graphTopologyEndpointLabel({
+          kind: edge.dst_kind as GraphCandidateEndpointRef["kind"],
+          id: edge.dst_id
+        }),
+        public_safe_label: graphTopologyEndpointLabel(
+          { kind: edge.dst_kind as GraphCandidateEndpointRef["kind"], id: edge.dst_id },
+          true
+        ),
         detail: graphTopologyBoundedLabel(edge.dst_kind, "endpoint", 48),
         graph_node_kind: graphTreeNodeKindSet.has(edge.dst_kind)
           ? (edge.dst_kind as GraphTreeNodeKind)
@@ -7914,7 +7982,9 @@ export class RecallantDb {
           "promotion_readiness",
           "edges"
         ],
-        supported_endpoint_policy: "chunk_to_chunk",
+        supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+        active_edge_endpoint_kinds: graphActiveEdgeEndpointKindValues,
+        chunk_retrieval_endpoint_policy: "chunk_to_chunk",
         retrieval_semantics_changed: false
       }
     };
@@ -11039,7 +11109,9 @@ export class RecallantDb {
         read_only: true,
         mutates_candidates: false,
         mutates_edges: false,
-        supported_endpoint_policy: "chunk_to_chunk"
+        supported_endpoint_policy: graphCurrentEdgesPromotionEndpointPolicy,
+        active_edge_endpoint_kinds: graphActiveEdgeEndpointKindValues,
+        chunk_retrieval_endpoint_policy: "chunk_to_chunk"
       }
     };
   }
@@ -11903,6 +11975,150 @@ export class RecallantDb {
     const row = result.rows[0];
     if (!row) throw new Error(`Unknown project_id: ${projectId}`);
     return { projectId, developerId: row.developer_id };
+  }
+
+  private async graphPromotionEndpointBlock(
+    client: PoolClient,
+    endpoint: GraphCandidateEndpointRef,
+    context: ProjectContext
+  ): Promise<{
+    reason: NonNullable<PromoteGraphCandidateResult["blocked_reason"]>;
+    detail: string;
+  } | null> {
+    if (
+      !graphActiveEdgeEndpointKindSet.has(endpoint.kind) ||
+      !isGraphActiveEdgeEndpointKind(endpoint.kind)
+    ) {
+      return {
+        reason: "unsupported_endpoint",
+        detail: "Promotion supports only chunk, event, and external edge endpoints."
+      };
+    }
+    if (endpoint.kind === "external") return null;
+
+    if (endpoint.kind === "chunk") {
+      const result = await client.query<{ project_id: string; developer_id: string }>(
+        "SELECT project_id::text, developer_id::text FROM chunks WHERE id = $1",
+        [endpoint.id]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return {
+          reason: "governed_endpoint_not_found",
+          detail: "The chunk endpoint does not exist."
+        };
+      }
+      if (row.project_id !== context.projectId || row.developer_id !== context.developerId) {
+        return {
+          reason: "endpoint_outside_project",
+          detail: "The chunk endpoint is outside the selected project."
+        };
+      }
+      return null;
+    }
+
+    const result = await client.query<{ project_id: string }>(
+      "SELECT project_id::text FROM events WHERE id = $1",
+      [endpoint.id]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return {
+        reason: "governed_endpoint_not_found",
+        detail: "The event endpoint does not exist."
+      };
+    }
+    if (row.project_id !== context.projectId) {
+      return {
+        reason: "endpoint_outside_project",
+        detail: "The event endpoint is outside the selected project."
+      };
+    }
+    return null;
+  }
+
+  private async graphPromotionEndpointBlocks(
+    client: Pick<PoolClient, "query">,
+    endpoints: GraphCandidateEndpointRef[],
+    context: ProjectContext
+  ) {
+    const chunks = Array.from(
+      new Set(
+        endpoints.filter((endpoint) => endpoint.kind === "chunk").map((endpoint) => endpoint.id)
+      )
+    );
+    const events = Array.from(
+      new Set(
+        endpoints.filter((endpoint) => endpoint.kind === "event").map((endpoint) => endpoint.id)
+      )
+    );
+    const [chunkRows, eventRows] = await Promise.all([
+      chunks.length > 0
+        ? client.query<{ id: string; project_id: string; developer_id: string }>(
+            "SELECT id::text, project_id::text, developer_id::text FROM chunks WHERE id::text = ANY($1::text[])",
+            [chunks]
+          )
+        : Promise.resolve({
+            rows: [] as Array<{ id: string; project_id: string; developer_id: string }>
+          }),
+      events.length > 0
+        ? client.query<{ id: string; project_id: string }>(
+            "SELECT id::text, project_id::text FROM events WHERE id::text = ANY($1::text[])",
+            [events]
+          )
+        : Promise.resolve({ rows: [] as Array<{ id: string; project_id: string }> })
+    ]);
+    const chunkById = new Map(chunkRows.rows.map((row) => [row.id, row]));
+    const eventById = new Map(eventRows.rows.map((row) => [row.id, row]));
+    const blocks = new Map<
+      string,
+      {
+        reason: NonNullable<PromoteGraphCandidateResult["blocked_reason"]>;
+        detail: string;
+      }
+    >();
+    for (const endpoint of endpoints) {
+      const key = endpoint.kind + ":" + endpoint.id;
+      if (!isGraphActiveEdgeEndpointKind(endpoint.kind)) {
+        blocks.set(key, {
+          reason: "unsupported_endpoint",
+          detail: "Promotion supports only chunk, event, and external edge endpoints."
+        });
+        continue;
+      }
+      if (endpoint.kind === "external") continue;
+      if (endpoint.kind === "chunk") {
+        const row = chunkById.get(endpoint.id);
+        if (!row) {
+          blocks.set(key, {
+            reason: "governed_endpoint_not_found",
+            detail: "The chunk endpoint does not exist."
+          });
+        } else if (
+          row.project_id !== context.projectId ||
+          row.developer_id !== context.developerId
+        ) {
+          blocks.set(key, {
+            reason: "endpoint_outside_project",
+            detail: "The chunk endpoint is outside the selected project."
+          });
+        }
+        continue;
+      }
+      const row = eventById.get(endpoint.id);
+      if (!row) {
+        blocks.set(key, {
+          reason: "governed_endpoint_not_found",
+          detail: "The event endpoint does not exist."
+        });
+      } else if (row.project_id !== context.projectId) {
+        blocks.set(key, {
+          reason: "endpoint_outside_project",
+          detail: "The event endpoint is outside the selected project."
+        });
+      }
+    }
+    return blocks;
   }
 
   private async resolveCapturePolicy(

@@ -429,6 +429,13 @@ const event = await db.appendTurn({
   text: "Review UI smoke source event.",
   dedup_key: `review-ui-${randomUUID()}`
 });
+const promotionEvent = await db.appendTurn({
+  session_id: session.session_id,
+  client_kind: "codex",
+  role: "assistant",
+  text: "Review UI smoke promotion destination event.",
+  dedup_key: "review-ui-promotion-" + randomUUID()
+});
 await db.appendEvent({
   session_id: session.session_id,
   client_kind: "codex",
@@ -813,8 +820,12 @@ const graphPromotableCandidate = await db.createGraphCandidate({
   project_id: projectId,
   candidate_kind: "edge",
   relation_type: "same_topic_as",
-  src: { kind: "chunk", id: randomUUID(), label: "Review UI graph chunk source" },
-  dst: { kind: "chunk", id: randomUUID(), label: "Review UI graph chunk destination" },
+  src: { kind: "chunk", id: event.chunk_ids[0], label: "Review UI graph chunk source" },
+  dst: {
+    kind: "chunk",
+    id: promotionEvent.chunk_ids[0],
+    label: "Review UI graph chunk destination"
+  },
   title: "Review UI graph promotable edge candidate",
   summary: "Compatible accepted graph edge fixture for explicit Workbench promotion.",
   confidence: 0.88,

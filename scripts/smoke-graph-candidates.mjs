@@ -140,7 +140,41 @@ try {
     name: "graph-candidate-smoke-two"
   });
   await db.ensureGraphCandidateSchema();
-
+  const projectOneSession = await db.startSession({
+    client_kind: "codex",
+    client_version: "smoke",
+    project_path: projectOnePath,
+    session_label: "graph-candidates-project-one",
+    resume_policy: "force_new"
+  });
+  const promotionSourceTurn = await db.appendTurn({
+    session_id: projectOneSession.session_id,
+    client_kind: "codex",
+    role: "user",
+    text: "graph promotion source chunk",
+    dedup_key: marker + ":promotion-source"
+  });
+  const promotionDestinationTurn = await db.appendTurn({
+    session_id: projectOneSession.session_id,
+    client_kind: "codex",
+    role: "assistant",
+    text: "graph promotion destination chunk",
+    dedup_key: marker + ":promotion-destination"
+  });
+  const cliPromotionSourceTurn = await db.appendTurn({
+    session_id: projectOneSession.session_id,
+    client_kind: "codex",
+    role: "user",
+    text: "CLI graph promotion source chunk",
+    dedup_key: marker + ":cli-promotion-source"
+  });
+  const cliPromotionDestinationTurn = await db.appendTurn({
+    session_id: projectOneSession.session_id,
+    client_kind: "codex",
+    role: "assistant",
+    text: "CLI graph promotion destination chunk",
+    dedup_key: marker + ":cli-promotion-destination"
+  });
   const tools = toolMap(db);
 
   await expectReject(
@@ -220,7 +254,7 @@ try {
     project_id: projectOne,
     candidate_kind: "edge",
     relation_type: "supports",
-    src: { kind: "external", id: `${marker}:src`, label: "smoke source" },
+    src: { kind: "topic", id: `${marker}:topic`, label: "conceptual topic source" },
     dst: { kind: "external", id: `${marker}:dst`, label: "smoke destination" },
     title: `${marker} governed edge candidate`,
     summary: `${marker} edge candidate remains staging only`,
@@ -313,8 +347,8 @@ try {
     actor_kind: "agent",
     note: "policy smoke accept"
   });
-  const promotionSrcChunkId = randomUUID();
-  const promotionDstChunkId = randomUUID();
+  const promotionSrcChunkId = promotionSourceTurn.chunk_ids[0];
+  const promotionDstChunkId = promotionDestinationTurn.chunk_ids[0];
   const promotableCandidate = await db.createGraphCandidate({
     project_id: projectOne,
     candidate_kind: "edge",
@@ -713,8 +747,16 @@ try {
     project_id: projectOne,
     candidate_kind: "edge",
     relation_type: "same_topic_as",
-    src: { kind: "chunk", id: randomUUID(), label: "CLI promotion source chunk" },
-    dst: { kind: "chunk", id: randomUUID(), label: "CLI promotion destination chunk" },
+    src: {
+      kind: "chunk",
+      id: cliPromotionSourceTurn.chunk_ids[0],
+      label: "CLI promotion source chunk"
+    },
+    dst: {
+      kind: "chunk",
+      id: cliPromotionDestinationTurn.chunk_ids[0],
+      label: "CLI promotion destination chunk"
+    },
     title: `${marker} CLI promotable edge candidate`,
     summary: `${marker} CLI explicit promotion candidate`,
     confidence: 0.87,

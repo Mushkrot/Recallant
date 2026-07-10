@@ -17,6 +17,43 @@ export const graphTreeNodeKindValues = [
 
 export type GraphTreeNodeKind = (typeof graphTreeNodeKindValues)[number];
 
+// These are the endpoint kinds represented by the existing edges table. They intentionally
+// exclude conceptual graph kinds until a later storage phase defines their durable mapping.
+export const graphActiveEdgeEndpointKindValues = ["chunk", "event", "external"] as const;
+
+export type GraphActiveEdgeEndpointKind = (typeof graphActiveEdgeEndpointKindValues)[number];
+
+export const graphPromotionEndpointPolicyValues = ["chunk_to_chunk", "current_edges"] as const;
+
+export type GraphPromotionEndpointPolicy = (typeof graphPromotionEndpointPolicyValues)[number];
+
+export const graphCurrentEdgesPromotionEndpointPolicy = "current_edges" as const;
+
+export type GraphEndpointPromotionCapabilities = {
+  active_edge_supported: boolean;
+  chunk_retrieval_supported: boolean;
+};
+
+const graphActiveEdgeEndpointKindSet = new Set<string>(graphActiveEdgeEndpointKindValues);
+
+export function isGraphActiveEdgeEndpointKind(
+  value: unknown
+): value is GraphActiveEdgeEndpointKind {
+  return typeof value === "string" && graphActiveEdgeEndpointKindSet.has(value);
+}
+
+export function graphEndpointPromotionCapabilities(
+  srcKind: unknown,
+  dstKind: unknown
+): GraphEndpointPromotionCapabilities {
+  const activeEdgeSupported =
+    isGraphActiveEdgeEndpointKind(srcKind) && isGraphActiveEdgeEndpointKind(dstKind);
+  return {
+    active_edge_supported: activeEdgeSupported,
+    chunk_retrieval_supported: activeEdgeSupported && srcKind === "chunk" && dstKind === "chunk"
+  };
+}
+
 export const graphTreeRelationTypeValues = [
   "mentions",
   "about",
@@ -306,12 +343,15 @@ export type PromoteGraphCandidateBlockedReason =
   | "candidate_kind_not_edge"
   | "candidate_not_accepted"
   | "missing_endpoint"
+  | "governed_endpoint_not_found"
+  | "endpoint_outside_project"
   | "unsupported_endpoint"
   | "self_loop";
 
 export type PromoteGraphCandidateResult = {
   graph_candidate_id: string;
   status: PromoteGraphCandidateStatus;
+  active_edge: boolean;
   retrieval_active: boolean;
   promoted_edge_id?: string | null;
   blocked_reason?: PromoteGraphCandidateBlockedReason | null;
@@ -321,8 +361,10 @@ export type PromoteGraphCandidateResult = {
     explicit_promotion: true;
     accept_remains_review_only: true;
     active_graph_table: "edges";
+    active_edge: boolean;
     retrieval_active: boolean;
-    supported_endpoint_policy: "chunk_to_chunk";
+    supported_endpoint_policy: GraphPromotionEndpointPolicy;
+    endpoint_capabilities: GraphEndpointPromotionCapabilities;
   };
 };
 
@@ -374,7 +416,9 @@ export type GraphCandidateHygieneResult = {
     read_only: true;
     mutates_candidates: false;
     mutates_edges: false;
-    supported_endpoint_policy: "chunk_to_chunk";
+    supported_endpoint_policy: GraphPromotionEndpointPolicy;
+    active_edge_endpoint_kinds: readonly GraphActiveEdgeEndpointKind[];
+    chunk_retrieval_endpoint_policy: "chunk_to_chunk";
   };
 };
 
@@ -626,7 +670,9 @@ export type GraphTopologyResult = {
     derived_from: Array<
       "graph_candidates" | "graph_candidate_source_refs" | "promotion_readiness" | "edges"
     >;
-    supported_endpoint_policy: "chunk_to_chunk";
+    supported_endpoint_policy: GraphPromotionEndpointPolicy;
+    active_edge_endpoint_kinds: readonly GraphActiveEdgeEndpointKind[];
+    chunk_retrieval_endpoint_policy: "chunk_to_chunk";
     retrieval_semantics_changed: false;
   };
 };

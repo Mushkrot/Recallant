@@ -81,6 +81,27 @@ try {
   });
   await db.ensureGraphCandidateSchema();
   await otherDb.ensureGraphCandidateSchema();
+  const session = await db.startSession({
+    client_kind: "codex",
+    client_version: "smoke",
+    project_path: projectOnePath,
+    session_label: "graph-topology-smoke",
+    resume_policy: "force_new"
+  });
+  const sourceTurn = await db.appendTurn({
+    session_id: session.session_id,
+    client_kind: "codex",
+    role: "user",
+    text: "graph topology active source",
+    dedup_key: marker + ":active-source"
+  });
+  const targetTurn = await db.appendTurn({
+    session_id: session.session_id,
+    client_kind: "codex",
+    role: "assistant",
+    text: "graph topology active target",
+    dedup_key: marker + ":active-target"
+  });
 
   const sourceRef = (label) => ({
     source_kind: "external",
@@ -92,8 +113,8 @@ try {
     project_id: projectOne,
     candidate_kind: "edge",
     relation_type: "same_topic_as",
-    src: { kind: "chunk", id: randomUUID(), label: `${marker} active source` },
-    dst: { kind: "chunk", id: randomUUID(), label: `${marker} active target` },
+    src: { kind: "chunk", id: sourceTurn.chunk_ids[0], label: `${marker} active source` },
+    dst: { kind: "chunk", id: targetTurn.chunk_ids[0], label: `${marker} active target` },
     title: `${marker} active edge`,
     summary: "Compatible edge that should become active after explicit promotion.",
     extraction_method: "agent",
@@ -112,6 +133,32 @@ try {
     graph_candidate_id: activeCandidate.graph_candidate_id,
     actor_kind: "agent",
     note: "graph topology active edge smoke"
+  });
+  const externalEndpointId = marker + ":opaque-external-endpoint";
+  const activeMixedCandidate = await db.createGraphCandidate({
+    project_id: projectOne,
+    candidate_kind: "edge",
+    relation_type: "derived_from",
+    src: { kind: "event", id: sourceTurn.event_id, label: "active event source" },
+    dst: { kind: "external", id: externalEndpointId, label: "opaque external endpoint" },
+    title: marker + " active mixed edge",
+    summary: "Active mixed endpoint edge should appear in topology without raw identifiers.",
+    extraction_method: "agent",
+    created_by: "agent",
+    source_refs: [sourceRef("active-mixed")]
+  });
+  await db.reviewGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: activeMixedCandidate.graph_candidate_id,
+    action: "accept",
+    actor_kind: "agent",
+    note: "graph topology active mixed edge smoke"
+  });
+  const mixedPromotion = await db.promoteGraphCandidate({
+    project_id: projectOne,
+    graph_candidate_id: activeMixedCandidate.graph_candidate_id,
+    actor_kind: "agent",
+    note: "graph topology active mixed edge smoke"
   });
   const stagedCandidate = await db.createGraphCandidate({
     project_id: projectOne,
@@ -187,15 +234,24 @@ try {
   });
   const serializedTopology = JSON.stringify(topology);
   assert(promotion.status === "promoted", "Active edge candidate should promote");
+  assert(
+    mixedPromotion.status === "promoted" &&
+      mixedPromotion.active_edge === true &&
+      mixedPromotion.retrieval_active === false,
+    "Mixed endpoint candidate should promote without becoming retrieval-active"
+  );
   assert(topology.governance.read_only === true, "Topology governance should be read-only");
   assert(topology.governance.mutates_candidates === false, "Topology must not mutate candidates");
   assert(topology.governance.mutates_edges === false, "Topology must not mutate edges");
   assert(before.candidates === after.candidates, "Topology read should not change candidate count");
   assert(before.edges === after.edges, "Topology read should not change edge count");
-  assert(topology.summary.active_edge_count >= 1, "Topology should count active promoted edges");
+  assert(topology.summary.active_edge_count >= 2, "Topology should count active promoted edges");
   assert(topology.summary.candidate_edge_count >= 3, "Topology should count candidate edges");
   assert(topology.summary.source_ref_count >= 4, "Topology should count source refs");
-  assert(topology.links.some((link) => link.link_kind === "active_edge" && link.active === true), "Topology should include an active edge link");
+  assert(
+    topology.links.some((link) => link.link_kind === "active_edge" && link.active === true),
+    "Topology should include an active edge link"
+  );
   assert(
     topology.links.some(
       (link) =>
@@ -208,6 +264,12 @@ try {
   assert(
     topology.links.some((link) => link.link_kind === "source_ref" && link.source_backed === true),
     "Topology should include source-ref links"
+  );
+  assert(
+    topology.links.some(
+      (link) => link.link_kind === "active_edge" && link.edge_id === mixedPromotion.promoted_edge_id
+    ),
+    "Topology should include the active mixed endpoint link"
   );
   assert(
     topology.nodes.some(
@@ -226,7 +288,14 @@ try {
     "Topology should mark unsupported accepted edge as blocked"
   );
   assert(!serializedTopology.includes(projectTwo), "Topology leaked other project id");
-  assert(!serializedTopology.includes(`${marker} other project decoy`), "Topology leaked decoy title");
+  assert(
+    !serializedTopology.includes(`${marker} other project decoy`),
+    "Topology leaked decoy title"
+  );
+  assert(
+    !serializedTopology.includes(externalEndpointId),
+    "Topology leaked opaque external endpoint id"
+  );
   assert(truncated.summary.truncated === true, "Small topology limits should report truncation");
   assert(
     truncated.summary.omitted_candidate_count > 0 ||

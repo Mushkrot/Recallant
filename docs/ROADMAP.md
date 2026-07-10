@@ -113,9 +113,11 @@ dependable before expanding the product surface.
 - Governed graph next slices after the shipped candidate storage, Workbench review surface,
   explicit chunk-to-chunk promotion, read-only hygiene report, Markdown vault bridge, memory keeper
   candidate pipeline, named one-hop retrieval profiles, read-only Workbench topology visualization,
-  governed graph maintenance workflows, B9 review ergonomics, and B10 keeper source integration:
-  first-class graph storage decisions, human-memory expansion, more endpoint kinds, passive vault
-  sync, raw media ingestion, and automatic promotion policy decisions.
+  governed graph maintenance workflows, B9 review ergonomics, B10 keeper source integration, and
+  B11 active-edge endpoint expansion across chunk, event, and external references: first-class
+  graph storage decisions, human-memory expansion, conceptual endpoint storage, passive vault sync,
+  raw media ingestion, and automatic promotion policy decisions. Current retrieval remains limited
+  to chunk-to-chunk active edges.
 - Autonomous attach polish through broader real-world migration pilots across non-owner
   repositories, with attention to report clarity, review ergonomics, and safe handling of stale
   agent files.

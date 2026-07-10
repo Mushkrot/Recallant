@@ -580,6 +580,8 @@ mustInclude(
     "`available_actions`",
     "`governance`",
     "B9 review ergonomics",
+    "accepted chunk, event,",
+    "Only chunk-to-chunk active edges currently participate",
     "The B10 source-selected path uses `--from-source` for source selection.",
     "`memory_keeper_candidates`",
     "requires `write_candidates: true` plus `confirm: true` before",
@@ -595,7 +597,7 @@ mustInclude(
     "`Open candidate detail`",
     "does not add first-class graph storage",
     "automatic promotion policies",
-    "additional endpoint kinds",
+    "conceptual endpoint storage",
     "retrieval semantics changes",
     "Workbench Graph Topology",
     "Graph Maintenance",
@@ -638,7 +640,8 @@ mustInclude(
 mustInclude(
   contractStatus,
   [
-    "Working B10 keeper source integration slice",
+    "Working B11 endpoint-kind slice",
+    "B11 endpoint-kind activation capabilities",
     "B10 source-selected keeper source contract",
     "B9 review workload and decision guidance",
     "Workbench graph review fields/actions",

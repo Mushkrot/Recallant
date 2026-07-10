@@ -5244,7 +5244,7 @@ function renderGraphReviewOverview(
         "Promotion-ready edges",
         promotionReady,
         promotionReady > 0
-          ? "Accepted compatible edges can be promoted into active graph retrieval."
+          ? "Accepted compatible edges can be promoted into active graph storage. Only chunk-to-chunk edges currently expand retrieval."
           : "No accepted edge is ready for promotion."
       )}
       ${renderReviewSummaryTile(
@@ -5312,6 +5312,8 @@ function renderGraphPromotionState(
   const blockedReason = optionalInput(readiness.blocked_reason);
   const blockedDetail = optionalInput(readiness.blocked_detail);
   const promotedEdgeId = optionalInput(readiness.promoted_edge_id);
+  const promotionMetadata = asRecord(asRecord(candidate.metadata).graph_promotion);
+  const retrievalActive = promotionMetadata.retrieval_active === true;
   const active = status === "promotable";
   const promotedEdgeLabel = promotedEdgeId
     ? publicScreenshotMode()
@@ -5324,8 +5326,12 @@ function renderGraphPromotionState(
       <strong>${escapeHtml(humanStatus(status))}</strong>
       <p>${escapeHtml(
         active
-          ? "This accepted compatible edge can be promoted into active graph retrieval."
-          : (blockedDetail ?? "This candidate is not eligible for active graph promotion.")
+          ? "This accepted compatible edge can be promoted into active graph storage. Only chunk-to-chunk edges currently expand retrieval."
+          : promotedEdgeId
+            ? retrievalActive
+              ? "This edge is active in graph storage and participates in current chunk-neighbor retrieval."
+              : "This edge is active in graph storage but does not change current chunk-neighbor retrieval."
+            : (blockedDetail ?? "This candidate is not eligible for active graph promotion.")
       )}</p>
       ${blockedReason ? `<p class="graph-promotion-reason">Blocked reason: ${escapeHtml(blockedReason)}</p>` : ""}
       ${promotedEdgeId ? `<p class="graph-promotion-edge">Promoted edge: ${escapeHtml(promotedEdgeLabel)}</p>` : ""}

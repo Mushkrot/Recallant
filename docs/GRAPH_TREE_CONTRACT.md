@@ -120,11 +120,13 @@ review history, and are exposed through MCP tools, the Workbench review dashboar
 review action routes. Accepting a candidate records the reviewed lifecycle state; it does not insert
 rows into `edges`, create first-class graph nodes, or change default retrieval by itself.
 
-B6 adds an explicit promotion path for the compatible edge subset. Promotion is separate from
+B6 introduced the explicit promotion path, and B11 expands it across the physical edges
+endpoint surface. Promotion is separate from
 review: accepted candidates remain review-only until a caller uses `memory_promote_graph_candidate`,
 `recallant graph promote-candidate <graph-candidate-id> --confirm`, or the Workbench `Promote
-candidate` action. Promotion creates or reuses a retrieval-active `edges` row only for accepted
-chunk-to-chunk edge candidates.
+candidate` action. Promotion creates or reuses an active edges row for accepted chunk, event,
+and external endpoint combinations. Only chunk-to-chunk active edges currently participate in
+one-hop chunk-neighbor retrieval.
 
 The first typed candidate kinds are:
 
@@ -227,7 +229,7 @@ B9 review ergonomics add exact public Review labels including `Graph review work
 `Graph review filters`, `Next graph action`, `Recommended graph decision`, and
 `Open candidate detail`.
 These labels are display and workflow guidance only. B9 does not add first-class graph storage,
-automatic promotion policies, additional endpoint kinds, or retrieval semantics changes.
+automatic promotion policies, conceptual endpoint storage, or retrieval semantics changes.
 
 ## Workbench Graph Topology
 
@@ -248,7 +250,8 @@ The topology payload contains:
 - `summary` - candidate, active edge, source-ref, blocked, duplicate, promotable, promoted, stale,
   limit, omitted, and truncation counts;
 - `governance` - explicit `read_only`, `mutates_candidates: false`, `mutates_edges: false`,
-  `derived_from`, `supported_endpoint_policy: "chunk_to_chunk"`, and
+  `derived_from`, `supported_endpoint_policy: "current_edges"`, active endpoint kinds, a
+  chunk-to-chunk retrieval-participation policy, and
   `retrieval_semantics_changed: false` flags.
 
 The topology labels are bounded for display. Public-safe screenshot mode uses `public_safe_label`
@@ -269,7 +272,8 @@ Graph hygiene is a read-only report. It does not mutate graph candidates or `edg
 returns these buckets:
 
 - `total` - scoped graph candidates considered by the report;
-- `promotable` - accepted chunk-to-chunk edge candidates that can become active edges;
+- `promotable` - accepted edge candidates with chunk, event, or external endpoints that can become
+  active edges;
 - `blocked` - candidates that cannot be promoted because of kind, lifecycle, endpoints, or similar
   validation;
 - `duplicate` - later candidates with the same project, endpoints, and relation as an earlier
@@ -280,12 +284,14 @@ returns these buckets:
   needed;
 - `blocked_reasons` - counts grouped by bounded reason codes.
 
-The current promotable subset is intentionally narrow:
+The current promotable subset is bounded:
 
 - candidate kind must be `edge`;
 - lifecycle state must be `accepted`;
-- `src.kind` and `dst.kind` must both be `chunk`;
-- source and destination chunk ids must be present and must not be the same chunk;
+- `src.kind` and `dst.kind` must each be chunk, event, or external;
+- governed chunk/event ids must resolve inside the selected project; external ids remain bounded
+  opaque references and are not fetched;
+- source and destination endpoint ids must be present and must not form a self-loop;
 - `relation_type` must be present.
 
 Node candidates, non-accepted candidates, stale candidates, archived candidates, rejected
@@ -293,7 +299,7 @@ candidates, missing endpoints, unsupported endpoint kinds, self-loops, and unsaf
 blocked. Promotion creates an `edges` row when no equivalent active edge exists and reuses the
 existing edge on repeat promotion.
 
-The exact B6 promotion and hygiene surfaces are:
+The B11 promotion and hygiene surfaces are:
 
 - MCP: `memory_promote_graph_candidate`;
 - MCP: `memory_graph_hygiene`;
@@ -434,8 +440,8 @@ copied into proposal JSON or stored graph candidate rows.
 Confirmed keeper writes call the same graph candidate storage used by other candidate sources.
 Stored keeper candidates remain staged review records. They are not part of default retrieval, and
 accepting or reviewing a candidate still does not by itself insert a row into `edges`. Compatible
-accepted chunk-to-chunk edge candidates require the explicit B6 promotion path before they can
-become active graph retrieval edges.
+accepted compatible edge candidates require explicit B11 promotion before they become active graph
+edges. Only promoted chunk-to-chunk edges affect current chunk-neighbor retrieval.
 
 The public smoke gate for this surface is `npm run memory-keeper:smoke`. It checks dry-run behavior
 without database configuration, database-required `--from-source` resolution, confirm-gated writes,
@@ -557,8 +563,8 @@ should show:
 
 This document defines the graph tree contract and vocabulary, plus the current graph candidate,
 Markdown vault bridge, deterministic keeper candidate, named one-hop graph retrieval profile,
-explicit chunk-to-chunk candidate promotion, read-only hygiene report, Workbench graph review,
+explicit B11 endpoint-compatible candidate promotion, read-only hygiene report, Workbench graph review,
 Workbench graph topology, governed graph maintenance workflow, B9 review ergonomics, and B10
 source-selected keeper integration slices. It does not create automatic promotion, first-class graph
-node storage, passive vault sync, raw media ingestion, human-memory expansion, additional endpoint
-kinds, retrieval semantics changes, or a dedicated graph database migration.
+node storage, passive vault sync, raw media ingestion, human-memory expansion, conceptual endpoint
+activation beyond current edges kinds, retrieval semantics changes, or a dedicated graph database migration.

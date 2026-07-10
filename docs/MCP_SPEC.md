@@ -269,9 +269,9 @@ The first candidate tools are:
   the scoped project.
 - `memory_review_graph_candidate` - record review actions such as accept, reject, archive,
   unarchive, mark stale, edit, merge, or supersede while preserving the original candidate row.
-- `memory_promote_graph_candidate` - explicitly promote one accepted compatible chunk-to-chunk edge
-  candidate into the active `edges` table. Accepting a candidate remains review-only; promotion
-  returns `promoted`, `already_promoted`, or `blocked` plus governance metadata.
+- `memory_promote_graph_candidate` - explicitly promote one accepted compatible edge candidate with
+  chunk, event, or external endpoints into the active `edges` table. Accepting a candidate remains
+  review-only; promotion reports active-edge and chunk-retrieval capabilities separately.
 - `memory_graph_hygiene` - return read-only scoped counts, candidate-level promotion readiness, and
   duplicate groups. It must report `read_only: true` and must not mutate graph candidates or edges.
 - `memory_graph_maintenance` - preview governed graph candidate maintenance recommendations or

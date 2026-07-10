@@ -128,7 +128,8 @@ extraction method, and review state attached before graph output can influence r
 Recallant now has staged graph candidate storage, an Obsidian-compatible Markdown vault bridge, a
 deterministic `recallant keeper candidates` path for keeper-generated candidate proposals, including
 B10 `--from-source <project-source-id>` source selection over bounded governed Recallant evidence,
-read-only graph hygiene reporting, explicit promotion for accepted chunk-to-chunk edge candidates,
+read-only graph hygiene reporting, explicit B11 promotion for accepted chunk, event, and external
+edge candidates, with only chunk-to-chunk edges participating in current retrieval,
 and a read-only Workbench topology view derived from graph candidates, source refs, promotion readiness, and active `edges`. It now also has governed graph maintenance workflows for read-only
 maintenance planning and confirm-gated candidate lifecycle actions, plus named one-hop graph
 retrieval profiles on `memory_search`, including `same_topic`,
@@ -144,8 +145,8 @@ evidence. It does not raw-read connector accounts, arbitrary URIs, server paths,
 artifacts, backups, passive vault sync streams, or raw media.
 
 Recallant does not yet have automatic promotion policies, a dedicated graph database, passive vault
-sync, raw media ingestion, support for promotion endpoint kinds beyond the B6 chunk-to-chunk subset,
-first-class graph node storage, human-memory expansion, or graph retrieval semantics driven by unpromoted candidates. Those remain future slices layered on top of the governed graph vocabulary.
+sync, raw media ingestion, first-class graph node storage, human-memory expansion, conceptual
+endpoint activation beyond the current edges table, or graph retrieval semantics driven by unpromoted candidates. Those remain future slices layered on top of the governed graph vocabulary.
 
 ## Safety Model
 

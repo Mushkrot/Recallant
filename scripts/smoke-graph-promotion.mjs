@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  graphActiveEdgeEndpointKindValues,
+  graphEndpointPromotionCapabilities
+} from "../packages/contracts/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
 const defaultDatabaseUrl = [
@@ -40,6 +44,26 @@ function assertNoForbidden(value, label) {
     assert(!serialized.includes(needle), `${label} leaked forbidden fixture: ${needle}`);
   }
 }
+
+const endpointPolicyMatrix = graphActiveEdgeEndpointKindValues.flatMap((srcKind) =>
+  graphActiveEdgeEndpointKindValues.map((dstKind) => ({
+    src_kind: srcKind,
+    dst_kind: dstKind,
+    ...graphEndpointPromotionCapabilities(srcKind, dstKind)
+  }))
+);
+
+assert(
+  endpointPolicyMatrix.length === 9 &&
+    endpointPolicyMatrix.every((entry) => entry.active_edge_supported) &&
+    endpointPolicyMatrix.filter((entry) => entry.chunk_retrieval_supported).length === 1 &&
+    endpointPolicyMatrix.some(
+      (entry) =>
+        entry.src_kind === "chunk" && entry.dst_kind === "chunk" && entry.chunk_retrieval_supported
+    ) &&
+    graphEndpointPromotionCapabilities("topic", "chunk").active_edge_supported === false,
+  "Unexpected graph endpoint policy matrix: " + JSON.stringify(endpointPolicyMatrix)
+);
 
 async function appendTurn(db, sessionId, label, text) {
   return db.appendTurn({
@@ -147,6 +171,13 @@ try {
     session_label: "graph-promotion-smoke",
     resume_policy: "force_new"
   });
+  const otherStarted = await db.startSession({
+    client_kind: "codex",
+    client_version: "smoke",
+    project_path: otherProjectPath,
+    session_label: "graph-promotion-smoke-other",
+    resume_policy: "force_new"
+  });
 
   const seed = await appendTurn(
     db,
@@ -159,6 +190,13 @@ try {
     started.session_id,
     "neighbor",
     `${marker} promoted neighbor should appear only after explicit graph promotion.`
+  );
+
+  const foreignEndpoint = await appendTurn(
+    db,
+    otherStarted.session_id,
+    "foreign-endpoint",
+    "Other project endpoint must remain unavailable to this project."
   );
 
   const candidate = await db.createGraphCandidate({
@@ -278,6 +316,248 @@ try {
       readinessAfter?.status === "promoted" &&
       readinessAfter.promoted_edge_id === firstPromotion.promoted_edge_id,
     `Unexpected hygiene after promotion: ${JSON.stringify(hygieneAfter)}`
+  );
+
+  const createAcceptedMatrixCandidate = async ({ title, src, dst }) => {
+    const candidate = await db.createGraphCandidate({
+      project_id: projectId,
+      candidate_kind: "edge",
+      relation_type: "mentions",
+      src,
+      dst,
+      title,
+      summary: "Explicit B11 endpoint-matrix promotion candidate.",
+      confidence: 0.9,
+      extraction_method: "agent",
+      created_by: "agent",
+      source_refs: [
+        {
+          source_kind: "external",
+          source_id: marker + ":matrix-source",
+          quote: "bounded endpoint-matrix evidence"
+        }
+      ],
+      metadata: { smoke: "graph-promotion-endpoint-matrix" }
+    });
+    await db.reviewGraphCandidate({
+      project_id: projectId,
+      graph_candidate_id: candidate.graph_candidate_id,
+      action: "accept",
+      actor_kind: "agent",
+      note: "accept endpoint matrix candidate"
+    });
+    return candidate;
+  };
+
+  const matrixSources = [
+    { kind: "chunk", id: seed.chunk_ids[0], label: "matrix source chunk" },
+    { kind: "event", id: seed.event_id, label: "matrix source event" },
+    { kind: "external", id: marker + ":matrix:external:src", label: "matrix source external" }
+  ];
+  const matrixDestinations = [
+    { kind: "chunk", id: neighbor.chunk_ids[0], label: "matrix destination chunk" },
+    { kind: "event", id: neighbor.event_id, label: "matrix destination event" },
+    {
+      kind: "external",
+      id: marker + ":matrix:external:dst",
+      label: "matrix destination external"
+    }
+  ];
+  const endpointMatrix = [];
+  for (const src of matrixSources) {
+    for (const dst of matrixDestinations) {
+      const edgesBeforeMatrixAccept = await edgeCount(db, projectId);
+      const matrixCandidate = await createAcceptedMatrixCandidate({
+        title: marker + " matrix " + src.kind + "-to-" + dst.kind,
+        src,
+        dst
+      });
+      const edgesAfterMatrixAccept = await edgeCount(db, projectId);
+      assert(
+        edgesAfterMatrixAccept === edgesBeforeMatrixAccept,
+        "Accepting an endpoint matrix candidate created an active edge."
+      );
+      const edgesBeforeMatrixPromotion = await edgeCount(db, projectId);
+      const first = await db.promoteGraphCandidate({
+        project_id: projectId,
+        graph_candidate_id: matrixCandidate.graph_candidate_id,
+        actor_kind: "agent",
+        note: "promote endpoint matrix candidate"
+      });
+      const edgesAfterMatrixPromotion = await edgeCount(db, projectId);
+      const repeated = await db.promoteGraphCandidate({
+        project_id: projectId,
+        graph_candidate_id: matrixCandidate.graph_candidate_id,
+        actor_kind: "agent",
+        note: "repeat endpoint matrix promotion"
+      });
+      assert(
+        first.status === "promoted" &&
+          first.active_edge === true &&
+          first.promoted_edge_id &&
+          first.retrieval_active === (src.kind === "chunk" && dst.kind === "chunk") &&
+          first.candidate.metadata?.graph_promotion?.active_edge === true &&
+          first.candidate.metadata?.graph_promotion?.retrieval_active === first.retrieval_active &&
+          edgesAfterMatrixPromotion === edgesBeforeMatrixPromotion + 1 &&
+          repeated.status === "already_promoted" &&
+          repeated.promoted_edge_id === first.promoted_edge_id &&
+          repeated.active_edge === true &&
+          repeated.retrieval_active === first.retrieval_active &&
+          (await edgeCount(db, projectId)) === edgesAfterMatrixPromotion,
+        "Endpoint matrix promotion failed: " +
+          JSON.stringify({
+            src,
+            dst,
+            first,
+            repeated,
+            edgesBeforeMatrixPromotion,
+            edgesAfterMatrixPromotion
+          })
+      );
+      endpointMatrix.push({
+        graph_candidate_id: matrixCandidate.graph_candidate_id,
+        src_kind: src.kind,
+        dst_kind: dst.kind,
+        first_status: first.status,
+        repeat_status: repeated.status,
+        active_edge: first.active_edge,
+        retrieval_active: first.retrieval_active
+      });
+    }
+  }
+  const matrixHygiene = await db.getGraphCandidateHygiene({ project_id: projectId });
+  assert(
+    endpointMatrix.every((entry) =>
+      matrixHygiene.readiness.some(
+        (readiness) =>
+          readiness.graph_candidate_id === entry.graph_candidate_id &&
+          readiness.status === "promoted" &&
+          Boolean(readiness.promoted_edge_id)
+      )
+    ) &&
+      matrixHygiene.governance.supported_endpoint_policy === "current_edges" &&
+      matrixHygiene.governance.active_edge_endpoint_kinds.join(",") === "chunk,event,external" &&
+      matrixHygiene.governance.chunk_retrieval_endpoint_policy === "chunk_to_chunk",
+    "Hygiene did not reflect the promoted endpoint matrix."
+  );
+
+  const ownershipCases = [
+    {
+      name: "foreign_chunk_source",
+      src: { kind: "chunk", id: foreignEndpoint.chunk_ids[0], label: "foreign chunk source" },
+      dst: { kind: "external", id: marker + ":ownership:dst-a", label: "external destination" },
+      reason: "endpoint_outside_project"
+    },
+    {
+      name: "foreign_chunk_destination",
+      src: { kind: "external", id: marker + ":ownership:src-a", label: "external source" },
+      dst: { kind: "chunk", id: foreignEndpoint.chunk_ids[0], label: "foreign chunk destination" },
+      reason: "endpoint_outside_project"
+    },
+    {
+      name: "foreign_event_source",
+      src: { kind: "event", id: foreignEndpoint.event_id, label: "foreign event source" },
+      dst: { kind: "external", id: marker + ":ownership:dst-b", label: "external destination" },
+      reason: "endpoint_outside_project"
+    },
+    {
+      name: "foreign_event_destination",
+      src: { kind: "external", id: marker + ":ownership:src-b", label: "external source" },
+      dst: { kind: "event", id: foreignEndpoint.event_id, label: "foreign event destination" },
+      reason: "endpoint_outside_project"
+    },
+    {
+      name: "missing_chunk_source",
+      src: { kind: "chunk", id: randomUUID(), label: "missing chunk source" },
+      dst: { kind: "external", id: marker + ":ownership:dst-c", label: "external destination" },
+      reason: "governed_endpoint_not_found"
+    },
+    {
+      name: "missing_chunk_destination",
+      src: { kind: "external", id: marker + ":ownership:src-c", label: "external source" },
+      dst: { kind: "chunk", id: randomUUID(), label: "missing chunk destination" },
+      reason: "governed_endpoint_not_found"
+    },
+    {
+      name: "missing_event_source",
+      src: { kind: "event", id: randomUUID(), label: "missing event source" },
+      dst: { kind: "external", id: marker + ":ownership:dst-d", label: "external destination" },
+      reason: "governed_endpoint_not_found"
+    },
+    {
+      name: "missing_event_destination",
+      src: { kind: "external", id: marker + ":ownership:src-d", label: "external source" },
+      dst: { kind: "event", id: randomUUID(), label: "missing event destination" },
+      reason: "governed_endpoint_not_found"
+    }
+  ];
+  const ownershipBlocks = [];
+  for (const ownershipCase of ownershipCases) {
+    const blockedCandidate = await createAcceptedMatrixCandidate({
+      title: marker + " " + ownershipCase.name,
+      src: ownershipCase.src,
+      dst: ownershipCase.dst
+    });
+    const beforeBlockedPromotion = await edgeCount(db, projectId);
+    const blockedPromotion = await db.promoteGraphCandidate({
+      project_id: projectId,
+      graph_candidate_id: blockedCandidate.graph_candidate_id,
+      actor_kind: "agent",
+      note: "verify endpoint ownership"
+    });
+    const afterBlockedPromotion = await edgeCount(db, projectId);
+    assert(
+      blockedPromotion.status === "blocked" &&
+        blockedPromotion.active_edge === false &&
+        blockedPromotion.retrieval_active === false &&
+        blockedPromotion.blocked_reason === ownershipCase.reason &&
+        afterBlockedPromotion === beforeBlockedPromotion,
+      "Endpoint ownership guard failed: " +
+        JSON.stringify({
+          ownershipCase,
+          blockedPromotion,
+          beforeBlockedPromotion,
+          afterBlockedPromotion
+        })
+    );
+    ownershipBlocks.push({
+      name: ownershipCase.name,
+      blocked_reason: blockedPromotion.blocked_reason,
+      edge_count_unchanged: afterBlockedPromotion === beforeBlockedPromotion
+    });
+  }
+
+  let externalLengthRejected = false;
+  try {
+    await db.createGraphCandidate({
+      project_id: projectId,
+      candidate_kind: "edge",
+      relation_type: "mentions",
+      src: { kind: "external", id: "x".repeat(513), label: "too long external id" },
+      dst: { kind: "external", id: marker + ":bounded-external", label: "external destination" },
+      title: marker + " oversized external endpoint",
+      extraction_method: "agent",
+      created_by: "agent",
+      source_refs: [{ source_kind: "external", source_id: marker + ":matrix-source" }]
+    });
+  } catch (error) {
+    externalLengthRejected = String(error).includes("endpoint id");
+  }
+  assert(externalLengthRejected, "Oversized external endpoint id should be rejected");
+
+  const afterMatrixSearch = await db.search({
+    session_id: started.session_id,
+    query: seedToken,
+    mode: "lexical_only",
+    top_k: 1,
+    graph_retrieval_profile: "same_topic",
+    graph_budget_nodes: 20,
+    max_chars_total: 12_000
+  });
+  assert(
+    graphHits(afterMatrixSearch).length === graphHits(afterSearch).length &&
+      hasChunk(afterMatrixSearch, neighbor.chunk_ids[0]),
+    "Mixed endpoint activation changed current chunk-neighbor retrieval."
   );
 
   const edgesBeforeMaintenance = await edgeCount(db, projectId);
@@ -445,7 +725,15 @@ try {
       first_status: firstPromotion.status,
       repeat_status: repeatPromotion.status,
       promoted_edge_reused: repeatPromotion.promoted_edge_id === firstPromotion.promoted_edge_id,
+      active_edge: firstPromotion.active_edge === true,
       retrieval_active: firstPromotion.retrieval_active === true
+    },
+    endpoint_matrix: endpointMatrix,
+    endpoint_ownership: {
+      blocks: ownershipBlocks,
+      bounded_external_id_rejected: externalLengthRejected,
+      mixed_endpoint_retrieval_unchanged:
+        graphHits(afterMatrixSearch).length === graphHits(afterSearch).length
     },
     maintenance_after_promotion: {
       status: maintenanceAfterPromotion.status,
@@ -467,6 +755,18 @@ try {
       after_counts: hygieneAfter.counts,
       after_selected_status: readinessAfter?.status,
       promoted_edge_recorded: Boolean(readinessAfter?.promoted_edge_id)
+    },
+    matrix_hygiene: {
+      promoted_count: endpointMatrix.filter((entry) =>
+        matrixHygiene.readiness.some(
+          (readiness) =>
+            readiness.graph_candidate_id === entry.graph_candidate_id &&
+            readiness.status === "promoted"
+        )
+      ).length,
+      endpoint_policy: matrixHygiene.governance.supported_endpoint_policy,
+      active_edge_endpoint_kinds: matrixHygiene.governance.active_edge_endpoint_kinds,
+      chunk_retrieval_endpoint_policy: matrixHygiene.governance.chunk_retrieval_endpoint_policy
     },
     isolation: {
       cross_project_get_blocked: crossProjectGetBlocked,
