@@ -775,7 +775,22 @@ const forgettable = await db.createAgentMemory({
   title: "Review UI forget forever memory",
   body: `This memory contains ${forgetSecret} and must be redacted by forget forever.`,
   created_by: "agent",
-  source_refs: [{ source_kind: "event", source_id: event.event_id, quote: forgetSecret }]
+  source_refs: [
+    {
+      source_kind: "event",
+      source_id: event.event_id,
+      quote: forgetSecret,
+      metadata: { sentinel: forgetSecret }
+    }
+  ],
+  metadata: { sentinel: forgetSecret }
+});
+await db.reviewAgentMemory({
+  memory_id: forgettable.memory_id,
+  action: "edit",
+  actor_kind: "agent",
+  note: `${forgetSecret} review history`,
+  patch: { title: "Review UI forget forever memory" }
 });
 await db.ensureGraphCandidateSchema();
 const graphNodeCandidate = await db.createGraphCandidate({
@@ -3995,7 +4010,11 @@ try {
     forgetDryRunForm.status !== 200 ||
     !forgetDryRunFormHtml.includes("Dry-run complete. Nothing was erased.") ||
     !forgetDryRunFormHtml.includes("Confirm forget forever") ||
-    !forgetDryRunFormHtml.includes(forgettable.memory_id)
+    !forgetDryRunFormHtml.includes(forgettable.memory_id) ||
+    !forgetDryRunFormHtml.includes("artifact references") ||
+    !forgetDryRunFormHtml.includes("review records") ||
+    !forgetDryRunFormHtml.includes("recall traces") ||
+    forgetDryRunFormHtml.includes("review ui forget form smoke")
   ) {
     throw new Error(
       `Memory forget form dry-run failed: ${forgetDryRunForm.status} ${forgetDryRunFormHtml}`
@@ -4012,7 +4031,7 @@ try {
       project_id: projectId,
       target_kind: "agent_memory",
       target_id: forgettable.memory_id,
-      reason: "review ui confirmed forget smoke",
+      reason: `${forgetSecret} review ui confirmed forget smoke`,
       confirm: "true"
     })
   });
@@ -4021,6 +4040,7 @@ try {
     forgetConfirmForm.status !== 200 ||
     !forgetConfirmFormHtml.includes("Forget forever complete. Recallant content was redacted.") ||
     !forgetConfirmFormHtml.includes("Redacted receipt") ||
+    !forgetConfirmFormHtml.includes("owner-controlled external files or objects are not deleted") ||
     forgetConfirmFormHtml.includes(forgetSecret)
   ) {
     throw new Error(
@@ -4033,7 +4053,20 @@ try {
     forgottenDetail.memory?.body !== "[REDACTED]" ||
     forgottenDetail.memory?.status !== "archived" ||
     forgottenDetail.memory?.use_policy !== "do_not_use" ||
-    forgottenDetail.source_refs.some((ref) => ref.quote !== null)
+    forgottenDetail.memory?.review_reason !== null ||
+    JSON.stringify(forgottenDetail.memory?.metadata).includes(forgetSecret) ||
+    forgottenDetail.source_refs.some(
+      (ref) =>
+        ref.quote !== null ||
+        ref.source_id !== "[REDACTED]" ||
+        JSON.stringify(ref.metadata).includes(forgetSecret)
+    ) ||
+    forgottenDetail.review_actions.some(
+      (action) =>
+        action.note !== null ||
+        action.actor_id !== null ||
+        JSON.stringify(action.metadata).includes(forgetSecret)
+    )
   ) {
     throw new Error(
       `Memory forget did not redact governed memory: ${JSON.stringify(forgottenDetail)}`

@@ -27,6 +27,7 @@ import {
 import {
   createRecallantDbFromEnv,
   emptyCanonCapabilityContext,
+  forgetTargetKindValues,
   type AgentMemorySourceRefInput,
   type ArchiveInput,
   type ContextPackInput,
@@ -1775,19 +1776,22 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_forget",
     title: "Forget Content",
-    description: "Preview or run an owner-confirmed erasure workflow.",
+    description:
+      "Preview or run project-bound erasure. Broad search/scope targets require the exact preview confirmation token.",
     inputSchema: z.object({
       target: z.object({
-        kind: z.enum([
-          "event",
-          "chunk",
-          "agent_memory",
-          "raw_artifact",
-          "search_query",
-          "scope_selector"
-        ]),
+        kind: z.enum(forgetTargetKindValues),
         id: z.string().nullable().optional(),
-        selector: metadata
+        selector: z
+          .object({
+            project_id: z.string().uuid().nullable().optional(),
+            query: z.string().min(3).max(200).nullable().optional(),
+            scope_kind: z.string().min(1).max(80).nullable().optional(),
+            scope_id: z.string().min(1).max(200).nullable().optional(),
+            max_matches: z.number().int().min(1).max(1000).nullable().optional()
+          })
+          .strict()
+          .default({})
       }),
       reason: nullableString,
       dry_run: z.boolean().default(true),
@@ -1809,8 +1813,14 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           events: 0,
           chunks: 0,
           embeddings: 0,
+          edges: 0,
           agent_memories: 0,
           raw_artifacts: 0,
+          source_refs: 0,
+          review_actions: 0,
+          recall_traces: 0,
+          checkpoints: 0,
+          external_artifacts: 0,
           derived_summaries: 0
         },
         warnings: ["MCP skeleton stub: erasure preview is not database-backed yet."],

@@ -125,7 +125,11 @@ mustInclude(
     "redacted system activity ledger",
     "bodies, auth headers, cookies",
     "Project purge must account for the ledger",
-    "Backups include the ledger table"
+    "Backups include the ledger table",
+    "Scoped Content Erasure",
+    "content-free selection",
+    "Owner-controlled external files or objects are not deleted",
+    "Raw query or task-hint text is not persisted"
   ],
   "docs/SECURITY.md"
 );
@@ -158,7 +162,11 @@ mustInclude(
     "Remote bridge hosts must not receive `RECALLANT_DATABASE_URL`, Postgres access, internal server",
     "paths, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw deployment overlays",
     "The existing invite-command flow remains an",
-    "advanced/admin fallback"
+    "advanced/admin fallback",
+    "Scoped Content Erasure",
+    "receipt is content-free",
+    "Owner-controlled external files or objects are not deleted",
+    "context-read audit events do not persist raw"
   ],
   "docs/MCP_SPEC.md remote security boundary"
 );
@@ -211,7 +219,9 @@ for (const [label, text] of [
 ]) {
   mustNotMatch(
     text,
-    keeperOverclaimPhrases.map((phrase) => new RegExp(phrase.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")),
+    keeperOverclaimPhrases.map(
+      (phrase) => new RegExp(phrase.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    ),
     label
   );
 }

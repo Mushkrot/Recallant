@@ -32,6 +32,7 @@ import {
 import {
   RecallantDb,
   createRecallantDbFromEnv,
+  forgetTargetKindValues,
   recallantDatabasePackage,
   type ForgetInput,
   type ProjectSourceKind,
@@ -2120,9 +2121,12 @@ function buildForgetInput(body: Record<string, unknown>): ForgetInput {
   const target = asRecord(body.target);
   const confirmation = asRecord(body.confirmation);
   const confirmed = confirmation.confirmed === true || body.confirm === "true";
+  const targetKind = optionalInput(target.kind) ?? optionalInput(body.target_kind);
   return {
     target: {
-      kind: optionalInput(target.kind) ?? optionalInput(body.target_kind) ?? "agent_memory",
+      kind: forgetTargetKindValues.includes(targetKind as (typeof forgetTargetKindValues)[number])
+        ? (targetKind as ForgetInput["target"]["kind"])
+        : "agent_memory",
       id:
         optionalInput(target.id) ?? optionalInput(body.target_id) ?? optionalInput(body.memory_id),
       selector: asRecord(target.selector)
@@ -2809,8 +2813,6 @@ function renderMemoryForgetResult(
   const receipt = asRecord(result.redacted_receipt);
   const warnings = Array.isArray(result.warnings) ? result.warnings.map(String) : [];
   const needsConfirmation = result.status !== "completed";
-  const reason =
-    memoryForget.reason ?? "Sensitive or wrong memory cleanup requested from Review UI";
   return `<article class="forget-result">
     <strong>${escapeHtml(
       needsConfirmation
@@ -2819,14 +2821,18 @@ function renderMemoryForgetResult(
     )}</strong>
     <p>${escapeHtml(
       needsConfirmation
-        ? "Review the affected Recallant records. Confirm only if this memory is sensitive, wrong, or must never be recalled again."
-        : "This is not ordinary cleanup. The receipt below contains only safe internal references, counts, and status."
+        ? "Review the affected Recallant-controlled records. Confirm only if this memory is sensitive, wrong, or must never be recalled again."
+        : "Recallant-controlled content and dependent references were redacted. The receipt contains only counts, a selection digest, and governance status; owner-controlled external files or objects are not deleted."
     )}</p>
     <div class="summary-grid">
       <span><strong>${escapeHtml(affected.agent_memories ?? 0)}</strong> memories</span>
       <span><strong>${escapeHtml(affected.chunks ?? 0)}</strong> chunks</span>
       <span><strong>${escapeHtml(affected.embeddings ?? 0)}</strong> embeddings</span>
       <span><strong>${escapeHtml(affected.events ?? 0)}</strong> events</span>
+      <span><strong>${escapeHtml(affected.raw_artifacts ?? 0)}</strong> artifact references</span>
+      <span><strong>${escapeHtml(affected.edges ?? 0)}</strong> graph edges</span>
+      <span><strong>${escapeHtml(affected.review_actions ?? 0)}</strong> review records</span>
+      <span><strong>${escapeHtml(affected.recall_traces ?? 0)}</strong> recall traces</span>
     </div>
     ${
       warnings.length > 0
@@ -2839,7 +2845,6 @@ function renderMemoryForgetResult(
             <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />
             <input type="hidden" name="target_kind" value="agent_memory" />
             <input type="hidden" name="target_id" value="${escapeHtml(memory.id)}" />
-            <input type="hidden" name="reason" value="${escapeHtml(reason)}" />
             <input type="hidden" name="confirm" value="true" />
             <button class="danger" type="submit">Confirm forget forever</button>
           </form>`
@@ -2865,7 +2870,7 @@ function renderMemoryForgetAction(
   const defaultReason = "Sensitive or wrong memory cleanup requested from Review UI";
   return `<details class="action-detail danger-zone">
     <summary>Forget forever</summary>
-    <p>Only use this for sensitive or wrong memory. Ordinary project detach hides a project from Recallant; this redacts the selected memory so agents cannot recall it.</p>
+    <p>Only use this for sensitive or wrong memory. Ordinary project detach only hides a project. Forget forever redacts the selected memory and its Recallant-controlled dependent metadata, history, traces, embeddings, and references. Owner-controlled external files or objects remain outside this operation.</p>
     ${renderMemoryForgetResult(memory, projectId, memoryForget)}
     <form method="post" action="/memory-forget">
       <input type="hidden" name="project_id" value="${escapeHtml(projectId)}" />

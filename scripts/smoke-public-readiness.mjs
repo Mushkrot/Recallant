@@ -345,6 +345,11 @@ mustInclude(
     "Synthetic non-secret marker recallant_safe_semantic_marker_example",
     "Passing `audience` as a string",
     "raw request bodies",
+    "Scoped Content Erasure",
+    "receipt is content-free",
+    "rejects a stale token",
+    "Owner-controlled external files or objects are not deleted",
+    "context-read audit events do not persist raw",
     "remote-live-external-canary:smoke",
     "RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1",
     "server_trace_validation_skipped",
@@ -538,6 +543,9 @@ mustInclude(
     "npm run system-audit:report-smoke",
     "npm run phase8:smoke:backup",
     "Workbench migration review queue",
+    "Scoped content erasure",
+    "stale-token rejection",
+    "content-free selection digests and receipts",
     "Current Remote Existing-Project Findings",
     '`mode: "remote_mcp_ready"`',
     "`remote-ready, local storage not attached`",
@@ -874,7 +882,11 @@ mustNotInclude(
 );
 mustNotInclude(
   contractStatus,
-  ["richer graph review ergonomics", "richer review ergonomics", "Broader keeper source integration"],
+  [
+    "richer graph review ergonomics",
+    "richer review ergonomics",
+    "Broader keeper source integration"
+  ],
   "CONTRACT_STATUS stale graph wording"
 );
 mustNotInclude(

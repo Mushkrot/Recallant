@@ -1129,11 +1129,30 @@ export type ContextPackInput = {
   local_spool_status?: JsonObject | null;
 };
 
+export const forgetTargetKindValues = [
+  "event",
+  "chunk",
+  "agent_memory",
+  "raw_artifact",
+  "search_query",
+  "scope_selector"
+] as const;
+
+export type ForgetTargetKind = (typeof forgetTargetKindValues)[number];
+
+export type ForgetSelector = {
+  project_id?: string | null;
+  query?: string | null;
+  scope_kind?: string | null;
+  scope_id?: string | null;
+  max_matches?: number | null;
+};
+
 export type ForgetInput = {
   target: {
-    kind: string;
+    kind: ForgetTargetKind;
     id?: string | null;
-    selector?: JsonObject;
+    selector?: ForgetSelector;
   };
   reason?: string | null;
   dry_run?: boolean;
@@ -1142,6 +1161,39 @@ export type ForgetInput = {
     confirmation_token?: string | null;
   };
 };
+
+type ForgetManifest = {
+  project_id: string;
+  target_kind: ForgetTargetKind;
+  event_ids: string[];
+  chunk_ids: string[];
+  embedding_chunk_ids: string[];
+  edge_ids: string[];
+  agent_memory_ids: string[];
+  raw_artifact_ids: string[];
+  source_ref_ids: string[];
+  review_action_ids: string[];
+  recall_trace_ids: string[];
+  checkpoint_selected: boolean;
+  external_artifacts: number;
+};
+
+type ForgetAffected = {
+  events: number;
+  chunks: number;
+  embeddings: number;
+  edges: number;
+  agent_memories: number;
+  raw_artifacts: number;
+  source_refs: number;
+  review_actions: number;
+  recall_traces: number;
+  checkpoints: number;
+  external_artifacts: number;
+  derived_summaries: number;
+};
+
+type ForgetQueryable = Pick<Pool, "query">;
 
 export type ProjectSettingInput = {
   project_id?: string | null;
@@ -2176,6 +2228,49 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function forgetUniqueIds(values: readonly (string | null | undefined)[]) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort();
+}
+
+function forgetLikePattern(value: string) {
+  return `%${value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+}
+
+function forgetManifestDigest(manifest: ForgetManifest) {
+  return sha256(manifest);
+}
+
+function forgetConfirmationToken(manifest: ForgetManifest) {
+  return `forget-v1:${forgetManifestDigest(manifest)}`;
+}
+
+function forgetAffected(manifest: ForgetManifest): ForgetAffected {
+  return {
+    events: manifest.event_ids.length,
+    chunks: manifest.chunk_ids.length,
+    embeddings: manifest.embedding_chunk_ids.length,
+    edges: manifest.edge_ids.length,
+    agent_memories: manifest.agent_memory_ids.length,
+    raw_artifacts: manifest.raw_artifact_ids.length,
+    source_refs: manifest.source_ref_ids.length,
+    review_actions: manifest.review_action_ids.length,
+    recall_traces: manifest.recall_trace_ids.length,
+    checkpoints: manifest.checkpoint_selected ? 1 : 0,
+    external_artifacts: manifest.external_artifacts,
+    derived_summaries: 0
+  };
+}
+
+function forgetAffectedTotal(affected: ForgetAffected) {
+  return (
+    affected.events +
+    affected.chunks +
+    affected.agent_memories +
+    affected.raw_artifacts +
+    affected.checkpoints
+  );
 }
 
 function stringArraySetting(value: unknown, maxItems = 20) {
@@ -8007,14 +8102,15 @@ export class RecallantDb {
         occurredAt: new Date(),
         payload: {
           schema_version: 1,
-          text: input.task_hint
-            ? `Context pack requested for: ${input.task_hint}`
-            : "Context pack requested.",
+          text: "Context pack requested.",
           metadata: {
             capture_kind: "context_read",
             include_raw_evidence: input.include_raw_evidence ?? "auto",
             include_recovery: input.include_recovery ?? true,
-            max_chars_total: input.max_chars_total ?? null
+            max_chars_total: input.max_chars_total ?? null,
+            task_hint_sha256: input.task_hint ? sha256(input.task_hint) : null,
+            task_hint_length: input.task_hint?.length ?? 0,
+            task_hint_redacted: true
           }
         }
       });
@@ -8185,64 +8281,64 @@ export class RecallantDb {
   }
 
   async forget(input: ForgetInput) {
-    const targetId = input.target.id;
-    if (!targetId) throw new Error("VALIDATION_ERROR: forget target id is required");
-    const affected = await this.countForgetTarget(input.target.kind, targetId);
+    const context = await this.ensureProject();
+    const manifest = await this.resolveForgetManifest(input, context, this.pool);
+    const affected = forgetAffected(manifest);
+    if (forgetAffectedTotal(affected) === 0) {
+      throw new Error("NOT_FOUND: forget target matched no Recallant-controlled content");
+    }
+    const digest = forgetManifestDigest(manifest);
+    const confirmationToken = forgetConfirmationToken(manifest);
+    const broadTarget =
+      input.target.kind === "search_query" || input.target.kind === "scope_selector";
     if (input.dry_run !== false || input.confirmation?.confirmed !== true) {
       return {
         erasure_id: randomUUID(),
         status: "pending_confirmation",
         requires_confirmation: true,
         affected,
+        selection_digest: digest,
+        confirmation_token: confirmationToken,
         warnings: ["Dry run only. No Recallant-controlled content was erased."],
         redacted_receipt: {}
       };
     }
+    if (broadTarget && input.confirmation.confirmation_token !== confirmationToken) {
+      throw new Error(
+        "CONFIRMATION_REQUIRED: broad forget confirmation token is missing, invalid, or stale"
+      );
+    }
     const erasureId = randomUUID();
     await withTransaction(this.pool, async (client) => {
-      if (input.target.kind === "chunk") {
-        await client.query("DELETE FROM embeddings WHERE chunk_id = $1", [targetId]);
-        await client.query(
-          "UPDATE chunks SET text = '[REDACTED]', archived_at = now() WHERE id = $1",
-          [targetId]
-        );
-      } else if (input.target.kind === "event") {
-        await client.query(
-          "DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE source_event_id = $1)",
-          [targetId]
-        );
-        await client.query(
-          "UPDATE chunks SET text = '[REDACTED]', archived_at = now() WHERE source_event_id = $1",
-          [targetId]
-        );
-        await client.query("UPDATE events SET payload = $2 WHERE id = $1", [
-          targetId,
-          JSON.stringify({ redacted: true, erasure_id: erasureId })
-        ]);
-      } else if (input.target.kind === "agent_memory") {
-        await client.query(
-          "UPDATE agent_memories SET title = '[REDACTED]', body = '[REDACTED]', status = 'archived', use_policy = 'do_not_use' WHERE id = $1",
-          [targetId]
-        );
-        await client.query(
-          "UPDATE agent_memory_source_refs SET quote = NULL WHERE memory_id = $1",
-          [targetId]
-        );
+      const currentManifest = await this.resolveForgetManifest(input, context, client);
+      if (forgetManifestDigest(currentManifest) !== digest) {
+        throw new Error("CONFLICT: forget selection changed after preview; run preview again");
       }
+      await this.executeForgetManifest(client, currentManifest, erasureId);
       await client.query(
         `
           INSERT INTO erasure_requests (
             id, developer_id, project_id, requested_by, request_source, target_selector,
             reason, status, requires_confirmation, confirmed_by, confirmed_at, executed_at, redacted_receipt
           )
-          VALUES ($1, coalesce((SELECT developer_id FROM projects LIMIT 1), gen_random_uuid()), NULL,
-                  'owner', 'mcp', $2, $3, 'completed', true, 'owner', now(), now(), $4)
+          VALUES ($1, $2, $3, 'owner', 'mcp', $4, NULL, 'completed', true,
+                  'owner', now(), now(), $5)
         `,
         [
           erasureId,
-          JSON.stringify({ kind: input.target.kind, id: targetId }),
-          input.reason ?? null,
-          JSON.stringify({ affected, content_redacted: true })
+          context.developerId,
+          context.projectId,
+          JSON.stringify({
+            kind: input.target.kind,
+            id: broadTarget ? null : (input.target.id ?? null),
+            selection_digest: digest
+          }),
+          JSON.stringify({
+            affected,
+            content_redacted: true,
+            external_objects_deleted: false,
+            governance_receipt_content_free: true
+          })
         ]
       );
     });
@@ -8251,8 +8347,19 @@ export class RecallantDb {
       status: "completed",
       requires_confirmation: false,
       affected,
-      warnings: [],
-      redacted_receipt: { affected, content_redacted: true }
+      selection_digest: digest,
+      warnings:
+        affected.external_artifacts > 0
+          ? [
+              "Recallant references were redacted. Owner-controlled external objects were not deleted."
+            ]
+          : [],
+      redacted_receipt: {
+        affected,
+        content_redacted: true,
+        external_objects_deleted: false,
+        governance_receipt_content_free: true
+      }
     };
   }
 
@@ -9157,17 +9264,19 @@ export class RecallantDb {
         INSERT INTO recall_traces (
           developer_id, project_id, tool_name, query, returned_memory_ids, metadata
         )
-        VALUES ($1, $2, 'memory_recall_agent_memories', $3, $4, $5)
+        VALUES ($1, $2, 'memory_recall_agent_memories', NULL, $3, $4)
         RETURNING id
       `,
       [
         context.developerId,
         context.projectId,
-        input.query,
         JSON.stringify(memories.map((memory) => memory.memory_id)),
         JSON.stringify({
           truncated: result.rows.length > memories.length,
-          source_id: sourceFilter?.source_id ?? null
+          source_id: sourceFilter?.source_id ?? null,
+          query_sha256: sha256(input.query),
+          query_length: input.query.length,
+          query_redacted: true
         })
       ]
     );
@@ -9338,18 +9447,20 @@ export class RecallantDb {
         INSERT INTO recall_traces (
           developer_id, project_id, tool_name, query, returned_memory_ids, metadata
         )
-        VALUES ($1, $2, 'memory_cross_project_recall', $3, $4, $5)
+        VALUES ($1, $2, 'memory_cross_project_recall', NULL, $3, $4)
         RETURNING id
       `,
       [
         context.developerId,
         context.projectId,
-        input.query,
         JSON.stringify(results.map((result) => result.memory_id)),
         JSON.stringify({
           mode,
           include_detached: input.include_detached === true,
-          truncated: rows.rows.length > results.length
+          truncated: rows.rows.length > results.length,
+          query_sha256: sha256(input.query),
+          query_length: input.query.length,
+          query_redacted: true
         })
       ]
     );
@@ -11774,60 +11885,472 @@ export class RecallantDb {
     return readProjectLifecycle(result.rows[0]?.value);
   }
 
-  private async countForgetTarget(kind: string, targetId: string) {
-    if (kind === "event") {
-      const result = await this.pool.query(
-        `
-          SELECT
-            1 AS events,
-            (SELECT count(*)::int FROM chunks WHERE source_event_id = $1) AS chunks,
-            (SELECT count(*)::int FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE source_event_id = $1)) AS embeddings,
-            0 AS agent_memories,
-            (SELECT count(*)::int FROM raw_artifacts WHERE source_event_id = $1) AS raw_artifacts,
-            0 AS derived_summaries
-        `,
-        [targetId]
-      );
-      return result.rows[0];
+  private async resolveForgetManifest(
+    input: ForgetInput,
+    context: ProjectContext,
+    queryable: ForgetQueryable
+  ): Promise<ForgetManifest> {
+    if (!forgetTargetKindValues.includes(input.target.kind)) {
+      throw new Error(`VALIDATION_ERROR: unsupported forget target kind ${input.target.kind}`);
     }
-    if (kind === "chunk") {
-      const result = await this.pool.query(
-        `
-          SELECT
-            0 AS events,
-            (SELECT count(*)::int FROM chunks WHERE id = $1) AS chunks,
-            (SELECT count(*)::int FROM embeddings WHERE chunk_id = $1) AS embeddings,
-            0 AS agent_memories,
-            0 AS raw_artifacts,
-            0 AS derived_summaries
-        `,
-        [targetId]
+    const selector = input.target.selector ?? {};
+    const allowedSelectorKeys = new Set([
+      "project_id",
+      "query",
+      "scope_kind",
+      "scope_id",
+      "max_matches"
+    ]);
+    const unknownSelectorKeys = Object.keys(selector).filter(
+      (key) => !allowedSelectorKeys.has(key)
+    );
+    if (unknownSelectorKeys.length > 0) {
+      throw new Error(
+        `VALIDATION_ERROR: unsupported forget selector field(s): ${unknownSelectorKeys.join(", ")}`
       );
-      return result.rows[0];
     }
-    if (kind === "agent_memory") {
-      const result = await this.pool.query(
-        `
-          SELECT
-            0 AS events,
-            0 AS chunks,
-            0 AS embeddings,
-            (SELECT count(*)::int FROM agent_memories WHERE id = $1) AS agent_memories,
-            0 AS raw_artifacts,
-            0 AS derived_summaries
-        `,
-        [targetId]
+    if (selector.project_id && selector.project_id !== context.projectId) {
+      throw new Error("FORBIDDEN: forget selector cannot cross the bound project");
+    }
+
+    const directTarget =
+      input.target.kind === "event" ||
+      input.target.kind === "chunk" ||
+      input.target.kind === "agent_memory" ||
+      input.target.kind === "raw_artifact";
+    if (directTarget && !input.target.id) {
+      throw new Error(`VALIDATION_ERROR: ${input.target.kind} forget target id is required`);
+    }
+    if (directTarget && (selector.query || selector.scope_kind || selector.scope_id)) {
+      throw new Error("VALIDATION_ERROR: direct forget targets do not accept broad selectors");
+    }
+
+    const eventIds = new Set<string>();
+    const chunkIds = new Set<string>();
+    const memoryIds = new Set<string>();
+    const artifactIds = new Set<string>();
+    const traceIds = new Set<string>();
+    let checkpointSelected = false;
+    let searchPattern: string | null = null;
+    const targetId = input.target.id ?? null;
+
+    if (input.target.kind === "event") {
+      const rows = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM events WHERE id = $1 AND project_id = $2",
+        [targetId, context.projectId]
       );
-      return result.rows[0];
+      if (!rows.rows[0]) throw new Error("NOT_FOUND: event forget target not found in project");
+      eventIds.add(rows.rows[0].id);
+    } else if (input.target.kind === "chunk") {
+      const rows = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM chunks WHERE id = $1 AND project_id = $2",
+        [targetId, context.projectId]
+      );
+      if (!rows.rows[0]) throw new Error("NOT_FOUND: chunk forget target not found in project");
+      chunkIds.add(rows.rows[0].id);
+    } else if (input.target.kind === "raw_artifact") {
+      const rows = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM raw_artifacts WHERE id = $1 AND project_id = $2",
+        [targetId, context.projectId]
+      );
+      if (!rows.rows[0]) {
+        throw new Error("NOT_FOUND: raw artifact forget target not found in project");
+      }
+      artifactIds.add(rows.rows[0].id);
+    } else if (input.target.kind === "agent_memory") {
+      const rows = await queryable.query<{ id: string }>(
+        `
+          SELECT id::text
+          FROM agent_memories
+          WHERE id = $1
+            AND developer_id = $2
+            AND (project_id = $3 OR scope = 'developer')
+        `,
+        [targetId, context.developerId, context.projectId]
+      );
+      if (!rows.rows[0]) {
+        throw new Error("NOT_FOUND: governed memory forget target not found in scope");
+      }
+      memoryIds.add(rows.rows[0].id);
+    } else if (input.target.kind === "search_query") {
+      const query = typeof selector.query === "string" ? selector.query.trim() : "";
+      if (query.length < 3 || query.length > 200) {
+        throw new Error("VALIDATION_ERROR: search_query must be between 3 and 200 characters");
+      }
+      if (selector.scope_kind || selector.scope_id) {
+        throw new Error("VALIDATION_ERROR: search_query does not accept scope fields");
+      }
+      searchPattern = forgetLikePattern(query);
+      const events = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM events WHERE project_id = $1 AND payload::text ILIKE $2",
+        [context.projectId, searchPattern]
+      );
+      const chunks = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM chunks WHERE project_id = $1 AND text ILIKE $2",
+        [context.projectId, searchPattern]
+      );
+      const artifacts = await queryable.query<{ id: string }>(
+        `
+              SELECT id::text
+              FROM raw_artifacts
+              WHERE project_id = $1
+                AND concat_ws(' ', uri, excerpt, metadata::text) ILIKE $2
+            `,
+        [context.projectId, searchPattern]
+      );
+      const memories = await queryable.query<{ id: string }>(
+        `
+              SELECT id::text
+              FROM agent_memories
+              WHERE project_id = $1
+                AND concat_ws(' ', title, body, review_reason, metadata::text) ILIKE $2
+            `,
+        [context.projectId, searchPattern]
+      );
+      const refs = await queryable.query<{ memory_id: string }>(
+        `
+              SELECT DISTINCT r.memory_id::text
+              FROM agent_memory_source_refs r
+              JOIN agent_memories m ON m.id = r.memory_id
+              WHERE m.project_id = $1
+                AND concat_ws(' ', r.source_id, r.quote, r.metadata::text) ILIKE $2
+            `,
+        [context.projectId, searchPattern]
+      );
+      const actions = await queryable.query<{ memory_id: string }>(
+        `
+              SELECT DISTINCT a.memory_id::text
+              FROM agent_memory_review_actions a
+              JOIN agent_memories m ON m.id = a.memory_id
+              WHERE m.project_id = $1
+                AND concat_ws(' ', a.note, a.metadata::text) ILIKE $2
+            `,
+        [context.projectId, searchPattern]
+      );
+      const traces = await queryable.query<{ id: string }>(
+        `
+              SELECT id::text
+              FROM recall_traces
+              WHERE project_id = $1
+                AND concat_ws(' ', query, metadata::text) ILIKE $2
+            `,
+        [context.projectId, searchPattern]
+      );
+      const checkpoint = await queryable.query<{ selected: boolean }>(
+        `
+              SELECT EXISTS (
+                SELECT 1 FROM checkpoints
+                WHERE project_id = $1 AND payload::text ILIKE $2
+              ) AS selected
+            `,
+        [context.projectId, searchPattern]
+      );
+      events.rows.forEach((row) => eventIds.add(row.id));
+      chunks.rows.forEach((row) => chunkIds.add(row.id));
+      artifacts.rows.forEach((row) => artifactIds.add(row.id));
+      memories.rows.forEach((row) => memoryIds.add(row.id));
+      refs.rows.forEach((row) => memoryIds.add(row.memory_id));
+      actions.rows.forEach((row) => memoryIds.add(row.memory_id));
+      traces.rows.forEach((row) => traceIds.add(row.id));
+      checkpointSelected = checkpoint.rows[0]?.selected === true;
+    } else {
+      const scopeKind = typeof selector.scope_kind === "string" ? selector.scope_kind.trim() : "";
+      const scopeId = typeof selector.scope_id === "string" ? selector.scope_id.trim() : "";
+      if (!scopeKind || scopeKind.length > 80 || !scopeId || scopeId.length > 200) {
+        throw new Error(
+          "VALIDATION_ERROR: scope_selector requires bounded scope_kind and scope_id"
+        );
+      }
+      if (selector.query) {
+        throw new Error("VALIDATION_ERROR: scope_selector does not accept query");
+      }
+      const chunks = await queryable.query<{ id: string }>(
+        `
+            SELECT id::text FROM chunks
+            WHERE project_id = $1 AND scope_kind = $2 AND scope_id = $3
+          `,
+        [context.projectId, scopeKind, scopeId]
+      );
+      const memories = await queryable.query<{ id: string }>(
+        `
+            SELECT id::text FROM agent_memories
+            WHERE project_id = $1 AND scope_kind = $2 AND scope_id = $3
+          `,
+        [context.projectId, scopeKind, scopeId]
+      );
+      const checkpoint = await queryable.query<{ selected: boolean }>(
+        `
+            SELECT EXISTS (
+              SELECT 1 FROM checkpoints
+              WHERE project_id = $1 AND payload::text ILIKE $2
+            ) AS selected
+          `,
+        [context.projectId, forgetLikePattern(scopeId)]
+      );
+      chunks.rows.forEach((row) => chunkIds.add(row.id));
+      memories.rows.forEach((row) => memoryIds.add(row.id));
+      checkpointSelected = checkpoint.rows[0]?.selected === true;
     }
-    return {
-      events: 0,
-      chunks: 0,
-      embeddings: 0,
-      agent_memories: 0,
-      raw_artifacts: 0,
-      derived_summaries: 0
+
+    const broadTarget =
+      input.target.kind === "search_query" || input.target.kind === "scope_selector";
+    if (broadTarget && chunkIds.size > 0) {
+      const events = await queryable.query<{ id: string }>(
+        "SELECT DISTINCT source_event_id::text AS id FROM chunks WHERE id = ANY($1::uuid[])",
+        [[...chunkIds]]
+      );
+      events.rows.forEach((row) => eventIds.add(row.id));
+    }
+    if (broadTarget && artifactIds.size > 0) {
+      const events = await queryable.query<{ id: string }>(
+        `
+          SELECT DISTINCT source_event_id::text AS id
+          FROM raw_artifacts
+          WHERE id = ANY($1::uuid[]) AND source_event_id IS NOT NULL
+        `,
+        [[...artifactIds]]
+      );
+      events.rows.forEach((row) => eventIds.add(row.id));
+    }
+    if (eventIds.size > 0) {
+      const chunks = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM chunks WHERE source_event_id = ANY($1::uuid[])",
+        [[...eventIds]]
+      );
+      const artifacts = await queryable.query<{ id: string }>(
+        "SELECT id::text FROM raw_artifacts WHERE source_event_id = ANY($1::uuid[])",
+        [[...eventIds]]
+      );
+      chunks.rows.forEach((row) => chunkIds.add(row.id));
+      artifacts.rows.forEach((row) => artifactIds.add(row.id));
+    }
+
+    const endpointIds = forgetUniqueIds([...eventIds, ...chunkIds, ...artifactIds]);
+    const embeddings = chunkIds.size
+      ? await queryable.query<{ id: string }>(
+          "SELECT chunk_id::text AS id FROM embeddings WHERE chunk_id = ANY($1::uuid[])",
+          [[...chunkIds]]
+        )
+      : { rows: [] as { id: string }[] };
+    const edges = endpointIds.length
+      ? await queryable.query<{ id: string }>(
+          `
+                SELECT id::text FROM edges
+                WHERE project_id = $1
+                  AND (src_id = ANY($2::text[]) OR dst_id = ANY($2::text[]))
+              `,
+          [context.projectId, endpointIds]
+        )
+      : { rows: [] as { id: string }[] };
+    const sourceRefs = await queryable.query<{ id: string }>(
+      `
+            SELECT r.id::text
+            FROM agent_memory_source_refs r
+            JOIN agent_memories m ON m.id = r.memory_id
+            WHERE m.developer_id = $1
+              AND (
+                r.memory_id = ANY($2::uuid[])
+                OR r.source_id = ANY($3::text[])
+              )
+          `,
+      [context.developerId, [...memoryIds], endpointIds]
+    );
+    const reviewActions = memoryIds.size
+      ? await queryable.query<{ id: string }>(
+          "SELECT id::text FROM agent_memory_review_actions WHERE memory_id = ANY($1::uuid[])",
+          [[...memoryIds]]
+        )
+      : { rows: [] as { id: string }[] };
+    const relatedTraces = await queryable.query<{ id: string }>(
+      `
+            SELECT id::text
+            FROM recall_traces
+            WHERE project_id = $1
+              AND (
+                id = ANY($2::uuid[])
+                OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(coalesce(returned_chunk_ids, '[]'::jsonb)) value
+                  WHERE value = ANY($3::text[])
+                )
+                OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(coalesce(returned_memory_ids, '[]'::jsonb)) value
+                  WHERE value = ANY($4::text[])
+                )
+                OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(coalesce(used_chunk_ids, '[]'::jsonb)) value
+                  WHERE value = ANY($3::text[])
+                )
+                OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(coalesce(used_memory_ids, '[]'::jsonb)) value
+                  WHERE value = ANY($4::text[])
+                )
+                OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(coalesce(ignored_memory_ids, '[]'::jsonb)) value
+                  WHERE value = ANY($4::text[])
+                )
+              )
+          `,
+      [context.projectId, [...traceIds], [...chunkIds], [...memoryIds]]
+    );
+    const externalArtifacts = artifactIds.size
+      ? await queryable.query<{ count: number }>(
+          `
+                SELECT count(*)::int AS count
+                FROM raw_artifacts
+                WHERE id = ANY($1::uuid[]) AND storage_backend <> 'postgres_inline'
+              `,
+          [[...artifactIds]]
+        )
+      : { rows: [{ count: 0 }] };
+    relatedTraces.rows.forEach((row) => traceIds.add(row.id));
+
+    const manifest: ForgetManifest = {
+      project_id: context.projectId,
+      target_kind: input.target.kind,
+      event_ids: forgetUniqueIds([...eventIds]),
+      chunk_ids: forgetUniqueIds([...chunkIds]),
+      embedding_chunk_ids: forgetUniqueIds(embeddings.rows.map((row) => row.id)),
+      edge_ids: forgetUniqueIds(edges.rows.map((row) => row.id)),
+      agent_memory_ids: forgetUniqueIds([...memoryIds]),
+      raw_artifact_ids: forgetUniqueIds([...artifactIds]),
+      source_ref_ids: forgetUniqueIds(sourceRefs.rows.map((row) => row.id)),
+      review_action_ids: forgetUniqueIds(reviewActions.rows.map((row) => row.id)),
+      recall_trace_ids: forgetUniqueIds([...traceIds]),
+      checkpoint_selected: checkpointSelected,
+      external_artifacts: Number(externalArtifacts.rows[0]?.count ?? 0)
     };
+    const maxMatches = boundedPositiveInt(selector.max_matches, 500, 1, 1000);
+    const primaryMatches = forgetAffectedTotal(forgetAffected(manifest));
+    if (broadTarget && primaryMatches > maxMatches) {
+      throw new Error(
+        `VALIDATION_ERROR: forget selector matched ${primaryMatches} primary records, above max_matches ${maxMatches}`
+      );
+    }
+    return manifest;
+  }
+
+  private async executeForgetManifest(
+    client: PoolClient,
+    manifest: ForgetManifest,
+    erasureId: string
+  ) {
+    const redactedMetadata = JSON.stringify({ redacted: true, erasure_id: erasureId });
+    if (manifest.embedding_chunk_ids.length) {
+      await client.query("DELETE FROM embeddings WHERE chunk_id = ANY($1::uuid[])", [
+        manifest.embedding_chunk_ids
+      ]);
+    }
+    if (manifest.edge_ids.length) {
+      await client.query("DELETE FROM edges WHERE id = ANY($1::uuid[])", [manifest.edge_ids]);
+    }
+    if (manifest.chunk_ids.length) {
+      await client.query(
+        `
+          UPDATE chunks
+          SET text = '[REDACTED]', archived_at = coalesce(archived_at, now()),
+              embed_status = 'failed', embed_model = NULL,
+              scope_kind = 'redacted', scope_id = NULL, audience = '[]'::jsonb
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.chunk_ids]
+      );
+    }
+    if (manifest.raw_artifact_ids.length) {
+      await client.query(
+        `
+          UPDATE raw_artifacts
+          SET uri = 'redacted://erasure', sha256 = NULL, size_bytes = NULL,
+              content_type = NULL, excerpt = NULL, metadata = $2, deleted_at = coalesce(deleted_at, now())
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.raw_artifact_ids, redactedMetadata]
+      );
+    }
+    if (manifest.event_ids.length) {
+      await client.query(
+        "UPDATE events SET payload = $2, payload_hash = NULL WHERE id = ANY($1::uuid[])",
+        [manifest.event_ids, redactedMetadata]
+      );
+    }
+    if (manifest.source_ref_ids.length) {
+      await client.query(
+        `
+          UPDATE agent_memory_source_refs
+          SET source_id = '[REDACTED]', quote = NULL, metadata = $2
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.source_ref_ids, redactedMetadata]
+      );
+    }
+    if (manifest.review_action_ids.length) {
+      await client.query(
+        `
+          UPDATE agent_memory_review_actions
+          SET actor_id = NULL, note = NULL, metadata = $2
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.review_action_ids, redactedMetadata]
+      );
+    }
+    if (manifest.agent_memory_ids.length) {
+      await client.query(
+        `
+          UPDATE agent_memories
+          SET title = '[REDACTED]', body = '[REDACTED]', status = 'archived',
+              use_policy = 'do_not_use', review_reason = NULL, metadata = $2,
+              accepted_by = NULL, rejected_by = NULL, supersedes = NULL, superseded_by = NULL,
+              scope_kind = 'redacted', scope_id = NULL, audience = '[]'::jsonb,
+              updated_at = now()
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.agent_memory_ids, redactedMetadata]
+      );
+      await client.query(
+        `
+          UPDATE agent_memories SET supersedes = NULL
+          WHERE supersedes = ANY($1::uuid[])
+        `,
+        [manifest.agent_memory_ids]
+      );
+      await client.query(
+        `
+          UPDATE agent_memories SET superseded_by = NULL
+          WHERE superseded_by = ANY($1::uuid[])
+        `,
+        [manifest.agent_memory_ids]
+      );
+    }
+    if (manifest.recall_trace_ids.length) {
+      await client.query(
+        `
+          UPDATE recall_traces
+          SET query = NULL, returned_chunk_ids = '[]'::jsonb, returned_memory_ids = '[]'::jsonb,
+              used_chunk_ids = '[]'::jsonb, used_memory_ids = '[]'::jsonb,
+              ignored_memory_ids = '[]'::jsonb, metadata = $2
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.recall_trace_ids, redactedMetadata]
+      );
+    }
+    if (manifest.checkpoint_selected) {
+      await client.query(
+        `
+          UPDATE checkpoints
+          SET payload = $2, updated_at = now()
+          WHERE project_id = $1
+        `,
+        [
+          manifest.project_id,
+          JSON.stringify({
+            current_status: "idle",
+            current_focus: "[REDACTED]",
+            next_step: "Await owner instructions",
+            open_questions: [],
+            erasure_id: erasureId
+          })
+        ]
+      );
+    }
   }
 
   async setCheckpoint(projectId: string | null | undefined, payload: JsonObject) {

@@ -109,6 +109,30 @@ Agent-created memories can be useful immediately, but durable behavioral guidanc
 authority. This protects maintainers from old or low-confidence context becoming hidden standing
 instructions.
 
+## Scoped Content Erasure
+
+Targeted erasure is separate from whole-project purge. `memory_forget` can select one current-project
+event, chunk, governed memory, or raw-artifact reference by ID, a bounded current-project search,
+or an exact scope kind and scope ID. Search and scope selection fail closed at their match limit.
+
+- The first pass is a no-write dry-run that returns affected counts, a content-free selection
+  digest, and a confirmation token.
+- Broad execution requires the exact token, re-resolves the selection inside one transaction, and
+  rejects stale confirmation rather than erasing a changed result set.
+- Selected content and Recallant-controlled dependents are redacted or removed, including text,
+  metadata, source quotes, artifact references, embeddings, graph edges, review history, recall
+  traces, and matching checkpoint state.
+- The retained receipt contains only bounded governance identifiers, counts, flags, and the
+  selection digest. It does not retain the reason, query, selector, deleted content, URI, quote,
+  metadata, or embedding.
+- Owner-controlled external files or objects are not deleted. Recallant erases its references and
+  reports that boundary explicitly.
+- Raw query or task-hint text is not persisted in recall traces or context-read audit events; only
+  hash, length, and redaction metadata remain, so verification cannot recreate erased text.
+
+Redacted rows act as non-content tombstones where referential integrity or governance history must
+remain. Repeating a direct erasure is therefore safe and does not restore or duplicate content.
+
 ## Project Sanitization
 
 Project cleanup is intentionally split into non-destructive detach and irreversible purge.

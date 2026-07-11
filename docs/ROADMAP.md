@@ -75,6 +75,10 @@ dependable before expanding the product surface.
   `Source-backed evidence`, empty-state copy, project isolation, public-safe labels, and
   `graph-topology:smoke` coverage.
 - Public readiness and security smokes that guard the OSS-facing documentation boundary.
+- Project-bound scoped content erasure for direct event, chunk, governed-memory, and artifact
+  targets plus bounded search and exact scope selectors, with no-write previews, digest-bound
+  confirmation, transactional dependent cleanup, content-free receipts, and an explicit boundary
+  that leaves owner-controlled external files or objects untouched.
 
 ## Near Term
 

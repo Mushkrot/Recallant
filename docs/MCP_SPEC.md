@@ -212,7 +212,34 @@ required-field message. These messages must not echo raw request bodies, raw sec
 customer data, private keys, backups, raw artifacts, large logs, database URLs, auth headers, or
 provider keys.
 
-## 3d) Raw Evidence Search Graph Profiles
+## 3d) Scoped Content Erasure
+
+`memory_forget` removes a bounded selection of Recallant-controlled content from the current
+project. Supported targets are a direct `event`, `chunk`, `agent_memory`, or `raw_artifact` ID, a
+bounded `search_query`, or an exact `scope_selector` containing `scope_kind` and `scope_id`.
+Search and scope selectors never cross the caller's current project boundary and fail closed when
+their configured match limit would be exceeded.
+
+Every request is dry-run first. The preview performs no writes and returns affected-record counts,
+a content-free selection digest, and a confirmation token. Broad search or scope execution must
+present that exact token; Recallant re-resolves the selection inside the erasure transaction and
+rejects a stale token instead of deleting a changed result set. Direct-ID execution is also
+transactional and idempotent.
+
+Execution redacts or removes the selected content and all Recallant-controlled content-bearing
+dependents, including chunks, embeddings, graph edges, artifact references, governed-memory source
+references and review history, recall traces, and matching checkpoint state. The retained erasure
+receipt is content-free: it contains identifiers needed for direct-target governance, counts,
+flags, and the selection digest, but no selector query, reason, deleted text, quote, URI, metadata,
+or embedding. Owner-controlled external files or objects are not deleted; Recallant removes or
+redacts only its stored references and returns an explicit warning about that boundary.
+
+Recall traces do not persist raw query text, and context-read audit events do not persist raw
+task-hint text. They retain only bounded hash/length/redaction metadata, so a post-erasure
+verification cannot recreate deleted content by writing the same query or task hint back into
+Recallant.
+
+## 3e) Raw Evidence Search Graph Profiles
 
 `memory_search` is the raw evidence/chunk search surface. It supports lexical, vector, and hybrid
 retrieval, plus an optional one-hop graph expansion from the seed hits.
@@ -247,7 +274,7 @@ retrieval-active only after explicit promotion into `edges`. Unknown `graph_retr
 values fail input validation with a bounded error listing allowed profiles and the
 `graph_retrieval_profile` path, without echoing raw request bodies.
 
-## 3e) Governed Graph Candidate Tools
+## 3f) Governed Graph Candidate Tools
 
 The graph candidate tool surface is a governed staging path for proposed graph nodes and edges. It
 does not make candidate data retrieval-active by default, and accepting a candidate records review
@@ -296,7 +323,7 @@ and Workbench `Promote candidate`. Workbench and HTTP form/API promotion use `/r
 `/api/review-action` with `target_kind=graph_candidate` and `action=promote`; Workbench and HTTP
 form/API maintenance use the same protected routes with `action=maintenance`.
 
-## 3f) External Rehearsal
+## 3g) External Rehearsal
 
 `remote-mcp-external-rehearsal:smoke` proves the shipped remote client path from a scrubbed
 external-like child-process environment. It uses HTTPS `/api/mcp`, `recallant connect-remote`,
