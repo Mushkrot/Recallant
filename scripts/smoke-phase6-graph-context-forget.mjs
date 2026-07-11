@@ -797,6 +797,40 @@ const searchMemory = await callTool(61, "memory_create_agent_memory", {
     }
   ]
 });
+const alternateDeveloperId = randomUUID();
+const alternateDeveloperMemoryId = randomUUID();
+const alternateDeveloperSourceRefId = randomUUID();
+await client.query("INSERT INTO developers (id, name) VALUES ($1, 'phase6 alternate developer')", [
+  alternateDeveloperId
+]);
+await client.query(
+  `
+    INSERT INTO agent_memories (
+      id, developer_id, project_id, scope, memory_type, title, body,
+      status, use_policy, confidence, created_by
+    )
+    VALUES ($1, $2, $3, 'project', 'work_log', $4, $5,
+            'needs_review', 'evidence_only', 1, 'agent')
+  `,
+  [
+    alternateDeveloperMemoryId,
+    alternateDeveloperId,
+    projectId,
+    `${searchEraseToken} alternate developer memory`,
+    `${searchEraseToken} alternate developer body`
+  ]
+);
+await client.query(
+  `
+    INSERT INTO agent_memory_source_refs (id, memory_id, source_kind, source_id, metadata)
+    VALUES ($1, $2, 'external', 'alternate-developer-source', $3)
+  `,
+  [
+    alternateDeveloperSourceRefId,
+    alternateDeveloperMemoryId,
+    JSON.stringify({ provenance: "must be redacted with the selected memory" })
+  ]
+);
 await callTool(62, "memory_review_agent_memory", {
   memory_id: searchMemory.memory_id,
   action: "edit",
@@ -852,8 +886,9 @@ const searchPreview = await callTool(64, "memory_forget", {
 });
 if (
   searchPreview.affected?.events !== 1 ||
-  searchPreview.affected?.agent_memories !== 1 ||
+  searchPreview.affected?.agent_memories !== 2 ||
   searchPreview.affected?.raw_artifacts !== 1 ||
+  searchPreview.affected?.source_refs !== 2 ||
   searchPreview.affected?.review_actions !== 1 ||
   searchPreview.affected?.recall_traces !== 1 ||
   searchPreview.affected?.checkpoints !== 1 ||

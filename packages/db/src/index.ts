@@ -12147,13 +12147,13 @@ export class RecallantDb {
             SELECT r.id::text
             FROM agent_memory_source_refs r
             JOIN agent_memories m ON m.id = r.memory_id
-            WHERE m.developer_id = $1
+            WHERE (m.project_id = $1 OR (m.developer_id = $2 AND r.memory_id = ANY($3::uuid[])))
               AND (
-                r.memory_id = ANY($2::uuid[])
-                OR r.source_id = ANY($3::text[])
+                r.memory_id = ANY($3::uuid[])
+                OR r.source_id = ANY($4::text[])
               )
           `,
-      [context.developerId, [...memoryIds], endpointIds]
+      [context.projectId, context.developerId, [...memoryIds], endpointIds]
     );
     const reviewActions = memoryIds.size
       ? await queryable.query<{ id: string }>(
