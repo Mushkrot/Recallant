@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
@@ -45,7 +45,13 @@ import {
   type ReviewAgentMemoryInput,
   type StartSessionInput
 } from "@recallant/db";
-import { buildMemoryKeeperPlan, type MemoryKeeperSourceInput } from "@recallant/core";
+import {
+  buildMemoryKeeperPlan,
+  prepareProjectLogSync,
+  validateProjectIdentity,
+  type MemoryKeeperSourceInput,
+  type ProjectLogCheckpointPayload
+} from "@recallant/core";
 import { z } from "zod";
 
 type ToolDb = ReturnType<typeof createRecallantDbFromEnv>;
@@ -274,6 +280,61 @@ function validationError(message: string) {
   return new Error(`VALIDATION_ERROR: ${message}`);
 }
 
+async function attachedProjectConfig(projectPath: string | null | undefined) {
+  if (!projectPath) return { projectPath: null, projectId: null, projectLogSync: null };
+  let resolvedPath: string;
+  try {
+    resolvedPath = await realpath(projectPath);
+  } catch {
+    // Do not turn an inaccessible remote path into a local identity assertion.
+    // A binding comparison is meaningful only for a real attached checkout.
+    return { projectPath: null, projectId: null, projectLogSync: null };
+  }
+  try {
+    const content = await readFile(join(resolvedPath, ".recallant", "config"), "utf8");
+    const config = JSON.parse(content) as Record<string, unknown>;
+    return {
+      projectPath: resolvedPath,
+      projectId: stringInput(config.project_id),
+      projectLogSync: config.project_log_sync ?? null
+    };
+  } catch {
+    return { projectPath: resolvedPath, projectId: null, projectLogSync: null };
+  }
+}
+
+async function projectIdentityPreflight(input: {
+  database?: ToolDb;
+  projectId?: string | null;
+  projectPath?: string | null;
+}) {
+  const config = await attachedProjectConfig(input.projectPath);
+  const requestedProjectId = stringInput(input.projectId);
+  const effectiveProjectId = config.projectId ?? requestedProjectId;
+  const binding =
+    input.database && effectiveProjectId
+      ? await input.database.getProjectBinding(effectiveProjectId)
+      : null;
+  const proof = validateProjectIdentity({
+    requestedProjectId,
+    attachedProjectId: config.projectId,
+    bindingProjectId: binding?.project_id ?? null,
+    projectPath: config.projectPath,
+    bindingPrimaryPath: binding?.primary_path ?? null
+  });
+  if (proof.status === "mismatch") {
+    throw validationError(
+      "PROJECT_ID_PATH_MISMATCH: requested project identity does not match the attached project path."
+    );
+  }
+  return {
+    ...proof,
+    project_id: effectiveProjectId,
+    project_path: config.projectPath,
+    project_log_sync: config.projectLogSync
+  };
+}
+
 function scopedProjectInputWithDiagnostics<T extends Record<string, unknown>>(
   args: T,
   options: { includeEnvironmentProjectScope?: boolean } = {}
@@ -379,11 +440,6 @@ function scopedAgentMemoryInput(args: Record<string, unknown>): CreateAgentMemor
         ? [remoteAgentSourceRef()]
         : sourceRefs
   } as CreateAgentMemoryInput;
-}
-
-function syncProjectLogInContext(payload: JsonObject, database?: ToolDb) {
-  const context = currentRecallantToolsContext();
-  return syncProjectLog(payload, database, context.projectId, context.projectPath);
 }
 
 function nowIso() {
@@ -756,68 +812,38 @@ async function syncProjectLog(
     };
   }
   const projectLogPath = join(projectRoot, "PROJECT_LOG.md");
-  let projectLogRealPath: string;
+  const identity = await projectIdentityPreflight({
+    database,
+    projectId: contextProjectId,
+    projectPath: projectRoot
+  });
+  let existing = "";
   try {
-    projectLogRealPath = await realpath(projectLogPath);
+    existing = await readFile(projectLogPath, "utf8");
   } catch {
+    existing = "";
+  }
+  const prepared = prepareProjectLogSync({
+    mode: identity.project_log_sync,
+    existingContent: existing,
+    payload: payload as ProjectLogCheckpointPayload
+  });
+  if (prepared.status !== "updated" || !prepared.next_content) {
     return {
-      status: "skipped",
-      reason: "PROJECT_LOG.md is not present in the attached project.",
+      ...prepared,
+      path: projectLogPath,
       project_path: projectRoot,
       project_path_source: resolvedProjectPath.source,
-      path: projectLogPath
+      identity
     };
   }
-  const relativePath = relative(projectRoot, projectLogRealPath);
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    return {
-      status: "skipped",
-      reason: "PROJECT_LOG.md resolved outside the attached project path.",
-      project_path: projectRoot,
-      project_path_source: resolvedProjectPath.source,
-      path: projectLogRealPath
-    };
-  }
-  const openQuestions = Array.isArray(payload.open_questions)
-    ? (payload.open_questions as unknown[]).map(String)
-    : [];
-  const currentSession = `## Current Session
-
-Status: ${String(payload.current_status ?? "checkpoint updated")}
-Current focus: ${String(payload.current_focus ?? "")}
-Next step: ${String(payload.next_step ?? "")}
-`;
-  const questions = `## Open Questions
-
-${openQuestions.length > 0 ? openQuestions.map((question) => `- ${question}`).join("\n") : "- None recorded."}
-`;
-  let rendered = "";
-  try {
-    const existing = await readFile(projectLogRealPath, "utf8");
-    rendered = existing;
-    const currentPattern = /## Current Session[\s\S]*?(?=\n## |$)/;
-    rendered = currentPattern.test(rendered)
-      ? rendered.replace(currentPattern, currentSession)
-      : `${rendered.trimEnd()}\n\n${currentSession}`;
-    const questionsPattern = /## Open Questions[\s\S]*?(?=\n## |$)/;
-    rendered = questionsPattern.test(rendered)
-      ? rendered.replace(questionsPattern, questions)
-      : `${rendered.trimEnd()}\n\n${questions}`;
-  } catch (error) {
-    return {
-      status: "skipped",
-      reason: error instanceof Error ? error.message : String(error),
-      project_path: projectRoot,
-      project_path_source: resolvedProjectPath.source,
-      path: projectLogRealPath
-    };
-  }
-  await writeFile(projectLogRealPath, rendered);
+  await writeFile(projectLogPath, prepared.next_content);
   return {
-    status: "updated",
-    path: projectLogRealPath,
+    ...prepared,
+    path: projectLogPath,
     project_path: projectRoot,
-    project_path_source: resolvedProjectPath.source
+    project_path_source: resolvedProjectPath.source,
+    identity
   };
 }
 
@@ -838,9 +864,19 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       const scoped = scopedProjectInputWithDiagnostics(args);
       if (database) {
-        const started = await database.startSession(scoped.input as StartSessionInput);
+        const identity = await projectIdentityPreflight({
+          database,
+          projectId: stringInput(scoped.input.project_id),
+          projectPath: stringInput(scoped.input.project_path)
+        });
+        const started = await database.startSession({
+          ...(scoped.input as StartSessionInput),
+          project_id: identity.project_id ?? undefined,
+          project_path: identity.project_path ?? stringInput(scoped.input.project_path) ?? undefined
+        });
         return {
           ...started,
+          project_identity: identity,
           ...projectScopeDiagnosticOutput(scoped)
         };
       }
@@ -1854,8 +1890,14 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     handler: async (args) => {
       const database = db();
       if (database) {
+        const context = currentRecallantToolsContext();
+        const identity = await projectIdentityPreflight({
+          database,
+          projectId: context.projectId ?? process.env.RECALLANT_PROJECT_ID,
+          projectPath: context.projectPath ?? null
+        });
         const checkpoint = await database.setCheckpoint(
-          currentRecallantToolsContext().projectId ?? process.env.RECALLANT_PROJECT_ID,
+          identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID,
           args.payload as JsonObject
         );
         try {
@@ -1865,7 +1907,12 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
             checkpoint_state_only: true,
             searchable_memory_created: false,
             memory_id: null,
-            repo_sync: await syncProjectLogInContext(args.payload as JsonObject, database)
+            repo_sync: await syncProjectLog(
+              args.payload as JsonObject,
+              database,
+              identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID,
+              identity.project_path ?? context.projectPath ?? null
+            )
           };
         } catch (error) {
           return {
@@ -1916,8 +1963,13 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const sessionId =
         typeof args.session_id === "string" ? args.session_id : (context.sessionId ?? null);
       if (database) {
-        const projectContext = projectId
-          ? { projectId }
+        const requestedIdentity = await projectIdentityPreflight({
+          database,
+          projectId,
+          projectPath
+        });
+        const projectContext = requestedIdentity.project_id
+          ? { projectId: requestedIdentity.project_id }
           : await database.ensureProject(projectPath ?? undefined);
         const checkpoint = await database.setCheckpoint(projectContext.projectId, payload);
         const eventText = checkpointEventText(payload);
@@ -2338,6 +2390,24 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const sessionId = String(args.session_id);
       const localSpoolStatus = args.local_spool_status as JsonObject | null | undefined;
       if (database) {
+        const sessionBinding = await database.getSessionProjectBinding(sessionId);
+        const runtimeAttachment = await attachedProjectConfig(context.projectPath);
+        const identity = await projectIdentityPreflight({
+          database,
+          projectId: runtimeAttachment.projectPath
+            ? (context.projectId ?? sessionBinding.project_id)
+            : sessionBinding.project_id,
+          projectPath: runtimeAttachment.projectPath ?? sessionBinding.primary_path
+        });
+        if (
+          runtimeAttachment.projectPath &&
+          identity.project_id &&
+          identity.project_id !== sessionBinding.project_id
+        ) {
+          throw validationError(
+            "PROJECT_ID_PATH_MISMATCH: closeout session project does not match the attached project path."
+          );
+        }
         const closeoutEvent = await database.appendEvent({
           session_id: sessionId,
           client_kind: "mcp",
@@ -2484,9 +2554,11 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         }
         let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
         try {
-          projectLogUpdate = await syncProjectLogInContext(
+          projectLogUpdate = await syncProjectLog(
             args.checkpoint_payload as JsonObject,
-            database
+            database,
+            closeoutProjectId,
+            identity.project_path ?? context.projectPath ?? sessionBinding.primary_path
           );
         } catch (error) {
           projectLogUpdate = {

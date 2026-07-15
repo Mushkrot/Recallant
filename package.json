@@ -29,6 +29,7 @@
     "project-sources:smoke": "node scripts/smoke-project-sources.mjs",
     "project-binding-regressions:smoke": "node scripts/smoke-project-binding-regressions.mjs --mode inventory",
     "project-binding-regressions:strict": "node scripts/smoke-project-binding-regressions.mjs --mode strict",
+    "project-log-sync:smoke": "node scripts/smoke-project-log-sync.mjs",
     "cold-ollama:smoke": "node scripts/smoke-cold-ollama-embeddings.mjs",
     "pending-embeddings:smoke": "node scripts/smoke-pending-embedding-recovery.mjs",
     "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",

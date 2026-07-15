@@ -163,7 +163,7 @@ For a fresh project, Recallant should create or update only compact local files:
 - `.recallant/config` as a local pointer to the Recallant memory space;
 - `README.md` when the project has no docs yet;
 - a thin `AGENTS.md` section that routes agents into Recallant;
-- a compact `PROJECT_LOG.md` fallback with current focus and next step;
+- a compact `PROJECT_LOG.md` fallback only when the file is absent; existing logs are preserved;
 - client-specific MCP configuration when needed;
 - local spool state for offline capture.
 
@@ -174,12 +174,15 @@ get status and decision docs; library/package projects get an API or usage surfa
 starter surfaces, not imported old handoffs, and they must not overwrite existing project docs.
 
 Durable history belongs in Recallant, not in a growing prompt file. A later session should start
-from a server-built context pack, not from a long manual prompt.
+from a server-built context pack, not from a long manual prompt. Automatic checkpoint mirroring is disabled by default; offline/spool capture never changes `PROJECT_LOG.md`. A project may opt in with
+`project_log_sync: "managed_block"` in `.recallant/config`, but Recallant then updates only the
+content between one exact `<!-- recallant:checkpoint:start -->` / `<!-- recallant:checkpoint:end -->`
+pair. Missing or invalid markers return `skipped: migration_required` without modifying the file.
 
 Remote connect uses the same thin-file shape. `recallant connect <project> --server-url <https-url>`
 and `recallant connect-cloud <project> --server-url <https-url>` generate or safely upsert
-`README.md`, `AGENTS.md`, and `PROJECT_LOG.md` alongside project-local remote MCP configuration and
-a non-secret consent receipt. The remote workstation still does not need local Docker, Postgres,
+`README.md`, `AGENTS.md`, and a `PROJECT_LOG.md` only when it is absent, alongside project-local
+remote MCP configuration and a non-secret consent receipt. The remote workstation still does not need local Docker, Postgres,
 `RECALLANT_DATABASE_URL`, or imported local storage.
 
 ## Existing Project Migration

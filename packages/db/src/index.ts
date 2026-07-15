@@ -4282,6 +4282,25 @@ export class RecallantDb {
     return result.rows[0] ?? null;
   }
 
+  async getSessionProjectBinding(sessionId: string) {
+    const result = await this.pool.query<{
+      project_id: string;
+      primary_path: string | null;
+    }>(
+      `
+        SELECT s.project_id, p.primary_path
+        FROM sessions s
+        JOIN projects p ON p.id = s.project_id
+        WHERE s.id = $1
+        LIMIT 1
+      `,
+      [sessionId]
+    );
+    const binding = result.rows[0];
+    if (!binding) throw new Error(`Unknown session_id: ${sessionId}`);
+    return binding;
+  }
+
   private async assertRemoteMcpCredentialScope(projectId: string, developerId: string) {
     const binding = await this.getProjectBinding(projectId);
     if (!binding) throw new Error("VALIDATION_ERROR: remote MCP project scope was not found");

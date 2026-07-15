@@ -713,10 +713,11 @@ Text mode prints the same boundary for humans. Local `recallant doctor` should d
 `remote-ready, local storage not attached` so agents do not run local `attach --confirm` unless the
 operator explicitly chooses the local-storage path.
 
-Remote connect also prepares the project for the next agent by creating or safely upserting the thin
-`README.md`, `AGENTS.md`, and `PROJECT_LOG.md` surfaces. These files route startup to Recallant and
-record a compact fallback state; they are not a local memory store and they do not replace governed
-server memory.
+Remote connect also prepares the project for the next agent by creating missing thin `README.md`,
+`AGENTS.md`, and `PROJECT_LOG.md` surfaces without overwriting an existing log. These files route
+startup to Recallant and are not a local memory store. `PROJECT_LOG.md` mirroring is disabled by
+default; it requires `project_log_sync: "managed_block"` plus the exact checkpoint markers, and
+offline/spool capture never edits user files.
 
 For an already connected remote project, use `recallant agent-start --format json` as the first
 refresh check. If it reports `remote_mcp_ready`, the existing scoped config is usable; no local

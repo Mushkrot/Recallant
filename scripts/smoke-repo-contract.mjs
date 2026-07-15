@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { URL } from "node:url";
@@ -38,7 +38,7 @@ function restoreEnv(snapshot) {
 }
 
 async function callTool(client, name, args) {
-  const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 5_000 });
+  const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 30_000 });
   const text = response.content?.[0]?.text;
   if (!text) throw new Error(`Missing tool response text for ${name}: ${JSON.stringify(response)}`);
   return JSON.parse(String(text));
@@ -108,6 +108,7 @@ const client = new Client({
 const server = createRecallantMcpServer({ projectId });
 
 let checkpointSet;
+let defaultCheckpointSet;
 let checkpointGet;
 let closeout;
 let started;
@@ -117,6 +118,7 @@ let projectLogAfterCheckpoint;
 let projectLogAfterCloseout;
 let absentLogSet;
 let pathVerification;
+let projectIdentityMismatch;
 try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -163,12 +165,29 @@ try {
     next_step: "continue implementation",
     open_questions: ["How often should async sync retry?"]
   };
+  defaultCheckpointSet = await callTool(client, "memory_set_checkpoint", { payload: checkpoint });
+  assert(
+    defaultCheckpointSet.ok === true &&
+      defaultCheckpointSet.repo_sync?.status === "disabled" &&
+      (await readFile(projectLogPath, "utf8")) === projectLogBefore,
+    `Default checkpoint unexpectedly edited PROJECT_LOG.md: ${JSON.stringify(defaultCheckpointSet)}`
+  );
+
+  await mkdir(join(projectDir, ".recallant"), { recursive: true });
+  await writeFile(
+    join(projectDir, ".recallant", "config"),
+    `${JSON.stringify({ project_id: projectId, project_log_sync: "managed_block" }, null, 2)}\n`
+  );
+  await writeFile(
+    projectLogPath,
+    `# Project Log\n\nOwner notes stay byte-for-byte unchanged.\n\n<!-- recallant:checkpoint:start -->\nold managed checkpoint\n<!-- recallant:checkpoint:end -->\n\n## Human section\n\n- Preserve this note.\n`
+  );
   checkpointSet = await callTool(client, "memory_set_checkpoint", { payload: checkpoint });
   assert(
     checkpointSet.ok === true &&
       checkpointSet.repo_sync?.status === "updated" &&
       checkpointSet.repo_sync?.project_path_source === "database_primary_path",
-    `Checkpoint repo sync failed: ${JSON.stringify(checkpointSet)}`
+    `Managed checkpoint repo sync failed: ${JSON.stringify(checkpointSet)}`
   );
   checkpointGet = await callTool(client, "memory_get_checkpoint", {});
   assert(
@@ -181,9 +200,9 @@ try {
     projectLogAfterCheckpoint.includes("Current focus: repo checkpoint mirror") &&
       projectLogAfterCheckpoint.includes("Next step: continue implementation") &&
       projectLogAfterCheckpoint.includes("- How often should async sync retry?") &&
-      projectLogAfterCheckpoint.includes(
-        "Next step: continue implementation\n\n## Open Questions"
-      ) &&
+      projectLogAfterCheckpoint.includes("<!-- recallant:checkpoint:start -->") &&
+      projectLogAfterCheckpoint.includes("<!-- recallant:checkpoint:end -->") &&
+      projectLogAfterCheckpoint.includes("Owner notes stay byte-for-byte unchanged.") &&
       projectLogAfterCheckpoint.includes("- Preserve this note."),
     `PROJECT_LOG.md was not synced correctly:\n${projectLogAfterCheckpoint}`
   );
@@ -205,7 +224,7 @@ try {
   assert(
     closeout.ok === true &&
       closeout.project_log_update?.status === "updated" &&
-      closeout.project_log_update?.project_path_source === "database_primary_path",
+      closeout.project_log_update?.project_path_source === "context",
     `Closeout repo sync failed: ${JSON.stringify(closeout)}`
   );
   projectLogAfterCloseout = await readFile(projectLogPath, "utf8");
@@ -213,9 +232,8 @@ try {
     projectLogAfterCloseout.includes("Status: repo contract closeout synced") &&
       projectLogAfterCloseout.includes("Current focus: repo closeout mirror") &&
       projectLogAfterCloseout.includes("Next step: continue closeout implementation") &&
-      projectLogAfterCloseout.includes(
-        "Next step: continue closeout implementation\n\n## Open Questions"
-      ) &&
+      projectLogAfterCloseout.includes("<!-- recallant:checkpoint:start -->") &&
+      projectLogAfterCloseout.includes("<!-- recallant:checkpoint:end -->") &&
       projectLogAfterCloseout.includes("- Preserve this note."),
     `PROJECT_LOG.md was not closeout-synced correctly:\n${projectLogAfterCloseout}`
   );
@@ -257,8 +275,32 @@ try {
   assert(
     absentLogSet.ok === true &&
       absentLogSet.repo_sync?.status === "skipped" &&
-      String(absentLogSet.repo_sync?.reason ?? "").includes("PROJECT_LOG.md is not present"),
-    `Absent PROJECT_LOG skip was not precise: ${JSON.stringify(absentLogSet)}`
+      absentLogSet.repo_sync?.reason === "migration_required",
+    `Absent PROJECT_LOG migration gate was not precise: ${JSON.stringify(absentLogSet)}`
+  );
+
+  const mismatchProjectDir = await mkdtemp(join(tmpdir(), "recallant-project-id-mismatch-"));
+  await mkdir(join(mismatchProjectDir, ".recallant"), { recursive: true });
+  await writeFile(
+    join(mismatchProjectDir, ".recallant", "config"),
+    `${JSON.stringify({ project_id: randomUUID(), project_log_sync: "managed_block" }, null, 2)}\n`
+  );
+  let mismatchError = null;
+  try {
+    const mismatchResponse = await callTool(client, "memory_start_session", {
+      client_kind: "codex",
+      client_version: "smoke",
+      project_path: mismatchProjectDir,
+      session_label: "must-not-start"
+    });
+    mismatchError = JSON.stringify(mismatchResponse);
+  } catch (error) {
+    mismatchError = error instanceof Error ? error.message : String(error);
+  }
+  projectIdentityMismatch = mismatchError;
+  assert(
+    mismatchError?.includes("PROJECT_ID_PATH_MISMATCH"),
+    `Project-id/path mismatch was not rejected before session creation: ${mismatchError}`
   );
 } finally {
   await client.close().catch(() => undefined);
@@ -273,6 +315,7 @@ process.stdout.write(
         mcp_config_excerpt: generatedConfig
           .split("\n")
           .filter((line) => line.includes("RECALLANT_PROJECT_") || line.startsWith("[mcp_servers")),
+        default_checkpoint_repo_sync: defaultCheckpointSet.repo_sync,
         checkpoint_repo_sync: checkpointSet.repo_sync,
         path_propagation: {
           project_dir: projectDir,
@@ -289,7 +332,8 @@ process.stdout.write(
         project_log_after_checkpoint: projectLogAfterCheckpoint.split("\n").slice(0, 9),
         closeout_project_log_update: closeout.project_log_update,
         project_log_after_closeout: projectLogAfterCloseout.split("\n").slice(0, 9),
-        absent_log_repo_sync: absentLogSet.repo_sync
+        absent_log_repo_sync: absentLogSet.repo_sync,
+        project_identity_mismatch: projectIdentityMismatch
       }
     },
     null,

@@ -130,6 +130,7 @@ async function writeFixture(projectDir) {
 
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-phase10-attach-"));
 await writeFixture(projectDir);
+const originalProjectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 
 const manual = runJson([
   "attach",
@@ -269,9 +270,7 @@ if (
   agents.includes("memory_promote") ||
   agents.includes("sk-fixturetoken123456") ||
   !agents.includes("<redacted-token>") ||
-  !projectLog.includes("Status: attached to Recallant.") ||
-  !projectLog.includes("recallant agent-start") ||
-  !projectLog.includes("compact fallback/checkpoint") ||
+  projectLog !== originalProjectLog ||
   !gitignore.includes(".recallant/") ||
   backupAgents.includes("sk-fixturetoken123456") ||
   !backupAgents.includes("<redacted-token>") ||
@@ -319,6 +318,51 @@ if (
 const rerun = runJson(["attach", projectDir, "--target", "codex", "--sandbox", "--format", "json"]);
 if (rerun.project_id !== attach.project_id || rerun.project_id_source !== "existing_config") {
   throw new Error(`Attach rerun did not reuse project id: ${JSON.stringify(rerun)}`);
+}
+
+const replacementPlan = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--replace-project-log",
+  "--format",
+  "json"
+]);
+if (
+  replacementPlan.status !== "needs_confirmation" ||
+  replacementPlan.writes_files !== false ||
+  replacementPlan.project_log?.status !== "replacement_requested" ||
+  (await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8")) !== originalProjectLog
+) {
+  throw new Error(
+    `Project log replacement did not wait for explicit confirmation: ${JSON.stringify(replacementPlan)}`
+  );
+}
+
+const replacement = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--replace-project-log",
+  "--confirm",
+  "--format",
+  "json"
+]);
+const replacedProjectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
+if (
+  replacement.status !== "attached" ||
+  replacement.project_log?.status !== "replaced" ||
+  !replacedProjectLog.includes("<!-- recallant:checkpoint:start -->") ||
+  !replacedProjectLog.includes("<!-- recallant:checkpoint:end -->") ||
+  replacedProjectLog === originalProjectLog
+) {
+  throw new Error(
+    `Explicit project log replacement failed: ${JSON.stringify({ replacement, replacedProjectLog })}`
+  );
 }
 
 const staleConfigDir = await mkdtemp(join(tmpdir(), "recallant-phase10-stale-config-"));

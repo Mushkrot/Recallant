@@ -17,8 +17,10 @@ import { supportedClientKinds } from "@recallant/adapters";
 import {
   buildMemoryKeeperPlan,
   getRecallantCoreInfo,
+  prepareProjectLogSync,
   type MemoryKeeperPlan,
-  type MemoryKeeperSourceInput
+  type MemoryKeeperSourceInput,
+  type ProjectLogCheckpointPayload
 } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
@@ -1348,40 +1350,28 @@ function checkpointPayloadFromFlags(argv: readonly string[], fallbackSummary?: s
   };
 }
 
-function renderProjectLogSession(payload: JsonObject) {
-  return `## Current Session
-
-Status: ${String(payload.status ?? "in_progress")}.
-Current focus: ${String(payload.current_focus ?? "Recallant-backed agent work")}.
-Next step: ${String(payload.next_step ?? "Continue from Recallant context.")}.
-Last updated: ${String(payload.updated_at ?? new Date().toISOString())}.
-`;
+function offlineProjectLogUpdate() {
+  return {
+    status: "skipped" as const,
+    reason: "offline_spool_no_project_log_write",
+    project_log_sync: null
+  };
 }
 
 async function updateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
   const projectLogPath = join(projectDir, "PROJECT_LOG.md");
   const existing = await readOptional(projectLogPath);
-  const rendered = renderProjectLogSession(payload);
-  if (!existing) {
-    await writeFile(
-      projectLogPath,
-      `# Project Log
-
-${rendered}
-## Notes
-
-- Recallant is the main source of truth for durable memory.
-- This file is a compact fallback/checkpoint.
-`
-    );
-    return { status: "created", path: projectLogPath };
+  const config = await readProjectConfig(projectDir);
+  const prepared = prepareProjectLogSync({
+    mode: config?.project_log_sync,
+    existingContent: existing ?? "",
+    payload: payload as ProjectLogCheckpointPayload
+  });
+  if (prepared.status !== "updated" || !prepared.next_content) {
+    return { ...prepared, path: projectLogPath };
   }
-  const pattern = /## Current Session[\s\S]*?(?=\n## |\n# |$)/;
-  const next = pattern.test(existing)
-    ? existing.replace(pattern, rendered.trimEnd())
-    : `${existing.trimEnd()}\n\n${rendered}`;
-  await writeFile(projectLogPath, next.endsWith("\n") ? next : `${next}\n`);
-  return { status: "updated", path: projectLogPath };
+  await writeFile(projectLogPath, prepared.next_content);
+  return { ...prepared, path: projectLogPath };
 }
 
 async function appendSpoolRecord(
@@ -1804,7 +1794,11 @@ async function readProjectConfig(projectDir: string) {
   const content = await readOptional(join(projectDir, ".recallant", "config"));
   if (!content) return null;
   try {
-    return JSON.parse(content) as { project_id?: string; recallant_server_url?: string };
+    return JSON.parse(content) as {
+      project_id?: string;
+      recallant_server_url?: string;
+      project_log_sync?: unknown;
+    };
   } catch {
     return null;
   }
@@ -6022,7 +6016,6 @@ async function runAgentEvent(argv: readonly string[]) {
 async function runAgentCheckpoint(argv: readonly string[]) {
   const dir = projectDir(argv);
   const payload = checkpointPayloadFromFlags(argv);
-  const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
   const database = createRecallantDbFromEnv();
   let state = await loadActiveAgentState(argv);
   if (database) {
@@ -6084,6 +6077,7 @@ async function runAgentCheckpoint(argv: readonly string[]) {
         last_event_id: String(event.event_id),
         last_memory_id: String(checkpointMemory.memory_id)
       });
+      const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
       process.stdout.write(
         `${JSON.stringify(
           {
@@ -6121,6 +6115,15 @@ async function runAgentCheckpoint(argv: readonly string[]) {
     metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: payload },
     raw_artifacts: []
   });
+  const now = new Date().toISOString();
+  await writeAgentSessionState(dir, {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_checkpoint_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(record.local_id)
+  });
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -6129,7 +6132,7 @@ async function runAgentCheckpoint(argv: readonly string[]) {
         mode: "offline_spool",
         local_id: record.local_id,
         spool_path: spoolPath(argv),
-        project_log_update: projectLogUpdate
+        project_log_update: offlineProjectLogUpdate()
       },
       null,
       2
@@ -6301,7 +6304,6 @@ async function runAgentCloseout(argv: readonly string[]) {
     argv,
     parseFlag(argv, "--summary") ?? "Session closeout"
   );
-  const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
   const database = createRecallantDbFromEnv();
   if (!database) {
     const record = await appendSpoolRecord(argv, "event", {
@@ -6358,7 +6360,7 @@ async function runAgentCloseout(argv: readonly string[]) {
           local_id: record.local_id,
           spool_path: spoolPath(argv),
           lifecycle,
-          project_log_update: projectLogUpdate
+          project_log_update: offlineProjectLogUpdate()
         },
         null,
         2
@@ -6506,6 +6508,7 @@ async function runAgentCloseout(argv: readonly string[]) {
       last_event_id: String(event.event_id),
       last_memory_id: String(closeoutMemory.memory_id)
     });
+    const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
     process.stdout.write(
       `${JSON.stringify(
         {

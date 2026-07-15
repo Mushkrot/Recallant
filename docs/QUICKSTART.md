@@ -138,8 +138,8 @@ secret.
 Expected remote readiness:
 
 - `recallant connect . --server-url https://memory.example.com` or `recallant connect-cloud .`
-  creates or safely upserts the thin `README.md`, `AGENTS.md`, and `PROJECT_LOG.md` agent-ready
-  surfaces by default, while preserving existing project docs and avoiding local storage setup;
+  creates missing thin starter surfaces without overwriting existing project docs or avoiding local
+  storage setup; an existing `PROJECT_LOG.md` is preserved unchanged;
 - `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
 - the same JSON includes a bounded `readiness_contract`; before proof its primary state remains
   `configured`;
@@ -353,8 +353,9 @@ can tell the difference between content removal and auditability retention.
 ## What Gets Written
 
 Project attach may create small local pointer/config files such as `.recallant/config`,
-client-specific MCP config such as `.codex/config.toml`, `AGENTS.md`, and `PROJECT_LOG.md`.
-Durable memory lives in Recallant, not in those bootstrap files.
+client-specific MCP config such as `.codex/config.toml`, `AGENTS.md`, and a starter
+`PROJECT_LOG.md` only when that file is absent. Durable memory lives in Recallant, not in those
+bootstrap files.
 
 When onboarding finds no project docs, it may also create starter docs. The base starter set is
 `README.md`, `AGENTS.md`, and `PROJECT_LOG.md`. Service or app projects may also get runbook and
@@ -362,9 +363,23 @@ architecture docs; product or roadmap projects may get status and decision docs;
 projects may get an API or usage surface. Starter docs are not copied old handoffs, and onboarding
 must not overwrite existing target files.
 
-`AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is a compact
-fallback/checkpoint file. Old handoffs, long history, source notes, and runbook details should be
-imported as source-linked evidence or reviewed memories rather than copied into startup context.
+`AGENTS.md` should route future agents into Recallant. `PROJECT_LOG.md` is an owner-controlled
+compact fallback, not an automatic history file. Automatic checkpoint mirroring is disabled by
+default, including when capture is offline or spooled. Old handoffs, long history, source notes,
+and runbook details should be imported as source-linked evidence or reviewed memories rather than
+copied into startup context.
+
+To opt in, set `"project_log_sync": "managed_block"` in `.recallant/config` and add one exact
+pair of markers to the existing file:
+
+```md
+<!-- recallant:checkpoint:start -->
+<!-- recallant:checkpoint:end -->
+```
+
+Recallant changes only the bytes between those markers. If the markers are missing, duplicated, or
+out of order, it returns `skipped: migration_required` and leaves the file untouched. Attach never
+replaces an existing log unless you explicitly run `recallant attach <project> --replace-project-log --confirm`.
 Use `recallant discover --dry-run --project-dir .` before migrating an existing project. The
 inventory is read-only, classifies safe documentation and risky paths, prints secret references by
 name only, and produces a review-first migration plan. Writes happen only after owner approval:

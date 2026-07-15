@@ -99,8 +99,9 @@ the normal beginner path. See [Client setup](docs/CLIENT_SETUP.md).
 
 Remote project access to an existing central Recallant server is a separate path. `remote_mcp_ready`
 maps to `configured`: scoped access exists, but memory is not proven by access alone.
-The remote connect path prepares scoped remote MCP access plus thin agent-ready files
-(`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`) without installing local storage.
+The remote connect path prepares scoped remote MCP access plus missing-only thin agent-ready files
+(`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`) without installing local storage. Existing logs
+stay untouched unless an owner explicitly opts into managed-block synchronization.
 `recallant remote-doctor --semantic-proof` creates and recalls one safe governed marker; the server
 persists readiness evidence, and a later `recallant agent-start` reads that evidence through the
 bounded readiness status. Checkpoint-only readback and capture-proof do not imply

@@ -111,6 +111,7 @@ function assertContextIncludesCloseout(context, closeoutProof, label) {
 
 const onlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-online-"));
 const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-offline-"));
+const managedProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-managed-log-"));
 const remoteProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-remote-"));
 const marker = `CAPTURE-SMOKE-${randomUUID()}`;
 let firstCloseoutProof;
@@ -123,6 +124,7 @@ try {
     attach.requested_mode === "autopilot" && attach.effective_mode === "autopilot",
     `ordinary attach did not use autopilot: ${JSON.stringify(attach)}`
   );
+  const onlineProjectLogBefore = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
 
   const started = await cli(onlineProject, [
     "agent-start",
@@ -201,7 +203,11 @@ try {
     checkpoint.memory?.status === "accepted",
     `checkpoint memory was not accepted: ${JSON.stringify(checkpoint)}`
   );
-  assert(checkpoint.project_log_update?.status, "PROJECT_LOG checkpoint was not updated");
+  assert(
+    checkpoint.project_log_update?.status === "disabled" &&
+      checkpoint.project_log_update?.reason === "project_log_sync_disabled",
+    `default checkpoint unexpectedly changed PROJECT_LOG.md: ${JSON.stringify(checkpoint)}`
+  );
 
   const checkpointAsk = await cli(onlineProject, [
     "ask",
@@ -303,7 +309,50 @@ try {
   }
 
   const projectLog = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
-  assert(projectLog.includes(marker), "PROJECT_LOG was not updated with checkpoint marker");
+  assert(projectLog === onlineProjectLogBefore, "default lifecycle changed PROJECT_LOG.md");
+
+  const managedAttach = await cli(managedProject, ["attach", ".", "--format", "json"]);
+  const managedConfigPath = join(managedProject, ".recallant", "config");
+  const managedConfig = JSON.parse(await readFile(managedConfigPath, "utf8"));
+  await writeFile(
+    managedConfigPath,
+    `${JSON.stringify({ ...managedConfig, project_log_sync: "managed_block" }, null, 2)}\n`
+  );
+  const managedLogBefore = await readFile(join(managedProject, "PROJECT_LOG.md"), "utf8");
+  const managedStarted = await cli(managedProject, [
+    "agent-start",
+    "--task-hint",
+    "managed log smoke"
+  ]);
+  assert(
+    managedStarted.project_id === managedAttach.project_id,
+    `managed log agent-start used wrong project: ${JSON.stringify({ managedAttach, managedStarted })}`
+  );
+  const managedCheckpoint = await cli(managedProject, [
+    "agent-checkpoint",
+    "--status",
+    "managed_log_smoke",
+    "--focus",
+    `Managed checkpoint ${marker}`,
+    "--next-step",
+    "Verify exact marker block."
+  ]);
+  const managedLogAfter = await readFile(join(managedProject, "PROJECT_LOG.md"), "utf8");
+  assert(
+    managedCheckpoint.project_log_update?.status === "updated" &&
+      managedLogAfter.includes(`Current focus: Managed checkpoint ${marker}`) &&
+      managedLogAfter.includes("<!-- recallant:checkpoint:start -->") &&
+      managedLogAfter.includes("<!-- recallant:checkpoint:end -->") &&
+      managedLogBefore.replace(
+        /<!-- recallant:checkpoint:start -->[\s\S]*?<!-- recallant:checkpoint:end -->/,
+        ""
+      ) ===
+        managedLogAfter.replace(
+          /<!-- recallant:checkpoint:start -->[\s\S]*?<!-- recallant:checkpoint:end -->/,
+          ""
+        ),
+    `managed checkpoint did not update only its marker block: ${JSON.stringify({ managedCheckpoint, managedLogBefore, managedLogAfter })}`
+  );
 
   const semanticDoctor = await cli(onlineProject, [
     "doctor",
@@ -368,6 +417,10 @@ try {
     { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
   );
   assert(offlineStart.mode === "offline_spool", "offline agent-start did not use spool mode");
+  const offlineProjectLog = ["# Owner project log", "", `OWNER_LOG_SENTINEL_${marker}`, ""].join(
+    "\n"
+  );
+  await writeFile(join(offlineProject, "PROJECT_LOG.md"), offlineProjectLog);
 
   const offlineEvent = await cli(
     offlineProject,
@@ -381,6 +434,38 @@ try {
     { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
   );
   assert(offlineEvent.mode === "offline_spool", "offline agent-event did not spool");
+
+  const offlineCheckpoint = await cli(
+    offlineProject,
+    [
+      "agent-checkpoint",
+      "--focus",
+      `Offline checkpoint ${marker}`,
+      "--next-step",
+      "Sync when available."
+    ],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    offlineCheckpoint.mode === "offline_spool" &&
+      offlineCheckpoint.project_log_update?.reason === "offline_spool_no_project_log_write",
+    `offline checkpoint changed project documentation: ${JSON.stringify(offlineCheckpoint)}`
+  );
+
+  const offlineCloseout = await cli(
+    offlineProject,
+    ["agent-closeout", "--summary", `Offline closeout ${marker}`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    offlineCloseout.mode === "offline_spool" &&
+      offlineCloseout.project_log_update?.reason === "offline_spool_no_project_log_write",
+    `offline closeout changed project documentation: ${JSON.stringify(offlineCloseout)}`
+  );
+  assert(
+    (await readFile(join(offlineProject, "PROJECT_LOG.md"), "utf8")) === offlineProjectLog,
+    "offline lifecycle modified owner PROJECT_LOG.md"
+  );
 
   const dryRun = await cli(offlineProject, ["sync-spool", "--dry-run"]);
   assert(
@@ -513,6 +598,7 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
 } finally {
   await rm(onlineProject, { recursive: true, force: true });
   await rm(offlineProject, { recursive: true, force: true });
+  await rm(managedProject, { recursive: true, force: true });
   await rm(remoteProject, { recursive: true, force: true });
 }
 

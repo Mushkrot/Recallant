@@ -27,6 +27,7 @@ type AttachOptions = {
   target: string;
   dryRun: boolean;
   confirm: boolean;
+  replaceProjectLog: boolean;
   productionApproved: boolean;
   explicitProduction: boolean;
   explicitSandbox: boolean;
@@ -39,6 +40,7 @@ type AttachOptions = {
 type AttachConfig = {
   project_id?: string;
   recallant_server_url?: string;
+  project_log_sync?: unknown;
 };
 
 type AgentFile = {
@@ -131,6 +133,7 @@ function parseAttachOptions(argv: readonly string[]): AttachOptions {
     target: parseFlag(argv, "--target") ?? "codex",
     dryRun: argv.includes("--dry-run"),
     confirm: argv.includes("--confirm"),
+    replaceProjectLog: argv.includes("--replace-project-log"),
     productionApproved: argv.includes("--production-approved"),
     explicitProduction: argv.includes("--production") || argv.includes("--live"),
     explicitSandbox: argv.includes("--sandbox") || argv.includes("--test"),
@@ -190,21 +193,23 @@ function compactProjectLog(input: {
 }) {
   return `# Project Log
 
+<!-- recallant:checkpoint:start -->
 ## Current Session
 
 Status: attached to Recallant.
 Current focus: Recallant-backed project work.
 Next step: start the next agent session with \`recallant agent-start --task-hint "<current task>"\`.
 
-## Active Constraints
-
-- Recallant is the main source of truth for durable memory.
-- This file is a compact fallback/checkpoint, not the full project history.
-- If Recallant is unavailable, record only minimal fallback state here and sync it later.
-
 ## Open Questions
 
 - None recorded.
+<!-- recallant:checkpoint:end -->
+
+## Active Constraints
+
+- Recallant is the main source of truth for durable memory.
+- This file is not modified automatically unless \`project_log_sync\` is explicitly set to \`"managed_block"\`.
+- Only the marked checkpoint block may be updated; durable session history belongs in Recallant memory.
 
 ## Recallant
 
@@ -805,16 +810,18 @@ export async function runAttach(argv: readonly string[]) {
       ? "guided"
       : options.requestedMode;
   const confirmationRequired =
-    effectiveMode === "guided" &&
-    !options.confirm &&
-    !(
-      options.requestedMode === "autopilot" &&
-      !options.modeWasProvided &&
-      !production.production_sensitive
-    );
+    (effectiveMode === "guided" &&
+      !options.confirm &&
+      !(
+        options.requestedMode === "autopilot" &&
+        !options.modeWasProvided &&
+        !production.production_sensitive
+      )) ||
+    (options.replaceProjectLog && !options.confirm);
   const executionAllowed =
     !options.dryRun &&
-    (effectiveMode === "autopilot" || (effectiveMode === "guided" && options.confirm));
+    (effectiveMode === "autopilot" || (effectiveMode === "guided" && options.confirm)) &&
+    (!options.replaceProjectLog || options.confirm);
   const database = executionAllowed ? createRecallantDbFromEnv() : null;
   const identity = executionAllowed
     ? await resolveProjectIdentity({
@@ -853,16 +860,17 @@ export async function runAttach(argv: readonly string[]) {
   const starterDocFiles = starterDocsPlan.eligible_for_apply
     ? starterDocsPlan.files.map((file) => file.path)
     : [];
+  const changesProjectLog = existingProjectLog === null || options.replaceProjectLog;
   const changedFiles = [
     ".recallant/config",
     targetConfig.config_file,
     ".gitignore",
     "AGENTS.md",
-    "PROJECT_LOG.md"
+    ...(changesProjectLog ? ["PROJECT_LOG.md"] : [])
   ];
   const changedExistingAgentFiles = [
     existingAgents === null ? null : "AGENTS.md",
-    existingProjectLog === null ? null : "PROJECT_LOG.md"
+    existingProjectLog === null || !options.replaceProjectLog ? null : "PROJECT_LOG.md"
   ].filter((item): item is string => item !== null);
   const agentFiles = await discoverAgentFiles(options.projectDir, candidates);
   const secretFindings = rawSecretFindings(candidates);
@@ -888,6 +896,16 @@ export async function runAttach(argv: readonly string[]) {
         : "plan_only",
     target: targetConfig.target,
     target_config: targetConfig,
+    project_log: {
+      status:
+        existingProjectLog === null
+          ? "will_create"
+          : options.replaceProjectLog
+            ? "replacement_requested"
+            : "preserved",
+      replacement_requires_confirm: options.replaceProjectLog,
+      path: projectLogPath
+    },
     project_dir: options.projectDir,
     project_id: identity.projectId,
     project_id_source: identity.source,
@@ -948,7 +966,9 @@ export async function runAttach(argv: readonly string[]) {
       next_step:
         effectiveMode === "manual"
           ? "Use lower-level init/discover/import commands for explicit manual work."
-          : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`,
+          : options.replaceProjectLog
+            ? `Run recallant attach ${options.projectDir} --replace-project-log --confirm after reviewing this plan.`
+            : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`,
       migration_summary: plannedMigrationSummary
     };
     process.stdout.write(
@@ -1009,15 +1029,28 @@ export async function runAttach(argv: readonly string[]) {
             : existingAgents
       )
     );
-    await writeFile(
-      projectLogPath,
-      compactProjectLog({
-        project: projectName(options.projectDir),
-        projectId: identity.projectId,
-        mode: effectiveMode,
-        productionSensitive: production.production_sensitive
-      })
-    );
+    if (changesProjectLog) {
+      await writeFile(
+        projectLogPath,
+        compactProjectLog({
+          project: projectName(options.projectDir),
+          projectId: identity.projectId,
+          mode: effectiveMode,
+          productionSensitive: production.production_sensitive
+        })
+      );
+      result.project_log = {
+        status: existingProjectLog === null ? "created" : "replaced",
+        replacement_requires_confirm: options.replaceProjectLog,
+        path: projectLogPath
+      };
+    } else {
+      result.project_log = {
+        status: "preserved",
+        replacement_requires_confirm: false,
+        path: projectLogPath
+      };
+    }
 
     let imported: unknown[] = [];
     let starterMemory: unknown = null;
