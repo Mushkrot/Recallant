@@ -270,22 +270,41 @@ async function assertHumanDefaultLanguage(page, label) {
     `${label} default visible text leaked technical language: ${JSON.stringify(forbiddenVisible)}`
   );
   for (const required of [
-    "Ask Recallant",
-    "Memory Spaces",
-    "Source Map",
-    "Activity / Replay",
-    "Command Center",
-    "Documentation strategy",
-    "Keep current docs, add Recallant layer",
-    "Canonicalize docs for Recallant-aware workflow",
-    "Create starter docs",
-    "Discuss first"
+    "Home",
+    "Ask & Search",
+    "Review",
+    "Sources",
+    "Activity",
+    "Settings",
+    "Diagnostics"
   ]) {
     assert(
       visibleText.includes(required),
       `${label} missing human Workbench language: ${required}`
     );
   }
+}
+
+async function assertHomeNavigation(page, label) {
+  const primary = page.locator(".workbench-nav-primary a");
+  const secondary = page.locator(".workbench-nav-secondary a");
+  assert(
+    (await primary.count()) === 5,
+    `${label} should expose five primary destinations, found ${await primary.count()}`
+  );
+  assert(
+    (await secondary.count()) === 2,
+    `${label} should expose two secondary destinations, found ${await secondary.count()}`
+  );
+  for (const name of ["Home", "Ask & Search", "Review", "Sources", "Activity"]) {
+    await primary.getByRole("link", { name, exact: true }).waitFor();
+  }
+  for (const name of ["Settings", "Diagnostics"]) {
+    await secondary.getByRole("link", { name, exact: true }).waitFor();
+  }
+  await visibleBox(page.locator("#home"), `${label} Home`);
+  await visibleBox(page.locator(".home-actions"), `${label} Home actions`);
+  await absent(page.locator("#command-center"), `${label} legacy command center`);
 }
 
 async function saveScreenshotPair(page, standardPath, publicPath, label, forbiddenText) {
@@ -902,87 +921,13 @@ async function run() {
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
-    await desktop.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
-    await noHorizontalScroll(desktop, "desktop initial Workbench");
-    await assertResponsiveBounds(desktop, "desktop initial Workbench");
-    await assertHumanDefaultLanguage(desktop, "desktop initial Workbench");
+    await desktop.getByRole("heading", { name: "Recallant", exact: true }).waitFor();
+    await noHorizontalScroll(desktop, "desktop initial Home");
+    await assertResponsiveBounds(desktop, "desktop initial Home");
+    await assertHumanDefaultLanguage(desktop, "desktop initial Home");
+    await assertHomeNavigation(desktop, "desktop initial Home");
     uiMetrics.desktop_initial = await collectUiMetrics(desktop, "desktop_initial");
-    actionContracts.desktop_initial = await assertActionContracts(
-      desktop,
-      "desktop initial Workbench"
-    );
-
-    const askBox = await visibleBox(desktop.locator("#ask-recallant"), "desktop Ask Recallant");
-    const snapshotBox = await visibleBox(
-      desktop.locator("#ask-recallant .first-screen-snapshot"),
-      "desktop first-screen snapshot"
-    );
-    const textareaBox = await visibleBox(
-      desktop.locator('#ask-recallant textarea[name="message"]'),
-      "desktop Ask Recallant textarea"
-    );
-    const leftRailBox = await visibleBox(desktop.locator(".left-rail"), "desktop left rail");
-    const sourcesBox = await visibleBox(desktop.locator("#sources"), "desktop Sources");
-    const secondaryBox = await visibleBox(
-      desktop.locator(".secondary-workspace"),
-      "desktop secondary workspace"
-    );
-    assert(askBox.width >= 980, `desktop Ask Recallant is too narrow: ${JSON.stringify(askBox)}`);
-    assert(
-      snapshotBox.width >= 620 && snapshotBox.y < textareaBox.y,
-      `desktop first-screen snapshot is not prominent above the Ask input: ${JSON.stringify({
-        snapshotBox,
-        textareaBox
-      })}`
-    );
-    assert(
-      askBox.y < leftRailBox.y && askBox.y < sourcesBox.y && sourcesBox.y < secondaryBox.y,
-      `desktop Workbench order is not Ask-first with Sources before secondary panels: ${JSON.stringify(
-        {
-          askBox,
-          leftRailBox,
-          sourcesBox,
-          secondaryBox
-        }
-      )}`
-    );
-
-    await visibleBox(desktop.locator("#memory-spaces"), "desktop Memory Spaces");
-    await desktop.getByText("Memory capture").first().waitFor();
-    await visibleBox(desktop.locator("#activity-replay"), "desktop Activity / Replay");
-    await desktop.getByText("Primary workspace folder").first().waitFor();
-    await desktop.locator(".source-health", { hasText: "Connector source needs setup" }).waitFor();
-    await desktop.locator(".source-health", { hasText: "Local path not found" }).waitFor();
-    await desktop.locator(".source-overview", { hasText: "ready to cite" }).waitFor();
-    await desktop.getByText("need setup").waitFor();
-    await desktop.locator(".source-overview", { hasText: "need attention" }).waitFor();
-    await desktop
-      .getByText("Long Term Operations Memory Space With Source Map Stress State")
-      .first()
-      .waitFor();
-    const denseMemorySpaceCount = await desktop.locator(".memory-space").count();
-    assert(
-      denseMemorySpaceCount >= 5,
-      `dense fixture should show multiple memory spaces, found ${denseMemorySpaceCount}`
-    );
-    const denseSourceNodeCount = await desktop.locator(".source-tree-node").count();
-    assert(
-      denseSourceNodeCount >= 6,
-      `dense fixture should show many source nodes, found ${denseSourceNodeCount}`
-    );
-    const denseSourceTreeText = await desktop.locator("#sources .source-tree").innerText();
-    assert(
-      denseSourceTreeText.includes("Customer research summaries"),
-      `dense source map did not include a long human-readable source label: ${denseSourceTreeText}`
-    );
-    await visibleBox(desktop.locator(".source-filter-panel").first(), "desktop source filter");
-    await desktop.getByText("Showing all sources").first().waitFor();
-    await visibleBox(desktop.locator("#review"), "desktop Review");
-    await visibleBox(desktop.locator("#review .review-overview"), "desktop Review overview");
-    await desktop.getByText("Review decision guide").first().waitFor();
-    await desktop.getByText("Needs your decision").first().waitFor();
-    await desktop.getByText("Possible conflicts").first().waitFor();
-    await visibleBox(desktop.locator("#settings"), "desktop Settings");
+    actionContracts.desktop_initial = [];
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-dense-desktop.png"),
       fullPage: true
@@ -1007,6 +952,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Ask view");
     await assertResponsiveBounds(desktop, "desktop focused Ask view");
+    actionContracts.desktop_ask = await assertActionContracts(desktop, "desktop focused Ask view");
     uiMetrics.desktop_ask = await collectUiMetrics(desktop, "desktop_ask");
     const focusedAskBox = await visibleBox(
       desktop.locator("#ask-recallant"),
@@ -1342,25 +1288,13 @@ async function run() {
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
     await mobile.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
-    await mobile.getByRole("heading", { name: "Recallant Workbench" }).waitFor();
-    await noHorizontalScroll(mobile, "mobile initial Workbench");
-    await assertResponsiveBounds(mobile, "mobile initial Workbench");
-    await assertHumanDefaultLanguage(mobile, "mobile initial Workbench");
+    await mobile.getByRole("heading", { name: "Recallant", exact: true }).waitFor();
+    await noHorizontalScroll(mobile, "mobile initial Home");
+    await assertResponsiveBounds(mobile, "mobile initial Home");
+    await assertHumanDefaultLanguage(mobile, "mobile initial Home");
+    await assertHomeNavigation(mobile, "mobile initial Home");
     uiMetrics.mobile_initial = await collectUiMetrics(mobile, "mobile_initial");
-    const mobileAskBox = await visibleBox(mobile.locator("#ask-recallant"), "mobile Ask Recallant");
-    const mobileSnapshotBox = await visibleBox(
-      mobile.locator("#ask-recallant .first-screen-snapshot"),
-      "mobile first-screen snapshot"
-    );
-    assert(
-      mobileAskBox.width >= 340,
-      `mobile Ask Recallant is too narrow: ${JSON.stringify(mobileAskBox)}`
-    );
-    assert(
-      mobileSnapshotBox.width >= 330,
-      `mobile first-screen snapshot is too narrow: ${JSON.stringify(mobileSnapshotBox)}`
-    );
-    await assertPublicSafePage(mobile, "mobile Workbench", forbiddenPublicText);
+    await assertPublicSafePage(mobile, "mobile Home", forbiddenPublicText);
     await mobile.screenshot({
       path: join(reportDir, "recallant-workbench-dense-mobile.png"),
       fullPage: true

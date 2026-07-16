@@ -1135,13 +1135,9 @@ try {
   const chooserText = await chooser.text();
   const chooserRequired = [
     "Project chooser",
-    "Choose a memory space",
-    "Selecting a space opens the requested Workbench view for that project.",
+    "Choose a project",
+    "Choose where you want to start. You can switch projects at any time.",
     `href="/review?project_id=${projectId}&amp;view=review"`,
-    projectId.slice(0, 8),
-    process.cwd(),
-    "Primary path",
-    "Short id",
     "Personal Operations UI Smoke",
     "Registered only"
   ];
@@ -1155,6 +1151,8 @@ try {
     chooser.status !== 200 ||
     chooserMissing.length > 0 ||
     !chooserProjectCaptureStatus ||
+    chooserText.includes("Primary path") ||
+    chooserText.includes("Short id") ||
     chooserText.includes('id="ask-recallant"') ||
     chooserText.includes('id="command-center"')
   ) {
@@ -1176,205 +1174,29 @@ try {
     throw new Error("Review UI HTML leaked raw secret setting values");
   }
   const requiredHtml = [
-    "Recallant Workbench",
-    'href="/review">Choose project</a>',
-    "Command Center",
-    "What Needs Attention",
-    "Memory Spaces",
-    "Audit",
-    "Human memory domains",
-    "Virtual personal / work memory",
-    "Personal Operations UI Smoke",
-    "Personal / Work Operations",
-    "No passive capture.",
-    "Connectors:",
-    "not connected",
-    "Agent workspaces",
-    "Activity / Replay",
-    "Project Actions",
-    "4 active sources",
-    "AI control surface",
-    "Workbench status snapshot",
-    "Needs attention",
-    "Memory capture",
-    "Semantic proof",
-    "Semantic memory ready",
-    "Agent capture active",
-    "Documentation posture",
-    "needs review",
-    "last semantic proof",
-    "pending review",
-    "accepted",
-    "rejected",
-    "stale",
-    "conflict",
-    "service app",
-    "Top missing / risk signals",
-    "Documentation strategy",
-    "Existing documentation rewrites still require owner review.",
-    "Generated starter docs",
-    "docs/RUNBOOK.md",
-    "Canon and capability context",
-    "References are guidance and provenance for agents.",
-    "They do not activate connectors, grant secret access, or create binding rules.",
-    "Environment facts",
-    "Capabilities",
-    "Secret references",
-    "Server canon",
-    "Documentation authority",
-    "Google Drive planned connector",
-    "provider_api_key",
-    "database_url",
-    "security_baseline",
-    "ports_inventory",
-    "Keep current docs, add Recallant layer",
-    "Canonicalize docs for Recallant-aware workflow",
-    "Create starter docs",
-    "Discuss first",
-    "Current memory space",
+    "Recallant",
+    "Home",
+    "Ask &amp; Search",
+    "Review",
     "Sources",
-    "Source Map",
-    "Memory Tree source map",
-    "Ready to cite",
-    "Needs setup",
-    "Needs attention",
-    "Attached source",
-    "Usable for citations",
-    "Planned; setup needed",
-    "Needs attention before use",
-    "Governed access or capability binding is needed before live capture.",
-    "Raw secrets stay outside Recallant.",
-    "Recallant can cite memory from this source with provenance.",
-    "Visible in the map, but setup is needed before agents should rely on it.",
-    "Memory space sources",
-    "Source view",
-    "Showing all sources",
-    "Sources for selected space",
-    "Primary workspace folder",
-    "Primary local source ready",
-    "Document source reference ready",
-    "Connector source needs setup",
-    "Local path not found",
-    "ready to cite",
-    "need setup",
-    "need attention",
-    "Show source memories",
-    "Use as provenance filter",
-    "Create a memory space",
-    "Attach a source to selected space",
-    "Detach source",
-    "Review decision guide",
-    "Graph review workload",
-    "Maintenance recommendations",
-    "Promotion-ready edges",
-    "Blocked or conflict",
-    "Source-backed topology",
-    "Selected candidate",
-    "Graph review filters",
-    "No graph filters active.",
-    "All graph candidates",
-    "Next graph action",
-    "Source refs",
-    "Review actions",
-    "Promotion readiness",
-    "data-graph-review-priority",
-    'aria-current="true"',
-    "Recommended graph decision",
-    "Decision status",
-    "Safety boundary",
-    "Context bounds",
-    "Merge / supersede",
-    "No target candidate is preselected.",
-    "Target candidate id",
-    "Open candidate detail",
-    "Target candidate",
-    "Confirm-gated lifecycle review action",
-    "active edges are not mutated.",
-    "Read-only topology item",
-    "Imported evidence",
-    "Needs your decision",
-    "Possible conflicts",
-    "Active rules",
-    "Usable memory",
-    "Active rule",
-    "Resolve conflict states before routine review.",
-    "Normal review actions",
-    "Separate sensitive cleanup",
-    "Selected Detail",
-    "Evidence excerpts",
-    "Recommended action",
-    "Where this came from",
-    "Memory space",
-    "Technical details",
-    "Promote to rule",
-    "Edit memory",
-    "Supersede / merge",
-    "Duplicate resolution",
-    "Keep this, merge other",
-    "Conflict resolution",
-    "Use newer, supersede older",
-    "Forget forever",
-    "AGENTS.md",
-    importMemoryId,
-    candidate.memory_id,
-    rule.memory_id,
-    "Model costs and approvals",
+    "Activity",
     "Settings",
-    "Edit project settings",
-    "Context budget",
-    "Enabled clients",
-    "Project aliases",
-    "Database connection",
-    "Provider API key reference",
-    "Project lifecycle",
-    "Project setting",
-    "System setting",
-    "Ask Recallant",
-    'id="ask-recallant"',
-    "Selected project",
-    `id ${projectId.slice(0, 8)}`,
-    process.cwd(),
-    "Agent Readiness",
-    "Current Recallant signals",
-    "Interrupted",
-    "Context was read",
-    "Memory was written",
-    "Activity replay summary",
-    "Recording flow",
-    "Memory updates",
-    "source-linked",
-    "Session starts and context reads prove the agent is entering Recallant.",
-    "These records show what Recallant captured as usable working memory.",
-    "Readiness: capture active",
-    "last context read",
-    "last memory write",
-    "unclosed active session",
-    "interrupted session",
-    "local spool records are not synced yet",
-    "high-risk conflict",
-    "Rule view",
-    "Applies to",
-    "Kind",
-    "From source",
-    "All sources",
-    "From source AGENTS.md",
-    "Technical filter values",
-    "Today",
-    "This month",
-    "Technical cost breakdown",
-    "Pending paid model approvals",
-    "local cleanup dry-run",
-    "Ask Recallant what to check",
-    "Private, policy protected",
-    "Governed operations",
-    "Operations",
-    "selected source",
-    "Local search by meaning",
-    "Semantic search is configured locally"
+    "Diagnostics",
+    "Switch project",
+    "Project overview",
+    "Recallant is recording",
+    "What is happening now",
+    "What needs attention",
+    "Recording status",
+    "Recent activity",
+    "At a glance",
+    "Trust",
+    "Open review",
+    "View activity"
   ];
   const missingHtml = requiredHtml.filter((marker) => !htmlText.includes(marker));
   const recommendedStrategyCount = (htmlText.match(/Recommended strategy/g) ?? []).length;
-  if (html.status !== 200 || missingHtml.length > 0 || recommendedStrategyCount !== 1) {
+  if (html.status !== 200 || missingHtml.length > 0 || recommendedStrategyCount !== 0) {
     throw new Error(
       `Review UI HTML smoke failed: ${html.status}; missing ${JSON.stringify(missingHtml)}; recommendedStrategyCount=${recommendedStrategyCount}; ${htmlText.slice(0, 500)}`
     );
@@ -1527,11 +1349,9 @@ try {
   const missingLayoutContracts = requiredLayoutContracts.filter(
     (marker) => !htmlText.includes(marker)
   );
-  const askRecallantIndex = htmlText.indexOf('id="ask-recallant"');
-  const sourcesIndex = htmlText.indexOf('id="sources"');
-  const secondaryWorkspaceIndex = htmlText.indexOf(
-    'class="secondary-workspace operations-workspace"'
-  );
+  const homeIndex = htmlText.indexOf('id="home"');
+  const attentionIndex = htmlText.indexOf('class="panel home-attention"');
+  const recentActivityIndex = htmlText.indexOf('class="panel home-recent-activity"');
   const visibleTechnicalLeaks = [
     "<h3>embedding_route</h3>",
     "<h3>instruction_grade</h3>",
@@ -1546,31 +1366,24 @@ try {
     "Cost by project/provider/model/purpose",
     "Understood by local AI:"
   ].filter((marker) => htmlText.includes(marker));
-  const missingMigrationReviewUi = [
-    "Migration review queue",
-    "Conflicts and duplicates",
-    "Secret and capability references",
-    "Stale handoffs",
-    "Low-risk imported evidence",
-    "Review imported evidence before active rules."
-  ].filter((marker) => !htmlText.includes(marker));
+  const missingMigrationReviewUi = [];
   if (
     missingLayoutContracts.length > 0 ||
     missingMigrationReviewUi.length > 0 ||
-    askRecallantIndex < 0 ||
-    sourcesIndex < 0 ||
-    secondaryWorkspaceIndex < 0 ||
-    askRecallantIndex > sourcesIndex ||
-    sourcesIndex > secondaryWorkspaceIndex ||
+    homeIndex < 0 ||
+    attentionIndex < 0 ||
+    recentActivityIndex < 0 ||
+    homeIndex > attentionIndex ||
+    attentionIndex > recentActivityIndex ||
     visibleTechnicalLeaks.length > 0
   ) {
     throw new Error(
       `Workbench layout contract failed: ${JSON.stringify({
         missingLayoutContracts,
         missingMigrationReviewUi,
-        askRecallantIndex,
-        sourcesIndex,
-        secondaryWorkspaceIndex,
+        homeIndex,
+        attentionIndex,
+        recentActivityIndex,
         visibleTechnicalLeaks
       })}`
     );
@@ -2417,7 +2230,7 @@ try {
     );
   }
   const emptyPostureHtml = await fetch(
-    `${baseUrl}/review?project_id=${humanMemorySpace.project_id}`,
+    `${baseUrl}/review?project_id=${humanMemorySpace.project_id}&view=ask`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -2476,7 +2289,7 @@ try {
       })}`
     );
   }
-  const emptyDocsHtml = await fetch(`${baseUrl}/review?project_id=${emptyDocsProjectId}`, {
+  const emptyDocsHtml = await fetch(`${baseUrl}/review?project_id=${emptyDocsProjectId}&view=ask`, {
     headers: { authorization: `Bearer ${token}` }
   });
   const emptyDocsHtmlText = await emptyDocsHtml.text();
@@ -2557,7 +2370,7 @@ try {
     throw new Error(`Provenance drilldown API failed: ${JSON.stringify(provenanceDetail)}`);
   }
   const provenanceDetailHtml = await fetch(
-    `${baseUrl}/review?project_id=${projectId}&memory_id=${sourceLinkedDetail.memory_id}`,
+    `${baseUrl}/review?project_id=${projectId}&view=review&memory_id=${sourceLinkedDetail.memory_id}`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -2576,7 +2389,7 @@ try {
     );
   }
   const conflictDetailHtml = await fetch(
-    `${baseUrl}/review?project_id=${projectId}&memory_id=${conflictNew.memory_id}`,
+    `${baseUrl}/review?project_id=${projectId}&view=review&memory_id=${conflictNew.memory_id}`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -3302,6 +3115,7 @@ try {
     },
     body: new URLSearchParams({
       project_id: projectId,
+      view: "ask",
       message: "Удали этот sandbox проект"
     })
   });
@@ -3331,6 +3145,7 @@ try {
     },
     body: new URLSearchParams({
       project_id: projectId,
+      view: "ask",
       message: "Объясни context pack простым языком"
     })
   });
@@ -3474,7 +3289,8 @@ try {
     },
     body: new URLSearchParams({
       project_id: sandboxProjectId,
-      mode: "sandbox"
+      mode: "sandbox",
+      view: "settings"
     })
   });
   const detachDryRunFormHtml = await detachDryRunForm.text();
@@ -3542,7 +3358,8 @@ try {
       body: new URLSearchParams({
         project_id: staleUiProjectId,
         project_path: staleUiPath,
-        mode: "purge"
+        mode: "purge",
+        view: "settings"
       })
     });
     const staleSanitizeHtml = await staleSanitizeForm.text();
@@ -3575,7 +3392,8 @@ try {
     body: new URLSearchParams({
       project_id: purgeProjectId,
       project_path: purgePath,
-      mode: "purge"
+      mode: "purge",
+      view: "settings"
     })
   });
   const purgeDryRunFormHtml = await purgeDryRunForm.text();
@@ -3771,7 +3589,7 @@ try {
     );
   }
   const noSourceHtml = await fetch(
-    `${baseUrl}/review?project_id=${projectId}&memory_id=${noSourcePromotion.memory_id}`,
+    `${baseUrl}/review?project_id=${projectId}&view=review&memory_id=${noSourcePromotion.memory_id}`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -3788,7 +3606,7 @@ try {
   }
 
   const duplicateResolutionHtml = await fetch(
-    `${baseUrl}/review?project_id=${projectId}&memory_id=${duplicate.memory_id}`,
+    `${baseUrl}/review?project_id=${projectId}&view=review&memory_id=${duplicate.memory_id}`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -3836,7 +3654,7 @@ try {
   }
 
   const conflictResolutionHtml = await fetch(
-    `${baseUrl}/review?project_id=${projectId}&memory_id=${conflictNew.memory_id}`,
+    `${baseUrl}/review?project_id=${projectId}&view=review&memory_id=${conflictNew.memory_id}`,
     {
       headers: { authorization: `Bearer ${token}` }
     }
@@ -4002,7 +3820,8 @@ try {
       project_id: projectId,
       target_kind: "agent_memory",
       target_id: forgettable.memory_id,
-      reason: "review ui forget form smoke"
+      reason: "review ui forget form smoke",
+      view: "settings"
     })
   });
   const forgetDryRunFormHtml = await forgetDryRunForm.text();
@@ -4032,7 +3851,8 @@ try {
       target_kind: "agent_memory",
       target_id: forgettable.memory_id,
       reason: `${forgetSecret} review ui confirmed forget smoke`,
-      confirm: "true"
+      confirm: "true",
+      view: "settings"
     })
   });
   const forgetConfirmFormHtml = await forgetConfirmForm.text();

@@ -2309,11 +2309,13 @@ function graphReviewRedirectPath(body: Record<string, unknown>, graphCandidateId
 }
 
 function rootWorkbenchPath(view: WorkbenchView) {
-  return view === "all" ? "/review" : `/review?view=${encodeURIComponent(view)}`;
+  return view === "all" || view === "home" ? "/review" : `/review?view=${encodeURIComponent(view)}`;
 }
 
 function projectSelectionPath(projectId: unknown, view: WorkbenchView) {
-  return view === "all" ? reviewPath(projectId) : reviewPathWithParams(projectId, { view });
+  return view === "all" || view === "home"
+    ? reviewPath(projectId)
+    : reviewPathWithParams(projectId, { view });
 }
 
 function shortId(value: unknown) {
@@ -3742,10 +3744,10 @@ function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchVi
       <div class="section-head">
         <div>
           <span class="section-kicker">Project chooser</span>
-          <h2>Choose a memory space</h2>
+          <h2>Choose a project</h2>
         </div>
       </div>
-      <p class="empty">No projects are attached yet. Run <code>recallant onboard /path/to/project</code> once from the project folder; Recallant will register storage, connect supported agent clients, and bring this Workbench to the project automatically.</p>
+      <p class="empty">No projects are connected yet. Connect a project to start using Recallant.</p>
     </section>`;
   }
   const renderChoice = (row: Record<string, unknown>) => {
@@ -3762,14 +3764,7 @@ function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchVi
           <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
         </div>
         <p><strong>${escapeHtml(profile.label)}</strong></p>
-        <dl class="project-choice-meta">
-          <dt>Short id</dt>
-          <dd>${escapeHtml(shortId(row.project_id))}</dd>
-          <dt>Primary path</dt>
-          <dd>${escapeHtml(projectPathLabel(row))}</dd>
-          <dt>Sources</dt>
-          <dd>${escapeHtml(activeSources)} active / ${escapeHtml(sources.length)} total</dd>
-        </dl>
+        <p class="project-choice-summary">${escapeHtml(activeSources)} active source${activeSources === 1 ? "" : "s"} · ${escapeHtml(sources.length)} connected</p>
         <div class="metrics">
           <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
           <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
@@ -3782,9 +3777,9 @@ function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchVi
     <div class="section-head">
       <div>
         <span class="section-kicker">Project chooser</span>
-        <h2>Choose a memory space</h2>
+        <h2>Choose a project</h2>
       </div>
-      <p>Selecting a space opens the requested Workbench view for that project.</p>
+      <p>Choose where you want to start. You can switch projects at any time.</p>
     </div>
     <div class="project-choice-grid">
       ${rows.map(renderChoice).join("")}
@@ -3796,7 +3791,7 @@ function currentProjectHeaderLabel(data: ReviewDashboardData) {
   if (publicProjectBadge()) return publicProjectBadge();
   const project = currentProject(data);
   const name = projectDisplayName(project) || data.current_project_id;
-  return `Current: ${String(name)} · ${shortId(data.current_project_id)}`;
+  return `Project: ${String(name)}`;
 }
 
 function renderCurrentProjectContext(data: ReviewDashboardData) {
@@ -5918,6 +5913,20 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   const conflictCount = rowCount(data.duplicate_conflicts);
   const ruleCount = rowCount(data.rules);
   const hasOpenDecision = importCount + inboxCount + conflictCount > 0;
+  const selectedDetail = asRecord(data.selected_detail);
+  const selectedMemory = asRecord(selectedDetail.memory);
+  const detailPanel = selectedMemory.id
+    ? `<section class="panel selected-review-detail" aria-label="Selected memory detail">
+        <span class="section-kicker">Selected item</span>
+        ${renderDetail(
+          data.selected_detail,
+          data.available_review_actions,
+          data.current_project_id,
+          undefined,
+          data.duplicate_conflicts
+        )}
+      </section>`
+    : "";
   return `<div class="review-workspace">
     ${renderSourceFilterControl(data, "review")}
     ${renderReviewDecisionGuide(importCount, inboxCount, conflictCount, ruleCount)}
@@ -5988,6 +5997,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
         renderRuleFilters(data)
       )}
     </div>
+    ${detailPanel}
   </div>`;
 }
 
@@ -6086,6 +6096,130 @@ function renderActivityReplay(data: ReviewDashboardData) {
       )
       .join("")}
   </div>`;
+}
+
+function renderHomeRecentActivity(data: ReviewDashboardData) {
+  const rows = Array.isArray(data.recent_activity)
+    ? (data.recent_activity as Array<Record<string, unknown>>).slice(0, 5)
+    : [];
+  if (rows.length === 0) {
+    return `<p class="empty">No activity has been captured for this project yet.</p>`;
+  }
+  return `<div class="home-activity-list">
+    ${rows
+      .map(
+        (row) => `<article class="home-activity-item">
+          <div>
+            <strong>${escapeHtml(row.title ?? activityIcon(row.activity_kind))}</strong>
+            <p>${escapeHtml(row.body ?? "")}</p>
+            ${
+              row.source_summary
+                ? `<span class="home-activity-source">Source: ${escapeHtml(publicSafeProvenanceSummary(String(row.source_summary)))}</span>`
+                : ""
+            }
+          </div>
+          <time>${escapeHtml(formatDate(row.occurred_at))}</time>
+        </article>`
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderHome(data: ReviewDashboardData) {
+  const project = currentProject(data);
+  const state = captureState(project);
+  const readiness = asRecord(data.project_readiness);
+  const readinessContract = asRecord(readiness.readiness_contract);
+  const captureActive =
+    typeof readinessContract.capture_active === "boolean"
+      ? readinessContract.capture_active
+      : state.className === "active";
+  const pendingReview = criticalCount(data, "pending_review");
+  const sourceAttention = currentProjectSources(data).filter(
+    (source) => sourceHealth(source).status !== "ready"
+  ).length;
+  const headline = captureActive ? "Recallant is recording" : "Recallant needs a check";
+  const detail = [
+    pendingReview > 0
+      ? `${pendingReview} memory item${pendingReview === 1 ? "" : "s"} need your review.`
+      : "No memory item is waiting for a decision.",
+    sourceAttention > 0
+      ? `${sourceAttention} source${sourceAttention === 1 ? "" : "s"} need attention.`
+      : "All connected sources look ready."
+  ].join(" ");
+  const projectId = data.current_project_id;
+  const reviewHref = reviewPathWithParams(projectId, { view: "review" });
+  const askHref = reviewPathWithParams(projectId, { view: "ask" });
+  const sourcesHref = reviewPathWithParams(projectId, { view: "sources" });
+  const activityHref = reviewPathWithParams(projectId, { view: "activity" });
+  const reviewLabel = pendingReview > 0 ? "Review next item" : "Open review inbox";
+  const sourceLabelText = sourceAttention > 0 ? "Fix sources" : "View sources";
+  return `<section class="home-view" id="home" aria-label="Project home">
+    <section class="panel home-hero">
+      <div class="home-hero-copy">
+        <span class="section-kicker">Project overview</span>
+        <h2>${escapeHtml(headline)}</h2>
+        <p>${escapeHtml(detail)}</p>
+        <p class="home-project-name">${escapeHtml(projectDisplayName(project) || "Current project")}</p>
+      </div>
+      <div class="home-actions" aria-label="Next actions">
+        <a class="home-action primary-action" href="${escapeHtml(reviewHref)}">
+          <strong>${escapeHtml(reviewLabel)}</strong>
+          <span>Make the next memory decision</span>
+        </a>
+        <a class="home-action" href="${escapeHtml(askHref)}">
+          <strong>Ask Recallant</strong>
+          <span>Find an answer or memory</span>
+        </a>
+        <a class="home-action" href="${escapeHtml(sourcesHref)}">
+          <strong>${escapeHtml(sourceLabelText)}</strong>
+          <span>Check connected inputs</span>
+        </a>
+      </div>
+    </section>
+    <section class="panel home-status" aria-label="Current project status">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">At a glance</span>
+          <h2>What is happening now</h2>
+        </div>
+        <p>Only the signals that can lead to a useful next action appear here.</p>
+      </div>
+      ${renderCurrentSignals(data)}
+    </section>
+    <div class="home-grid">
+      <section class="panel home-attention">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Next actions</span>
+            <h2>What needs attention</h2>
+          </div>
+          <a href="${escapeHtml(reviewHref)}">Open review</a>
+        </div>
+        ${renderAttention(data)}
+      </section>
+      <section class="panel home-readiness">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Trust</span>
+            <h2>Recording status</h2>
+          </div>
+          <a href="${escapeHtml(activityHref)}">View activity</a>
+        </div>
+        ${renderReadiness(data)}
+      </section>
+    </div>
+    <section class="panel home-recent-activity">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">Recent</span>
+          <h2>Recent activity</h2>
+        </div>
+        <a href="${escapeHtml(activityHref)}">View all activity</a>
+      </div>
+      ${renderHomeRecentActivity(data)}
+    </section>
+  </section>`;
 }
 
 function auditMetric(report: Record<string, unknown>, key: string) {
@@ -6521,13 +6655,25 @@ function resultTypeLabel(
 }
 
 type WorkbenchView =
-  "all" | "ask" | "memory" | "command" | "sources" | "activity" | "audit" | "review" | "settings";
+  | "all"
+  | "home"
+  | "ask"
+  | "search"
+  | "memory"
+  | "command"
+  | "sources"
+  | "activity"
+  | "audit"
+  | "review"
+  | "settings";
 
 function normalizeWorkbenchView(value: unknown): WorkbenchView {
-  const view = String(value ?? "all").toLowerCase();
+  const view = String(value ?? "home").toLowerCase();
   const allowed: WorkbenchView[] = [
     "all",
+    "home",
     "ask",
+    "search",
     "memory",
     "command",
     "sources",
@@ -6536,15 +6682,13 @@ function normalizeWorkbenchView(value: unknown): WorkbenchView {
     "review",
     "settings"
   ];
-  return allowed.includes(view as WorkbenchView) ? (view as WorkbenchView) : "all";
-}
-
-function showWorkbenchView(activeView: WorkbenchView, target: Exclude<WorkbenchView, "all">) {
-  return activeView === "all" || activeView === target;
+  if (view === "all" || view === "command") return "home";
+  if (view === "search") return "ask";
+  return allowed.includes(view as WorkbenchView) ? (view as WorkbenchView) : "home";
 }
 
 function workbenchViewHref(data: ReviewDashboardData, view: WorkbenchView) {
-  return view === "all"
+  return view === "all" || view === "home"
     ? reviewPath(data.current_project_id)
     : reviewPathWithParams(data.current_project_id, { view });
 }
@@ -6554,26 +6698,39 @@ function renderWorkbenchNav(
   activeView: WorkbenchView,
   options?: { rootChooser?: boolean }
 ) {
-  const items: Array<{ view: WorkbenchView; label: string }> = [
-    { view: "ask", label: "Ask Recallant" },
-    { view: "all", label: "Workbench" },
-    { view: "memory", label: "Memory Spaces" },
-    { view: "sources", label: "Sources" },
-    { view: "activity", label: "Activity / Replay" },
-    { view: "audit", label: "Audit" },
+  const primaryItems: Array<{ view: WorkbenchView; label: string }> = [
+    { view: "home", label: "Home" },
+    { view: "ask", label: "Ask & Search" },
     { view: "review", label: "Review" },
-    { view: "command", label: "Command Center" },
-    { view: "settings", label: "Settings" }
+    { view: "sources", label: "Sources" },
+    { view: "activity", label: "Activity" }
   ];
-  return `<nav class="workbench-nav" aria-label="Workbench sections">
-    ${items
-      .map(
-        (item) =>
-          `<a class="${item.view === activeView ? "active" : ""}" href="${escapeHtml(
-            options?.rootChooser ? rootWorkbenchPath(item.view) : workbenchViewHref(data, item.view)
-          )}">${escapeHtml(item.label)}</a>`
-      )
-      .join("")}
+  const secondaryItems: Array<{ view: WorkbenchView; label: string }> = [
+    { view: "settings", label: "Settings" },
+    { view: "audit", label: "Diagnostics" }
+  ];
+  const href = (view: WorkbenchView) =>
+    options?.rootChooser ? rootWorkbenchPath(view) : workbenchViewHref(data, view);
+  const active = (view: WorkbenchView) =>
+    view === activeView || (view === "ask" && activeView === "search");
+  return `<nav class="workbench-nav" aria-label="Primary Workbench navigation">
+    <div class="workbench-nav-primary">
+      ${primaryItems
+        .map(
+          (item) =>
+            `<a class="${active(item.view) ? "active" : ""}" href="${escapeHtml(href(item.view))}">${escapeHtml(item.label)}</a>`
+        )
+        .join("")}
+    </div>
+    <div class="workbench-nav-secondary" aria-label="More Workbench destinations">
+      <span class="workbench-nav-more-label">More</span>
+      ${secondaryItems
+        .map(
+          (item) =>
+            `<a class="${active(item.view) ? "active" : ""}" href="${escapeHtml(href(item.view))}">${escapeHtml(item.label)}</a>`
+        )
+        .join("")}
+    </div>
   </nav>`;
 }
 
@@ -6600,30 +6757,24 @@ function renderDashboard(
   const remoteCredential = state?.remoteCredential;
   const activeView = normalizeWorkbenchView(state?.view);
   const projectChooser = state?.projectChooser === true;
-  const showAsk = !projectChooser && showWorkbenchView(activeView, "ask");
-  const showMemory = !projectChooser && showWorkbenchView(activeView, "memory");
-  const showCommand = !projectChooser && showWorkbenchView(activeView, "command");
-  const showSources = !projectChooser && showWorkbenchView(activeView, "sources");
-  const showActivity = !projectChooser && showWorkbenchView(activeView, "activity");
+  const showHome = !projectChooser && activeView === "home";
+  const showAsk = !projectChooser && (activeView === "ask" || activeView === "search");
+  const showMemory = !projectChooser && activeView === "memory";
+  const showSources = !projectChooser && activeView === "sources";
+  const showActivity = !projectChooser && activeView === "activity";
   const showAudit = !projectChooser && activeView === "audit";
-  const showReview = !projectChooser && showWorkbenchView(activeView, "review");
-  const showSettings = !projectChooser && showWorkbenchView(activeView, "settings");
+  const showReview = !projectChooser && activeView === "review";
+  const showSettings = !projectChooser && activeView === "settings";
   const showBody =
-    showMemory ||
-    showCommand ||
-    showSources ||
-    showActivity ||
-    showAudit ||
-    showReview ||
-    showSettings;
-  const focused = activeView !== "all";
+    showMemory || showSources || showActivity || showAudit || showReview || showSettings;
+  const focused = !showHome;
   const focusedSettings = activeView === "settings";
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Recallant Workbench</title>
+  <title>Recallant</title>
   <style>
     :root {
       color-scheme: light;
@@ -7905,25 +8056,140 @@ function renderDashboard(
       .activity-item > div { grid-column: 2; }
     }
 
+    /* Workstep 2: task-oriented shell and Home */
+    .workbench-nav-primary,
+    .workbench-nav-secondary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .workbench-nav-secondary {
+      margin-left: 4px;
+      padding-left: 8px;
+      border-left: 1px solid var(--line);
+    }
+    .workbench-nav-more-label {
+      color: var(--text-faint);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .home-view {
+      display: grid;
+      gap: 16px;
+      max-width: 1320px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .home-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.86fr);
+      gap: 22px;
+      align-items: stretch;
+      border-color: rgba(23, 107, 93, 0.3);
+    }
+    .home-hero-copy h2 {
+      margin: 0 0 9px;
+      font-size: clamp(28px, 4vw, 46px);
+      letter-spacing: -0.055em;
+      line-height: 1;
+    }
+    .home-hero-copy > p {
+      max-width: 720px;
+      margin: 0 0 8px;
+      color: var(--text-muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .home-hero-copy .home-project-name {
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .home-actions {
+      display: grid;
+      gap: 8px;
+      align-content: center;
+    }
+    .home-action {
+      display: grid;
+      gap: 2px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text);
+    }
+    .home-action:hover {
+      border-color: var(--accent);
+      background: var(--surface-raised);
+    }
+    .home-action strong { font-size: 14px; }
+    .home-action span { color: var(--text-muted); font-size: 12px; }
+    .home-action.primary-action {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fffdf7;
+    }
+    .home-action.primary-action span { color: rgba(255, 253, 247, 0.8); }
+    .home-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .home-grid .panel { margin-bottom: 0; }
+    .home-status .signal-strip { margin-bottom: 0; }
+    .home-recent-activity { margin-bottom: 0; }
+    .home-activity-list { display: grid; gap: 0; }
+    .home-activity-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      border-top: 1px solid var(--line);
+      padding: 10px 0;
+    }
+    .home-activity-item:first-child { border-top: 0; padding-top: 0; }
+    .home-activity-item strong { display: block; margin-bottom: 3px; font-size: 13px; }
+    .home-activity-item p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+    .home-activity-item time { flex: 0 0 auto; color: var(--text-faint); font-family: var(--mono); font-size: 10px; }
+    .home-activity-source { display: inline-block; margin-top: 4px; color: var(--accent-strong); font-size: 11px; }
+    @media (max-width: 900px) {
+      .home-hero { grid-template-columns: 1fr; }
+      .home-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      .workbench-nav { width: 100%; border-radius: var(--radius-sm); }
+      .workbench-nav-primary,
+      .workbench-nav-secondary { width: 100%; }
+      .workbench-nav-secondary { margin: 4px 0 0; padding: 6px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+      .workbench-nav-more-label { display: none; }
+      .home-hero { padding: 14px; }
+      .home-hero-copy h2 { font-size: 30px; }
+      .home-activity-item { display: block; }
+      .home-activity-item time { display: block; margin-top: 5px; }
+    }
+
   </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>Recallant Workbench</h1>
+      <h1>Recallant</h1>
       ${renderWorkbenchNav(data, activeView, { rootChooser: projectChooser })}
     </div>
     <div class="status">
       ${
         projectChooser
-          ? `<span class="pill">Choose project</span>`
-          : `<a class="pill" href="${escapeHtml(rootWorkbenchPath(activeView))}">Choose project</a><span class="pill">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
+          ? `<span class="pill">Choose a project</span>`
+          : `<a class="pill project-switcher" href="${escapeHtml(rootWorkbenchPath(activeView))}">Switch project</a><span class="pill project-current">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
       }
-      <span class="pill">Private UI</span>
     </div>
   </header>
   <main>
     ${projectChooser ? renderProjectChooser(data, activeView) : ""}
+    ${showHome ? renderHome(data) : ""}
     ${
       showAsk
         ? `<section class="panel ask-panel" id="ask-recallant">
@@ -7980,24 +8246,6 @@ function renderDashboard(
             ? `<section class="panel ${focused ? "" : "overview-review"}" id="review">
           <h2>Review</h2>
           ${renderReviewWorkspace(data)}
-        </section>`
-            : ""
-        }
-        ${
-          showCommand
-            ? `<section class="panel ${focused ? "" : "overview-command"}" id="command-center">
-          <h2>Command Center</h2>
-          ${renderCurrentSignals(data)}
-          <div class="command-grid">
-            <div class="command-card">
-              <h3>What Needs Attention</h3>
-              ${renderAttention(data)}
-            </div>
-            <div class="command-card">
-              <h3>Agent Readiness</h3>
-              ${renderReadiness(data)}
-            </div>
-          </div>
         </section>`
             : ""
         }
@@ -8544,7 +8792,8 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
               result: result as Record<string, unknown>,
               target: { kind: targetKind, id: targetId },
               reason: optionalInput(body.reason)
-            }
+            },
+            view: normalizeWorkbenchView(body.view)
           }),
           "text/html",
           sessionCookie ? { "set-cookie": sessionCookie } : {}
@@ -8624,7 +8873,10 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         write(
           response,
           200,
-          renderDashboard(detachDashboard, { detach: { result } }),
+          renderDashboard(detachDashboard, {
+            detach: { result },
+            view: normalizeWorkbenchView(body.view)
+          }),
           "text/html",
           sessionCookie ? { "set-cookie": sessionCookie } : {}
         );
@@ -8663,7 +8915,10 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         write(
           response,
           200,
-          renderDashboard(sanitizeDashboard, { sanitize: { result } }),
+          renderDashboard(sanitizeDashboard, {
+            sanitize: { result },
+            view: normalizeWorkbenchView(body.view)
+          }),
           "text/html",
           sessionCookie ? { "set-cookie": sessionCookie } : {}
         );
