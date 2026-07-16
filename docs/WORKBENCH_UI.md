@@ -42,6 +42,8 @@ Review starts with a decision guide, summary counts, and four lanes:
 Graph candidates, topology, maintenance, and migration evidence remain available under **Advanced
 graph review** or **Imported migration details**. These panels preserve the governed graph actions
 without forcing every owner to understand graph internals before completing ordinary review.
+Large review queues stay collapsed until you choose a lane, so a busy project does not turn the
+first Review screen into an endless card list.
 
 ## Sources without the map-first trap
 
