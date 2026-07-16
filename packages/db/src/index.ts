@@ -8894,7 +8894,8 @@ export class RecallantDb {
         "(project_id = $1::uuid OR scope = 'developer')",
         "status IN ('candidate', 'needs_review', 'accepted')",
         "use_policy <> 'do_not_use'",
-        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'"
+        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'",
+        "coalesce(metadata->>'acceptance', '') <> 'remote_external'"
       ];
       if (input.scope_kind) {
         values.push(input.scope_kind);
@@ -8942,7 +8943,8 @@ export class RecallantDb {
         "(project_id = $1::uuid OR scope = 'developer')",
         "status = 'accepted'",
         "use_policy <> 'do_not_use'",
-        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'"
+        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'",
+        "coalesce(metadata->>'acceptance', '') <> 'remote_external'"
       ];
       if (input.scope_kind) {
         values.push(input.scope_kind);

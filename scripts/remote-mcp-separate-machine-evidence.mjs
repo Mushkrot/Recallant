@@ -510,6 +510,7 @@ async function runBridgeProbe(input, env) {
           source_refs: [],
           created_by: "agent",
           metadata: {
+            diagnostic_marker: true,
             trace_id: input.traceId,
             session_id: sessionId,
             acceptance: "remote_external"

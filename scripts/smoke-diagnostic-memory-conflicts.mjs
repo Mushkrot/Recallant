@@ -16,7 +16,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function acceptedMemory({ title, body, diagnosticMarker }) {
+async function acceptedMemory({ title, body, diagnosticMarker, legacyRemoteAcceptance = false }) {
   const memory = await db.createAgentMemory({
     project_id: projectId,
     project_path: projectPath,
@@ -32,7 +32,11 @@ async function acceptedMemory({ title, body, diagnosticMarker }) {
         quote: "Synthetic non-secret regression evidence."
       }
     ],
-    metadata: diagnosticMarker ? { diagnostic_marker: true } : { smoke: true }
+    metadata: diagnosticMarker
+      ? { diagnostic_marker: true }
+      : legacyRemoteAcceptance
+        ? { acceptance: "remote_external" }
+        : { smoke: true }
   });
   await db.reviewAgentMemory({
     memory_id: memory.memory_id,
@@ -75,12 +79,30 @@ try {
       diagnosticMarker: false
     })
   ];
+  const legacyRemoteAcceptanceIds = [
+    await acceptedMemory({
+      title: "Remote acceptance marker",
+      body: "Legacy remote acceptance marker alpha",
+      diagnosticMarker: false,
+      legacyRemoteAcceptance: true
+    }),
+    await acceptedMemory({
+      title: "Remote acceptance marker",
+      body: "Legacy remote acceptance marker beta",
+      diagnosticMarker: false,
+      legacyRemoteAcceptance: true
+    })
+  ];
 
   const conflicts = await db.listAgentMemories({ project_id: projectId, view: "conflicts" });
   const conflictIds = conflicts.memories.map((memory) => String(memory.memory_id));
   assert(
     diagnosticIds.every((memoryId) => !conflictIds.includes(memoryId)),
     `diagnostic markers leaked into conflict review: ${JSON.stringify(conflictIds)}`
+  );
+  assert(
+    legacyRemoteAcceptanceIds.every((memoryId) => !conflictIds.includes(memoryId)),
+    `legacy remote acceptance markers leaked into conflict review: ${JSON.stringify(conflictIds)}`
   );
   assert(
     genuineIds.every((memoryId) => conflictIds.includes(memoryId)),
@@ -91,7 +113,8 @@ try {
     `${JSON.stringify(
       {
         diagnostic_memory_conflicts_smoke: "passed",
-        diagnostic_markers_excluded: diagnosticIds.length,
+        diagnostic_markers_excluded:
+          diagnosticIds.length + legacyRemoteAcceptanceIds.length,
         genuine_conflicts_reported: genuineIds.length
       },
       null,
