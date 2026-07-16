@@ -74,6 +74,25 @@ Confirmed install:
 - applies schema migrations;
 - starts a service when the selected profile supports it.
 
+## Change Deployment Policy
+
+For an active managed-service checkout, ordinary in-scope code and runtime changes follow one
+delivery sequence: build the checkout, install the artifact consumed by the service, restart the
+managed service, verify that it is active and healthy, and run the focused consumer smoke. This is
+the default deployment policy for approved product changes; a separate owner confirmation is only
+needed for destructive, out-of-scope, or potentially unrelated-workload interruptions.
+
+```bash
+npm run build
+./scripts/install-recallant-cli.sh --user
+systemctl restart <recallant-service>
+systemctl is-active <recallant-service>
+recallant doctor --project-dir <project> --format json
+```
+
+Keep concrete service names, environment paths, database URLs, credentials, and private topology in
+the deployment layer rather than in this public document.
+
 ## Onboarding Storage Readiness
 
 `recallant connect <project>` checks storage before it changes project files. If

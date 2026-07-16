@@ -51,6 +51,20 @@ This repository is public OSS. Treat all tracked files as user-facing or contrib
   turn, say that explicitly.
 - Prefer small, reviewable changes that match existing TypeScript, CLI, server, and docs patterns.
 
+## Deployment And Restart Policy
+
+- For a managed Recallant checkout, a change that affects the running service is not complete until
+  it is built, installed where the service consumes it, restarted, and verified through
+  `systemctl is-active`, health, and the relevant consumer smoke.
+- Treat that build/install/restart/verify sequence as the default deployment policy for ordinary
+  in-scope changes. Do not ask the owner to re-authorize a routine service restart after every code
+  change.
+- Ask before restarting only when the action is destructive, outside the requested deployment
+  scope, or could interrupt an unrelated workload; an ordinary managed-service reload after an
+  approved product change is part of delivery.
+- A commit or green test run without live consumer verification is a handoff checkpoint, not a
+  deployed result.
+
 ## Before Opening A PR
 
 Run the focused checks that match your change. For ordinary code/doc work, start with:
