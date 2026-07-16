@@ -951,6 +951,24 @@ async function run() {
       viewport: { width: 1440, height: 1000 },
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
+    await desktop.goto(`${baseUrl}/review?view=ask`, { waitUntil: "networkidle" });
+    await desktop.getByRole("heading", { name: "Choose a project for Ask & Search" }).waitFor();
+    assert(
+      (await desktop.locator('[data-workbench-view="ask"]').count()) === 1,
+      "Ask & Search chooser did not preserve the requested mode"
+    );
+    const chooserProject = desktop.locator(".project-choice").first();
+    assert((await chooserProject.count()) === 1, "Ask & Search chooser rendered no project cards");
+    assert(
+      (await chooserProject.getAttribute("href"))?.includes("view=ask"),
+      "Ask & Search project card did not preserve the requested mode"
+    );
+    await chooserProject.click();
+    await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
+    assert(
+      desktop.url().includes(`project_id=${projectId}`) && desktop.url().includes("view=ask"),
+      `Ask & Search chooser opened an unexpected URL: ${desktop.url()}`
+    );
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await desktop.getByRole("heading", { name: "Recallant", exact: true }).waitFor();
     await noHorizontalScroll(desktop, "desktop initial Home");

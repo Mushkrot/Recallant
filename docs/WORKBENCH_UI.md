@@ -14,7 +14,8 @@ action, a short attention list, and recent activity. The first screen should ans
 
 Use **Switch project** in the header to choose another connected project. Project cards show a
 human-readable name, source count, and memory count; technical identifiers are intentionally kept
-out of the first decision.
+out of the first decision. When no project is selected, the chooser keeps the requested destination
+visible (for example, **Ask & Search**) and each project card opens directly in that destination.
 
 ## Five primary destinations
 

@@ -3772,17 +3772,60 @@ function renderMemorySpaces(data: ReviewDashboardData, activeView: WorkbenchView
   </div>`;
 }
 
+function workbenchModeCopy(activeView: WorkbenchView) {
+  const fallback = {
+    label: "Home",
+    heading: "Choose a project",
+    description: "Choose where you want to start. You can switch projects at any time."
+  };
+  const copy: Record<string, { label: string; heading: string; description: string }> = {
+    home: fallback,
+    ask: {
+      label: "Ask & Search",
+      heading: "Choose a project for Ask & Search",
+      description: "Choose the project you want to ask about or search."
+    },
+    review: {
+      label: "Review",
+      heading: "Choose a project for Review",
+      description: "Choose the project whose memories and decisions you want to review."
+    },
+    sources: {
+      label: "Sources",
+      heading: "Choose a project for Sources",
+      description: "Choose the project whose connected sources you want to inspect."
+    },
+    activity: {
+      label: "Activity",
+      heading: "Choose a project for Activity",
+      description: "Choose the project whose recording activity you want to see."
+    },
+    settings: {
+      label: "Settings",
+      heading: "Choose a project for Settings",
+      description: "Choose the project whose settings you want to change."
+    },
+    audit: {
+      label: "Diagnostics",
+      heading: "Choose a project for Diagnostics",
+      description: "Choose the project whose health and diagnostics you want to inspect."
+    }
+  };
+  return copy[activeView] ?? fallback;
+}
+
 function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchView) {
   const rows = data.projects;
+  const mode = workbenchModeCopy(activeView);
   if (rows.length === 0) {
-    return `<section class="panel project-chooser empty-project-chooser" id="project-chooser">
+    return `<section class="panel project-chooser empty-project-chooser" id="project-chooser" data-workbench-view="${escapeHtml(activeView)}">
       <div class="section-head">
         <div>
           <span class="section-kicker">Project chooser</span>
-          <h2>Choose a project</h2>
+          <h2>${escapeHtml(mode.heading)}</h2>
         </div>
       </div>
-      <p class="empty">No projects are connected yet. Connect a project to start using Recallant.</p>
+      <p class="empty">No projects are connected yet. Connect a project to open ${escapeHtml(mode.label)}.</p>
     </section>`;
   }
   const renderChoice = (row: Record<string, unknown>) => {
@@ -3792,7 +3835,7 @@ function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchVi
       ? (row.sources as Array<Record<string, unknown>>)
       : [];
     const activeSources = sources.filter((source) => source.status === "active").length;
-    return `<a class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}">
+    return `<a class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}" aria-label="Open ${escapeHtml(projectDisplayName(row))} in ${escapeHtml(mode.label)}">
       <article>
         <div class="memory-space-head">
           <h3>${escapeHtml(projectDisplayName(row))}</h3>
@@ -3805,16 +3848,17 @@ function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchVi
           <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
           <span>${escapeHtml(row.event_count ?? 0)} events</span>
         </div>
+        <span class="project-choice-action">Open ${escapeHtml(mode.label)} <span aria-hidden="true">→</span></span>
       </article>
     </a>`;
   };
-  return `<section class="panel project-chooser" id="project-chooser">
+  return `<section class="panel project-chooser" id="project-chooser" data-workbench-view="${escapeHtml(activeView)}">
     <div class="section-head">
       <div>
         <span class="section-kicker">Project chooser</span>
-        <h2>Choose a project</h2>
+        <h2>${escapeHtml(mode.heading)}</h2>
       </div>
-      <p>Choose where you want to start. You can switch projects at any time.</p>
+      <p>${escapeHtml(mode.description)}</p>
     </div>
     <div class="project-choice-grid">
       ${rows.map(renderChoice).join("")}
@@ -7025,6 +7069,7 @@ function renderDashboard(
     .project-choice:hover article { border-color: var(--line-strong); background: #fff; }
     .project-choice h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
     .project-choice p { margin: 7px 0 0; color: #4f5867; font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .project-choice-action { display: inline-block; margin-top: 12px; color: var(--accent); font-size: 12px; font-weight: 700; }
     .project-choice-meta { grid-template-columns: 96px minmax(0, 1fr); gap: 5px 8px; margin-top: 10px; }
     .project-choice-meta dt { font-size: 11px; }
     .project-choice-meta dd { font-size: 12px; }
@@ -8495,7 +8540,7 @@ function renderDashboard(
     <div class="status">
       ${
         projectChooser
-          ? `<span class="pill">Choose a project</span>`
+          ? `<span class="pill">Choose a project · ${escapeHtml(workbenchModeCopy(activeView).label)}</span>`
           : `<a class="pill project-switcher" href="${escapeHtml(rootWorkbenchPath(activeView))}">Switch project</a><span class="pill project-current">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
       }
     </div>

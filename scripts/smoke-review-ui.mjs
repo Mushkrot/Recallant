@@ -1136,7 +1136,7 @@ try {
   const chooserRequired = [
     "Project chooser",
     "Choose a project",
-    "Choose where you want to start. You can switch projects at any time.",
+    "Choose the project whose memories and decisions you want to review.",
     `href="/review?project_id=${projectId}&amp;view=review"`,
     "Personal Operations UI Smoke",
     "Registered only"
@@ -1158,6 +1158,24 @@ try {
   ) {
     throw new Error(
       `Project chooser smoke failed: ${chooser.status}; missing ${JSON.stringify(chooserMissing)}; captureStatus=${chooserProjectCaptureStatus}; ${chooserText.slice(0, 900)}`
+    );
+  }
+
+  const askChooser = await fetch(`${baseUrl}/review?view=ask`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const askChooserText = await askChooser.text();
+  const askChooserRequired = [
+    'data-workbench-view="ask"',
+    "Choose a project for Ask &amp; Search",
+    "Choose the project you want to ask about or search.",
+    `href="/review?project_id=${projectId}&amp;view=ask"`,
+    "Open Ask &amp; Search"
+  ];
+  const askChooserMissing = askChooserRequired.filter((marker) => !askChooserText.includes(marker));
+  if (askChooser.status !== 200 || askChooserMissing.length > 0) {
+    throw new Error(
+      `Mode-aware project chooser smoke failed: ${askChooser.status}; missing ${JSON.stringify(askChooserMissing)}`
     );
   }
 
