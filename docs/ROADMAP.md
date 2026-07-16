@@ -3,6 +3,32 @@
 Recallant is pre-release. The roadmap is intentionally practical: make the agent-ready project path
 dependable before expanding the product surface.
 
+## Delivery Plan In Plain Language
+
+The order matters: first make Recallant dependable, then make it easy to use, and only then expand
+the product.
+
+1. **Prove it in real conditions.** Repeat the full installation, connection, capture, recall,
+   client, recovery, and cleanup journey on an independent machine and on an owner-approved
+   candidate project or safe copy. Do not import private history or raw secrets without explicit
+   approval.
+2. **Make the first run easy.** Keep `recallant connect <project>` clear and guided: show progress,
+   explain errors, offer repair and check actions, connect a client, and show whether capture and
+   recall are working.
+3. **Make remote use dependable.** Improve reconnect after interruptions, headless setup, older
+   client support, and the range of supported client profiles.
+4. **Make review understandable.** Improve Workbench so people can see what Recallant remembered,
+   where it came from, what needs review, which documents can be created, and which actions require
+   confirmation.
+5. **Add portability and more sources.** After the core is stable, add richer connectors,
+   export/import, portable installations, and broader links between memories.
+6. **Consider team workflows last.** Shared memory, multiple users, permissions, and team review
+   should come only after the single-maintainer workflow is stable.
+
+The next practical milestone is the first external pilot on an owner-approved candidate project or
+safe copy. Its purpose is to find real onboarding, client, migration, and recovery problems before
+we call Recallant release-ready.
+
 ## Current
 
 - Self-hosted CLI/server shape.
