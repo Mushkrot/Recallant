@@ -547,8 +547,16 @@ async function run() {
     project_id: projectId,
     candidate_kind: "edge",
     relation_type: "supports",
-    src: { kind: "chunk", id: randomUUID(), label: "Playwright graph source endpoint" },
-    dst: { kind: "chunk", id: randomUUID(), label: "Review Workbench graph destination" },
+    src: {
+      kind: "external",
+      id: "playwright-graph-source",
+      label: "Playwright graph source endpoint"
+    },
+    dst: {
+      kind: "external",
+      id: "playwright-graph-destination",
+      label: "Review Workbench graph destination"
+    },
     title: "Playwright graph edge candidate",
     summary: "Graph edge candidate for focused Review view screenshots.",
     confidence: 0.79,

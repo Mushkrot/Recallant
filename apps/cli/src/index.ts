@@ -18,6 +18,7 @@ import {
   buildMemoryKeeperPlan,
   getRecallantCoreInfo,
   prepareProjectLogSync,
+  validateProjectIdentity,
   type MemoryKeeperPlan,
   type MemoryKeeperSourceInput,
   type ProjectLogCheckpointPayload
@@ -33,6 +34,7 @@ import {
   formatDiscoveryText,
   readImportTextForCandidate
 } from "./discovery.js";
+import { optionalProjectLogMirror } from "./project-log-mirror.js";
 import {
   analyzeProjectDocumentationPosture,
   summarizeDocumentationPostureForOnboard,
@@ -1374,6 +1376,13 @@ async function updateProjectLogCheckpoint(projectDir: string, payload: JsonObjec
   return { ...prepared, path: projectLogPath };
 }
 
+async function safelyUpdateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
+  return optionalProjectLogMirror({
+    projectLogPath: join(projectDir, "PROJECT_LOG.md"),
+    write: () => updateProjectLogCheckpoint(projectDir, payload)
+  });
+}
+
 async function appendSpoolRecord(
   argv: readonly string[],
   recordKind: string,
@@ -2224,8 +2233,12 @@ async function resolveOnboardVersionControl(
     return unavailableGitStep();
   }
 
-  const ready = runGit(options.projectDir, ["rev-parse", "--is-inside-work-tree"]);
-  if (ready.status === 0 && ready.stdout.trim() === "true") {
+  const topLevel = runGit(options.projectDir, ["rev-parse", "--show-toplevel"]);
+  const targetPath = await realpath(options.projectDir).catch(() => resolve(options.projectDir));
+  const repositoryPath = topLevel.stdout.trim()
+    ? await realpath(topLevel.stdout.trim()).catch(() => resolve(topLevel.stdout.trim()))
+    : null;
+  if (topLevel.status === 0 && repositoryPath === targetPath) {
     return {
       status: "ready",
       git_available: true,
@@ -5911,6 +5924,35 @@ async function startAgentSession(
   return { state, pack, context_read: contextRead, start_result: started };
 }
 
+async function assertAgentStateProjectBinding(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  state: AgentSessionState,
+  dir: string
+) {
+  const binding = await database.getSessionProjectBinding(state.session_id);
+  const proof = validateProjectIdentity({
+    requestedProjectId: state.project_id,
+    bindingProjectId: binding.project_id,
+    projectPath: dir,
+    bindingPrimaryPath: binding.primary_path
+  });
+  if (proof.status === "mismatch") {
+    throw new Error(
+      `${proof.error_code}: active session project_id and project_path do not match the database binding`
+    );
+  }
+}
+
+function isHardProjectIdentityError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    "PROJECT_ID_PATH_MISMATCH",
+    "Unknown project_id",
+    "Unknown session_id",
+    "ambiguous project path"
+  ].some((marker) => message.includes(marker));
+}
+
 async function ensureOfflineAgentSession(argv: readonly string[], reason: string) {
   const dir = projectDir(argv);
   const existing = await readAgentSessionState(dir);
@@ -6065,6 +6107,8 @@ async function runAgentEvent(argv: readonly string[]) {
       if (!state) {
         const started = await startAgentSession(database, argv);
         state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
       }
       const event = await database.appendEvent({
         session_id: state.session_id,
@@ -6125,6 +6169,7 @@ async function runAgentEvent(argv: readonly string[]) {
       );
       return;
     } catch (error) {
+      if (isHardProjectIdentityError(error)) throw error;
       state = await ensureOfflineAgentSession(
         argv,
         error instanceof Error ? error.message : "server unavailable"
@@ -6179,6 +6224,8 @@ async function runAgentCheckpoint(argv: readonly string[]) {
       if (!state) {
         const started = await startAgentSession(database, argv);
         state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
       }
       const checkpoint = await database.setCheckpoint(state.project_id, payload);
       const event = await database.appendEvent({
@@ -6233,7 +6280,7 @@ async function runAgentCheckpoint(argv: readonly string[]) {
         last_event_id: String(event.event_id),
         last_memory_id: String(checkpointMemory.memory_id)
       });
-      const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
+      const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
       process.stdout.write(
         `${JSON.stringify(
           {
@@ -6253,6 +6300,7 @@ async function runAgentCheckpoint(argv: readonly string[]) {
       );
       return;
     } catch (error) {
+      if (isHardProjectIdentityError(error)) throw error;
       state = await ensureOfflineAgentSession(
         argv,
         error instanceof Error ? error.message : "server unavailable"
@@ -6525,6 +6573,7 @@ async function runAgentCloseout(argv: readonly string[]) {
     return;
   }
   try {
+    await assertAgentStateProjectBinding(database, state, dir);
     const event = await database.appendEvent({
       session_id: state.session_id,
       client_kind: state.client_kind,
@@ -6664,7 +6713,7 @@ async function runAgentCloseout(argv: readonly string[]) {
       last_event_id: String(event.event_id),
       last_memory_id: String(closeoutMemory.memory_id)
     });
-    const projectLogUpdate = await updateProjectLogCheckpoint(dir, payload);
+    const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
     process.stdout.write(
       `${JSON.stringify(
         {

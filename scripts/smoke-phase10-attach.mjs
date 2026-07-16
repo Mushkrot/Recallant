@@ -248,6 +248,40 @@ if (
 }
 
 const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
+await writeFile(
+  join(projectDir, ".recallant", "config"),
+  `${JSON.stringify(
+    {
+      ...config,
+      project_log_sync: "managed_block",
+      future_extension: { enabled: true, owner: "fixture" }
+    },
+    null,
+    2
+  )}\n`
+);
+const repeatedAttach = runJson([
+  "attach",
+  projectDir,
+  "--target",
+  "codex",
+  "--sandbox",
+  "--format",
+  "json"
+]);
+const repeatedConfig = JSON.parse(
+  await readFile(join(projectDir, ".recallant", "config"), "utf8")
+);
+if (
+  repeatedAttach.project_id !== attach.project_id ||
+  repeatedConfig.project_log_sync !== "managed_block" ||
+  repeatedConfig.future_extension?.enabled !== true ||
+  repeatedConfig.future_extension?.owner !== "fixture"
+) {
+  throw new Error(
+    `Repeated attach did not preserve config fields: ${JSON.stringify({ repeatedAttach, repeatedConfig })}`
+  );
+}
 const mcpConfig = await readFile(join(projectDir, ".codex", "config.toml"), "utf8");
 const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");

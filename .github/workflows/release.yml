@@ -1,0 +1,36 @@
+name: Release candidate gates
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deterministic-release-gates:
+    uses: ./.github/workflows/ci.yml
+
+  external-rehearsal-regressions:
+    needs: deterministic-release-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RECALLANT_DATABASE_URL: postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work
+      RECALLANT_EMBEDDING_PROVIDER: deterministic
+      RECALLANT_EMBEDDING_DIMS: "8"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run db:reset
+      - run: npm run build
+      - run: npm run security-review:smoke
+      - run: npm run remote-connect-external-rehearsal:smoke
+      - run: npm run remote-mcp-external-rehearsal:smoke
+      - run: npm run remote-live-external-canary:smoke
+      - run: |
+          echo "Live external-host rehearsals require operator-provided credentials and evidence."
+          echo "They are intentionally not represented as passing deterministic CI gates."
+      - name: Stop rehearsal database
+        if: always()
+        run: npm run db:down

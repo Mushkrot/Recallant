@@ -2430,7 +2430,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         const closeoutProjectId = stringInput(checkpoint?.project_id) ?? context.projectId ?? null;
         const closeoutContext = {
           ...context,
-          projectId: closeoutProjectId
+          projectId: closeoutProjectId,
+          projectPath: identity.project_path ?? sessionBinding.primary_path
         };
         const createdMemoryIds: string[] = [];
         const needsReviewIds: string[] = [];

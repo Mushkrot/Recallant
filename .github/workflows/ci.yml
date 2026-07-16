@@ -1,13 +1,14 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
       - main
 
 jobs:
-  lint-and-build:
+  quality-and-public-safety:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,3 +20,30 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run build
+      - run: npm run public-security:smoke
+
+  product-integration:
+    needs: quality-and-public-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RECALLANT_DATABASE_URL: postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work
+      RECALLANT_EMBEDDING_PROVIDER: deterministic
+      RECALLANT_EMBEDDING_DIMS: "8"
+      PLAYWRIGHT_BROWSERS_PATH: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:reset
+      - run: npm run build
+      - run: npm test
+      - run: npm run public-readiness:smoke
+      - run: npm run review-ui:playwright
+      - name: Stop integration database
+        if: always()
+        run: npm run db:down

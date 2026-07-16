@@ -156,7 +156,11 @@ Current strengths:
   next-agent readiness after event, checkpoint, accepted closeout memory, semantic recall, and
   next-session context proof;
 - project-binding regression coverage for session-derived context/closeout writes, config-derived
-  CLI writes, `project_dir` compatibility aliasing, and duplicate path ambiguity handling;
+  CLI writes, exact `project_id` / `project_path` preflight, stale and foreign local config
+  rejection before session or spool mutation, `project_dir` compatibility aliasing, and duplicate
+  path ambiguity handling;
+- exact-line, opt-in `PROJECT_LOG.md` managed-block updates, repeat-attach config merging, and an
+  optional mirror boundary that cannot turn a successful database capture into an offline retry;
 - first agent-ready project onboarding path;
 - existing-project migration reports with local backups, import counts, review-needed counts, and
   raw-secret signals;
@@ -172,7 +176,10 @@ Current strengths:
   `recallant 0.0.0`;
 - explicit security and cost governance design;
 - public/private boundary guards across docs and runtime/install defaults;
-- smoke coverage for the core capture/recall path.
+- smoke coverage for the core capture/recall path;
+- required GitHub Actions gates for public safety/readiness, onboarding, lifecycle, project
+  binding, project-log sync, diagnostic conflict policy, DB-backed Review UI, and Playwright browser
+  acceptance; manual release rehearsal regressions remain separate from real operator evidence.
 
 Known pre-release work:
 

@@ -8,6 +8,7 @@ const {
   projectLogCheckpointStartMarker,
   validateProjectIdentity
 } = await import("../packages/core/dist/index.js");
+const { optionalProjectLogMirror } = await import("../apps/cli/dist/project-log-mirror.js");
 
 const before = "# Owner log\n\nKeep this byte-for-byte.\n\n";
 const after = "\n\n## Owner history\n\nNever replace this.\n";
@@ -52,6 +53,9 @@ assert(
 
 for (const [label, content] of [
   ["missing", "# Owner log\n"],
+  ["quoted", `> ${projectLogCheckpointStartMarker}\nold\n> ${projectLogCheckpointEndMarker}`],
+  ["inline", `Example ${projectLogCheckpointStartMarker}\nold\n${projectLogCheckpointEndMarker} suffix`],
+  ["indented", `  ${projectLogCheckpointStartMarker}\nold\n  ${projectLogCheckpointEndMarker}`],
   ["duplicate-start", `${projectLogCheckpointStartMarker}\n${projectLogCheckpointStartMarker}\n${projectLogCheckpointEndMarker}`],
   ["duplicate-end", `${projectLogCheckpointStartMarker}\n${projectLogCheckpointEndMarker}\n${projectLogCheckpointEndMarker}`],
   ["reversed", `${projectLogCheckpointEndMarker}\n${projectLogCheckpointStartMarker}`]
@@ -90,6 +94,19 @@ assert(
   `mismatched identity was not rejected: ${JSON.stringify(identityMismatch)}`
 );
 
+const mirrorFailure = await optionalProjectLogMirror({
+  projectLogPath: "/synthetic/PROJECT_LOG.md",
+  write: async () => {
+    throw new Error("synthetic mirror write failure");
+  }
+});
+assert(
+  mirrorFailure.status === "skipped" &&
+    mirrorFailure.reason === "project_log_sync_write_failed" &&
+    mirrorFailure.warning === "synthetic mirror write failure",
+  `optional mirror failure escaped its boundary: ${JSON.stringify(mirrorFailure)}`
+);
+
 process.stdout.write(
   `${JSON.stringify(
     {
@@ -98,6 +115,7 @@ process.stdout.write(
         disabled: { status: disabled.status, reason: disabled.reason },
         updated: { status: updated.status, project_log_sync: updated.project_log_sync },
         migration_required: "passed",
+        optional_mirror_failure: mirrorFailure.reason,
         identity_mismatch: {
           status: identityMismatch.status,
           error_code: identityMismatch.error_code

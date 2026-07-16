@@ -30,6 +30,7 @@
     "project-binding-regressions:smoke": "node scripts/smoke-project-binding-regressions.mjs --mode inventory",
     "project-binding-regressions:strict": "node scripts/smoke-project-binding-regressions.mjs --mode strict",
     "project-log-sync:smoke": "node scripts/smoke-project-log-sync.mjs",
+    "diagnostic-memory-conflicts:smoke": "node scripts/smoke-diagnostic-memory-conflicts.mjs",
     "cold-ollama:smoke": "node scripts/smoke-cold-ollama-embeddings.mjs",
     "pending-embeddings:smoke": "node scripts/smoke-pending-embedding-recovery.mjs",
     "phase4:smoke": "node scripts/smoke-phase4-embeddings.mjs",
@@ -129,10 +130,12 @@
     "phase10:smoke": "node scripts/smoke-phase10-attach.mjs && node scripts/smoke-phase10-detach.mjs && node scripts/smoke-phase10-cross-project.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
-    "test": "npm run build"
+    "test:product-gates": "npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run review-ui:smoke",
+    "test": "npm run test:product-gates"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20.17.50",
     "eslint": "^9.27.0",
     "prettier": "^3.5.3",

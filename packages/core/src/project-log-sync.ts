@@ -46,10 +46,11 @@ function asNonEmptyString(value: unknown) {
 
 function markerPositions(content: string, marker: string) {
   const positions: number[] = [];
-  let position = content.indexOf(marker);
-  while (position !== -1) {
-    positions.push(position);
-    position = content.indexOf(marker, position + marker.length);
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    const exactLine = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (exactLine === marker) positions.push(offset);
+    offset += line.length + 1;
   }
   return positions;
 }

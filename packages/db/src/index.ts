@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import {
   buildRecallantReadinessContract,
   graphActiveEdgeEndpointKindValues,
@@ -5998,6 +5998,16 @@ export class RecallantDb {
     const project = input.project_id
       ? await this.contextForProject(input.project_id)
       : await this.ensureProject(input.project_path);
+    if (input.project_id && input.project_path) {
+      const binding = await this.getProjectBinding(input.project_id);
+      const requestedPath = resolve(input.project_path);
+      const boundPath = binding?.primary_path ? resolve(binding.primary_path) : null;
+      if (!boundPath || requestedPath !== boundPath) {
+        throw new Error(
+          "PROJECT_ID_PATH_MISMATCH: project_id is not bound to the requested project_path"
+        );
+      }
+    }
     return withTransaction(this.pool, async (client) => {
       const previous = await client.query(
         `
@@ -8883,7 +8893,8 @@ export class RecallantDb {
         "developer_id = $2::uuid",
         "(project_id = $1::uuid OR scope = 'developer')",
         "status IN ('candidate', 'needs_review', 'accepted')",
-        "use_policy <> 'do_not_use'"
+        "use_policy <> 'do_not_use'",
+        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'"
       ];
       if (input.scope_kind) {
         values.push(input.scope_kind);
@@ -8930,7 +8941,8 @@ export class RecallantDb {
         "developer_id = $2::uuid",
         "(project_id = $1::uuid OR scope = 'developer')",
         "status = 'accepted'",
-        "use_policy <> 'do_not_use'"
+        "use_policy <> 'do_not_use'",
+        "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'"
       ];
       if (input.scope_kind) {
         values.push(input.scope_kind);

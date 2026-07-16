@@ -176,8 +176,18 @@ function runCli(projectDir, developerId, args) {
     stdout_json: json,
     stdout_json_ok: Boolean(json),
     stdout_line_count: result.stdout.trim() ? result.stdout.trim().split("\n").length : 0,
-    stderr_line_count: result.stderr.trim() ? result.stderr.trim().split("\n").length : 0
+    stderr_line_count: result.stderr.trim() ? result.stderr.trim().split("\n").length : 0,
+    stderr_has_project_id_path_mismatch: result.stderr.includes("PROJECT_ID_PATH_MISMATCH")
   };
+}
+
+async function pathExists(path) {
+  try {
+    await readFile(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function seedProjectActivity(database, project, label, count = 1) {
@@ -879,6 +889,128 @@ async function runDuplicateProjectIdentityCase() {
   });
 }
 
+async function runForeignProjectPathPreflightCase() {
+  const developerId = randomUUID();
+  return withTempProject("binding-owned-path", async (boundDir) =>
+    withTempProject("binding-foreign-path", async (foreignDir) => {
+      const project = syntheticProject("binding-owned", developerId, boundDir);
+      const database = dbFor(project);
+      try {
+        await registerProject(database, project);
+        const countSessions = async () => {
+          const result = await database.pool.query(
+            "SELECT count(*)::int AS count FROM sessions WHERE project_id = $1",
+            [project.id]
+          );
+          return Number(result.rows[0]?.count ?? 0);
+        };
+        const before = await countSessions();
+        let directError = "";
+        try {
+          await database.startSession({
+            client_kind: "fixture",
+            client_version: "project-binding-regression",
+            project_id: project.id,
+            project_path: foreignDir,
+            session_label: "foreign-path-must-not-start",
+            resume_policy: "force_new"
+          });
+        } catch (error) {
+          directError = error instanceof Error ? error.message : String(error);
+        }
+        const afterDirect = await countSessions();
+
+        await writeProjectConfig(foreignDir, project.id);
+        const cli = runCli(foreignDir, developerId, [
+          "agent-start",
+          "--project-dir",
+          foreignDir,
+          "--task-hint",
+          "foreign project binding must fail before mutation"
+        ]);
+        const foreignSpoolDir = await mkdtemp(join(tmpdir(), "recallant-binding-foreign-spool-"));
+        const foreignCapture = runCli(foreignDir, developerId, [
+          "agent-event",
+          "--project-dir",
+          foreignDir,
+          "--spool-dir",
+          foreignSpoolDir,
+          "--kind",
+          "action",
+          "--text",
+          "foreign project capture must fail before spool"
+        ]);
+        const afterCli = await countSessions();
+        const stateWritten = await pathExists(join(foreignDir, ".recallant", "current-session.json"));
+        const foreignSpoolWritten = await pathExists(join(foreignSpoolDir, "spool.jsonl"));
+
+        const staleDir = await mkdtemp(join(tmpdir(), "recallant-binding-stale-config-"));
+        const staleSpoolDir = await mkdtemp(join(tmpdir(), "recallant-binding-stale-spool-"));
+        const staleProjectId = randomUUID();
+        await writeProjectConfig(staleDir, staleProjectId);
+        const staleCapture = runCli(staleDir, developerId, [
+          "agent-event",
+          "--project-dir",
+          staleDir,
+          "--spool-dir",
+          staleSpoolDir,
+          "--kind",
+          "action",
+          "--text",
+          "stale project capture must fail before spool"
+        ]);
+        const staleStateWritten = await pathExists(
+          join(staleDir, ".recallant", "current-session.json")
+        );
+        const staleSpoolWritten = await pathExists(join(staleSpoolDir, "spool.jsonl"));
+        await rm(foreignSpoolDir, { recursive: true, force: true });
+        await rm(staleDir, { recursive: true, force: true });
+        await rm(staleSpoolDir, { recursive: true, force: true });
+        const strictPass =
+          directError.includes("PROJECT_ID_PATH_MISMATCH") &&
+          afterDirect === before &&
+          cli.exit_status !== 0 &&
+          cli.stderr_has_project_id_path_mismatch &&
+          foreignCapture.exit_status !== 0 &&
+          foreignCapture.stderr_has_project_id_path_mismatch &&
+          afterCli === before &&
+          !stateWritten &&
+          !foreignSpoolWritten &&
+          staleCapture.exit_status !== 0 &&
+          !staleStateWritten &&
+          !staleSpoolWritten;
+        return makeCaseResult({
+          caseId: "foreign-project-path-preflight",
+          status: strictPass ? "guard_already_present" : "regression_reproduced",
+          observed: {
+            direct_mismatch_rejected: directError.includes("PROJECT_ID_PATH_MISMATCH"),
+            cli_mismatch_rejected: cli.stderr_has_project_id_path_mismatch,
+            sessions_before: before,
+            sessions_after_direct: afterDirect,
+            sessions_after_cli: afterCli,
+            current_session_state_written: stateWritten,
+            foreign_capture_rejected: foreignCapture.stderr_has_project_id_path_mismatch,
+            foreign_spool_written: foreignSpoolWritten,
+            stale_capture_rejected: staleCapture.exit_status !== 0,
+            stale_current_session_state_written: staleStateWritten,
+            stale_spool_written: staleSpoolWritten
+          },
+          futureGuard:
+            "A project_id bound to another project_path is rejected before session creation or local capture state writes.",
+          strictPass,
+          diagnostics: {
+            bound_path_basename: basename(boundDir),
+            foreign_path_basename: basename(foreignDir),
+            stale_path_basename: basename(staleDir)
+          }
+        });
+      } finally {
+        await database.close();
+      }
+    })
+  );
+}
+
 async function runHarnessCase() {
   const source = await readFile(new URL(import.meta.url), "utf8");
   const marker = `project-binding-fixture-${randomUUID()}`;
@@ -908,7 +1040,8 @@ const cases = new Map([
   ["closeout-session-derived-project", runCloseoutSessionDerivedProjectCase],
   ["demo-capture-config-project-id", runDemoCaptureConfigProjectIdCase],
   ["sync-spool-config-project-id", runSyncSpoolConfigProjectIdCase],
-  ["duplicate-project-identity", runDuplicateProjectIdentityCase]
+  ["duplicate-project-identity", runDuplicateProjectIdentityCase],
+  ["foreign-project-path-preflight", runForeignProjectPathPreflightCase]
 ]);
 
 async function main() {

@@ -37,7 +37,7 @@ type AttachOptions = {
   format: "json" | "text";
 };
 
-type AttachConfig = {
+type AttachConfig = Record<string, unknown> & {
   project_id?: string;
   recallant_server_url?: string;
   project_log_sync?: unknown;
@@ -153,8 +153,16 @@ function projectName(projectDir: string) {
   return projectDir.split("/").filter(Boolean).at(-1) ?? "recallant-project";
 }
 
-function configJson(projectId: string, serverUrl: string) {
-  return `${JSON.stringify({ project_id: projectId, recallant_server_url: serverUrl }, null, 2)}\n`;
+function configJson(existingConfig: AttachConfig | null, projectId: string, serverUrl: string) {
+  return `${JSON.stringify(
+    {
+      ...(existingConfig ?? {}),
+      project_id: projectId,
+      recallant_server_url: serverUrl
+    },
+    null,
+    2
+  )}\n`;
 }
 
 async function readOptional(path: string) {
@@ -1000,7 +1008,7 @@ export async function runAttach(argv: readonly string[]) {
     );
     await writeFile(
       join(options.projectDir, ".recallant", "config"),
-      configJson(identity.projectId, options.serverUrl)
+      configJson(existingConfigResult.config, identity.projectId, options.serverUrl)
     );
     await mkdir(
       join(options.projectDir, targetConfig.config_file).split("/").slice(0, -1).join("/"),

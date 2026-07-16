@@ -546,6 +546,19 @@ assert(
 assert(!(await exists(join(vcsChoiceProject, ".recallant", "config"))), "vcs choice wrote config");
 assert((await projectRowCount(vcsChoiceProject)) === 0, "vcs choice wrote database row");
 
+const parentWorktree = await mkdtemp(join(tmpdir(), "recallant-onboarding-parent-worktree-"));
+run("git", ["init", parentWorktree], { cwd: parentWorktree });
+const nestedProject = join(parentWorktree, "nested-project");
+await mkdir(nestedProject, { recursive: true });
+await writeFile(join(nestedProject, "README.md"), "# Nested project VCS safety smoke\n");
+const nestedChoice = runRaw(recallant, ["onboard", nestedProject], { cwd: nestedProject });
+assert(
+  nestedChoice.status === 2 && nestedChoice.stdout.includes("Version-control safety choices"),
+  `nested project should require its own VCS choice: ${nestedChoice.stderr}\n${nestedChoice.stdout}`
+);
+assert(!(await exists(join(nestedProject, ".recallant", "config"))), "nested VCS choice wrote config");
+assert((await projectRowCount(nestedProject)) === 0, "nested VCS choice wrote database row");
+
 const vcsInitProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-init-"));
 await writeFile(join(vcsInitProject, "README.md"), "# Version-control init smoke\n");
 const vcsInit = runJson(recallant, ["onboard", vcsInitProject, "--yes", "--format", "json"], {
