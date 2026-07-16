@@ -40,6 +40,73 @@ async function noHorizontalScroll(page, label) {
   return metrics;
 }
 
+async function collectUiMetrics(page, label) {
+  const metrics = await page.evaluate(() => {
+    const visible = (element) => {
+      const style = globalThis.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    };
+    const controls = Array.from(
+      globalThis.document.querySelectorAll("a,button,input,textarea,select,summary")
+    ).filter(visible);
+    const targetSizes = controls.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        tag: element.tagName.toLowerCase(),
+        text: String(element.textContent ?? element.getAttribute("aria-label") ?? "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 80),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    });
+    return {
+      height: globalThis.document.documentElement.scrollHeight,
+      text_length: (globalThis.document.body.innerText ?? "").length,
+      headings: globalThis.document.querySelectorAll("h1,h2,h3").length,
+      links: globalThis.document.querySelectorAll("a").length,
+      buttons: globalThis.document.querySelectorAll("button").length,
+      forms: globalThis.document.querySelectorAll("form").length,
+      details: globalThis.document.querySelectorAll("details").length,
+      cards: globalThis.document.querySelectorAll(
+        ".panel,.memory-space,.project-choice,.source-card,.source-result,.review-lane,.activity-group"
+      ).length,
+      visible_controls: controls.length,
+      targets_below_24: targetSizes.filter((item) => item.width < 24 || item.height < 24).length,
+      targets_below_44: targetSizes.filter((item) => item.width < 44 || item.height < 44).length
+    };
+  });
+  assert(metrics.height > 0, `${label} returned an invalid document height`);
+  return { label, ...metrics };
+}
+
+async function assertActionContracts(page, label) {
+  const actions = await page
+    .locator("form")
+    .evaluateAll((forms) =>
+      forms.map((form) => (form.getAttribute("action") ?? "").split("#", 1)[0]).filter(Boolean)
+    );
+  const requiredActions = ["/management-chat", "/review-action"];
+  for (const action of requiredActions) {
+    assert(
+      actions.includes(action),
+      `${label} lost required form action ${action}: ${actions.join(", ")}`
+    );
+  }
+  assert(
+    actions.some((action) => action.includes("project-")),
+    `${label} lost project cleanup action contract: ${actions.join(", ")}`
+  );
+  return actions;
+}
+
 async function assertResponsiveBounds(page, label) {
   const offenders = await page.evaluate(() => {
     const document = globalThis.document;
@@ -282,6 +349,8 @@ async function run() {
       "Promote candidate"
     ]
   };
+  const uiMetrics = {};
+  const actionContracts = {};
 
   process.env.RECALLANT_AUTH_TOKEN = token;
   process.env.RECALLANT_SESSION_SECRET = `review-playwright-session-${randomUUID()}`;
@@ -837,6 +906,11 @@ async function run() {
     await noHorizontalScroll(desktop, "desktop initial Workbench");
     await assertResponsiveBounds(desktop, "desktop initial Workbench");
     await assertHumanDefaultLanguage(desktop, "desktop initial Workbench");
+    uiMetrics.desktop_initial = await collectUiMetrics(desktop, "desktop_initial");
+    actionContracts.desktop_initial = await assertActionContracts(
+      desktop,
+      "desktop initial Workbench"
+    );
 
     const askBox = await visibleBox(desktop.locator("#ask-recallant"), "desktop Ask Recallant");
     const snapshotBox = await visibleBox(
@@ -933,6 +1007,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Ask view");
     await assertResponsiveBounds(desktop, "desktop focused Ask view");
+    uiMetrics.desktop_ask = await collectUiMetrics(desktop, "desktop_ask");
     const focusedAskBox = await visibleBox(
       desktop.locator("#ask-recallant"),
       "desktop focused Ask Recallant"
@@ -957,6 +1032,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Source Map" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Sources view");
     await assertResponsiveBounds(desktop, "desktop focused Sources view");
+    uiMetrics.desktop_sources = await collectUiMetrics(desktop, "desktop_sources");
     const focusedSourcesBox = await visibleBox(
       desktop.locator("#sources"),
       "desktop focused Sources"
@@ -1008,6 +1084,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Activity / Replay" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused source-filtered Activity view");
     await assertResponsiveBounds(desktop, "desktop focused source-filtered Activity view");
+    uiMetrics.desktop_activity = await collectUiMetrics(desktop, "desktop_activity");
     const focusedActivityBox = await visibleBox(
       desktop.locator("#activity-replay"),
       "desktop focused source-filtered Activity"
@@ -1047,6 +1124,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Audit", exact: true }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Audit view");
     await assertResponsiveBounds(desktop, "desktop focused Audit view");
+    uiMetrics.desktop_audit = await collectUiMetrics(desktop, "desktop_audit");
     const focusedAuditBox = await visibleBox(desktop.locator("#audit"), "desktop focused Audit");
     assert(
       focusedAuditBox.width >= 980,
@@ -1078,6 +1156,7 @@ async function run() {
       "desktop focused Review view"
     );
     await assertResponsiveBounds(desktop, "desktop focused Review view");
+    uiMetrics.desktop_review = await collectUiMetrics(desktop, "desktop_review");
     await visibleBox(desktop.locator("#review"), "desktop focused Review");
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
@@ -1213,6 +1292,7 @@ async function run() {
     await desktop.getByRole("heading", { name: "Operations" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Settings view");
     await assertResponsiveBounds(desktop, "desktop focused Settings view");
+    uiMetrics.desktop_settings = await collectUiMetrics(desktop, "desktop_settings");
     const focusedSettingsBox = await visibleBox(
       desktop.locator("#settings"),
       "desktop focused Settings"
@@ -1266,6 +1346,7 @@ async function run() {
     await noHorizontalScroll(mobile, "mobile initial Workbench");
     await assertResponsiveBounds(mobile, "mobile initial Workbench");
     await assertHumanDefaultLanguage(mobile, "mobile initial Workbench");
+    uiMetrics.mobile_initial = await collectUiMetrics(mobile, "mobile_initial");
     const mobileAskBox = await visibleBox(mobile.locator("#ask-recallant"), "mobile Ask Recallant");
     const mobileSnapshotBox = await visibleBox(
       mobile.locator("#ask-recallant .first-screen-snapshot"),
@@ -1298,6 +1379,7 @@ async function run() {
       "mobile focused Review graph view"
     );
     await assertResponsiveBounds(mobile, "mobile focused Review graph view");
+    uiMetrics.mobile_review = await collectUiMetrics(mobile, "mobile_review");
     await mobile.getByText("Graph review workload").first().waitFor();
     await mobile.getByText("Next graph action").first().waitFor();
     await mobile.getByText("Recommended graph decision").first().waitFor();
@@ -1395,6 +1477,8 @@ async function run() {
           ],
           public_safe_screenshot_candidates: Object.values(publicScreenshots),
           b9_review_ergonomics: b9ReviewErgonomics,
+          ui_metrics: uiMetrics,
+          action_contracts: actionContracts,
           checks: [
             "auth_required",
             "desktop_no_horizontal_scroll",
