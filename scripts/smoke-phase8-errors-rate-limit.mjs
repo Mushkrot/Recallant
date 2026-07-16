@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase8-errors-"));
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -13,8 +17,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     ...process.env,
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: randomUUID(),
-    RECALLANT_PROJECT_ID: randomUUID(),
-    RECALLANT_PROJECT_PATH: process.cwd(),
+    RECALLANT_PROJECT_PATH: projectPath,
     RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS: "20",
     RECALLANT_MCP_RATE_LIMIT_PER_MINUTE: "2"
   },

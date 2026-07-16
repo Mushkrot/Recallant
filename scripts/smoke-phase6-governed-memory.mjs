@@ -117,6 +117,28 @@ const started = await callTool(2, "memory_start_session", {
   session_label: "phase6-governed-smoke",
   resume_policy: "normal"
 });
+const routeClient = new pg.Client({ connectionString: databaseUrl });
+await routeClient.connect();
+try {
+  await routeClient.query(
+    `
+      INSERT INTO developer_settings (developer_id, key, value, updated_by)
+      VALUES ($1, 'embedding_route', $2, 'smoke')
+      ON CONFLICT (developer_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+    `,
+    [
+      developerId,
+      JSON.stringify({
+        route_class: "local_model",
+        provider: "deterministic",
+        model: "deterministic-phase6-governed",
+        dims: 768
+      })
+    ]
+  );
+} finally {
+  await routeClient.end();
+}
 
 const event = await callTool(3, "memory_append_turn", {
   session_id: started.session_id,

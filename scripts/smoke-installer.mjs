@@ -28,8 +28,20 @@ const backupSource = readFileSync(
   join(repoRoot, "scripts", "recallant-production-backup.sh"),
   "utf8"
 );
+const backupEngineSource = readFileSync(
+  join(repoRoot, "scripts", "recallant-production-backup.mjs"),
+  "utf8"
+);
 const rollbackSource = readFileSync(
   join(repoRoot, "scripts", "rollback-recallant-install.sh"),
+  "utf8"
+);
+const backupRuleSource = readFileSync(
+  join(repoRoot, "contrib", "prometheus", "recallant-backup.rules.yml"),
+  "utf8"
+);
+const backupRuleTestSource = readFileSync(
+  join(repoRoot, "contrib", "prometheus", "recallant-backup.rules.test.yml"),
   "utf8"
 );
 
@@ -217,6 +229,11 @@ will_install_cli: yes
 will_start_postgres: yes
 will_apply_migrations: if schema is absent
 will_install_systemd: ${systemd === "manual" ? "no" : "auto"}
+will_install_backup_service: ${systemd === "manual" ? "no" : "recallant-backup.service"}
+will_install_backup_timer: ${systemd === "manual" ? "no" : "recallant-backup.timer"}
+backup_schedule: daily at 03:15 with persistent catch-up
+backup_max_age_hours: 30
+restore_verification_max_age_hours: 30
 DRY_RUN: no files, Docker containers, database rows, or systemd services were changed.
 `;
 }
@@ -251,6 +268,19 @@ const ownerPlan = run([
   "--run-user",
   "recallant-smoke"
 ]);
+const ownerPlanRepeat = run([
+  "--dry-run",
+  "--profile",
+  "owner-server",
+  "--env-file",
+  ownerEnv,
+  "--data-dir",
+  ownerData,
+  "--install-cli-prefix",
+  ownerPrefix,
+  "--run-user",
+  "recallant-smoke"
+]);
 
 for (const marker of [
   "Recallant install plan",
@@ -263,10 +293,16 @@ for (const marker of [
   "will_start_postgres: yes",
   "will_apply_migrations: if schema is absent",
   "will_install_systemd: auto",
+  "will_install_backup_service: recallant-backup.service",
+  "will_install_backup_timer: recallant-backup.timer",
+  "backup_schedule: daily at 03:15 with persistent catch-up",
+  "backup_max_age_hours: 30",
+  "restore_verification_max_age_hours: 30",
   "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
 ]) {
   assert(ownerPlan.includes(marker), `Owner installer dry-run output missing ${marker}`);
 }
+assert(ownerPlanRepeat === ownerPlan, "Repeated installer dry-run must produce one stable plan");
 assert(!(await exists(ownerEnv)), "Owner installer dry-run created env file");
 assert(!(await exists(ownerData)), "Owner installer dry-run created data dir");
 assert(!(await exists(ownerPrefix)), "Owner installer dry-run created CLI prefix");
@@ -368,13 +404,18 @@ assert(
   "Production compose must use profile-driven Postgres data, container, and port settings"
 );
 assert(
-  backupSource.includes("ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}") &&
-    backupSource.includes("DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}") &&
+  !backupSource.includes("RECALLANT_ENV_FILE:-/etc/recallant/recallant.env") &&
+    backupSource.includes('if [ -n "${RECALLANT_ENV_FILE:-}" ]') &&
+    backupSource.includes('if [ -z "${RECALLANT_DATABASE_URL:-}" ]') &&
     backupSource.includes(
       'RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}'
     ) &&
-    backupSource.includes("BACKUP_TARGET=${RECALLANT_BACKUP_TARGET:-$DATA_DIR/backups}"),
-  "Production backup script must honor profile env/data paths"
+    backupEngineSource.includes('backup_kind: "postgresql_custom"') &&
+    backupEngineSource.includes('"--format=custom"') &&
+    backupEngineSource.includes('"--no-owner"') &&
+    backupEngineSource.includes('"--no-privileges"') &&
+    backupEngineSource.includes('join(dataDir, "backups")'),
+  "Production backup must use preloaded or explicit env and native portable PostgreSQL artifacts"
 );
 assert(
   installerSource.includes(".recallant-install-marker") &&
@@ -385,6 +426,49 @@ assert(
       "DRY_RUN: no files, Docker containers, database rows, or systemd services were changed."
     ),
   "Installer rollback must be dry-run first, confirmation-gated, and marker-based"
+);
+const count = (text, needle) => text.split(needle).length - 1;
+assert(
+  count(installerSource, "OnCalendar=*-*-* 03:15:00") === 1 &&
+    count(installerSource, "EnvironmentFile=$ENV_FILE") === 2 &&
+    count(installerSource, 'Environment="RECALLANT_ENV_FILE=$ENV_FILE"') === 2 &&
+    installerSource.includes("RECALLANT_BACKUP_MAX_AGE_HOURS") &&
+    installerSource.includes("RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS") &&
+    installerSource.includes("recallant-backup.service") &&
+    installerSource.includes("recallant-backup.timer"),
+  "Installer must generate one backup schedule and use the selected env authority for both services"
+);
+assert(
+  rollbackSource.includes('rm -f "$SYSTEMD_UNIT" "$BACKUP_SYSTEMD_UNIT" "$BACKUP_SYSTEMD_TIMER"') &&
+    rollbackSource.includes('if [[ "$REMOVE_ENV_FILE" == "true"') &&
+    rollbackSource.includes('if [[ "$REMOVE_DATA_DIR" == "true"'),
+  "Rollback must remove all selected units while preserving env and data unless explicitly requested"
+);
+assert(
+  backupRuleSource.includes("alert: RecallantBackupFailed") &&
+    backupRuleSource.includes(
+      'node_systemd_unit_state{name="recallant-backup.service",state="failed"} == 1'
+    ) &&
+    backupRuleTestSource.includes("values: '1 1 1'") &&
+    backupRuleTestSource.includes("values: '0 0 0'") &&
+    backupRuleTestSource.includes("exp_alerts: []"),
+  "Backup alert fixtures must cover failed and healthy systemd metric series"
+);
+for (const forbidden of ["/opt/", "telegram", "webhook", "token", "recipient", "127.0.0.1"]) {
+  assert(
+    !`${backupRuleSource}\n${backupRuleTestSource}`.toLowerCase().includes(forbidden),
+    `Portable backup alert fixtures contain protected routing detail: ${forbidden}`
+  );
+}
+
+const promtoolResult = spawnSync("node", ["scripts/smoke-backup-alerts.mjs"], {
+  cwd: repoRoot,
+  encoding: "utf8"
+});
+if (promtoolResult.error) throw promtoolResult.error;
+assert(
+  promtoolResult.status === 0,
+  `Backup alert rule tests failed:\n${promtoolResult.stderr}\n${promtoolResult.stdout}`
 );
 assert(
   bootstrapSource.includes("--onboard <project-dir>") &&
@@ -594,4 +678,14 @@ for (const [mode, markers] of [
   );
 }
 
-process.stdout.write("Installer dry-run/profile smoke passed\n");
+process.stdout.write(
+  [
+    "Installer dry-run/profile smoke passed",
+    "Backup units: recallant-backup.service + recallant-backup.timer",
+    "Env authority: selected EnvironmentFile + explicit RECALLANT_ENV_FILE",
+    "Schedule: daily 03:15 persistent; backup SLA: 30h; restore SLA: 30h",
+    promtoolResult.stdout.trim(),
+    "Rerun/rollback: stable single schedule; env and data preserved by default",
+    "Public boundary: portable alert fixtures contain no protected routing details"
+  ].join("\n") + "\n"
+);

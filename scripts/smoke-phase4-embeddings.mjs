@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { URL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -21,7 +24,7 @@ const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl();
 
 const developerId = randomUUID();
 const defaultProjectId = randomUUID();
-const projectId = randomUUID();
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase4-embeddings-"));
 
 async function assertCliMcpServerLifecycle() {
   const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
@@ -30,8 +33,7 @@ async function assertCliMcpServerLifecycle() {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
-      RECALLANT_PROJECT_ID: projectId,
-      RECALLANT_PROJECT_PATH: process.cwd()
+      RECALLANT_PROJECT_PATH: projectPath
     },
     stdio: ["pipe", "pipe", "pipe"]
   });
@@ -74,8 +76,8 @@ const mcpEnvKeys = [
 const mcpEnvSnapshot = snapshotEnv(mcpEnvKeys);
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
-process.env.RECALLANT_PROJECT_ID = projectId;
-process.env.RECALLANT_PROJECT_PATH = process.cwd();
+delete process.env.RECALLANT_PROJECT_ID;
+process.env.RECALLANT_PROJECT_PATH = projectPath;
 
 const cliLifecycle = await assertCliMcpServerLifecycle();
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -83,7 +85,16 @@ const mcpClient = new Client({
   name: "recallant-phase4-smoke",
   version: "0.0.0"
 });
-const mcpServer = createRecallantMcpServer();
+const mcpDb = new RecallantDb({
+  databaseUrl,
+  developerId,
+  projectPath
+});
+const mcpServer = createRecallantMcpServer({
+  developerId,
+  projectPath,
+  getDatabase: () => mcpDb
+});
 await mcpServer.connect(serverTransport);
 await mcpClient.connect(clientTransport);
 const initializeEvidence = {
@@ -111,7 +122,7 @@ SDK in-memory transport as `mcp:smoke` while the CLI lifecycle is checked separa
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectPath,
   session_label: "phase4-smoke",
   resume_policy: "normal"
 });
@@ -147,6 +158,11 @@ await defaultDb.close();
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
+const sessionProject = await client.query("SELECT project_id FROM sessions WHERE id = $1", [
+  started.session_id
+]);
+const sessionProjectId = sessionProject.rows[0]?.project_id;
+if (!sessionProjectId) throw new Error("Phase 4 session project was not persisted");
 await client.query(
   `
     INSERT INTO project_settings (project_id, key, value, reason, updated_by)
@@ -154,7 +170,7 @@ await client.query(
     ON CONFLICT (project_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
   `,
   [
-    projectId,
+    sessionProjectId,
     JSON.stringify({
       route_class: "local_model",
       provider: "deterministic",
@@ -217,7 +233,7 @@ await client.query(
     WHERE project_id = $1 AND key = 'embedding_route'
   `,
   [
-    projectId,
+    sessionProjectId,
     JSON.stringify({
       route_class: "local_model",
       provider: "deterministic",
@@ -331,7 +347,7 @@ try {
         (SELECT count(*)::int FROM model_calls WHERE project_id = $2 AND provider = 'openai' AND confirmation_status = 'denied' AND status = 'cancelled' AND error_code = 'paid_api_approval_denied') AS denied_paid_calls,
         (SELECT count(*)::int FROM embeddings e JOIN chunks c ON c.id = e.chunk_id WHERE c.project_id = $2) AS paid_embedding_count
     `,
-    [projectId, paidProjectId, defaultProjectId]
+    [sessionProjectId, paidProjectId, defaultProjectId]
   );
   const row = checks.rows[0];
   if (
@@ -354,6 +370,7 @@ try {
 
 await mcpClient.close().catch(() => undefined);
 await mcpServer.close().catch(() => undefined);
+await mcpDb.close();
 restoreEnv(mcpEnvSnapshot);
 
 process.stdout.write("Phase 4 embedding smoke passed\n");

@@ -7,6 +7,8 @@ CLI_PATH=""
 POSTGRES_CONTAINER_NAME=""
 COMPOSE_PROJECT_NAME="recallant"
 SYSTEMD_UNIT="/etc/systemd/system/recallant.service"
+BACKUP_SYSTEMD_UNIT="/etc/systemd/system/recallant-backup.service"
+BACKUP_SYSTEMD_TIMER="/etc/systemd/system/recallant-backup.timer"
 DRY_RUN=false
 REMOVE_ENV_FILE=false
 REMOVE_DATA_DIR=false
@@ -161,6 +163,8 @@ cli_path: ${CLI_PATH:-not selected}
 postgres_container_name: ${POSTGRES_CONTAINER_NAME:-not selected}
 compose_project_name: $COMPOSE_PROJECT_NAME
 systemd_unit: ${SYSTEMD_UNIT:-not selected}
+backup_systemd_unit: $BACKUP_SYSTEMD_UNIT
+backup_systemd_timer: $BACKUP_SYSTEMD_TIMER
 will_remove_env_file: $REMOVE_ENV_FILE
 will_remove_data_dir: $REMOVE_DATA_DIR
 data_dir_marker_present: $(data_dir_marked && echo yes || echo no)
@@ -204,9 +208,10 @@ fi
 if [[ "$REMOVE_SYSTEMD" == "true" ]]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now "$(basename "$SYSTEMD_UNIT")" >/dev/null 2>&1 || true
+    systemctl disable --now "$(basename "$BACKUP_SYSTEMD_TIMER")" >/dev/null 2>&1 || true
     systemctl daemon-reload >/dev/null 2>&1 || true
   fi
-  rm -f "$SYSTEMD_UNIT"
+  rm -f "$SYSTEMD_UNIT" "$BACKUP_SYSTEMD_UNIT" "$BACKUP_SYSTEMD_TIMER"
 fi
 
 if [[ "$REMOVE_CONTAINER" == "true" && -n "$POSTGRES_CONTAINER_NAME" ]]; then

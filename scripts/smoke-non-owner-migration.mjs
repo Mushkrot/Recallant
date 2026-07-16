@@ -236,6 +236,7 @@ function migrationEntryRiskClasses(entry) {
 const originalDir = await mkdtemp(join(tmpdir(), "recallant-non-owner-original-"));
 const sandboxDir = await mkdtemp(join(tmpdir(), "recallant-non-owner-sandbox-"));
 await writeExistingProjectFixture(originalDir);
+const originalProjectLog = await readFile(join(originalDir, "PROJECT_LOG.md"), "utf8");
 const originalBefore = await snapshotTree(originalDir);
 await cp(originalDir, sandboxDir, { recursive: true });
 
@@ -396,7 +397,7 @@ assert(
 assert(agents.includes("recallant agent-start"), "AGENTS.md does not route agents to Recallant");
 assert(agents.includes("<redacted-token>"), "AGENTS.md did not mask the raw legacy token");
 assert(!agents.includes("sk-nonownerfixture123456"), "AGENTS.md still contains raw legacy token");
-assert(projectLog.includes("Status: attached to Recallant."), "PROJECT_LOG.md was not compacted");
+assert(projectLog === originalProjectLog, "Attach changed the owner-authored PROJECT_LOG.md");
 assert(backupAgents.includes("<redacted-token>"), "Backup AGENTS.md was not redacted");
 assert(!backupAgents.includes("sk-nonownerfixture123456"), "Backup AGENTS.md leaked raw token");
 assert(

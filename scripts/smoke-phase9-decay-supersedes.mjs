@@ -10,6 +10,7 @@ const databaseUrl =
 
 const developerId = randomUUID();
 const projectId = randomUUID();
+const projectPath = `/tmp/recallant-phase9-decay-${projectId}`;
 const sessionId = randomUUID();
 const oldEventId = randomUUID();
 const freshEventId = randomUUID();
@@ -26,7 +27,7 @@ try {
   ]);
   await client.query(
     "INSERT INTO projects (id, developer_id, primary_path, name) VALUES ($1, $2, $3, 'phase9-decay')",
-    [projectId, developerId, `/tmp/recallant-phase9-decay-${projectId}`]
+    [projectId, developerId, projectPath]
   );
   await client.query(
     "INSERT INTO sessions (id, project_id, client_kind, client_version, status) VALUES ($1, $2, 'codex', 'smoke', 'active')",
@@ -68,7 +69,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd(),
+    RECALLANT_PROJECT_PATH: projectPath,
     RECALLANT_DECAY_HALFLIFE_DAYS: "1",
     RECALLANT_DECAY_MIN: "0.01",
     RECALLANT_SUPERSEDES_SCORE_MULTIPLIER: "0.1"

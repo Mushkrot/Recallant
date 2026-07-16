@@ -148,11 +148,50 @@ deployment details:
 Access-provider redirects or HTTP authentication challenges are classified as public-route success.
 A browser-visible gateway error or anonymous Workbench response is not.
 
-Production readiness also expects a recent backup verification signal. Configure
-`RECALLANT_LATEST_BACKUP_VERIFICATION_FILE` to point at a JSON report produced by
-`recallant backup-verify`, or provide `RECALLANT_LATEST_BACKUP_MANIFEST` so doctor can fall back to
-the latest manifest's restore-verification status. A configured backup timer without a readable
-passed verification report is not enough for the production gate.
+Production readiness requires evidence from the complete scheduled backup path, not only an enabled
+timer. The production job runs `scripts/recallant-production-backup.sh`, creates a PostgreSQL custom
+format artifact with the version-matched `pg_dump` inside the configured Postgres container, checks
+its SHA-256, restores it into a randomly named disposable database with `pg_restore --exit-on-error`,
+compares every public table and row count, then removes the disposable database. The logical
+`recallant backup-verify` command checks logical snapshot integrity only and reports
+`restore_verification: not_performed`; it cannot satisfy production readiness.
+
+Configure `RECALLANT_LATEST_BACKUP_VERIFICATION_FILE` to the production job's
+`latest-verification.json`. Doctor requires all of the following:
+
+- `recallant-backup.timer` is enabled;
+- the latest `recallant-backup.service` result is `success`, `ExecMainStatus` is zero, and its
+  completion timestamp is valid and recent;
+- `backup_kind` is `postgresql_custom`, the artifact hash was verified, and the artifact timestamp
+  is fresh;
+- the disposable restore reports `restore_verification: passed`, matching table inventories and row
+  counts, an unchanged production fingerprint, `production_overwritten: false`, and successful
+  disposable-database cleanup;
+- both timestamps are within their independent freshness limits.
+
+The default limits are 30 hours. Override them with positive finite values up to 8760 hours:
+
+```bash
+RECALLANT_BACKUP_MAX_AGE_HOURS=30
+RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS=30
+```
+
+`recallant doctor --format json` reports `production_readiness.backup_timer`,
+`production_readiness.backup_job`, and separate `backup` and `restore` freshness objects under
+`production_readiness.latest_backup_verification`. Missing, malformed, future, stale, failed, legacy
+status-only, logical-snapshot, or cleanup-unverified evidence fails closed with a reason code and
+operator action. Repair the job and run one successful native backup/rehearsal before retrying
+doctor; never edit the report to force readiness.
+
+For Prometheus installations that collect node-exporter systemd metrics, load
+`contrib/prometheus/recallant-backup.rules.yml`. Its portable `RecallantBackupFailed` alert fires
+when `recallant-backup.service` remains failed for one minute. Configure routing and receivers only
+in the protected deployment layer; do not add recipient, token, or private-origin details to the
+public rule. Validate the rule before reload with:
+
+```bash
+promtool test rules contrib/prometheus/recallant-backup.rules.test.yml
+```
 
 After attaching and connecting a project:
 

@@ -83,6 +83,25 @@ const started = await callTool(2, "memory_start_session", {
   resume_policy: "normal"
 });
 
+const client = new pg.Client({ connectionString: databaseUrl });
+await client.connect();
+await client.query(
+  `
+    INSERT INTO developer_settings (developer_id, key, value, updated_by)
+    VALUES ($1, 'embedding_route', $2, 'smoke')
+    ON CONFLICT (developer_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [
+    developerId,
+    JSON.stringify({
+      route_class: "local_model",
+      provider: "deterministic",
+      model: "deterministic-phase3-smoke",
+      dims: 768
+    })
+  ]
+);
+
 const dedupKey = `phase3-smoke-${randomUUID()}`;
 const appended = await callTool(3, "memory_append_turn", {
   session_id: started.session_id,
@@ -102,8 +121,6 @@ if (duplicate.event_id !== appended.event_id || duplicate.status !== "duplicate"
   throw new Error(`Dedup failed: ${JSON.stringify({ appended, duplicate })}`);
 }
 
-const client = new pg.Client({ connectionString: databaseUrl });
-await client.connect();
 await client.query(
   `
     INSERT INTO project_settings (project_id, key, value, reason, updated_by)

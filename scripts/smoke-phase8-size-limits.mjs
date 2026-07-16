@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import pg from "pg";
 
@@ -9,7 +12,7 @@ const databaseUrl =
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
 const developerId = randomUUID();
-const projectId = randomUUID();
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase8-limits-"));
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -17,8 +20,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     ...process.env,
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
-    RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd(),
+    RECALLANT_PROJECT_PATH: projectPath,
     RECALLANT_APPEND_TURN_MAX_CHARS: "64",
     RECALLANT_APPEND_EVENT_TEXT_MAX_CHARS: "64",
     RECALLANT_RAW_ARTIFACT_EXCERPT_MAX_CHARS: "32"
@@ -89,13 +91,34 @@ send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectPath,
   session_label: "phase8-size-smoke",
   resume_policy: "normal"
 });
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
+const sessionProject = await client.query("SELECT project_id FROM sessions WHERE id = $1", [
+  started.session_id
+]);
+const sessionProjectId = sessionProject.rows[0]?.project_id;
+if (!sessionProjectId) throw new Error("Phase 8 limits session project was not persisted");
+await client.query(
+  `
+    INSERT INTO developer_settings (developer_id, key, value, updated_by)
+    VALUES ($1, 'embedding_route', $2, 'smoke')
+    ON CONFLICT (developer_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [
+    developerId,
+    JSON.stringify({
+      route_class: "local_model",
+      provider: "deterministic",
+      model: "deterministic-phase8-limits",
+      dims: 768
+    })
+  ]
+);
 
 async function counts() {
   const result = await client.query(
@@ -105,7 +128,7 @@ async function counts() {
         (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1) AS raw_artifacts,
         (SELECT count(*)::int FROM ingest_dedup_keys WHERE project_id = $1) AS dedup_keys
     `,
-    [projectId]
+    [sessionProjectId]
   );
   return result.rows[0];
 }

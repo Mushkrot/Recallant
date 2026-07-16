@@ -1,0 +1,31 @@
+rule_files:
+  - recallant-backup.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'node_systemd_unit_state{name="recallant-backup.service",state="failed"}'
+        values: '1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RecallantBackupFailed
+        exp_alerts:
+          - exp_labels:
+              name: recallant-backup.service
+              state: failed
+              severity: critical
+              service: recallant
+            exp_annotations:
+              summary: Recallant verified backup job failed
+              description: Inspect recallant-backup.service, repair the failure, and run one successful verified backup.
+
+  - interval: 1m
+    input_series:
+      - series: 'node_systemd_unit_state{name="recallant-backup.service",state="failed"}'
+        values: '0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RecallantBackupFailed
+        exp_alerts: []

@@ -3076,6 +3076,7 @@ function doctorHumanReport(result: {
   local_model: Awaited<ReturnType<typeof checkOllama>>;
   service_env_profile: Awaited<ReturnType<typeof checkServiceEnvProfile>>;
   pending_embeddings: Awaited<ReturnType<typeof checkPendingEmbeddingStatus>>;
+  production_readiness: Awaited<ReturnType<typeof checkProductionReadiness>>;
 }) {
   const summary = result.owner_summary;
   const localModelReady = result.local_model.reachable === true;
@@ -3116,6 +3117,9 @@ function doctorHumanReport(result: {
     `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
     `- Semantic indexing: ${semanticIndexingStatus}`,
     `- Service env profile: ${result.service_env_profile.status}`,
+    `- Backup job: ${result.production_readiness.backup_job.ok ? "ready" : `not ready (${result.production_readiness.backup_job.reason})`}`,
+    `- Backup artifact: ${result.production_readiness.latest_backup_verification.backup.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.backup.reason})`}`,
+    `- Restore rehearsal: ${result.production_readiness.latest_backup_verification.restore.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.restore.reason})`}`,
     `- Current project: ${summary.local_storage_status}`,
     `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
@@ -3902,6 +3906,11 @@ const productionReadinessEnvKeys = [
   "RECALLANT_ADMIN_EMAIL",
   "RECALLANT_BACKUP_TIMER_ENABLED",
   "RECALLANT_BACKUP_TIMER_STATUS",
+  "RECALLANT_BACKUP_JOB_RESULT",
+  "RECALLANT_BACKUP_JOB_EXIT_STATUS",
+  "RECALLANT_BACKUP_JOB_COMPLETED_AT",
+  "RECALLANT_BACKUP_MAX_AGE_HOURS",
+  "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS",
   "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS",
   "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE",
   "RECALLANT_LATEST_BACKUP_MANIFEST",
@@ -4224,6 +4233,146 @@ function systemdBackupTimerStatus() {
   };
 }
 
+function positiveHoursSetting(
+  env: ProductionReadinessEnvValues,
+  key: "RECALLANT_BACKUP_MAX_AGE_HOURS" | "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS",
+  fallback = 30
+) {
+  const raw = productionEnvValue(env, key);
+  if (!raw) return { hours: fallback, valid: true, source: "default" };
+  const hours = Number(raw);
+  const valid = Number.isFinite(hours) && hours > 0 && hours <= 8_760;
+  return {
+    hours: valid ? hours : null,
+    valid,
+    source: "env"
+  };
+}
+
+function timestampFreshness(
+  value: unknown,
+  maximum: ReturnType<typeof positiveHoursSetting>,
+  reasonPrefix: string
+) {
+  if (!maximum.valid || maximum.hours === null) {
+    return {
+      timestamp: typeof value === "string" ? value : null,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_max_age_invalid`
+    };
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return {
+      timestamp: null,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_missing`
+    };
+  }
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) {
+    return {
+      timestamp: value,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_invalid`
+    };
+  }
+  const ageHours = (Date.now() - timestampMs) / 3_600_000;
+  if (ageHours < -5 / 60) {
+    return {
+      timestamp: value,
+      age_hours: ageHours,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_future`
+    };
+  }
+  const fresh = ageHours <= maximum.hours;
+  return {
+    timestamp: value,
+    age_hours: Math.max(0, ageHours),
+    max_age_hours: maximum.hours,
+    fresh,
+    reason: fresh ? null : `${reasonPrefix}_stale`
+  };
+}
+
+function backupOperatorAction(reason: string | null) {
+  if (!reason) return "No backup remediation is required.";
+  if (reason.startsWith("backup_job_")) {
+    return "Inspect recallant-backup.service, repair the job, and run one successful backup before retrying doctor.";
+  }
+  if (reason.includes("stale") || reason.includes("timestamp")) {
+    return "Run a fresh native backup and disposable restore rehearsal, then retry doctor.";
+  }
+  if (reason.includes("max_age")) {
+    return "Set a positive backup freshness maximum no greater than 8760 hours.";
+  }
+  return "Create and verify a native PostgreSQL backup with a successful disposable restore rehearsal.";
+}
+
+function systemdBackupJobStatus() {
+  const result = systemctlValue(["show", "recallant-backup.service", "-p", "Result", "--value"]);
+  const exitStatus = systemctlValue([
+    "show",
+    "recallant-backup.service",
+    "-p",
+    "ExecMainStatus",
+    "--value"
+  ]);
+  const completedAt = systemctlValue([
+    "show",
+    "recallant-backup.service",
+    "-p",
+    "ExecMainExitTimestamp",
+    "--value"
+  ]);
+  return { result, exit_status: exitStatus, completed_at: completedAt, source: "systemd" };
+}
+
+function backupJobStatus(
+  env: ProductionReadinessEnvValues,
+  maximum: ReturnType<typeof positiveHoursSetting>
+) {
+  const hasOverride = [
+    "RECALLANT_BACKUP_JOB_RESULT",
+    "RECALLANT_BACKUP_JOB_EXIT_STATUS",
+    "RECALLANT_BACKUP_JOB_COMPLETED_AT"
+  ].some((key) => productionEnvValue(env, key as ProductionReadinessEnvKey) !== undefined);
+  const observed = hasOverride
+    ? {
+        result: productionEnvValue(env, "RECALLANT_BACKUP_JOB_RESULT") ?? null,
+        exit_status: productionEnvValue(env, "RECALLANT_BACKUP_JOB_EXIT_STATUS") ?? null,
+        completed_at: productionEnvValue(env, "RECALLANT_BACKUP_JOB_COMPLETED_AT") ?? null,
+        source: "env"
+      }
+    : systemdBackupJobStatus();
+  const completion = timestampFreshness(observed.completed_at, maximum, "backup_job_completion");
+  const parsedExit =
+    observed.exit_status !== null && observed.exit_status !== ""
+      ? Number(observed.exit_status)
+      : null;
+  let reason: string | null = null;
+  if (observed.result !== "success") reason = "backup_job_result_failed";
+  else if (parsedExit !== 0) reason = "backup_job_exit_nonzero";
+  else if (!completion.fresh) reason = completion.reason;
+  return {
+    result: observed.result ?? "unknown",
+    exit_status: Number.isFinite(parsedExit) ? parsedExit : null,
+    completed_at: observed.completed_at,
+    completion,
+    source: observed.source,
+    ok: reason === null,
+    reason,
+    operator_action: backupOperatorAction(reason)
+  };
+}
+
 function bindHostIsPrivate(bindHost: string) {
   return bindHost === "127.0.0.1" || bindHost === "::1" || bindHost.endsWith(".tailnet");
 }
@@ -4470,44 +4619,81 @@ async function checkServiceRuntimeReadiness(input: {
   };
 }
 
-async function latestBackupVerificationStatus(env: ProductionReadinessEnvValues = process.env) {
-  const envStatus = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS");
-  if (envStatus) return { status: envStatus, ok: envStatus === "passed", source: "env" };
-
+async function latestBackupVerificationStatus(
+  env: ProductionReadinessEnvValues = process.env,
+  backupMaximum = positiveHoursSetting(env, "RECALLANT_BACKUP_MAX_AGE_HOURS"),
+  restoreMaximum = positiveHoursSetting(env, "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS")
+) {
   const verificationPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE");
   if (!verificationPath) {
-    return { status: "unknown", ok: false, source: "not_configured", file_configured: false };
+    const legacyStatus = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS");
+    return {
+      status: legacyStatus ?? "unknown",
+      ok: false,
+      reason: legacyStatus
+        ? "legacy_status_without_evidence"
+        : "backup_verification_not_configured",
+      source: legacyStatus ? "legacy-env-insufficient" : "not_configured",
+      file_configured: false,
+      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
+      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
+      operator_action: backupOperatorAction(
+        legacyStatus ? "legacy_status_without_evidence" : "backup_verification_not_configured"
+      )
+    };
   }
   try {
     const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
-    const status = String(parsed.restore_verification ?? parsed.status ?? "unknown");
+    const status = String(parsed.restore_verification ?? "unknown");
+    const backup = timestampFreshness(parsed.backup_created_at, backupMaximum, "backup");
+    const restore = timestampFreshness(
+      parsed.restore_verified_at ?? parsed.verified_at,
+      restoreMaximum,
+      "restore"
+    );
+    let reason: string | null = null;
+    if (parsed.backup_kind !== "postgresql_custom") reason = "backup_kind_not_restorable";
+    else if (status !== "passed") reason = "restore_not_passed";
+    else if (parsed.artifact_sha256_verified !== true) reason = "backup_artifact_hash_unverified";
+    else if (parsed.production_overwritten !== false) reason = "production_overwrite_not_disproved";
+    else if (parsed.production_fingerprint_unchanged !== true)
+      reason = "production_fingerprint_unverified";
+    else if (parsed.disposable_database_removed !== true) reason = "rehearsal_cleanup_unverified";
+    else if (
+      !Array.isArray(parsed.missing_tables) ||
+      !Array.isArray(parsed.unexpected_tables) ||
+      !Array.isArray(parsed.row_count_mismatches) ||
+      parsed.missing_tables.length > 0 ||
+      parsed.unexpected_tables.length > 0 ||
+      parsed.row_count_mismatches.length > 0
+    )
+      reason = "restore_inventory_mismatch";
+    else if (!backup.fresh) reason = backup.reason;
+    else if (!restore.fresh) reason = restore.reason;
     return {
       status,
-      ok: status === "passed" && parsed.production_overwritten !== true,
+      ok: reason === null,
+      reason,
       source: "latest-verification-file",
       file_configured: true,
-      verified_at: parsed.verified_at ?? null,
-      manifest_configured: Boolean(parsed.manifest_path)
+      backup: { ...backup, source: "latest-verification-file" },
+      restore: { ...restore, source: "latest-verification-file" },
+      artifact_sha256_verified: parsed.artifact_sha256_verified === true,
+      production_overwritten: parsed.production_overwritten,
+      manifest_configured: Boolean(parsed.manifest_path),
+      operator_action: backupOperatorAction(reason)
     };
   } catch {
-    const manifestPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_MANIFEST");
-    if (!manifestPath)
-      return { status: "unknown", ok: false, source: "missing", file_configured: true };
-    try {
-      const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as {
-        restore_verification?: { status?: string };
-      };
-      const status = parsed.restore_verification?.status ?? "unknown";
-      return {
-        status,
-        ok: status === "passed",
-        source: "manifest",
-        file_configured: true,
-        manifest_configured: true
-      };
-    } catch {
-      return { status: "unknown", ok: false, source: "missing", file_configured: true };
-    }
+    return {
+      status: "unknown",
+      ok: false,
+      reason: "backup_verification_missing_or_invalid",
+      source: "missing",
+      file_configured: true,
+      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
+      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
+      operator_action: backupOperatorAction("backup_verification_missing_or_invalid")
+    };
   }
 }
 
@@ -4760,7 +4946,14 @@ async function checkProductionReadiness(
     : envBackupTimerEnabled
       ? { enabled: true, status: "enabled", source: "env" }
       : systemdBackupTimerStatus();
-  const latestBackupVerification = await latestBackupVerificationStatus(env);
+  const backupMaximum = positiveHoursSetting(env, "RECALLANT_BACKUP_MAX_AGE_HOURS");
+  const restoreMaximum = positiveHoursSetting(env, "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS");
+  const backupJob = backupJobStatus(env, backupMaximum);
+  const latestBackupVerification = await latestBackupVerificationStatus(
+    env,
+    backupMaximum,
+    restoreMaximum
+  );
   let deploymentProjectRows: number | null = null;
   let unintendedPaidApiSuccessCalls30d: number | null = null;
   const readinessProjectPath =
@@ -4827,6 +5020,9 @@ async function checkProductionReadiness(
       status: backupTimer.status,
       source: backupTimer.source
     },
+    backup_job: backupJob,
+    backup_freshness_sla: backupMaximum,
+    restore_freshness_sla: restoreMaximum,
     latest_backup_verification: latestBackupVerification,
     deployment_project_path: readinessProjectPath,
     deployment_project_rows: deploymentProjectRows,
@@ -4856,6 +5052,7 @@ async function checkProductionReadiness(
       deploymentProfile.server_inventory.registered &&
       deploymentProfile.security_baseline.present &&
       backupTimer.enabled &&
+      backupJob.ok &&
       latestBackupVerification.ok &&
       deploymentProjectRows !== null &&
       deploymentProjectRows <= 1 &&
@@ -5207,34 +5404,14 @@ async function runRecoverEmbeddings(argv: readonly string[]) {
 }
 
 async function snapshotTables(client: pg.Client) {
-  const tableNames = [
-    "developers",
-    "projects",
-    "sessions",
-    "events",
-    "raw_artifacts",
-    "chunks",
-    "embeddings",
-    "edges",
-    "checkpoints",
-    "agent_memories",
-    "agent_memory_source_refs",
-    "agent_memory_review_actions",
-    "recall_traces",
-    "ingest_dedup_keys",
-    "erasure_requests",
-    "paid_api_approval_requests",
-    "model_calls",
-    "system_settings",
-    "developer_settings",
-    "project_settings",
-    "session_overrides",
-    "client_adapter_settings",
-    "settings_audit_events",
-    "system_activity_events"
-  ];
+  const inventory = await client.query<{ tablename: string }>(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+  );
+  const tableNames = inventory.rows.map((row) => row.tablename);
   const tables: Record<string, unknown[]> = {};
   for (const table of tableNames) {
+    if (!/^[a-z_][a-z0-9_]*$/i.test(table))
+      throw new Error("Unsafe table name in backup inventory");
     const result = await client.query(`SELECT * FROM ${table}`);
     tables[table] = result.rows;
   }
@@ -5263,6 +5440,7 @@ async function runBackup(argv: readonly string[]) {
     await writeFile(join(backupDir, "tables.json"), tablesJson);
     const manifest = {
       backup_id: backupId,
+      backup_kind: "logical_snapshot",
       created_at: new Date().toISOString(),
       recallant_version: "0.0.0",
       schema_version: "0001_initial",
@@ -5271,7 +5449,8 @@ async function runBackup(argv: readonly string[]) {
       files: [{ path: "tables.json", sha256: tablesHash, size_bytes: tablesJson.length }],
       target: { kind: "local_directory", path: backupDir, future_ssh_tailscale_supported: true },
       encryption: { status: "not_enabled_local_dev" },
-      restore_verification: { status: "not_run" },
+      snapshot_verification: { status: "not_run" },
+      restore_verification: { status: "not_performed" },
       secret_policy: "manifest excludes provider keys and raw secrets"
     };
     await writeFile(join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -5320,55 +5499,32 @@ async function runBackupVerify(argv: readonly string[]) {
   if (searchQuery && boundedSearchMatches === 0) {
     throw new Error("Backup bounded search verification failed");
   }
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
-  const schema = `verify_${randomUUID().replaceAll("-", "_")}`;
-  try {
-    await client.query(`CREATE SCHEMA ${schema}`);
-    await client.query(`CREATE TABLE ${schema}.backup_snapshot (payload jsonb)`);
-    await client.query(`INSERT INTO ${schema}.backup_snapshot (payload) VALUES ($1)`, [
-      JSON.stringify(tables)
-    ]);
-    const checks = await client.query(
-      `
-        SELECT
-          jsonb_array_length(payload->'projects') AS project_count,
-          jsonb_array_length(payload->'checkpoints') AS checkpoint_count,
-          jsonb_array_length(payload->'chunks') AS chunk_count,
-          jsonb_array_length(payload->'agent_memories') AS governed_memory_count,
-          jsonb_array_length(payload->'raw_artifacts') AS raw_artifact_count,
-          jsonb_array_length(payload->'system_activity_events') AS system_activity_event_count
-        FROM ${schema}.backup_snapshot
-        LIMIT 1
-      `
-    );
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          ok: true,
-          restore_verification: "passed",
-          temporary_schema: schema,
-          project_count: checks.rows[0]?.project_count ?? 0,
-          latest_checkpoint_present: checkpoints.length > 0,
-          governed_memory_count: checks.rows[0]?.governed_memory_count ?? agentMemories.length,
-          chunk_count: checks.rows[0]?.chunk_count ?? chunks.length,
-          raw_artifact_count: checks.rows[0]?.raw_artifact_count ?? rawArtifacts.length,
-          system_activity_event_count: checks.rows[0]?.system_activity_event_count ?? 0,
-          raw_artifact_pointer_issues: rawArtifactPointerIssues,
-          bounded_search_checked: true,
-          bounded_search_query: searchQuery ?? null,
-          bounded_search_matches: boundedSearchMatches,
-          schema_version: manifest.schema_version,
-          production_overwritten: false
-        },
-        null,
-        2
-      )}\n`
-    );
-  } finally {
-    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await client.end();
-  }
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        snapshot_verification: "passed",
+        restore_verification: "not_performed",
+        project_count: rowsOf(tables, "projects").length,
+        latest_checkpoint_present: checkpoints.length > 0,
+        governed_memory_count: agentMemories.length,
+        chunk_count: chunks.length,
+        raw_artifact_count: rawArtifacts.length,
+        system_activity_event_count: rowsOf(tables, "system_activity_events").length,
+        table_count: Object.keys(tables).length,
+        raw_artifact_pointer_issues: rawArtifactPointerIssues,
+        bounded_search_checked: true,
+        bounded_search_query: searchQuery ?? null,
+        bounded_search_matches: boundedSearchMatches,
+        schema_version: manifest.schema_version,
+        production_overwritten: false,
+        warning:
+          "Logical snapshot integrity passed; production readiness requires a native PostgreSQL restore rehearsal."
+      },
+      null,
+      2
+    )}\n`
+  );
 }
 
 async function runRestorePlan(argv: readonly string[]) {

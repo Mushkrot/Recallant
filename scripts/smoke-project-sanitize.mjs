@@ -273,7 +273,7 @@ if (
   dryRunCounts.paid_api_approvals < 1 ||
   dryRun.local_cleanup?.writes_files !== false ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "AGENTS.md") ||
-  !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "PROJECT_LOG.md") ||
+  dryRun.local_cleanup?.planned_changes?.some((change) => change.path === "PROJECT_LOG.md") ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/hooks") ||
   !dryRun.local_cleanup?.planned_changes?.some((change) => change.path === ".recallant/spool") ||
   dryRun.receipt?.target?.requested_via !== "--project-dir" ||

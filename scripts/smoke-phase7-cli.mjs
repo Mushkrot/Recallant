@@ -443,7 +443,27 @@ if (
   throw new Error(`doctor unavailable Ollama state failed: ${JSON.stringify(unreachableDoctor)}`);
 }
 
-const productionDoctor = run(["doctor", "--project-dir", projectDir, "--format", "json"], {
+const backupVerificationFile = join(projectDir, "latest-backup-verification.json");
+const freshTimestamp = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+const freshVerification = {
+  ok: true,
+  status: "passed",
+  backup_kind: "postgresql_custom",
+  backup_created_at: freshTimestamp,
+  verified_at: freshTimestamp,
+  restore_verified_at: freshTimestamp,
+  restore_verification: "passed",
+  artifact_sha256_verified: true,
+  missing_tables: [],
+  unexpected_tables: [],
+  row_count_mismatches: [],
+  production_fingerprint_unchanged: true,
+  production_overwritten: false,
+  disposable_database_removed: true,
+  manifest_path: "/redacted/manifest.json"
+};
+await writeFile(backupVerificationFile, `${JSON.stringify(freshVerification)}\n`);
+const productionEnv = {
   RECALLANT_SERVER_INVENTORY_FILE: portsFile,
   RECALLANT_SECURITY_BASELINE_PATH: securityPath,
   RECALLANT_PRODUCTION_PROJECT_PATH: projectDir,
@@ -460,8 +480,29 @@ const productionDoctor = run(["doctor", "--project-dir", projectDir, "--format",
   RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
   RECALLANT_BACKUP_TIMER_ENABLED: "true",
   RECALLANT_BACKUP_TIMER_STATUS: "enabled",
-  RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS: "passed"
-});
+  RECALLANT_BACKUP_JOB_RESULT: "success",
+  RECALLANT_BACKUP_JOB_EXIT_STATUS: "0",
+  RECALLANT_BACKUP_JOB_COMPLETED_AT: freshTimestamp,
+  RECALLANT_BACKUP_MAX_AGE_HOURS: "30",
+  RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS: "30",
+  RECALLANT_LATEST_BACKUP_VERIFICATION_FILE: backupVerificationFile,
+  RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS: ""
+};
+function productionDoctorWith(overrides = {}) {
+  return run(["doctor", "--project-dir", projectDir, "--format", "json"], {
+    ...productionEnv,
+    ...overrides
+  });
+}
+async function productionDoctorWithReport(reportPatch, envOverrides = {}) {
+  await writeFile(
+    backupVerificationFile,
+    `${JSON.stringify({ ...freshVerification, ...reportPatch })}\n`
+  );
+  return productionDoctorWith(envOverrides);
+}
+
+const productionDoctor = productionDoctorWith();
 if (
   productionDoctor.production_readiness?.doctor_ok !== true ||
   productionDoctor.production_readiness?.local_stdio_mcp_smoke?.command !== "npm run mcp:smoke" ||
@@ -471,7 +512,10 @@ if (
   productionDoctor.production_readiness?.service_runtime?.ok !== true ||
   productionDoctor.production_readiness?.localhost_only_origin?.ok !== true ||
   productionDoctor.production_readiness?.backup_timer?.enabled !== true ||
+  productionDoctor.production_readiness?.backup_job?.ok !== true ||
   productionDoctor.production_readiness?.latest_backup_verification?.ok !== true ||
+  productionDoctor.production_readiness?.latest_backup_verification?.backup?.fresh !== true ||
+  productionDoctor.production_readiness?.latest_backup_verification?.restore?.fresh !== true ||
   productionDoctor.production_readiness?.no_duplicate_deployment_project_rows !== true ||
   productionDoctor.production_readiness?.no_unintended_paid_api_use !== true ||
   productionDoctor.production_readiness?.ready !== true
@@ -480,6 +524,108 @@ if (
     `production readiness doctor failed: ${JSON.stringify(productionDoctor.production_readiness)}`
   );
 }
+
+const readinessMatrix = [];
+function matrixCase(name, doctor, expectedReason) {
+  const readiness = doctor.production_readiness;
+  const actualReason = readiness.backup_job?.ok
+    ? readiness.latest_backup_verification?.reason
+    : readiness.backup_job?.reason;
+  if (readiness.ready !== false || actualReason !== expectedReason) {
+    throw new Error(
+      `${name} readiness case failed: ${JSON.stringify({ ready: readiness.ready, actualReason, readiness })}`
+    );
+  }
+  readinessMatrix.push({ name, ready: readiness.ready, reason: actualReason });
+}
+
+matrixCase(
+  "failed_job",
+  productionDoctorWith({ RECALLANT_BACKUP_JOB_RESULT: "exit-code" }),
+  "backup_job_result_failed"
+);
+matrixCase(
+  "nonzero_exit",
+  productionDoctorWith({ RECALLANT_BACKUP_JOB_EXIT_STATUS: "1" }),
+  "backup_job_exit_nonzero"
+);
+matrixCase(
+  "missing_completion",
+  productionDoctorWith({ RECALLANT_BACKUP_JOB_COMPLETED_AT: "" }),
+  "backup_job_completion_timestamp_missing"
+);
+matrixCase(
+  "stale_job",
+  productionDoctorWith({
+    RECALLANT_BACKUP_JOB_COMPLETED_AT: new Date(Date.now() - 31 * 60 * 60 * 1000).toISOString()
+  }),
+  "backup_job_completion_stale"
+);
+matrixCase(
+  "stale_backup",
+  await productionDoctorWithReport({
+    backup_created_at: new Date(Date.now() - 31 * 60 * 60 * 1000).toISOString()
+  }),
+  "backup_stale"
+);
+matrixCase(
+  "stale_restore",
+  await productionDoctorWithReport({
+    restore_verified_at: new Date(Date.now() - 31 * 60 * 60 * 1000).toISOString()
+  }),
+  "restore_stale"
+);
+matrixCase(
+  "malformed_timestamp",
+  await productionDoctorWithReport({ backup_created_at: "not-a-date" }),
+  "backup_timestamp_invalid"
+);
+matrixCase(
+  "future_timestamp",
+  await productionDoctorWithReport({
+    restore_verified_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  }),
+  "restore_timestamp_future"
+);
+matrixCase(
+  "fake_restore",
+  await productionDoctorWithReport({
+    backup_kind: "logical_snapshot",
+    restore_verification: "not_performed"
+  }),
+  "backup_kind_not_restorable"
+);
+matrixCase(
+  "invalid_sla",
+  productionDoctorWith({ RECALLANT_BACKUP_MAX_AGE_HOURS: "0" }),
+  "backup_job_completion_max_age_invalid"
+);
+matrixCase(
+  "legacy_pass_without_evidence",
+  productionDoctorWith({
+    RECALLANT_LATEST_BACKUP_VERIFICATION_FILE: "",
+    RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS: "passed"
+  }),
+  "legacy_status_without_evidence"
+);
+
+const insideBoundary = await productionDoctorWithReport({
+  backup_created_at: new Date(Date.now() - 29.9 * 60 * 60 * 1000).toISOString(),
+  restore_verified_at: new Date(Date.now() - 29.9 * 60 * 60 * 1000).toISOString()
+});
+assert(
+  insideBoundary.production_readiness.latest_backup_verification.ok === true,
+  "Freshness just inside the 30-hour boundary should pass"
+);
+const outsideBoundary = await productionDoctorWithReport({
+  backup_created_at: new Date(Date.now() - 30.1 * 60 * 60 * 1000).toISOString()
+});
+assert(
+  outsideBoundary.production_readiness.latest_backup_verification.reason === "backup_stale",
+  "Freshness just outside the 30-hour boundary should fail"
+);
+await writeFile(backupVerificationFile, `${JSON.stringify(freshVerification)}\n`);
+readinessMatrix.push({ name: "fully_fresh", ready: true, reason: null });
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
@@ -511,4 +657,13 @@ try {
   await client.end();
 }
 
-process.stdout.write("Phase 7 CLI smoke passed\n");
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      backup_readiness_matrix: readinessMatrix,
+      freshness_boundary_hours: { inside: 29.9, outside: 30.1, maximum: 30 }
+    },
+    null,
+    2
+  )}\nPhase 7 CLI smoke passed\n`
+);

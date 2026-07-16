@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import pg from "pg";
 
@@ -9,7 +12,7 @@ const databaseUrl =
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
 
 const developerId = randomUUID();
-const projectId = randomUUID();
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase9-archive-"));
 
 const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
   cwd: process.cwd(),
@@ -17,8 +20,7 @@ const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], 
     ...process.env,
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
-    RECALLANT_PROJECT_ID: projectId,
-    RECALLANT_PROJECT_PATH: process.cwd()
+    RECALLANT_PROJECT_PATH: projectPath
   },
   stdio: ["pipe", "pipe", "pipe"]
 });
@@ -74,10 +76,28 @@ send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectPath,
   session_label: "phase9-archive-smoke",
   resume_policy: "normal"
 });
+const client = new pg.Client({ connectionString: databaseUrl });
+await client.connect();
+await client.query(
+  `
+    INSERT INTO developer_settings (developer_id, key, value, updated_by)
+    VALUES ($1, 'embedding_route', $2, 'smoke')
+    ON CONFLICT (developer_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+  `,
+  [
+    developerId,
+    JSON.stringify({
+      route_class: "local_model",
+      provider: "deterministic",
+      model: "deterministic-phase9-archive",
+      dims: 768
+    })
+  ]
+);
 
 const token = `archive_unique_token_${randomUUID().replaceAll("-", "_")}`;
 const appended = await callTool(3, "memory_append_turn", {
@@ -150,8 +170,6 @@ if (!restored.hits.some((hit) => hit.chunk_id === chunkId)) {
   throw new Error(`Unarchived chunk missing from ordinary search: ${JSON.stringify(restored)}`);
 }
 
-const client = new pg.Client({ connectionString: databaseUrl });
-await client.connect();
 try {
   const checks = await client.query(
     `

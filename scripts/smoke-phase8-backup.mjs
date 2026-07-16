@@ -1,221 +1,348 @@
 import { spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { RecallantDb } from "../packages/db/dist/index.js";
+import { dirname, join } from "node:path";
+import { URL } from "node:url";
+import pg from "pg";
+import { assertSafeRehearsalDatabase } from "./recallant-backup-safety.mjs";
 
-const databaseUrl =
+const baseDatabaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://recallant:recallant_dev_password@127.0.0.1:15433/recallant_agent_work";
-const repoRoot = process.cwd();
-
-const backupRoot = await mkdtemp(join(tmpdir(), "recallant-phase8-backup-"));
-const projectId = randomUUID();
-const developerId = randomUUID();
-const projectPath = `/tmp/recallant-phase8-${projectId}`;
+const baseUrl = new URL(baseDatabaseUrl);
+const postgresUser = decodeURIComponent(baseUrl.username);
+const containerName =
+  process.env.RECALLANT_POSTGRES_CONTAINER_NAME ??
+  (baseUrl.port === "15433" ? "recallant-dev-postgres-1" : "recallant-postgres");
+const testDatabase = `recallant_backup_smoke_${randomUUID().replaceAll("-", "_")}`;
 const searchNeedle = "portable-quartz-signal";
+const backupRoot = await mkdtemp(join(tmpdir(), "recallant-phase8-native-backup-"));
 
-const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath });
-try {
-  await db.ensureProject(projectPath);
-  const session = await db.startSession({
-    client_kind: "codex",
-    client_version: "smoke",
-    project_path: projectPath,
-    session_label: "phase8-backup-smoke",
-    resume_policy: "normal"
-  });
-  const event = await db.appendTurn({
-    session_id: session.session_id,
-    client_kind: "codex",
-    role: "user",
-    text: `Phase 8 backup smoke creates searchable chunk ${searchNeedle}.`,
-    dedup_key: `phase8-backup-turn-${randomUUID()}`
-  });
-  await db.appendEvent({
-    session_id: session.session_id,
-    client_kind: "codex",
-    event_kind: "terminal_output",
-    text: "Phase 8 backup smoke raw artifact pointer event.",
-    metadata: { smoke: true },
-    raw_artifacts: [
-      {
-        artifact_kind: "terminal_output",
-        storage_backend: "external",
-        uri: "smoke://phase8-backup-artifact",
-        sha256: "2".repeat(64),
-        size_bytes: 2048,
-        content_type: "text/plain",
-        excerpt: "bounded backup artifact excerpt",
-        metadata: { smoke: true }
-      }
-    ],
-    dedup_key: `phase8-backup-artifact-${randomUUID()}`
-  });
-  await db.setCheckpoint(projectId, {
-    current_status: "phase8 backup smoke",
-    current_focus: "backup verification",
-    next_step: "continue hardening",
-    open_questions: []
-  });
-  await db.createAgentMemory({
-    memory_type: "work_log",
-    scope: "project",
-    title: "Phase 8 backup smoke memory",
-    body: `Backup verification should preserve governed memory around ${searchNeedle}.`,
-    confidence: 0.9,
-    created_by: "agent",
-    source_refs: [{ source_kind: "event", source_id: event.event_id, quote: searchNeedle }]
-  });
-  const activity = await db.startSystemActivity({
-    developer_id: developerId,
-    project_id: projectId,
-    surface: "cli",
-    operation: "backup-smoke",
-    actor_kind: "system",
-    actor_id: "phase8-backup-smoke",
-    metadata: {
-      smoke: true,
-      policy: "backup must preserve redacted system activity ledger rows"
-    }
-  });
-  await db.finishSystemActivity({
-    id: activity.id,
-    status: "success",
-    metadata: { verified: true }
-  });
-} finally {
-  await db.close();
+function urlFor(databaseName) {
+  const parsed = new URL(baseDatabaseUrl);
+  parsed.pathname = `/${databaseName}`;
+  return parsed.toString();
 }
 
-function run(args) {
-  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      RECALLANT_DATABASE_URL: databaseUrl
-    },
-    encoding: "utf8"
+function run(command, args, env = {}) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024
   });
+  return result;
+}
+
+function runJson(command, args, env = {}) {
+  const result = run(command, args, env);
   if (result.status !== 0) {
-    throw new Error(
-      `Command failed: recallant ${args.join(" ")}\n${result.stderr}\n${result.stdout}`
-    );
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr}\n${result.stdout}`);
   }
   return JSON.parse(result.stdout);
 }
 
-const backup = run(["backup", "--target", backupRoot]);
-if (
-  backup.ok !== true ||
-  !backup.manifest_path ||
-  backup.restore_verification?.status !== "not_run" ||
-  backup.secret_policy !== "manifest excludes provider keys and raw secrets"
-) {
-  throw new Error(`Backup output failed: ${JSON.stringify(backup)}`);
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
 }
 
-const manifest = JSON.parse(await readFile(backup.manifest_path, "utf8"));
-const tablesPath = join(backup.manifest_path, "..", "tables.json");
-const tablesJson = await readFile(tablesPath, "utf8");
-const tables = JSON.parse(tablesJson);
-const tablesHash = createHash("sha256").update(tablesJson).digest("hex");
-const manifestTables = manifest.files.find((file) => file.path === "tables.json");
-
-if (
-  manifest.backup_id !== backup.backup_id ||
-  manifest.schema_version !== "0001_initial" ||
-  manifestTables?.sha256 !== tablesHash ||
-  !Array.isArray(tables.embeddings) ||
-  !Array.isArray(tables.edges) ||
-  !Array.isArray(tables.model_calls) ||
-  !Array.isArray(tables.settings_audit_events) ||
-  !Array.isArray(tables.system_activity_events) ||
-  !tables.projects.some((project) => project.id === projectId) ||
-  !tables.checkpoints.some((checkpoint) => checkpoint.project_id === projectId) ||
-  !tables.chunks.some(
-    (chunk) => chunk.project_id === projectId && chunk.text.includes(searchNeedle)
-  ) ||
-  !tables.agent_memories.some((memory) => memory.project_id === projectId) ||
-  !tables.raw_artifacts.some(
-    (artifact) => artifact.project_id === projectId && artifact.sha256 === "2".repeat(64)
-  ) ||
-  !tables.system_activity_events.some(
-    (activity) => activity.project_id === projectId && activity.operation === "backup-smoke"
-  )
-) {
-  throw new Error(`Backup manifest/tables failed: ${JSON.stringify({ manifest, tablesHash })}`);
-}
-
-const forbiddenFragments = [
-  "fixture-secret-value",
-  "fixture-password",
-  "sk-fixturetoken123456",
-  "ANTHROPIC_API_KEY=real",
-  "GEMINI_API_KEY=real"
-];
-const combined = `${JSON.stringify(manifest)}\n${tablesJson}`;
-for (const fragment of forbiddenFragments) {
-  if (combined.includes(fragment)) {
-    throw new Error(`Backup leaked forbidden secret fragment: ${fragment}`);
+const admin = new pg.Client({ connectionString: urlFor("postgres") });
+await admin.connect();
+try {
+  await admin.query(`CREATE DATABASE "${testDatabase}" TEMPLATE template0`);
+  const databaseUrl = urlFor(testDatabase);
+  const migration = await readFile("packages/db/migrations/0001_initial.sql", "utf8");
+  const database = new pg.Client({ connectionString: databaseUrl });
+  await database.connect();
+  try {
+    await database.query(migration);
+    const developerId = randomUUID();
+    const projectId = randomUUID();
+    const sessionId = randomUUID();
+    const eventId = randomUUID();
+    await database.query("INSERT INTO developers (id, name) VALUES ($1, $2)", [
+      developerId,
+      "Backup smoke developer"
+    ]);
+    await database.query(
+      "INSERT INTO projects (id, developer_id, name, primary_path) VALUES ($1, $2, $3, $4)",
+      [projectId, developerId, "Backup smoke project", "/tmp/recallant-backup-smoke"]
+    );
+    await database.query(
+      "INSERT INTO project_sources (project_id, source_kind, label, is_primary) VALUES ($1, 'workspace_path', $2, true)",
+      [projectId, "smoke source"]
+    );
+    await database.query(
+      "INSERT INTO sessions (id, project_id, client_kind) VALUES ($1, $2, 'codex')",
+      [sessionId, projectId]
+    );
+    await database.query(
+      "INSERT INTO events (id, project_id, session_id, ingest_source, kind, occurred_at, payload) VALUES ($1, $2, $3, 'smoke', 'turn_user', now(), $4)",
+      [eventId, projectId, sessionId, JSON.stringify({ text: searchNeedle })]
+    );
+    await database.query(
+      "INSERT INTO chunks (project_id, developer_id, source_event_id, text, chunk_index) VALUES ($1, $2, $3, $4, 0)",
+      [projectId, developerId, eventId, searchNeedle]
+    );
+    await database.query("INSERT INTO checkpoints (project_id, payload) VALUES ($1, $2)", [
+      projectId,
+      JSON.stringify({ current_status: "backup smoke" })
+    ]);
+    await database.query(
+      "INSERT INTO agent_memories (developer_id, project_id, memory_type, title, body, created_by) VALUES ($1, $2, 'work_log', $3, $4, 'agent')",
+      [developerId, projectId, "Backup smoke", searchNeedle]
+    );
+  } finally {
+    await database.end();
   }
-}
 
-const latestManifestPath = join(backupRoot, "latest-manifest.json");
-await symlink(backup.manifest_path, latestManifestPath);
+  const env = {
+    RECALLANT_DATABASE_URL: databaseUrl,
+    POSTGRES_DB: testDatabase,
+    POSTGRES_USER: postgresUser,
+    RECALLANT_POSTGRES_CONTAINER_NAME: containerName,
+    RECALLANT_BACKUP_TARGET: backupRoot,
+    RECALLANT_DATA_DIR: dirname(backupRoot)
+  };
+  const beforeRehearsals = await admin.query(
+    "SELECT count(*)::int AS count FROM pg_database WHERE datname LIKE 'recallant_rehearsal_%'"
+  );
+  const report = runJson("sh", ["scripts/recallant-production-backup.sh"], env);
+  assert(report.ok === true, "Native backup did not report success");
+  assert(report.backup_kind === "postgresql_custom", "Backup kind is not native PostgreSQL");
+  assert(report.restore_verification === "passed", "Relational restore rehearsal did not pass");
+  assert(report.production_overwritten === false, "Production overwrite safety flag failed");
+  assert(report.production_fingerprint_unchanged === true, "Production fingerprint changed");
+  assert(report.disposable_database_removed === true, "Disposable database was not removed");
+  assert(report.missing_tables.length === 0, "Restored database is missing source tables");
+  assert(report.unexpected_tables.length === 0, "Restored database has unexpected tables");
+  assert(report.row_count_mismatches.length === 0, "Restored row counts differ from source");
+  assert(
+    Object.values(report.schema_probes).every(Boolean),
+    `Schema probes failed: ${JSON.stringify(report.schema_probes)}`
+  );
+  assert(
+    Object.values(report.semantic_probes).every(Boolean),
+    `Semantic probes failed: ${JSON.stringify(report.semantic_probes)}`
+  );
+  assertSafeRehearsalDatabase(`recallant_rehearsal_${"a".repeat(32)}`, testDatabase);
+  let productionTargetRejected = false;
+  try {
+    assertSafeRehearsalDatabase(testDatabase, testDatabase);
+  } catch {
+    productionTargetRejected = true;
+  }
+  assert(productionTargetRejected, "Production database target was not rejected");
 
-const verify = run(["backup-verify", "--manifest", latestManifestPath, "--query", searchNeedle]);
-if (
-  verify.ok !== true ||
-  verify.restore_verification !== "passed" ||
-  verify.production_overwritten !== false ||
-  Number(verify.project_count) < 1 ||
-  verify.latest_checkpoint_present !== true ||
-  Number(verify.governed_memory_count) < 1 ||
-  Number(verify.chunk_count) < 1 ||
-  Number(verify.raw_artifact_count) < 1 ||
-  Number(verify.system_activity_event_count) < 1 ||
-  verify.raw_artifact_pointer_issues !== 0 ||
-  Number(verify.bounded_search_matches) < 1
-) {
-  throw new Error(`Backup verification failed: ${JSON.stringify(verify)}`);
-}
+  const manifest = JSON.parse(await readFile(report.manifest_path, "utf8"));
+  const dumpPath = join(dirname(report.manifest_path), manifest.artifact.path);
+  const dumpHeader = (await readFile(dumpPath)).subarray(0, 5).toString("ascii");
+  assert(dumpHeader === "PGDMP", "Artifact is not PostgreSQL custom format");
+  const manifestMode = (await stat(report.manifest_path)).mode & 0o777;
+  const dumpMode = (await stat(dumpPath)).mode & 0o777;
+  const backupDirMode = (await stat(dirname(report.manifest_path))).mode & 0o777;
+  assert(manifestMode === 0o600, `Manifest mode is ${manifestMode.toString(8)}`);
+  assert(dumpMode === 0o600, `Dump mode is ${dumpMode.toString(8)}`);
+  assert(backupDirMode === 0o700, `Backup directory mode is ${backupDirMode.toString(8)}`);
+  const manifestText = JSON.stringify(manifest);
+  assert(!manifestText.includes(baseDatabaseUrl), "Manifest leaked database URL");
+  assert(!manifestText.includes(decodeURIComponent(baseUrl.password)), "Manifest leaked credential");
+  const canonicalTables = [
+    ...migration.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)
+  ]
+    .map((match) => match[1])
+    .sort();
+  const coveredTables = manifest.source_table_inventory.map((entry) => entry.table).sort();
+  const missingCanonicalTables = canonicalTables.filter((table) => !coveredTables.includes(table));
+  assert(missingCanonicalTables.length === 0, `Missing canonical tables: ${missingCanonicalTables}`);
+  for (const table of [
+    "project_sources",
+    "graph_candidates",
+    "graph_candidate_source_refs",
+    "remote_mcp_credentials",
+    "remote_connect_requests",
+    "settings_audit_events",
+    "system_activity_events"
+  ]) {
+    assert(coveredTables.includes(table), `Backup inventory omitted ${table}`);
+  }
 
-const remapPath = join(backupRoot, "restore-remap.json");
-const newProjectPath = `/new-server/projects/recallant-phase8-${projectId}`;
-await writeFile(
-  remapPath,
-  `${JSON.stringify(
+  const logicalRoot = join(backupRoot, "logical");
+  await mkdir(logicalRoot, { recursive: true });
+  const logicalBackup = runJson(
+    process.execPath,
+    ["apps/cli/dist/index.js", "backup", "--target", logicalRoot],
+    env
+  );
+  const logicalVerify = runJson(
+    process.execPath,
+    [
+      "apps/cli/dist/index.js",
+      "backup-verify",
+      "--manifest",
+      logicalBackup.manifest_path,
+      "--query",
+      searchNeedle
+    ],
+    env
+  );
+  assert(logicalVerify.snapshot_verification === "passed", "Logical integrity did not pass");
+  assert(
+    logicalVerify.restore_verification === "not_performed",
+    "Logical JSON verification falsely claimed relational restore success"
+  );
+
+  const explicitEnvFile = join(backupRoot, "explicit.env");
+  await writeFile(
+    explicitEnvFile,
+    [
+      `RECALLANT_DATABASE_URL=${databaseUrl}`,
+      `POSTGRES_DB=${testDatabase}`,
+      `POSTGRES_USER=${postgresUser}`,
+      `RECALLANT_POSTGRES_CONTAINER_NAME=${containerName}`,
+      `RECALLANT_BACKUP_TARGET=${backupRoot}`,
+      `RECALLANT_DATA_DIR=${dirname(backupRoot)}`
+    ].join("\n") + "\n",
+    { mode: 0o600 }
+  );
+  const explicitEnvVerify = runJson(
+    "sh",
+    ["scripts/recallant-production-backup.sh", "--verify-manifest", report.manifest_path],
     {
-      project_roots: { [projectPath]: newProjectPath },
-      raw_artifact_roots: { "smoke://": "restored-smoke://" },
-      secret_refs: { OPENAI_API_KEY: "target-secret-store:OPENAI_API_KEY" },
-      connector_accounts: { github: "reauthorize-on-target" },
-      environment_facts: { ollama: "recheck-on-target" },
-      ports: { recallant_http: 3005 }
-    },
-    null,
-    2
-  )}\n`
-);
-const restorePlan = run(["restore-plan", "--manifest", latestManifestPath, "--remap", remapPath]);
-if (
-  restorePlan.ok !== true ||
-  restorePlan.writes_database !== false ||
-  restorePlan.production_overwritten !== false ||
-  !restorePlan.projects.some(
-    (project) =>
-      project.project_id === projectId &&
-      project.old_primary_path === projectPath &&
-      project.new_primary_path === newProjectPath &&
-      project.needs_mapping === false
-  ) ||
-  restorePlan.secret_references.OPENAI_API_KEY !== "target-secret-store:OPENAI_API_KEY" ||
-  restorePlan.connector_accounts.github !== "reauthorize-on-target" ||
-  restorePlan.environment_facts.ollama !== "recheck-on-target"
-) {
-  throw new Error(`Restore remap plan failed: ${JSON.stringify(restorePlan)}`);
-}
+      RECALLANT_DATABASE_URL: "",
+      POSTGRES_DB: "",
+      POSTGRES_USER: "",
+      RECALLANT_POSTGRES_CONTAINER_NAME: "",
+      RECALLANT_BACKUP_TARGET: "",
+      RECALLANT_DATA_DIR: "",
+      RECALLANT_ENV_FILE: explicitEnvFile
+    }
+  );
+  assert(explicitEnvVerify.restore_verification === "passed", "Explicit env file was not honored");
 
-process.stdout.write("Phase 8 backup smoke passed\n");
+  const latestBeforeFailure = await readFile(join(backupRoot, "latest-verification.json"), "utf8");
+  const corruptDir = join(backupRoot, "corrupt");
+  await mkdir(corruptDir, { recursive: true, mode: 0o700 });
+  const corruptDump = join(corruptDir, "database.dump");
+  const corruptManifest = join(corruptDir, "manifest.json");
+  await copyFile(dumpPath, corruptDump);
+  await copyFile(report.manifest_path, corruptManifest);
+  await chmod(corruptDump, 0o600);
+  const handle = await open(corruptDump, "r+");
+  try {
+    const byte = Buffer.alloc(1);
+    await handle.read(byte, 0, 1, 0);
+    byte[0] ^= 0xff;
+    await handle.write(byte, 0, 1, 0);
+  } finally {
+    await handle.close();
+  }
+  const corruptResult = run(
+    process.execPath,
+    ["scripts/recallant-production-backup.mjs", "--verify-manifest", corruptManifest],
+    env
+  );
+  assert(corruptResult.status !== 0, "Corrupt artifact unexpectedly passed verification");
+  assert(
+    corruptResult.stderr.includes("hash verification failed"),
+    "Corrupt artifact did not fail at the hash gate"
+  );
+  const latestAfterFailure = await readFile(join(backupRoot, "latest-verification.json"), "utf8");
+  assert(latestAfterFailure === latestBeforeFailure, "Failed verification advanced latest report");
+
+  const restoreFailureDir = join(backupRoot, "restore-failure");
+  await mkdir(restoreFailureDir, { recursive: true, mode: 0o700 });
+  const restoreFailureDump = join(restoreFailureDir, "database.dump");
+  const restoreFailureManifest = join(restoreFailureDir, "manifest.json");
+  await copyFile(dumpPath, restoreFailureDump);
+  const restoreFailureHandle = await open(restoreFailureDump, "r+");
+  try {
+    const bytes = Buffer.from("not-a-valid-postgresql-dump");
+    await restoreFailureHandle.truncate(0);
+    await restoreFailureHandle.write(bytes, 0, bytes.length, 0);
+  } finally {
+    await restoreFailureHandle.close();
+  }
+  const restoreFailureBytes = await readFile(restoreFailureDump);
+  const restoreFailureHash = createHash("sha256").update(restoreFailureBytes).digest("hex");
+  await writeFile(
+    restoreFailureManifest,
+    `${JSON.stringify({
+      ...manifest,
+      artifact: {
+        ...manifest.artifact,
+        sha256: restoreFailureHash,
+        size_bytes: restoreFailureBytes.length
+      }
+    })}\n`,
+    { mode: 0o600 }
+  );
+  const restoreFailureResult = run(
+    process.execPath,
+    ["scripts/recallant-production-backup.mjs", "--verify-manifest", restoreFailureManifest],
+    env
+  );
+  assert(restoreFailureResult.status !== 0, "Invalid dump unexpectedly restored");
+  assert(
+    restoreFailureResult.stderr.includes("pg_restore:"),
+    `Restore failure did not reach pg_restore: ${restoreFailureResult.stderr}`
+  );
+  const latestAfterRestoreFailure = await readFile(
+    join(backupRoot, "latest-verification.json"),
+    "utf8"
+  );
+  assert(
+    latestAfterRestoreFailure === latestBeforeFailure,
+    "Restore failure advanced latest passed verification"
+  );
+
+  const afterRehearsals = await admin.query(
+    "SELECT count(*)::int AS count FROM pg_database WHERE datname LIKE 'recallant_rehearsal_%'"
+  );
+  assert(
+    afterRehearsals.rows[0].count === beforeRehearsals.rows[0].count,
+    "A disposable rehearsal database was left behind"
+  );
+
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        native_restore: "passed",
+        dump_format_header: dumpHeader,
+        postgresql_tool_version: manifest.postgresql_tool_version,
+        artifact_sha256_verified: report.artifact_sha256_verified,
+        file_modes: { directory: "0700", manifest: "0600", artifact: "0600" },
+        env_profiles: { preloaded: "passed", explicit_file: "passed" },
+        failed_latest_publication: "unchanged",
+        logical_restore_claim: logicalVerify.restore_verification,
+        canonical_expected_tables: canonicalTables.length,
+        covered_tables: coveredTables.length,
+        missing_canonical_tables: missingCanonicalTables,
+        production_target_rejected_by_namespace_guard: true,
+        schema_probes: report.schema_probes,
+        semantic_probes: report.semantic_probes,
+        source_restored_table_counts: {
+          source: report.source_table_count,
+          restored: report.restored_table_count,
+          mismatches: report.row_count_mismatches
+        },
+        production_fingerprint_unchanged: report.production_fingerprint_unchanged,
+        disposable_cleanup_success: true,
+        disposable_cleanup_failure: true,
+        corrupt_artifact_rejected: true,
+        restore_failure_rejected: true
+      },
+      null,
+      2
+    )}\nPhase 8 backup smoke passed\n`
+  );
+} finally {
+  await admin.query(
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+    [testDatabase]
+  );
+  await admin.query(`DROP DATABASE IF EXISTS "${testDatabase}"`);
+  await admin.end();
+}

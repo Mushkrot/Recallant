@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { URL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -20,7 +23,7 @@ function defaultDatabaseUrl() {
 const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl();
 
 const developerId = randomUUID();
-const projectId = randomUUID();
+const projectPath = await mkdtemp(join(tmpdir(), "recallant-phase5-retrieval-"));
 
 async function assertCliMcpServerLifecycle() {
   const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
@@ -29,8 +32,7 @@ async function assertCliMcpServerLifecycle() {
       ...process.env,
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
-      RECALLANT_PROJECT_ID: projectId,
-      RECALLANT_PROJECT_PATH: process.cwd()
+      RECALLANT_PROJECT_PATH: projectPath
     },
     stdio: ["pipe", "pipe", "pipe"]
   });
@@ -73,8 +75,8 @@ const mcpEnvKeys = [
 const mcpEnvSnapshot = snapshotEnv(mcpEnvKeys);
 process.env.RECALLANT_DATABASE_URL = databaseUrl;
 process.env.RECALLANT_DEVELOPER_ID = developerId;
-process.env.RECALLANT_PROJECT_ID = projectId;
-process.env.RECALLANT_PROJECT_PATH = process.cwd();
+delete process.env.RECALLANT_PROJECT_ID;
+process.env.RECALLANT_PROJECT_PATH = projectPath;
 
 await assertCliMcpServerLifecycle();
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -82,7 +84,12 @@ const mcpClient = new Client({
   name: "recallant-phase5-smoke",
   version: "0.0.0"
 });
-const mcpServer = createRecallantMcpServer();
+const mcpDb = new RecallantDb({ databaseUrl, developerId, projectPath });
+const mcpServer = createRecallantMcpServer({
+  developerId,
+  projectPath,
+  getDatabase: () => mcpDb
+});
 await mcpServer.connect(serverTransport);
 await mcpClient.connect(clientTransport);
 
@@ -106,10 +113,15 @@ await client.connect();
 const started = await callTool(2, "memory_start_session", {
   client_kind: "codex",
   client_version: "smoke",
-  project_path: process.cwd(),
+  project_path: projectPath,
   session_label: "phase5-smoke",
   resume_policy: "normal"
 });
+const sessionProject = await client.query("SELECT project_id FROM sessions WHERE id = $1", [
+  started.session_id
+]);
+const sessionProjectId = sessionProject.rows[0]?.project_id;
+if (!sessionProjectId) throw new Error("Phase 5 session project was not persisted");
 
 await client.query(
   `
@@ -118,7 +130,7 @@ await client.query(
     ON CONFLICT (project_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
   `,
   [
-    projectId,
+    sessionProjectId,
     JSON.stringify({
       route_class: "local_model",
       provider: "deterministic",
@@ -154,8 +166,8 @@ const unrelatedProjectId = randomUUID();
 const scopedDb = new RecallantDb({
   databaseUrl,
   developerId,
-  projectId,
-  projectPath: process.cwd()
+  projectId: sessionProjectId,
+  projectPath
 });
 const unrelatedDb = new RecallantDb({
   databaseUrl,
@@ -221,7 +233,7 @@ const scopedImports = [
 const scopedResults = new Map();
 for (const scopedImport of scopedImports) {
   const result = await scopedDb.importSource({
-    project_path: process.cwd(),
+    project_path: projectPath,
     source_path: `phase5/${scopedImport.scope_kind}.md`,
     source_type: "smoke_fixture",
     source_sha256: randomUUID(),
@@ -239,14 +251,14 @@ for (const scopedImport of scopedImports) {
 }
 
 const sourceFilteredA = await scopedDb.attachProjectSource({
-  project_id: projectId,
+  project_id: sessionProjectId,
   source_kind: "document_collection",
   label: "Raw Search Source A",
   uri: "docs/raw-search-source-a.md",
   metadata: { source_path: "docs/raw-search-source-a.md" }
 });
 const sourceFilteredB = await scopedDb.attachProjectSource({
-  project_id: projectId,
+  project_id: sessionProjectId,
   source_kind: "document_collection",
   label: "Raw Search Source B",
   uri: "docs/raw-search-source-b.md",
@@ -258,7 +270,7 @@ if (!sourceFilteredA?.id || !sourceFilteredB?.id) {
   );
 }
 const sourceAImport = await scopedDb.importSource({
-  project_path: process.cwd(),
+  project_path: projectPath,
   source_path: "docs/raw-search-source-a.md",
   source_type: "smoke_fixture",
   source_sha256: randomUUID(),
@@ -266,7 +278,7 @@ const sourceAImport = await scopedDb.importSource({
   bounded_excerpt: "source_filter_shared_raw_token source A",
   result_class: "environment_fact",
   scope_kind: "project",
-  scope_id: projectId,
+  scope_id: sessionProjectId,
   audience: [{ kind: "all_agents", id: null }],
   risk: "low",
   risks: [],
@@ -274,7 +286,7 @@ const sourceAImport = await scopedDb.importSource({
   metadata: { project_source_id: sourceFilteredA.id }
 });
 const sourceBImport = await scopedDb.importSource({
-  project_path: process.cwd(),
+  project_path: projectPath,
   source_path: "docs/raw-search-source-b.md",
   source_type: "smoke_fixture",
   source_sha256: randomUUID(),
@@ -282,7 +294,7 @@ const sourceBImport = await scopedDb.importSource({
   bounded_excerpt: "source_filter_shared_raw_token source B",
   result_class: "environment_fact",
   scope_kind: "project",
-  scope_id: projectId,
+  scope_id: sessionProjectId,
   audience: [{ kind: "all_agents", id: null }],
   risk: "low",
   risks: [],
@@ -423,7 +435,7 @@ try {
         (SELECT access_count FROM chunks WHERE source_event_id = $2 ORDER BY chunk_index LIMIT 1) AS network_access_count,
         (SELECT count(*)::int FROM model_calls WHERE project_id = $3 AND purpose = 'query_embedding' AND status = 'success') AS query_embedding_calls
     `,
-    [rare.event_id, network.event_id, projectId]
+    [rare.event_id, network.event_id, sessionProjectId]
   );
   const row = checks.rows[0];
   if (row.rare_access_count < 1 || row.network_access_count < 1 || row.query_embedding_calls < 2) {
@@ -437,6 +449,7 @@ try {
 
 await mcpClient.close().catch(() => undefined);
 await mcpServer.close().catch(() => undefined);
+await mcpDb.close();
 restoreEnv(mcpEnvSnapshot);
 
 process.stdout.write("Phase 5 retrieval smoke passed\n");

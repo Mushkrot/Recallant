@@ -76,6 +76,7 @@ await writeFile(
   join(projectDir, "PROJECT_LOG.md"),
   ["# Project Log", "", "## Current Session", "", "Status: fixture before attach.", ""].join("\n")
 );
+const originalProjectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 await writeFile(join(projectDir, "docs", "README.md"), "# Fixture Docs\n");
 await writeFile(join(orphanDir, "README.md"), "# Orphan Local Fixture\n");
 await writeFile(join(staleDir, "README.md"), "# Stale Local Fixture\n");
@@ -183,7 +184,7 @@ const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 const projectLog = await readFile(join(projectDir, "PROJECT_LOG.md"), "utf8");
 if (
   !agents.includes("Memory (Recallant)") ||
-  !projectLog.includes("Local cleanup smoke session closed") ||
+  projectLog !== originalProjectLog ||
   !(await exists(join(projectDir, ".recallant", "backups")))
 ) {
   throw new Error("local cleanup removed bootstrap files or backups unexpectedly");

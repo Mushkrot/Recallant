@@ -148,6 +148,11 @@ will_install_cli: yes
 will_start_postgres: yes
 will_apply_migrations: if schema is absent
 will_install_systemd: $([[ "$SYSTEMD_MODE" != "manual" ]] && echo auto || echo no)
+will_install_backup_service: $([[ "$SYSTEMD_MODE" != "manual" ]] && echo recallant-backup.service || echo no)
+will_install_backup_timer: $([[ "$SYSTEMD_MODE" != "manual" ]] && echo recallant-backup.timer || echo no)
+backup_schedule: daily at 03:15 with persistent catch-up
+backup_max_age_hours: 30
+restore_verification_max_age_hours: 30
 EOF
 }
 
@@ -240,6 +245,22 @@ else
   echo "Using existing $ENV_FILE"
 fi
 
+ensure_env_default() {
+  local key="$1"
+  local value="$2"
+  if ! grep -q "^${key}=" "$ENV_FILE"; then
+    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
+  fi
+}
+
+ensure_env_default RECALLANT_DATA_DIR "$DATA_DIR"
+ensure_env_default RECALLANT_BACKUP_TARGET "$DATA_DIR/backups"
+ensure_env_default RECALLANT_LATEST_BACKUP_VERIFICATION_FILE "$DATA_DIR/backups/latest-verification.json"
+ensure_env_default RECALLANT_LATEST_BACKUP_MANIFEST "$DATA_DIR/backups/latest-manifest.json"
+ensure_env_default RECALLANT_BACKUP_MAX_AGE_HOURS "30"
+ensure_env_default RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS "30"
+chmod 600 "$ENV_FILE"
+
 if [[ ! -d node_modules ]]; then
   npm install
 fi
@@ -267,6 +288,8 @@ else
 fi
 
 unit_file="/etc/systemd/system/recallant.service"
+backup_service_file="/etc/systemd/system/recallant-backup.service"
+backup_timer_file="/etc/systemd/system/recallant-backup.timer"
 if [[ "$SYSTEMD_MODE" != "manual" && -d /etc/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
   cat >"$unit_file" <<EOF
 [Unit]
@@ -279,6 +302,7 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$RECALLANT_HOME
 EnvironmentFile=$ENV_FILE
+Environment="RECALLANT_ENV_FILE=$ENV_FILE"
 ExecStart=/usr/bin/env npm run server:start
 Restart=on-failure
 RestartSec=3
@@ -286,9 +310,43 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+  cat >"$backup_service_file" <<EOF
+[Unit]
+Description=Recallant verified PostgreSQL backup
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=$RUN_USER
+WorkingDirectory=$RECALLANT_HOME
+EnvironmentFile=$ENV_FILE
+Environment="RECALLANT_ENV_FILE=$ENV_FILE"
+Environment="RECALLANT_DATA_DIR=$DATA_DIR"
+Environment="RECALLANT_BACKUP_TARGET=$DATA_DIR/backups"
+ExecStart=$RECALLANT_HOME/scripts/recallant-production-backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+EOF
+  cat >"$backup_timer_file" <<'EOF'
+[Unit]
+Description=Run Recallant verified backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=recallant-backup.service
+
+[Install]
+WantedBy=timers.target
+EOF
   systemctl daemon-reload
   systemctl enable --now recallant.service
+  systemctl enable --now recallant-backup.timer
   echo "Installed and started recallant.service"
+  echo "Installed and enabled recallant-backup.timer"
 else
   echo "systemd not available; start manually with: cd $RECALLANT_HOME && npm run server:start"
 fi

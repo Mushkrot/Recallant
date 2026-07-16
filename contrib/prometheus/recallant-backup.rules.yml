@@ -1,0 +1,12 @@
+groups:
+  - name: recallant-backup
+    rules:
+      - alert: RecallantBackupFailed
+        expr: node_systemd_unit_state{name="recallant-backup.service",state="failed"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: recallant
+        annotations:
+          summary: Recallant verified backup job failed
+          description: Inspect recallant-backup.service, repair the failure, and run one successful verified backup.

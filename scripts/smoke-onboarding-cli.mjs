@@ -530,7 +530,8 @@ assert(
 const vcsChoiceProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-choice-"));
 await writeFile(join(vcsChoiceProject, "README.md"), "# Version-control safety smoke\n");
 const vcsChoice = runRaw(recallant, ["onboard", vcsChoiceProject], {
-  cwd: vcsChoiceProject
+  cwd: vcsChoiceProject,
+  env: { GIT_CEILING_DIRECTORIES: tmpdir() }
 });
 assert(
   vcsChoice.status === 2,
@@ -548,7 +549,8 @@ assert((await projectRowCount(vcsChoiceProject)) === 0, "vcs choice wrote databa
 const vcsInitProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-init-"));
 await writeFile(join(vcsInitProject, "README.md"), "# Version-control init smoke\n");
 const vcsInit = runJson(recallant, ["onboard", vcsInitProject, "--yes", "--format", "json"], {
-  cwd: vcsInitProject
+  cwd: vcsInitProject,
+  env: { GIT_CEILING_DIRECTORIES: tmpdir() }
 });
 assert(
   vcsInit.version_control?.status === "initialized" &&
