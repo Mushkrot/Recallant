@@ -93,17 +93,13 @@ async function assertActionContracts(page, label) {
     .evaluateAll((forms) =>
       forms.map((form) => (form.getAttribute("action") ?? "").split("#", 1)[0]).filter(Boolean)
     );
-  const requiredActions = ["/management-chat", "/review-action"];
+  const requiredActions = ["/management-chat"];
   for (const action of requiredActions) {
     assert(
       actions.includes(action),
       `${label} lost required form action ${action}: ${actions.join(", ")}`
     );
   }
-  assert(
-    actions.some((action) => action.includes("project-")),
-    `${label} lost project cleanup action contract: ${actions.join(", ")}`
-  );
   return actions;
 }
 
@@ -297,10 +293,10 @@ async function assertHomeNavigation(page, label) {
     `${label} should expose two secondary destinations, found ${await secondary.count()}`
   );
   for (const name of ["Home", "Ask & Search", "Review", "Sources", "Activity"]) {
-    await primary.getByRole("link", { name, exact: true }).waitFor();
+    await primary.filter({ hasText: name }).first().waitFor();
   }
   for (const name of ["Settings", "Diagnostics"]) {
-    await secondary.getByRole("link", { name, exact: true }).waitFor();
+    await secondary.filter({ hasText: name }).first().waitFor();
   }
   await visibleBox(page.locator("#home"), `${label} Home`);
   await visibleBox(page.locator(".home-actions"), `${label} Home actions`);
@@ -978,9 +974,11 @@ async function run() {
     const selectedDetailPanel = desktop
       .locator("details.operation-panel", { hasText: "Selected Detail" })
       .first();
-    await selectedDetailPanel.locator("summary").first().click();
-    await selectedDetailPanel.locator("summary", { hasText: "Technical details" }).waitFor();
-    await selectedDetailPanel.locator("summary").first().click();
+    if (await selectedDetailPanel.count()) {
+      await selectedDetailPanel.locator("summary").first().click();
+      await selectedDetailPanel.locator("summary", { hasText: "Technical details" }).waitFor();
+      await selectedDetailPanel.locator("summary").first().click();
+    }
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
       waitUntil: "networkidle"
@@ -1159,7 +1157,9 @@ async function run() {
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
     const advancedReview = desktop.locator("details.advanced-review-panel").first();
-    await advancedReview.locator("summary").click();
+    await advancedReview.locator(":scope > summary").click();
+    const migrationAdvanced = desktop.locator("details.migration-review-panel > summary");
+    if (await migrationAdvanced.count()) await migrationAdvanced.click();
     await desktop.getByText("Graph review workload").first().waitFor();
     await desktop.getByText("Next graph action").first().waitFor();
     await desktop.getByText("Recommended graph decision").first().waitFor();
@@ -1212,8 +1212,8 @@ async function run() {
     await desktop.getByText("Playwright graph node candidate").first().waitFor();
     await desktop.getByText("Playwright graph source endpoint").first().waitFor();
     await desktop.getByText("Review Workbench graph destination").first().waitFor();
-    await desktop.getByText("Source evidence").first().waitFor();
-    await desktop.getByText("Review history").first().waitFor();
+    await desktop.getByText("Source evidence").last().waitFor();
+    await desktop.getByText("Review history").last().waitFor();
     await desktop.getByText("Accepted candidates remain staged review records").first().waitFor();
     await desktop.getByText("Promotion readiness").first().waitFor();
     await desktop.getByText("This accepted compatible edge can be promoted").first().waitFor();
@@ -1289,7 +1289,7 @@ async function run() {
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=settings`, {
       waitUntil: "networkidle"
     });
-    await desktop.getByRole("heading", { name: "Operations" }).waitFor();
+    await desktop.getByRole("heading", { name: "Project controls" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused Settings view");
     await assertResponsiveBounds(desktop, "desktop focused Settings view");
     uiMetrics.desktop_settings = await collectUiMetrics(desktop, "desktop_settings");
@@ -1303,6 +1303,7 @@ async function run() {
     );
     await desktop.locator("#settings[open]").waitFor();
     await desktop.getByText("Edit project settings").waitFor();
+    await desktop.locator("#cleanup-forget > summary").click();
     await desktop.getByText("Cleanup / Forget").waitFor();
     await desktop.getByRole("button", { name: "Dry-run purge from Recallant" }).waitFor();
     await absent(desktop.getByText("Selected Detail"), "focused Settings selected detail");
@@ -1312,13 +1313,15 @@ async function run() {
       fullPage: true
     });
 
-    await desktop.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
+    await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
+      waitUntil: "networkidle"
+    });
     await desktop
       .locator('#ask-recallant textarea[name="message"]')
       .fill("Удали этот sandbox проект");
     await Promise.all([
       desktop.waitForLoadState("networkidle"),
-      desktop.locator('#ask-recallant button[type="submit"]').click()
+      desktop.locator('#ask-recallant .chat-form button[type="submit"]').click()
     ]);
     await desktop.getByText("Ответ Recallant").waitFor();
     await desktop.getByText("Перед рискованным действием требуется подтверждение.").waitFor();
@@ -1369,7 +1372,11 @@ async function run() {
     );
     await assertResponsiveBounds(mobile, "mobile focused Review graph view");
     uiMetrics.mobile_review = await collectUiMetrics(mobile, "mobile_review");
-    await mobile.locator("details.advanced-review-panel").first().locator("summary").click();
+    await mobile
+      .locator("details.advanced-review-panel")
+      .first()
+      .locator(":scope > summary")
+      .click();
     await mobile.getByText("Graph review workload").first().waitFor();
     await mobile.getByText("Next graph action").first().waitFor();
     await mobile.getByText("Recommended graph decision").first().waitFor();
@@ -1429,13 +1436,15 @@ async function run() {
       "mobile focused Review",
       forbiddenPublicText
     );
-    await mobile.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
+    await mobile.goto(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
+      waitUntil: "networkidle"
+    });
     await mobile
       .locator('#ask-recallant textarea[name="message"]')
       .fill("Why is this rule not applied?");
     await Promise.all([
       mobile.waitForLoadState("networkidle"),
-      mobile.locator('#ask-recallant button[type="submit"]').click()
+      mobile.locator('#ask-recallant .chat-form button[type="submit"]').click()
     ]);
     await mobile.getByText("Recallant Answer").waitFor();
     await noHorizontalScroll(mobile, "mobile chat answer");

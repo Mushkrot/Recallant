@@ -6028,6 +6028,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   const inboxCount = rowCount(data.inbox);
   const conflictCount = rowCount(data.duplicate_conflicts);
   const ruleCount = rowCount(data.rules);
+  const migrationCount = Number(asRecord(data.migration_review).total_imported ?? 0);
   const hasOpenDecision = importCount + inboxCount + conflictCount > 0;
   const selectedDetail = asRecord(data.selected_detail);
   const selectedMemory = asRecord(selectedDetail.memory);
@@ -6082,7 +6083,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
         data.import_candidates,
         "No imported evidence needs review.",
         data.current_project_id,
-        importCount > 0,
+        importCount > 0 && importCount <= 5,
         "Imported material stays as evidence until you decide what is useful."
       )}
       ${renderReviewLane(
@@ -6090,7 +6091,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
         data.inbox,
         "No memory item needs your decision.",
         data.current_project_id,
-        inboxCount > 0,
+        inboxCount > 0 && inboxCount <= 5,
         "Decide whether each item becomes Usable memory, gets rejected, is archived, or needs more work."
       )}
       ${renderReviewLane(
@@ -6106,7 +6107,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
         data.rules,
         "No active rules match the current filters.",
         data.current_project_id,
-        !hasOpenDecision && ruleCount > 0,
+        !hasOpenDecision && ruleCount > 0 && ruleCount <= 5,
         "These are durable rules agents can apply across work after review.",
         renderRuleFilters(data)
       )}
@@ -6117,7 +6118,7 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
       ${renderGraphCandidateReview(data)}
     </details>
     ${
-      rowCount(data.migration_review) > 0
+      migrationCount > 0
         ? `<details class="advanced-review-panel migration-review-panel">
       <summary>Imported migration details <span>Keep source evidence separate from normal triage</span></summary>
       ${renderMigrationReviewQueue(data)}
@@ -8473,7 +8474,12 @@ function renderDashboard(
     @media (max-width: 760px) {
       header { padding: 12px 14px !important; align-items: flex-start; }
       main { padding: 14px 12px 28px !important; }
-      .workbench-nav a { flex: 1 1 44%; justify-content: center; }
+      .workbench-nav a {
+        flex: 0 0 auto;
+        min-width: 48px;
+        justify-content: center;
+        white-space: nowrap;
+      }
       .home-actions a,
       .home-action { width: 100%; }
     }
