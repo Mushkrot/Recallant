@@ -15,6 +15,9 @@ smoke gates. It should not yet be treated as stable team-wide infrastructure.
 - Project identity binding, exact managed log markers, optional mirroring boundaries, diagnostic
   memory conflict policy, Review UI acceptance, and required CI product gates have regression
   coverage.
+- The Workbench now opens on a task-oriented Home screen with five primary destinations; Ask &
+  Search, list-first Review, health-first Sources, Activity, and secondary Project controls are
+  covered by focused smoke and desktop/mobile browser checks.
 - Local Ollama embeddings are fail-soft; embedding requests ask the runtime to retain the embedding
   model, while bounded recovery handles temporary unavailability.
 

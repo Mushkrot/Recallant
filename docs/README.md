@@ -16,6 +16,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
 - [Comparison](COMPARISON.md): related projects and the gap Recallant fills.
 - [Reference projects](REFERENCE_PROJECTS.md): external projects Recallant studies, what to borrow,
   and what not to copy.
+- [Workbench UI](WORKBENCH_UI.md): the task-oriented navigation, review flow, source workspace,
+  safety states, and browser checks.
 - [Architecture](ARCHITECTURE.md): public system overview.
 - [Governed graph tree contract](GRAPH_TREE_CONTRACT.md): graph node kinds, relation types,
   lifecycle states, Workbench graph review, and governance rules for relation-aware retrieval work.
