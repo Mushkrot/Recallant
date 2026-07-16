@@ -1121,6 +1121,8 @@ async function run() {
     await visibleBox(desktop.locator("#review"), "desktop focused Review");
     await desktop.getByText("Review decision guide").first().waitFor();
     await desktop.getByText("Needs your decision").first().waitFor();
+    const advancedReview = desktop.locator("details.advanced-review-panel").first();
+    await advancedReview.locator("summary").click();
     await desktop.getByText("Graph review workload").first().waitFor();
     await desktop.getByText("Next graph action").first().waitFor();
     await desktop.getByText("Recommended graph decision").first().waitFor();
@@ -1329,6 +1331,7 @@ async function run() {
     );
     await assertResponsiveBounds(mobile, "mobile focused Review graph view");
     uiMetrics.mobile_review = await collectUiMetrics(mobile, "mobile_review");
+    await mobile.locator("details.advanced-review-panel").first().locator("summary").click();
     await mobile.getByText("Graph review workload").first().waitFor();
     await mobile.getByText("Next graph action").first().waitFor();
     await mobile.getByText("Recommended graph decision").first().waitFor();

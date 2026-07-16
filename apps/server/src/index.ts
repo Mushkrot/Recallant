@@ -6041,8 +6041,6 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
   return `<div class="review-workspace">
     ${renderSourceFilterControl(data, "review")}
     ${renderReviewDecisionGuide(importCount, inboxCount, conflictCount, ruleCount)}
-    ${renderGraphCandidateReview(data)}
-    ${renderMigrationReviewQueue(data)}
     <div class="review-overview">
       ${renderReviewSummaryTile(
         "Imported evidence",
@@ -6109,6 +6107,18 @@ function renderReviewWorkspace(data: ReviewDashboardData) {
       )}
     </div>
     ${detailPanel}
+    <details class="advanced-review-panel">
+      <summary>Advanced graph review <span>Open only when you need graph decisions</span></summary>
+      ${renderGraphCandidateReview(data)}
+    </details>
+    ${
+      rowCount(data.migration_review) > 0
+        ? `<details class="advanced-review-panel migration-review-panel">
+      <summary>Imported migration details <span>Keep source evidence separate from normal triage</span></summary>
+      ${renderMigrationReviewQueue(data)}
+    </details>`
+        : ""
+    }
   </div>`;
 }
 
@@ -8292,6 +8302,30 @@ function renderDashboard(
     .memory-search-result-head span,
     .memory-search-result small { color: var(--text-muted); font-size: 11px; }
     .memory-search-result p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+    .advanced-review-panel {
+      border-top: 1px solid var(--line);
+      margin-top: 14px;
+      padding-top: 12px;
+    }
+    .advanced-review-panel > summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 750;
+      list-style-position: inside;
+    }
+    .advanced-review-panel > summary span {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .advanced-review-panel[open] > summary { margin-bottom: 12px; }
+    .advanced-review-panel .graph-review,
+    .advanced-review-panel .migration-review { margin-top: 0; }
     .home-activity-list { display: grid; gap: 0; }
     .home-activity-item {
       display: flex;
