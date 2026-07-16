@@ -8470,9 +8470,9 @@ function renderDashboard(
           <div class="section-head">
             <div>
               <span class="section-kicker">Secondary workspace · Governed operations</span>
-              <h2>Operations drawer</h2>
+              <h2>Project controls</h2>
             </div>
-            <p>Review detail, cost controls, cleanup, and settings stay available here without crowding Ask Recallant, Memory Spaces, or the Source Map.</p>
+            <p>Change project behavior here. Risky actions stay separate, explain what they affect, and require a dry-run or confirmation.</p>
           </div>
           <div class="operation-panels">
             ${
@@ -8491,19 +8491,19 @@ function renderDashboard(
               ${renderCosts(data)}
             </details>`
             }
+            <details class="operation-panel" id="settings"${focusedSettings ? " open" : ""}>
+              <summary><span>Settings</span><small>Project behavior and capture preferences</small></summary>
+              ${renderSettings(data, setting)}
+            </details>
             ${
               focused && !focusedSettings
                 ? ""
                 : `
-            <details class="operation-panel" id="cleanup-forget"${focusedSettings ? " open" : ""}>
+            <details class="operation-panel" id="cleanup-forget">
               <summary><span>Cleanup / Forget</span><small>Dry-run first; permanent erasure is separate</small></summary>
               ${renderCleanup(data, detach, sanitize, memoryForget)}
             </details>`
             }
-            <details class="operation-panel" id="settings"${focused ? " open" : ""}>
-              <summary><span>Settings</span><small>Project controls and technical values</small></summary>
-              ${renderSettings(data, setting)}
-            </details>
             <details class="operation-panel" id="remote-credentials"${remoteCredential ? " open" : ""}>
               <summary><span>Remote MCP Credentials</span><small>Scoped bridge provisioning for external agents</small></summary>
               ${renderRemoteCredentials(data, remoteCredential)}
