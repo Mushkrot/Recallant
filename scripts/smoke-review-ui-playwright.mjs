@@ -307,6 +307,41 @@ async function assertHomeNavigation(page, label) {
   await absent(page.locator("#command-center"), `${label} legacy command center`);
 }
 
+async function assertVisualBaseline(page, label) {
+  const result = await page.evaluate(() => {
+    const bodyStyle = globalThis.getComputedStyle(globalThis.document.body);
+    const headerStyle = globalThis.getComputedStyle(globalThis.document.querySelector("header"));
+    const controls = Array.from(
+      globalThis.document.querySelectorAll(
+        'button,input:not([type="hidden"]),select,textarea,summary,.workbench-nav a,.home-action'
+      )
+    ).filter((element) => {
+      const elementStyle = globalThis.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        elementStyle.display !== "none" && elementStyle.visibility !== "hidden" && rect.width > 0
+      );
+    });
+    return {
+      bodyBackgroundImage: bodyStyle.backgroundImage,
+      headerBackdropFilter: headerStyle.backdropFilter,
+      shortTargets: controls.filter((element) => element.getBoundingClientRect().height < 40).length
+    };
+  });
+  assert(
+    result.bodyBackgroundImage === "none",
+    `${label} should use a flat body background: ${JSON.stringify(result)}`
+  );
+  assert(
+    result.headerBackdropFilter === "none",
+    `${label} should not use header blur: ${JSON.stringify(result)}`
+  );
+  assert(
+    result.shortTargets === 0,
+    `${label} has undersized primary controls: ${JSON.stringify(result)}`
+  );
+}
+
 async function saveScreenshotPair(page, standardPath, publicPath, label, forbiddenText) {
   await page.screenshot({ path: standardPath, fullPage: true });
   await assertPublicSafePage(page, label, forbiddenText);
@@ -926,6 +961,7 @@ async function run() {
     await assertResponsiveBounds(desktop, "desktop initial Home");
     await assertHumanDefaultLanguage(desktop, "desktop initial Home");
     await assertHomeNavigation(desktop, "desktop initial Home");
+    await assertVisualBaseline(desktop, "desktop initial Home");
     uiMetrics.desktop_initial = await collectUiMetrics(desktop, "desktop_initial");
     actionContracts.desktop_initial = [];
     await desktop.screenshot({
@@ -1311,6 +1347,7 @@ async function run() {
     await assertResponsiveBounds(mobile, "mobile initial Home");
     await assertHumanDefaultLanguage(mobile, "mobile initial Home");
     await assertHomeNavigation(mobile, "mobile initial Home");
+    await assertVisualBaseline(mobile, "mobile initial Home");
     uiMetrics.mobile_initial = await collectUiMetrics(mobile, "mobile_initial");
     await assertPublicSafePage(mobile, "mobile Home", forbiddenPublicText);
     await mobile.screenshot({

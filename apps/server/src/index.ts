@@ -8385,6 +8385,99 @@ function renderDashboard(
       .memory-search-row button { width: 100%; }
     }
 
+    /* Workstep 7: calm, accessible presentation baseline */
+    body {
+      background: #f4f5f2 !important;
+      background-image: none !important;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    header {
+      background: #ffffff !important;
+      background-image: none !important;
+      backdrop-filter: none !important;
+      box-shadow: none !important;
+    }
+    main .panel,
+    .home-hero,
+    .ask-panel,
+    .source-workbench,
+    .project-chooser,
+    .operation-panel {
+      background: #ffffff !important;
+      background-image: none !important;
+      box-shadow: none !important;
+    }
+    .ask-panel::before { display: none !important; }
+    .workbench-nav {
+      border-radius: 8px !important;
+      background: #f7f8f6 !important;
+      box-shadow: none !important;
+    }
+    .workbench-nav a {
+      min-height: 44px;
+      border-radius: 6px !important;
+      box-shadow: none !important;
+    }
+    .workbench-nav a.active { background: var(--text) !important; }
+    .home-action,
+    button,
+    .actions a,
+    .source-card-actions a {
+      min-height: 44px;
+      border-radius: 6px !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .status .pill {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+    }
+    button:hover,
+    .actions a:hover,
+    .source-card-actions a:hover,
+    .home-action:hover,
+    .project-choice:hover article { transform: none !important; box-shadow: none !important; }
+    input,
+    select,
+    textarea { border-radius: 6px !important; }
+    input:not([type="hidden"]),
+    select { min-height: 44px; }
+    .pill,
+    .badges span,
+    .signal-strip span,
+    .current-project-facts span,
+    .source-map-legend span,
+    .source-health,
+    .filter-chip,
+    .source-filter-chip,
+    .state,
+    .source-role,
+    .source-readiness,
+    .source-usability,
+    .source-kind,
+    .source-attachment,
+    .posture-profile { border-radius: 5px !important; }
+    .advanced-review-panel > summary,
+    .source-map-advanced > summary,
+    details > summary { min-height: 44px; display: flex; align-items: center; }
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid #1d6b5b;
+      outline-offset: 2px;
+    }
+    @media (max-width: 760px) {
+      header { padding: 12px 14px !important; align-items: flex-start; }
+      main { padding: 14px 12px 28px !important; }
+      .workbench-nav a { flex: 1 1 44%; justify-content: center; }
+      .home-actions a,
+      .home-action { width: 100%; }
+    }
+
   </style>
 </head>
 <body>
