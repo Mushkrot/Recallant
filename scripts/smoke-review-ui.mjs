@@ -1210,6 +1210,8 @@ try {
     askView.status !== 200 ||
     !askViewText.includes('class="active" href="/review?project_id=') ||
     !askViewText.includes("Ask Recallant") ||
+    !askViewText.includes("Search Recallant memory") ||
+    !askViewText.includes('name="q"') ||
     !askViewText.includes('id="ask-recallant"') ||
     askViewText.includes("Source Map") ||
     askViewText.includes('id="command-center"')

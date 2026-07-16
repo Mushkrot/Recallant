@@ -54,6 +54,8 @@ type ReviewDashboardData = Awaited<
   canon_capability_context?: unknown;
   audit_report?: unknown;
   audit_error?: unknown;
+  search_query?: string | null;
+  search_results?: unknown;
 };
 
 type ChatRenderState = {
@@ -76,6 +78,7 @@ type MemoryForgetRenderState = {
     id?: string | null;
   };
   reason?: string | null;
+  view?: WorkbenchView;
 };
 
 type SettingRenderState = {
@@ -2429,6 +2432,37 @@ async function withAuditReport(
   }
 }
 
+async function withSearchResults(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  dashboard: ReviewDashboardData,
+  requestUrl: URL,
+  activeView: WorkbenchView
+) {
+  const query = optionalInput(requestUrl.searchParams.get("q"));
+  if (!query || !["ask", "search"].includes(activeView)) return dashboard;
+  try {
+    const searchResults = await database.recallAgentMemories({
+      project_id: dashboard.current_project_id,
+      query,
+      include_candidates: true,
+      include_needs_review: true,
+      include_stale: true,
+      top_k: 12,
+      max_chars_total: 8_000
+    });
+    return { ...dashboard, search_query: query, search_results: searchResults };
+  } catch (error) {
+    return {
+      ...dashboard,
+      search_query: query,
+      search_results: {
+        memories: [],
+        error: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
 function parseSettingValue(value: unknown) {
   if (value === null || value === undefined) return undefined;
   if (typeof value === "object") return value;
@@ -2848,6 +2882,7 @@ function renderMemoryForgetResult(
             <input type="hidden" name="target_kind" value="agent_memory" />
             <input type="hidden" name="target_id" value="${escapeHtml(memory.id)}" />
             <input type="hidden" name="confirm" value="true" />
+            <input type="hidden" name="view" value="${escapeHtml(memoryForget.view ?? "review")}" />
             <button class="danger" type="submit">Confirm forget forever</button>
           </form>`
         : `<details>
@@ -4165,6 +4200,82 @@ function renderCanonCapabilityContext(value: unknown) {
       )}
     </div>
   </div>`;
+}
+
+function renderMemorySearch(data: ReviewDashboardData) {
+  const query = String(data.search_query ?? "").trim();
+  const result = asRecord(data.search_results);
+  const memories = asArray(result.memories).map(asRecord);
+  const error = optionalInput(result.error);
+  const searchForm = `<form class="memory-search-form" method="get" action="/review" role="search">
+    <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
+    <input type="hidden" name="view" value="ask" />
+    <label for="memory-search-query">Search your memory</label>
+    <div class="memory-search-row">
+      <input id="memory-search-query" name="q" value="${escapeHtml(query)}" placeholder="Try a project decision, source, or topic" autocomplete="off" />
+      <button type="submit">Search</button>
+    </div>
+    <p class="memory-search-help">Search looks through Recallant memories and keeps the original review and source context one click away.</p>
+  </form>`;
+  if (!query) {
+    return `<section class="search-panel" aria-label="Search Recallant memory">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">Find something</span>
+          <h3>Search Recallant memory</h3>
+        </div>
+        <p>Use a few natural words. You can open any result in Review to see its source and decision history.</p>
+      </div>
+      ${searchForm}
+    </section>`;
+  }
+  if (error) {
+    return `<section class="search-panel" aria-label="Search Recallant memory">
+      <div class="section-head"><div><span class="section-kicker">Search</span><h3>Search is unavailable</h3></div></div>
+      ${searchForm}
+      <p class="empty">Recallant could not search this project right now. Try again in a moment.</p>
+    </section>`;
+  }
+  const resultCards = memories
+    .map((memory) => {
+      const memoryId = optionalInput(memory.memory_id ?? memory.id);
+      const sourceRefs = asArray(memory.source_refs);
+      const status = humanStatus(String(memory.status ?? "memory"));
+      const provenance =
+        sourceRefs.length > 0
+          ? `${sourceRefs.length} linked source${sourceRefs.length === 1 ? "" : "s"}`
+          : "No linked source yet";
+      const href = memoryId
+        ? reviewPathWithParams(data.current_project_id, {
+            view: "review",
+            memory_id: memoryId
+          })
+        : reviewPathWithParams(data.current_project_id, { view: "review" });
+      return `<a class="memory-search-result" href="${escapeHtml(href)}">
+        <div class="memory-search-result-head">
+          <strong>${escapeHtml(memory.title ?? "Untitled memory")}</strong>
+          <span>${escapeHtml(status)}</span>
+        </div>
+        <p>${escapeHtml(
+          String(memory.body ?? "")
+            .trim()
+            .slice(0, 420)
+        )}</p>
+        <small>${escapeHtml(provenance)}</small>
+      </a>`;
+    })
+    .join("");
+  return `<section class="search-panel" aria-label="Search Recallant memory">
+    <div class="section-head">
+      <div>
+        <span class="section-kicker">Search results</span>
+        <h3>Results for “${escapeHtml(query)}”</h3>
+      </div>
+      <p>${escapeHtml(memories.length)} result${memories.length === 1 ? "" : "s"}. Open one to review its evidence and history.</p>
+    </div>
+    ${searchForm}
+    ${memories.length > 0 ? `<div class="memory-search-results">${resultCards}</div>` : `<p class="empty">No memories matched those words. Try a broader phrase or ask Recallant instead.</p>`}
+  </section>`;
 }
 
 function renderDocumentationPosture(data: ReviewDashboardData) {
@@ -6473,7 +6584,8 @@ function renderProjectSanitizeResult(data: ReviewDashboardData, sanitize?: Sanit
 function renderCleanup(
   data: ReviewDashboardData,
   detach?: DetachRenderState,
-  sanitize?: SanitizeRenderState
+  sanitize?: SanitizeRenderState,
+  memoryForget?: MemoryForgetRenderState
 ) {
   const project = currentProject(data);
   const projectName =
@@ -6491,6 +6603,15 @@ function renderCleanup(
     <p>Detach hides the selected project from active Recallant views and search. Purge is the irreversible clean-slate path for Recallant database records. Project files on disk are not deleted.</p>
     ${renderProjectDetachResult(data, detach)}
     ${renderProjectSanitizeResult(data, sanitize)}
+    ${
+      memoryForget && data.selected_detail?.memory
+        ? renderMemoryForgetResult(
+            asRecord(data.selected_detail.memory),
+            data.current_project_id,
+            memoryForget
+          )
+        : ""
+    }
     <form method="post" action="/project-detach">
       <input type="hidden" name="project_id" value="${escapeHtml(data.current_project_id)}" />
       <input type="hidden" name="mode" value="sandbox" />
@@ -8142,6 +8263,35 @@ function renderDashboard(
     .home-grid .panel { margin-bottom: 0; }
     .home-status .signal-strip { margin-bottom: 0; }
     .home-recent-activity { margin-bottom: 0; }
+    .search-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: var(--surface-soft);
+    }
+    .search-panel .section-head { margin-bottom: 10px; }
+    .search-panel h3 { margin: 0; font-size: 16px; }
+    .memory-search-form { display: grid; gap: 7px; }
+    .memory-search-form > label { color: var(--text); font-size: 12px; font-weight: 700; }
+    .memory-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .memory-search-row input { min-width: 0; padding: 10px 11px; font-size: 14px; }
+    .memory-search-row button { min-width: 92px; }
+    .memory-search-help { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+    .memory-search-results { display: grid; gap: 8px; margin-top: 12px; }
+    .memory-search-result {
+      display: grid;
+      gap: 5px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 11px 12px;
+      background: var(--surface);
+    }
+    .memory-search-result:hover { border-color: var(--accent); background: var(--surface-raised); }
+    .memory-search-result-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .memory-search-result-head strong { font-size: 13px; }
+    .memory-search-result-head span,
+    .memory-search-result small { color: var(--text-muted); font-size: 11px; }
+    .memory-search-result p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
     .home-activity-list { display: grid; gap: 0; }
     .home-activity-item {
       display: flex;
@@ -8169,6 +8319,8 @@ function renderDashboard(
       .home-hero-copy h2 { font-size: 30px; }
       .home-activity-item { display: block; }
       .home-activity-item time { display: block; margin-top: 5px; }
+      .memory-search-row { grid-template-columns: 1fr; }
+      .memory-search-row button { width: 100%; }
     }
 
   </style>
@@ -8200,6 +8352,7 @@ function renderDashboard(
           <p class="workbench-promise">Ask what Recallant remembers, whether agents are recording, which sources support an answer, what needs review, or how to act safely.</p>
           ${renderCurrentProjectContext(data)}
           ${renderFirstScreenSnapshot(data)}
+          ${renderMemorySearch(data)}
           ${renderDocumentationPosture(data)}
           ${renderManagementChat(data, chat, activeView)}
         </div>
@@ -8282,7 +8435,7 @@ function renderDashboard(
                 : `
             <details class="operation-panel" id="cleanup-forget"${focusedSettings ? " open" : ""}>
               <summary><span>Cleanup / Forget</span><small>Dry-run first; permanent erasure is separate</small></summary>
-              ${renderCleanup(data, detach, sanitize)}
+              ${renderCleanup(data, detach, sanitize, memoryForget)}
             </details>`
             }
             <details class="operation-panel" id="settings"${focused ? " open" : ""}>
@@ -8492,9 +8645,14 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         return;
       }
       if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
-        const dashboard = await withAuditReport(
+        const dashboard = await withSearchResults(
           database,
-          sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
+          await withAuditReport(
+            database,
+            sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
+            requestUrl,
+            workbenchView
+          ),
           requestUrl,
           workbenchView
         );
@@ -8791,7 +8949,8 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
             memoryForget: {
               result: result as Record<string, unknown>,
               target: { kind: targetKind, id: targetId },
-              reason: optionalInput(body.reason)
+              reason: optionalInput(body.reason),
+              view: normalizeWorkbenchView(body.view)
             },
             view: normalizeWorkbenchView(body.view)
           }),

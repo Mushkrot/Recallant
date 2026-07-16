@@ -972,6 +972,21 @@ async function run() {
       forbiddenPublicText
     );
 
+    await desktop.goto(
+      `${baseUrl}/review?project_id=${projectId}&view=ask&q=${encodeURIComponent("browser QA")}`,
+      { waitUntil: "networkidle" }
+    );
+    await desktop.getByRole("heading", { name: /Results for/ }).waitFor();
+    await desktop.locator(".memory-search-result").first().waitFor();
+    await noHorizontalScroll(desktop, "desktop Ask search results");
+    await assertResponsiveBounds(desktop, "desktop Ask search results");
+    uiMetrics.desktop_search = await collectUiMetrics(desktop, "desktop_search");
+    const firstSearchResult = desktop.locator(".memory-search-result").first();
+    assert(
+      (await firstSearchResult.getAttribute("href"))?.includes("view=review"),
+      "Ask search result should link into Review"
+    );
+
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=sources`, {
       waitUntil: "networkidle"
     });
