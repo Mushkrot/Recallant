@@ -4,6 +4,9 @@ This page tracks how the public Recallant product contract maps to implementatio
 evidence. It is intentionally public and generic: owner-specific server inventories, private access
 provider settings, secret locations, and internal handoffs belong outside this repository.
 
+For a concise current maturity and release summary, see [Current Status](STATUS.md). For routine
+operations and incident handling, see the [Operations Runbook](RUNBOOK.md).
+
 Recallant is still pre-release. A status of "working slice" means the behavior exists and has smoke
 coverage, but may still need broader client pilots, UI polish, screenshots, repeat rehearsals, or
 release packaging before it should be treated as stable infrastructure.

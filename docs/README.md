@@ -10,6 +10,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
   references, and safety gates.
 - [Product contract status](CONTRACT_STATUS.md): current coverage, evidence, and remaining release
   work.
+- [Current status](STATUS.md): concise maturity, working-slice, verification, and release position.
+- [Operations runbook](RUNBOOK.md): routine health, deployment, backup, incident, and rollback path.
 - [Why Recallant](WHY_RECALLANT.md): why governed agent memory matters.
 - [Comparison](COMPARISON.md): related projects and the gap Recallant fills.
 - [Reference projects](REFERENCE_PROJECTS.md): external projects Recallant studies, what to borrow,

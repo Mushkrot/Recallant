@@ -131,6 +131,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
   source references, and safety gates.
 - [Product contract status](docs/CONTRACT_STATUS.md): current coverage, evidence, and remaining
   release work.
+- [Current status](docs/STATUS.md): concise maturity, verification, and release position.
+- [Operations runbook](docs/RUNBOOK.md): routine health, deployment, backup, incident, and rollback.
 - [Why Recallant](docs/WHY_RECALLANT.md): problem statement and community value.
 - [Comparison](docs/COMPARISON.md): inspirations, alternatives, and the gap Recallant fills.
 - [Reference projects](docs/REFERENCE_PROJECTS.md): external projects Recallant studies, what to

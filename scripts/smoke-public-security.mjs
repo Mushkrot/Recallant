@@ -32,6 +32,8 @@ const publicDocs = [
   "docs/QUICKSTART.md",
   "docs/AGENT_READY_PROJECTS.md",
   "docs/CONTRACT_STATUS.md",
+  "docs/STATUS.md",
+  "docs/RUNBOOK.md",
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
   "docs/REFERENCE_PROJECTS.md",

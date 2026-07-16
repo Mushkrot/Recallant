@@ -303,13 +303,11 @@ function validateBeforeNetwork(options: RemoteDoctorOptions) {
     return validationReport(options, stages);
   }
   if (parsedUrl.protocol !== "https:") {
-    if (
-      !(
-        options.allowInsecureLocalhost &&
-        parsedUrl.protocol === "http:" &&
-        isLocalhostUrl(parsedUrl)
-      )
-    ) {
+    if (!(
+      options.allowInsecureLocalhost &&
+      parsedUrl.protocol === "http:" &&
+      isLocalhostUrl(parsedUrl)
+    )) {
       stages.push(
         stage("url_validation", "fail", "non_https_url", "Remote MCP diagnostics require HTTPS.", {
           metadata: { protocol: parsedUrl.protocol.replace(":", "") },

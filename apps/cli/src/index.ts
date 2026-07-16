@@ -438,12 +438,7 @@ type OnboardVerifyPayload = {
 
 type OnboardEmbeddingRecoveryPayload = {
   status:
-    | "skipped"
-    | "no_pending"
-    | "recovered"
-    | "still_pending"
-    | "model_unavailable"
-    | "unknown";
+    "skipped" | "no_pending" | "recovered" | "still_pending" | "model_unavailable" | "unknown";
   attempted: boolean;
   project_id: string | null;
   pending_before: number | null;
@@ -4401,10 +4396,15 @@ function httpStatusReadiness(status: number | null) {
   return { status: "unexpected_status", ok: false };
 }
 
+const HTTP_READINESS_TIMEOUT_MS = 5000;
+
+function httpReadinessSignal() {
+  return AbortSignal.timeout(HTTP_READINESS_TIMEOUT_MS);
+}
+
 async function checkHttpStatus(url: string) {
-  const timeout = AbortSignal.timeout(1200);
   try {
-    const response = await fetch(url, { redirect: "manual", signal: timeout });
+    const response = await fetch(url, { redirect: "manual", signal: httpReadinessSignal() });
     return { http_status: response.status, error: null };
   } catch (error) {
     return {
@@ -4871,11 +4871,10 @@ async function checkPublicWorkbenchReadiness(
     };
   }
 
-  const timeout = AbortSignal.timeout(1200);
   try {
     const response = await fetch(origin.url, {
       redirect: "manual",
-      signal: timeout
+      signal: httpReadinessSignal()
     });
     const originStatus =
       response.status === 401 || response.status === 403

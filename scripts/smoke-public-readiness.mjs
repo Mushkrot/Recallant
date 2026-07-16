@@ -1,8 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, readFileSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { readdir, readFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 
 const repoRoot = process.cwd();
 
@@ -94,6 +96,8 @@ const publicDocs = [
   "docs/QUICKSTART.md",
   "docs/AGENT_READY_PROJECTS.md",
   "docs/CONTRACT_STATUS.md",
+  "docs/STATUS.md",
+  "docs/RUNBOOK.md",
   "docs/WHY_RECALLANT.md",
   "docs/COMPARISON.md",
   "docs/REFERENCE_PROJECTS.md",
@@ -256,6 +260,40 @@ mustAppearBefore(
   "curl -fsSL https://memory.example.com/connect | bash",
   "recallant invite /path/to/project --server-url https://memory.example.com",
   "docs/QUICKSTART.md"
+);
+
+const statusDoc = await read("docs/STATUS.md");
+mustInclude(
+  statusDoc,
+  [
+    "Recallant is pre-release",
+    "What Works Now",
+    "Release Position",
+    "production_readiness.ready: true",
+    "Required Verification",
+    "Documentation Authority",
+    "Operations Runbook",
+    "Product Contract Status"
+  ],
+  "docs/STATUS.md"
+);
+
+const runbook = await read("docs/RUNBOOK.md");
+mustInclude(
+  runbook,
+  [
+    "Routine Health Check",
+    "Deploy A Checkout Change",
+    "Backup And Restore Verification",
+    "Incident Triage",
+    "Rollback",
+    "Escalation And Records",
+    "production_readiness.ready",
+    "systemctl restart <recallant-service>",
+    "rollback-recallant-install.sh --dry-run",
+    "Never delete source"
+  ],
+  "docs/RUNBOOK.md"
 );
 
 const clientSetup = await read("docs/CLIENT_SETUP.md");
@@ -1132,6 +1170,37 @@ async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
   return parsed?.public_workbench_readiness;
 }
 
+async function startDelayedAuthOrigin(delayMs) {
+  const child = spawn(
+    process.execPath,
+    [join(repoRoot, "scripts/fixtures/delayed-auth-origin.mjs"), String(delayMs)],
+    {
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const lines = createInterface({ input: child.stdout });
+  const lineResult = once(lines, "line");
+  const earlyExit = once(child, "exit").then(([code]) => {
+    throw new Error(`Delayed origin exited before ready; code=${code}; stderr=${stderr}`);
+  });
+  const [line] = await Promise.race([lineResult, earlyExit]);
+  lines.close();
+  const port = Number(line);
+  assert(Number.isInteger(port) && port > 0, `Delayed origin failed to start: ${stderr}`);
+  return {
+    url: `http://127.0.0.1:${port}/review`,
+    stop() {
+      if (child.exitCode !== null) return;
+      child.kill("SIGKILL");
+    }
+  };
+}
+
 async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
   const parsed = runDoctorFixture(
     projectDir,
@@ -1192,6 +1261,23 @@ assert(
     authReady?.origin?.status === "auth_required" &&
     authReady?.cloudflare_access?.edge_auth_required === true,
   `Auth-ready readiness failed: ${JSON.stringify(authReady)}`
+);
+
+const delayedOrigin = await startDelayedAuthOrigin(1500);
+const delayedStartedAt = Date.now();
+let delayedAuthReady;
+try {
+  delayedAuthReady = await runDoctorWithOrigin(publicUiFixtureDir, delayedOrigin.url);
+} finally {
+  delayedOrigin.stop();
+}
+const delayedElapsedMs = Date.now() - delayedStartedAt;
+assert(
+  delayedElapsedMs >= 1200 &&
+    delayedAuthReady?.status === "auth_ready" &&
+    delayedAuthReady?.ready === true &&
+    delayedAuthReady?.origin?.status === "auth_required",
+  `Delayed auth origin should remain ready beyond 1200ms: elapsed=${delayedElapsedMs}, result=${JSON.stringify(delayedAuthReady)}`
 );
 assert(
   String(authReady.operator_action ?? "").includes("protected public URL") &&
@@ -1346,6 +1432,12 @@ process.stdout.write(
           ready: authReady.ready,
           origin: authReady.origin.status,
           edge_auth_required: authReady.cloudflare_access.edge_auth_required
+        },
+        delayed_auth_ready: {
+          status: delayedAuthReady.status,
+          ready: delayedAuthReady.ready,
+          origin: delayedAuthReady.origin.status,
+          elapsed_ms: delayedElapsedMs
         },
         missing_edge_auth: {
           status: missingEdgeAuth.status,

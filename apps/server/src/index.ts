@@ -6521,15 +6521,7 @@ function resultTypeLabel(
 }
 
 type WorkbenchView =
-  | "all"
-  | "ask"
-  | "memory"
-  | "command"
-  | "sources"
-  | "activity"
-  | "audit"
-  | "review"
-  | "settings";
+  "all" | "ask" | "memory" | "command" | "sources" | "activity" | "audit" | "review" | "settings";
 
 function normalizeWorkbenchView(value: unknown): WorkbenchView {
   const view = String(value ?? "all").toLowerCase();

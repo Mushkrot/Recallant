@@ -3,11 +3,7 @@ import { join } from "node:path";
 import { type DiscoveryCandidate, detectImportCandidates } from "./discovery.js";
 
 export type DocumentationPostureStatus =
-  | "docs_absent"
-  | "readme_only"
-  | "partial"
-  | "needs_review"
-  | "recallant_ready";
+  "docs_absent" | "readme_only" | "partial" | "needs_review" | "recallant_ready";
 
 export const onboardDocumentationPostureStatuses = [
   "empty",
@@ -20,10 +16,7 @@ export type OnboardDocumentationPostureStatus =
   (typeof onboardDocumentationPostureStatuses)[number];
 
 export type DocumentationProfile =
-  | "unknown"
-  | "service_app"
-  | "library_package"
-  | "product_roadmap";
+  "unknown" | "service_app" | "library_package" | "product_roadmap";
 
 export type DocumentationPostureSignalCode =
   | "docs_absent"
@@ -73,10 +66,7 @@ export type DocumentationPosture = {
   signals: DocumentationPostureSignal[];
   review_options: Array<{
     option:
-      | "keep_current_docs"
-      | "canonicalize_for_recallant"
-      | "create_starter_docs"
-      | "discuss_first";
+      "keep_current_docs" | "canonicalize_for_recallant" | "create_starter_docs" | "discuss_first";
     recommended: boolean;
     reason: string;
   }>;

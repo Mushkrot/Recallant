@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@recallant/contracts": "file:../contracts",
-    "pg": "^8.21.0"
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0"

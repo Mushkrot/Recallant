@@ -369,11 +369,7 @@ export type PromoteGraphCandidateResult = {
 };
 
 export type GraphCandidatePromotionReadinessStatus =
-  | "promotable"
-  | "blocked"
-  | "duplicate"
-  | "promoted"
-  | "stale";
+  "promotable" | "blocked" | "duplicate" | "promoted" | "stale";
 
 export type GraphCandidatePromotionReadiness = {
   graph_candidate_id: string;
@@ -441,11 +437,7 @@ export type GraphCandidateMaintenanceActionKind =
   (typeof graphCandidateMaintenanceActionKindValues)[number];
 
 export type GraphCandidateMaintenanceLaneKey =
-  | "duplicates"
-  | "stale_or_archived"
-  | "blocked"
-  | "conflict_review"
-  | "promoted_cleanup";
+  "duplicates" | "stale_or_archived" | "blocked" | "conflict_review" | "promoted_cleanup";
 
 export type GraphCandidateMaintenanceRiskLevel = "low" | "medium" | "high";
 
@@ -549,10 +541,7 @@ export type GraphCandidateMaintenanceApplyInput =
     });
 
 export type GraphCandidateMaintenanceApplyStatus =
-  | "dry_run"
-  | "applied"
-  | "already_applied"
-  | "rejected";
+  "dry_run" | "applied" | "already_applied" | "rejected";
 
 export type GraphCandidateMaintenanceMutationFlags = {
   dry_run: boolean;

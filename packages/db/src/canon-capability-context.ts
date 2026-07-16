@@ -10,19 +10,11 @@ export type CanonCapabilityProvenance = {
   source_id: string | null;
   source_path: string | null;
   review_status:
-    | "canonical"
-    | "configured_reference"
-    | "review_required"
-    | "evidence_only"
-    | "not_recorded";
+    "canonical" | "configured_reference" | "review_required" | "evidence_only" | "not_recorded";
 };
 
 export type CanonCapabilityReferenceState =
-  | "configured"
-  | "needed"
-  | "missing"
-  | "ready"
-  | "review_required";
+  "configured" | "needed" | "missing" | "ready" | "review_required";
 
 export type CanonCapabilityEnvironmentFact = {
   key: string;
@@ -71,11 +63,7 @@ export type DocumentationAuthorityMapItem = {
     | "stale_handoff"
     | "review_required";
   status:
-    | "canonical"
-    | "configured_reference"
-    | "review_required"
-    | "evidence_only"
-    | "not_recorded";
+    "canonical" | "configured_reference" | "review_required" | "evidence_only" | "not_recorded";
   reason: string;
   provenance: CanonCapabilityProvenance;
   authority: CanonCapabilityAuthority;

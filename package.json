@@ -88,6 +88,7 @@
     "remote-client-cleanup:smoke": "node scripts/smoke-remote-client-cleanup.mjs",
     "project-sanitize:smoke": "node scripts/smoke-project-sanitize.mjs",
     "onboarding:smoke": "node scripts/smoke-onboarding-cli.mjs",
+    "onboarding-temp-cleanup:smoke": "node scripts/smoke-onboarding-temp-cleanup.mjs",
     "connect:smoke": "node scripts/smoke-connect-cli.mjs",
     "installer:smoke": "node scripts/smoke-installer.mjs",
     "backup-alerts:smoke": "node scripts/smoke-backup-alerts.mjs",
@@ -130,16 +131,16 @@
     "phase10:smoke": "node scripts/smoke-phase10-attach.mjs && node scripts/smoke-phase10-detach.mjs && node scripts/smoke-phase10-cross-project.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
-    "test:product-gates": "npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run review-ui:smoke",
+    "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run review-ui:smoke",
     "test": "npm run test:product-gates"
   },
   "devDependencies": {
-    "@eslint/js": "^9.27.0",
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.60.0",
-    "@types/node": "^20.17.50",
-    "eslint": "^9.27.0",
-    "prettier": "^3.5.3",
+    "@types/node": "^20.19.43",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.5",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.32.1"
+    "typescript-eslint": "^8.64.0"
   }
 }

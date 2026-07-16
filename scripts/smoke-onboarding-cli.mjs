@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
+import { createManagedSmokeTempRoot } from "./lib/smoke-temp-root.mjs";
 
 const repoRoot = process.cwd();
 const databaseUrl =
@@ -145,8 +146,9 @@ async function assertFileIncludes(path, marker, message) {
   return content;
 }
 
-const prefix = await mkdtemp(join(tmpdir(), "recallant-onboarding-prefix-"));
-const projectDir = await mkdtemp(join(tmpdir(), "recallant-onboarding-project-"));
+const { root: smokeRoot } = await createManagedSmokeTempRoot("recallant-onboarding-smoke-");
+const prefix = await mkdtemp(join(smokeRoot, "prefix-"));
+const projectDir = await mkdtemp(join(smokeRoot, "project-"));
 await writeFile(join(projectDir, "README.md"), "# Fresh onboarding smoke\n");
 
 run("bash", ["scripts/install-recallant-cli.sh"], {
@@ -159,9 +161,7 @@ const recallant = join(prefix, "recallant");
 const lint = runJson(recallant, ["lint-context"], { cwd: projectDir });
 assert(lint.ok === true, `installed wrapper did not run lint-context: ${JSON.stringify(lint)}`);
 
-const missingStorageProject = await mkdtemp(
-  join(tmpdir(), "recallant-onboarding-missing-storage-")
-);
+const missingStorageProject = await mkdtemp(join(smokeRoot, "missing-storage-"));
 await writeFile(join(missingStorageProject, "README.md"), "# Missing storage onboarding smoke\n");
 const missingStorage = runRaw(
   recallant,
@@ -293,7 +293,7 @@ assert(
   )}`
 );
 
-const defaultEnvRoot = await mkdtemp(join(tmpdir(), "recallant-onboarding-default-env-"));
+const defaultEnvRoot = await mkdtemp(join(smokeRoot, "default-env-"));
 const defaultEnvHome = join(defaultEnvRoot, "home");
 const defaultEnvDir = join(defaultEnvHome, ".config", "recallant");
 await mkdir(defaultEnvDir, { recursive: true });
@@ -325,7 +325,7 @@ assert(
   "default env onboard output leaked database credentials"
 );
 
-const explicitEnvProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-explicit-env-"));
+const explicitEnvProject = await mkdtemp(join(smokeRoot, "explicit-env-"));
 await writeFile(join(explicitEnvProject, "README.md"), "# Explicit env onboarding smoke\n");
 const explicitEnvOnboard = runJson(
   recallant,
@@ -343,7 +343,7 @@ assert(
   "explicit env onboard output leaked database credentials"
 );
 
-const wrapperEnvRoot = await mkdtemp(join(tmpdir(), "recallant-onboarding-wrapper-env-"));
+const wrapperEnvRoot = await mkdtemp(join(smokeRoot, "wrapper-env-"));
 const wrapperEnvPrefix = join(wrapperEnvRoot, "bin");
 const wrapperEnvFile = join(wrapperEnvRoot, "recallant.env");
 await writeFile(wrapperEnvFile, `RECALLANT_DATABASE_URL=${databaseUrl}\n`);
@@ -383,7 +383,7 @@ assert(
   "wrapper env onboard output leaked database credentials"
 );
 
-const emptyStarterProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-empty-starter-"));
+const emptyStarterProject = await mkdtemp(join(smokeRoot, "empty-starter-"));
 const emptyStarterDryRun = runJson(
   recallant,
   ["onboard", emptyStarterProject, "--skip-vcs-safety", "--dry-run", "--format", "json"],
@@ -473,7 +473,7 @@ assert(
 );
 
 async function onboardProfileStarter(name, envText, expectedFiles) {
-  const profileProject = await mkdtemp(join(tmpdir(), `recallant-onboarding-${name}-starter-`));
+  const profileProject = await mkdtemp(join(smokeRoot, `${name}-starter-`));
   await writeFile(join(profileProject, ".env.example"), envText);
   const result = runJson(
     recallant,
@@ -527,7 +527,7 @@ assert(
   `library starter profile failed: ${JSON.stringify(libraryStarter.result.documentation_posture)}`
 );
 
-const vcsChoiceProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-choice-"));
+const vcsChoiceProject = await mkdtemp(join(smokeRoot, "vcs-choice-"));
 await writeFile(join(vcsChoiceProject, "README.md"), "# Version-control safety smoke\n");
 const vcsChoice = runRaw(recallant, ["onboard", vcsChoiceProject], {
   cwd: vcsChoiceProject,
@@ -546,7 +546,7 @@ assert(
 assert(!(await exists(join(vcsChoiceProject, ".recallant", "config"))), "vcs choice wrote config");
 assert((await projectRowCount(vcsChoiceProject)) === 0, "vcs choice wrote database row");
 
-const parentWorktree = await mkdtemp(join(tmpdir(), "recallant-onboarding-parent-worktree-"));
+const parentWorktree = await mkdtemp(join(smokeRoot, "parent-worktree-"));
 run("git", ["init", parentWorktree], { cwd: parentWorktree });
 const nestedProject = join(parentWorktree, "nested-project");
 await mkdir(nestedProject, { recursive: true });
@@ -556,10 +556,13 @@ assert(
   nestedChoice.status === 2 && nestedChoice.stdout.includes("Version-control safety choices"),
   `nested project should require its own VCS choice: ${nestedChoice.stderr}\n${nestedChoice.stdout}`
 );
-assert(!(await exists(join(nestedProject, ".recallant", "config"))), "nested VCS choice wrote config");
+assert(
+  !(await exists(join(nestedProject, ".recallant", "config"))),
+  "nested VCS choice wrote config"
+);
 assert((await projectRowCount(nestedProject)) === 0, "nested VCS choice wrote database row");
 
-const vcsInitProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-vcs-init-"));
+const vcsInitProject = await mkdtemp(join(smokeRoot, "vcs-init-"));
 await writeFile(join(vcsInitProject, "README.md"), "# Version-control init smoke\n");
 const vcsInit = runJson(recallant, ["onboard", vcsInitProject, "--yes", "--format", "json"], {
   cwd: vcsInitProject,
@@ -573,7 +576,7 @@ assert(
 );
 assert(await exists(join(vcsInitProject, ".git")), "--yes vcs init did not create .git");
 
-const productionProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-production-"));
+const productionProject = await mkdtemp(join(smokeRoot, "production-"));
 await writeFile(
   join(productionProject, "README.md"),
   "# Production service\n\nThis project deploys a production service through public deployment.\n"
@@ -759,7 +762,7 @@ assert(
   "context pack documentation/canon context leaked secret-like values"
 );
 
-const oneCommandProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-one-command-"));
+const oneCommandProject = await mkdtemp(join(smokeRoot, "one-command-"));
 await writeFile(join(oneCommandProject, "README.md"), "# One-command onboarding proof\n");
 const oneCommand = runJson(recallant, ["onboard", oneCommandProject, "--yes", "--format", "json"], {
   cwd: oneCommandProject
@@ -788,7 +791,7 @@ assert(
   `one-command structured proof stages incomplete: ${JSON.stringify(oneCommand.verify)}`
 );
 
-const universalLocalProject = await mkdtemp(join(tmpdir(), "recallant-universal-local-"));
+const universalLocalProject = await mkdtemp(join(smokeRoot, "universal-local-"));
 await writeFile(join(universalLocalProject, "README.md"), "# Universal local connect proof\n");
 const universalLocal = runJson(
   recallant,
@@ -849,7 +852,7 @@ for (const file of ["docs/RUNBOOK.md", "docs/ARCHITECTURE.md", "docs/API.md"]) {
   );
 }
 
-const humanProject = await mkdtemp(join(tmpdir(), "recallant-onboarding-human-success-"));
+const humanProject = await mkdtemp(join(smokeRoot, "human-success-"));
 await writeFile(join(humanProject, "README.md"), "# Human success onboarding proof\n");
 const humanSuccess = runRaw(recallant, ["onboard", humanProject, "--yes"], { cwd: humanProject });
 assert(

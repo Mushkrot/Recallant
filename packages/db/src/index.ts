@@ -1025,11 +1025,7 @@ export type RecallAgentMemoriesInput = {
 };
 
 export type CrossProjectRecallMode =
-  | "same_project"
-  | "developer_rules"
-  | "environment"
-  | "similar_projects"
-  | "all_projects_review";
+  "same_project" | "developer_rules" | "environment" | "similar_projects" | "all_projects_review";
 
 export type CrossProjectRecallInput = {
   query: string;
@@ -1242,10 +1238,7 @@ type ProjectManagementTarget = {
 };
 
 type ProjectManagementResolutionReason =
-  | "project_id"
-  | "project_path"
-  | "project_path_fallback"
-  | "not_found";
+  "project_id" | "project_path" | "project_path_fallback" | "not_found";
 
 type ManagedProjectRow = {
   project_id: string;

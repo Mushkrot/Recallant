@@ -138,7 +138,7 @@ secret.
 Expected remote readiness:
 
 - `recallant connect . --server-url https://memory.example.com` or `recallant connect-cloud .`
-  creates missing thin starter surfaces without overwriting existing project docs or avoiding local
+  creates missing thin starter surfaces without overwriting existing project docs or requiring local
   storage setup; an existing `PROJECT_LOG.md` is preserved unchanged;
 - `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
 - the same JSON includes a bounded `readiness_contract`; before proof its primary state remains
