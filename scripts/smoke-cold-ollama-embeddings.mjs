@@ -53,7 +53,7 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  await readRequestBody(request);
+  const payload = JSON.parse(await readRequestBody(request));
   const active = scenario;
   if (!active) {
     response.writeHead(500, { "content-type": "application/json" });
@@ -67,7 +67,13 @@ const server = http.createServer(async (request, response) => {
   if (action?.delay_ms) await delay(action.delay_ms);
 
   const status = action?.status ?? 200;
-  requestLog.push({ scenario: active.name, call: active.calls, status });
+  requestLog.push({
+    scenario: active.name,
+    call: active.calls,
+    status,
+    model: payload.model,
+    keep_alive: payload.keep_alive
+  });
   response.writeHead(status, { "content-type": "application/json" });
   if (status >= 400) {
     response.end(JSON.stringify({ error: `fake_${status}` }));
@@ -201,6 +207,10 @@ try {
   assert(transient.chunk?.embedding_rows === 1, JSON.stringify(transient.chunk));
   assert(transient.model_call?.status === "success", JSON.stringify(transient.model_call));
   assert(transient.model_call?.metadata?.retry_count === 1, JSON.stringify(transient.model_call));
+  assert(
+    transient.requests.every((request) => request.keep_alive === -1),
+    JSON.stringify(transient.requests)
+  );
 
   const slow = await runScenario(
     "slow_success",
@@ -210,6 +220,7 @@ try {
   assert(slow.append_embedding?.status === "embedded", JSON.stringify(slow));
   assert(slow.elapsed_ms < 2_500, JSON.stringify(slow));
   assert(slow.model_call?.metadata?.attempt_count === 1, JSON.stringify(slow.model_call));
+  assert(slow.requests.every((request) => request.keep_alive === -1), JSON.stringify(slow.requests));
 
   const persistent = await runScenario(
     "persistent_failure",
@@ -229,6 +240,10 @@ try {
   assert(
     persistent.model_call?.metadata?.retry_exhausted === true,
     JSON.stringify(persistent.model_call)
+  );
+  assert(
+    persistent.requests.every((request) => request.keep_alive === -1),
+    JSON.stringify(persistent.requests)
   );
 
   for (const result of [transient, slow, persistent]) {

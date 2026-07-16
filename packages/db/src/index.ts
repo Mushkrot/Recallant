@@ -1697,7 +1697,7 @@ async function fetchOllamaEmbeddingOnce(route: EmbeddingRoute, text: string) {
     const response = await fetch(ollamaUrl("/api/embeddings"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: route.model, prompt: text }),
+      body: JSON.stringify({ model: route.model, prompt: text, keep_alive: -1 }),
       signal: controller.signal
     });
     const payload = (await response.json().catch(() => ({}))) as unknown;
