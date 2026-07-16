@@ -998,6 +998,7 @@ async function run() {
       desktop.locator("#sources"),
       "desktop focused Sources"
     );
+    await desktop.locator("details.source-map-advanced summary").click();
     await visibleBox(desktop.locator("#sources .source-tree"), "desktop Memory Tree source map");
     assert(
       focusedSourcesBox.width >= 980,

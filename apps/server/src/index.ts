@@ -4360,12 +4360,6 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
       <p>These are the folders, repositories, documents, connectors, and virtual inputs Recallant may cite for this memory space. Detaching a source does not delete the memory.</p>
     </div>
     ${renderSourceResult(source)}
-    <div class="source-map-legend" aria-label="Source map legend">
-      <span><strong>Root</strong> current memory space</span>
-      <span><strong>Branches</strong> attached sources</span>
-      <span><strong>Provenance</strong> where facts came from</span>
-      <span><strong>Safety</strong> detach is not delete</span>
-    </div>
     <div class="source-overview">
       <span><strong>${escapeHtml(counts.active)}</strong> active sources</span>
       <span><strong>${escapeHtml(counts.ready)}</strong> ready to cite</span>
@@ -4373,17 +4367,28 @@ function renderSourceWorkbench(data: ReviewDashboardData, source?: SourceRenderS
       <span><strong>${escapeHtml(counts.needsAttention)}</strong> need attention</span>
       <span><strong>${escapeHtml(filterState.selectedLabel)}</strong> selected source</span>
     </div>
-    ${renderSourceTree(data)}
     ${renderSourceFilterControl(data, "sources")}
     <div class="source-workspace-grid">
       <div>
         <h3>Sources for selected space</h3>
+        <p class="source-primary-note">Check what Recallant can cite, then attach or detach a source when the project changes.</p>
         ${renderSelectedSources(data)}
       </div>
       <div class="source-management">
+        <h3>Add a source</h3>
         ${renderMemorySpaceForms(data)}
       </div>
     </div>
+    <details class="source-map-advanced">
+      <summary>Open source map <span>See the memory space tree and provenance legend</span></summary>
+      <div class="source-map-legend" aria-label="Source map legend">
+        <span><strong>Root</strong> current memory space</span>
+        <span><strong>Branches</strong> attached sources</span>
+        <span><strong>Provenance</strong> where facts came from</span>
+        <span><strong>Safety</strong> detach is not delete</span>
+      </div>
+      ${renderSourceTree(data)}
+    </details>
   </section>`;
 }
 
@@ -8326,6 +8331,29 @@ function renderDashboard(
     .advanced-review-panel[open] > summary { margin-bottom: 12px; }
     .advanced-review-panel .graph-review,
     .advanced-review-panel .migration-review { margin-top: 0; }
+    .source-map-advanced {
+      border-top: 1px solid var(--line);
+      margin-top: 16px;
+      padding-top: 12px;
+    }
+    .source-map-advanced > summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 750;
+      list-style-position: inside;
+    }
+    .source-map-advanced > summary span {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .source-map-advanced[open] > summary { margin-bottom: 12px; }
+    .source-primary-note { margin: -4px 0 10px; color: var(--text-muted); font-size: 12px; }
     .home-activity-list { display: grid; gap: 0; }
     .home-activity-item {
       display: flex;
