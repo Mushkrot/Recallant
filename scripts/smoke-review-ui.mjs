@@ -1196,18 +1196,16 @@ try {
     "Choose the project whose memories and decisions you want to review.",
     `href="/review?project_id=${projectId}&amp;view=review"`,
     "Personal Operations UI Smoke",
-    "Registered only",
     "Find a project",
     "Recent projects",
     "All other projects",
-    "Technical details"
+    "Technical details",
+    "Connected"
   ];
   const chooserMissing = chooserRequired.filter((marker) => !chooserText.includes(marker));
-  const chooserProjectCaptureStatus = [
-    "Interrupted",
-    "Capture active",
-    "Started, not complete"
-  ].some((marker) => chooserText.includes(marker));
+  const chooserProjectCaptureStatus = ["Recording", "Setup incomplete", "Connected"].some(
+    (marker) => chooserText.includes(marker)
+  );
   if (
     chooser.status !== 200 ||
     chooserMissing.length > 0 ||

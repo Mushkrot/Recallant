@@ -3318,6 +3318,16 @@ function captureState(row: Record<string, unknown>) {
   return { label: "Registered only", className: "registered" };
 }
 
+function projectChooserState(row: Record<string, unknown>) {
+  if (row.last_context_read_at && row.last_memory_write_at && row.checkpoint_updated_at) {
+    return { label: "Recording", className: "active" };
+  }
+  if (Number(row.session_count ?? 0) > 0 || row.last_context_read_at) {
+    return { label: "Setup incomplete", className: "started" };
+  }
+  return { label: "Connected", className: "registered" };
+}
+
 function sourceLabel(row: Record<string, unknown>) {
   const sources = Array.isArray(row.sources) ? (row.sources as Array<Record<string, unknown>>) : [];
   const primarySource =
@@ -4028,7 +4038,7 @@ function renderProjectChooser(
       )
     : [];
   const renderChoice = (row: Record<string, unknown>) => {
-    const state = captureState(row);
+    const state = projectChooserState(row);
     const favorite = favorites.has(String(row.project_id).toLowerCase());
     return `<article class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" data-project-id="${escapeHtml(row.project_id)}">
       <div class="project-choice-head">
@@ -4049,7 +4059,7 @@ function renderProjectChooser(
     </article>`;
   };
   const renderListRow = (row: Record<string, unknown>) => {
-    const state = captureState(row);
+    const state = projectChooserState(row);
     const favorite = favorites.has(String(row.project_id).toLowerCase());
     return `<li class="project-list-row" data-project-id="${escapeHtml(row.project_id)}">
       <div class="project-list-copy">
