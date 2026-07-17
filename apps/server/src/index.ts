@@ -8835,11 +8835,13 @@ function renderDashboard(
     .project-choice-meta dd { margin: 2px 0 0; color: var(--text); font-size: 11px; overflow-wrap: anywhere; }
     .all-projects { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 8px; }
     .all-projects > summary { min-height: 48px; color: var(--text); font-size: 13px; }
+    .all-projects > summary span { margin-left: 4px; }
     .project-list { list-style: none; margin: 0; padding: 0; }
     .project-list-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(142px, auto) auto; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding: 9px 0; }
     .project-list-row:first-child { border-top: 0; }
     .project-list-copy { min-width: 0; }
     .project-list-copy > a { display: block; color: var(--text); font-size: 13px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+    .project-list-copy > a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
     .project-list-copy > span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; }
     .project-list-details { position: relative; }
     .project-list-details > summary { min-width: 64px; justify-content: center; color: var(--text-muted); font-size: 11px; }
@@ -8849,6 +8851,10 @@ function renderDashboard(
     .connect-command { margin: 16px 0 0; border: 1px solid var(--line); border-radius: 6px; padding: 14px; background: var(--surface-soft); color: var(--text); overflow-x: auto; }
     @media (max-width: 760px) {
       .project-chooser { padding: 16px; }
+      .workbench-nav { display: block; }
+      .workbench-nav-primary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+      .workbench-nav-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .workbench-nav a { min-width: 0; padding: 7px 4px; white-space: normal; }
       .project-search-row { grid-template-columns: 1fr 1fr; }
       .project-search-row input { grid-column: 1 / -1; }
       .project-choice-grid { grid-template-columns: 1fr; }

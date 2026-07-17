@@ -338,6 +338,49 @@ async function assertVisualBaseline(page, label) {
   );
 }
 
+async function assertChooserTargets(page, label) {
+  const undersized = await page.evaluate(() =>
+    Array.from(
+      globalThis.document.querySelectorAll(
+        ".project-search-row input,.project-search-row button,.project-search-clear,.project-choice-link,.project-favorite-toggle,.project-choice-details > summary,.all-projects > summary"
+      )
+    )
+      .filter((element) => {
+        const style = globalThis.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0;
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          text: String(element.textContent ?? element.getAttribute("aria-label") ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 80),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        };
+      })
+      .filter((item) => item.width < 44 || item.height < 44)
+  );
+  assert(
+    undersized.length === 0,
+    `${label} has chooser controls smaller than 44px: ${JSON.stringify(undersized)}`
+  );
+}
+
+async function tabTo(page, selector, label, maxTabs = 20) {
+  for (let index = 0; index < maxTabs; index += 1) {
+    await page.keyboard.press("Tab");
+    if (
+      await page.evaluate((target) => globalThis.document.activeElement?.matches(target), selector)
+    ) {
+      return;
+    }
+  }
+  throw new Error(`${label} was not reachable in ${maxTabs} Tab presses`);
+}
+
 async function saveScreenshotPair(page, standardPath, publicPath, label, forbiddenText) {
   await page.screenshot({ path: standardPath, fullPage: true });
   await assertPublicSafePage(page, label, forbiddenText);
@@ -358,13 +401,15 @@ async function run() {
   const publicReportDir = join(reportDir, "public-safe-candidates");
   const publicScreenshots = {
     overview: join(publicReportDir, "recallant-workbench-overview.png"),
+    switcher: join(publicReportDir, "recallant-workbench-project-switcher.png"),
     ask: join(publicReportDir, "recallant-workbench-ask.png"),
     sources: join(publicReportDir, "recallant-workbench-sources.png"),
     activity: join(publicReportDir, "recallant-workbench-activity.png"),
     audit: join(publicReportDir, "recallant-workbench-audit.png"),
     review: join(publicReportDir, "recallant-workbench-review.png"),
     reviewMobile: join(publicReportDir, "recallant-workbench-review-mobile.png"),
-    mobile: join(publicReportDir, "recallant-workbench-mobile.png")
+    mobile: join(publicReportDir, "recallant-workbench-mobile.png"),
+    switcherMobile: join(publicReportDir, "recallant-workbench-project-switcher-mobile.png")
   };
   const forbiddenPublicText = [
     projectId,
@@ -401,6 +446,26 @@ async function run() {
   };
   const uiMetrics = {};
   const actionContracts = {};
+  const browserDiagnostics = {
+    console_errors: [],
+    page_errors: [],
+    request_failures: []
+  };
+  const watchPage = (page, label) => {
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        browserDiagnostics.console_errors.push(`${label}: ${message.text()}`);
+      }
+    });
+    page.on("pageerror", (error) => {
+      browserDiagnostics.page_errors.push(`${label}: ${error.message}`);
+    });
+    page.on("requestfailed", (request) => {
+      browserDiagnostics.request_failures.push(
+        `${label}: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? "failed"}`
+      );
+    });
+  };
 
   process.env.RECALLANT_AUTH_TOKEN = token;
   process.env.RECALLANT_SESSION_SECRET = `review-playwright-session-${randomUUID()}`;
@@ -433,6 +498,30 @@ async function run() {
     `,
     [projectId]
   );
+  const longProjectName =
+    "International customer research and release readiness for a multi-region product";
+  const longProject = await db.createMemorySpace({
+    name: longProjectName,
+    developerId,
+    projectKind: "other",
+    memoryDomain: "work_operations",
+    primaryPath: null
+  });
+  for (const name of [
+    "Customer support operations",
+    "Product roadmap",
+    "Design references",
+    "Personal notes",
+    "Release archive"
+  ]) {
+    await db.createMemorySpace({
+      name,
+      developerId,
+      projectKind: "other",
+      memoryDomain: "work_operations",
+      primaryPath: null
+    });
+  }
   const importedDocSource = await db.attachProjectSource({
     project_id: projectId,
     source_kind: "document_collection",
@@ -951,19 +1040,85 @@ async function run() {
       viewport: { width: 1440, height: 1000 },
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
-    await desktop.goto(`${baseUrl}/review?view=ask`, { waitUntil: "networkidle" });
+    watchPage(desktop, "desktop");
+    await desktop.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
+    await desktop.locator("#home").waitFor();
+    assert(
+      (await desktop.locator("#project-chooser").count()) === 0,
+      "Workbench root should open Home instead of the project chooser"
+    );
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      desktop.getByRole("link", { name: "Switch project" }).click()
+    ]);
+    await desktop.getByRole("heading", { name: "Choose a project" }).waitFor();
+    const desktopChooserCards = await desktop.locator(".project-choice").count();
+    assert(
+      desktopChooserCards > 0 && desktopChooserCards <= 4,
+      `Home chooser should show at most four recent cards, found ${desktopChooserCards}`
+    );
+    await desktop.locator("details.all-projects").waitFor();
+    await noHorizontalScroll(desktop, "desktop project switcher");
+    await assertResponsiveBounds(desktop, "desktop project switcher");
+    await assertChooserTargets(desktop, "desktop project switcher");
+    uiMetrics.desktop_switcher = await collectUiMetrics(desktop, "desktop_switcher");
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-project-switcher.png"),
+      publicScreenshots.switcher,
+      "desktop project switcher",
+      forbiddenPublicText
+    );
+    await tabTo(desktop, "#project-q", "Project search");
+    await desktop.keyboard.type("International customer research");
+    await Promise.all([desktop.waitForLoadState("networkidle"), desktop.keyboard.press("Enter")]);
+    await desktop.getByRole("heading", { name: /Search results/ }).waitFor();
+    await desktop.getByRole("link", { name: longProjectName }).waitFor();
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      desktop.getByRole("button", { name: "Add to favorites" }).click()
+    ]);
+    await desktop.getByRole("button", { name: "Remove from favorites" }).waitFor();
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      desktop.getByRole("link", { name: "Clear" }).click()
+    ]);
+    await desktop.getByRole("heading", { name: "Favorites" }).waitFor();
+    const favoriteLongProject = desktop.locator(
+      `.project-choice[data-project-id="${longProject.project_id}"]`
+    );
+    await favoriteLongProject.waitFor();
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      favoriteLongProject.locator(".project-choice-link").click()
+    ]);
+    await desktop.locator("#home").waitFor();
+    assert(
+      desktop.url().includes(`project_id=${longProject.project_id}`),
+      `Favorite project opened an unexpected URL: ${desktop.url()}`
+    );
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      desktop.getByRole("link", { name: "Ask & Search" }).click()
+    ]);
+    await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
+    await Promise.all([
+      desktop.waitForLoadState("networkidle"),
+      desktop.getByRole("link", { name: "Switch project" }).click()
+    ]);
     await desktop.getByRole("heading", { name: "Choose a project for Ask & Search" }).waitFor();
     assert(
       (await desktop.locator('[data-workbench-view="ask"]').count()) === 1,
       "Ask & Search chooser did not preserve the requested mode"
     );
-    const chooserProject = desktop.locator(".project-choice").first();
-    assert((await chooserProject.count()) === 1, "Ask & Search chooser rendered no project cards");
+    const chooserProject = desktop.locator(`[data-project-id="${projectId}"]`).first();
+    assert((await chooserProject.count()) === 1, "Ask & Search chooser lost the demo project");
+    const chooserProjectLink = chooserProject.locator("a").first();
     assert(
-      (await chooserProject.getAttribute("href"))?.includes("view=ask"),
-      "Ask & Search project card did not preserve the requested mode"
+      (await chooserProjectLink.getAttribute("href"))?.includes("view=ask"),
+      "Ask & Search project link did not preserve the requested mode"
     );
-    await chooserProject.click();
+    await chooserProjectLink.click();
     await desktop.getByRole("heading", { name: "Ask Recallant" }).waitFor();
     assert(
       desktop.url().includes(`project_id=${projectId}`) && desktop.url().includes("view=ask"),
@@ -1362,6 +1517,32 @@ async function run() {
       viewport: { width: 390, height: 844 },
       extraHTTPHeaders: { authorization: `Bearer ${token}` }
     });
+    watchPage(mobile, "mobile");
+    await mobile.goto(`${baseUrl}/review`, { waitUntil: "networkidle" });
+    await mobile.getByRole("heading", { name: "Recallant is recording" }).waitFor();
+    await Promise.all([
+      mobile.waitForLoadState("networkidle"),
+      mobile.getByRole("link", { name: "Switch project" }).click()
+    ]);
+    await mobile.getByRole("heading", { name: "Choose a project" }).waitFor();
+    await noHorizontalScroll(mobile, "mobile project switcher");
+    await assertResponsiveBounds(mobile, "mobile project switcher");
+    await assertChooserTargets(mobile, "mobile project switcher");
+    uiMetrics.mobile_switcher = await collectUiMetrics(mobile, "mobile_switcher");
+    await saveScreenshotPair(
+      mobile,
+      join(reportDir, "recallant-workbench-project-switcher-mobile.png"),
+      publicScreenshots.switcherMobile,
+      "mobile project switcher",
+      forbiddenPublicText
+    );
+    const mobileLongProject = mobile.locator(`[data-project-id="${longProject.project_id}"]`);
+    if (!(await mobileLongProject.isVisible())) {
+      await mobile.locator("details.all-projects > summary").click();
+    }
+    await mobileLongProject.waitFor();
+    await noHorizontalScroll(mobile, "mobile expanded project list");
+    await assertResponsiveBounds(mobile, "mobile expanded project list");
     await mobile.goto(`${baseUrl}/review?project_id=${projectId}`, { waitUntil: "networkidle" });
     await mobile.getByRole("heading", { name: "Recallant", exact: true }).waitFor();
     await noHorizontalScroll(mobile, "mobile initial Home");
@@ -1471,6 +1652,13 @@ async function run() {
       fullPage: true
     });
 
+    assert(
+      browserDiagnostics.console_errors.length === 0 &&
+        browserDiagnostics.page_errors.length === 0 &&
+        browserDiagnostics.request_failures.length === 0,
+      `Browser diagnostics failed: ${JSON.stringify(browserDiagnostics)}`
+    );
+
     console.log(
       JSON.stringify(
         {
@@ -1478,6 +1666,7 @@ async function run() {
           base_url: baseUrl,
           screenshots: [
             join(reportDir, "recallant-workbench-desktop.png"),
+            join(reportDir, "recallant-workbench-project-switcher.png"),
             join(reportDir, "recallant-workbench-dense-desktop.png"),
             join(reportDir, "recallant-workbench-desktop-focused-ask.png"),
             join(reportDir, "recallant-workbench-desktop-focused-sources.png"),
@@ -1489,6 +1678,7 @@ async function run() {
             join(reportDir, "recallant-workbench-desktop-focused-settings.png"),
             join(reportDir, "recallant-workbench-desktop-chat.png"),
             join(reportDir, "recallant-workbench-dense-mobile.png"),
+            join(reportDir, "recallant-workbench-project-switcher-mobile.png"),
             join(reportDir, "recallant-workbench-mobile-focused-review.png"),
             join(reportDir, "recallant-workbench-mobile-chat.png")
           ],
@@ -1496,8 +1686,17 @@ async function run() {
           b9_review_ergonomics: b9ReviewErgonomics,
           ui_metrics: uiMetrics,
           action_contracts: actionContracts,
+          browser_diagnostics: browserDiagnostics,
           checks: [
             "auth_required",
+            "root_opens_last_project_home",
+            "switch_project_click_path",
+            "project_search_keyboard_path",
+            "project_favorite_persistence",
+            "project_mode_continuity",
+            "project_switcher_desktop_mobile",
+            "project_switcher_44px_targets",
+            "browser_console_and_request_clean",
             "desktop_no_horizontal_scroll",
             "central_ask_recallant_panel",
             "first_screen_snapshot_prominent",
