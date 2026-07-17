@@ -317,6 +317,24 @@ Backups include `system_activity_events` together with the memory/capture tables
 system history: the dry-run counts project-scoped ledger rows, and confirmed purge de-identifies
 them by clearing project/session links while retaining a redacted governance trail.
 
+## Agent Activity Retention
+
+Agent observations are separate from the system activity ledger. They contain bounded,
+project-scoped evidence reported by connected agents and power Workbench **Activity** run replay,
+error recovery, and coverage views. The default retention is 30 days. Set a different positive
+number of days in the service environment when required:
+
+```bash
+RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS=30
+```
+
+Observation cleanup runs when new project observations are stored. Native backups include the
+`agent_observations` table and restore verification checks its semantic content. Confirmed targeted
+forget redacts selected observation content; confirmed project purge deletes project observations.
+Keep Workbench Activity private and authenticated, and do not use the observation body as a place
+for credentials, raw environment output, or hidden model reasoning. See
+[Agent observability](AGENT_OBSERVABILITY.md) for the complete capture contract.
+
 ## Model Routing
 
 Recallant is local-first. The local model route points at Ollama through

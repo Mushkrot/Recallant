@@ -288,6 +288,19 @@ Useful filters include `--since`, `--until`, `--surface`, `--status`, `--slow-ms
 `--format json`. The default report window is bounded so an accidental command does not dump the
 whole system history.
 
+### See what agents did
+
+Open **Activity** for the selected project. **Runs** shows recent agent runs without flooding the
+page with raw events. Select a run and use **Replay** to follow visible prompts, responses, tool
+work, errors, retries, remediation, and verification. **Errors** groups repeated failures and shows
+whether recovery was verified. **Coverage** explains missing evidence and which client adapters are
+reporting.
+
+Recallant does not capture hidden chain-of-thought. It stores bounded, redacted, user-visible
+evidence with a 30-day default retention period. See
+[Agent observability](AGENT_OBSERVABILITY.md) for integration commands, completeness semantics,
+privacy boundaries, and removal behavior.
+
 ## 5. Clean Up Or Reset A Test Project
 
 Recallant has separate cleanup levels so a test run does not turn into accidental data loss.
@@ -345,10 +358,11 @@ local disconnect is enabled, Recallant removes or updates only Recallant-generat
 generated bootstrap sections. If a previous file can only be restored from a redacted backup,
 Recallant reports that limitation instead of guessing.
 
-Project purge also accounts for the system activity ledger. Project-scoped memory/capture records
-are removed according to the dry-run plan, while ledger rows are retained only as de-identified
-governance evidence with project/session identity removed. The receipt calls this out so an owner
-can tell the difference between content removal and auditability retention.
+Project purge also accounts for the system activity ledger and agent observations. Project-scoped
+memory, capture, and agent observation records are removed according to the dry-run plan, while
+ledger rows are retained only as de-identified governance evidence with project/session identity
+removed. The receipt calls this out so an owner can tell the difference between content removal and
+auditability retention.
 
 ## What Gets Written
 

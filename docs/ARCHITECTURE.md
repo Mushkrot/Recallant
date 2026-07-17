@@ -178,6 +178,29 @@ Lifecycle operations treat the ledger as governance evidence. Backups include it
 instance can explain what happened. Project purge counts matching ledger rows during dry-run and
 then de-identifies them during confirmed purge, retaining only a redacted audit trail.
 
+## Agent Observation Model
+
+`agent_observations` is the project-scoped account of what connected agents reported doing. It is
+separate from `system_activity_events`: the latter describes Recallant service operations, while an
+agent observation describes a visible prompt or response, meaningful tool work, an error and its
+recovery, verification, or lifecycle activity.
+
+Each row carries project, developer, session, run, turn, trace, and optional parent correlation.
+Independent session and run sequence numbers preserve ordering and make missing evidence visible.
+The DB layer enforces project/session binding, deterministic run ordering, deduplication, bounded
+content, secret redaction, and retention. Legacy lifecycle events can derive compatible
+observations, while MCP `memory_append_observation`, CLI `recallant agent-observe`, and optional
+project-local hooks provide explicit capture paths.
+
+The Workbench builds a bounded read model over recent observations: run summaries, one selected run
+replay, grouped error fingerprints and recovery evidence, capture coverage, and adapter health.
+Completeness is evidence-based: sequence gaps, unmatched prompts, unmatched tool calls, and
+unresolved errors remain visible rather than being treated as success.
+
+Backups and verified restore include observations. Targeted forget redacts selected observation
+content, and project purge deletes project observation rows. See
+[Agent observability](AGENT_OBSERVABILITY.md) for the user and integration contract.
+
 ## Deployment Shape
 
 Recallant can run as a single-user local service or a managed Linux service. The public default is

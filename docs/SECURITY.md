@@ -87,6 +87,25 @@ are retained only as de-identified governance evidence: project and session link
 the redacted receipt records the purge. Backups include the ledger table so restore verification can
 audit history, while manifests continue to exclude raw secrets.
 
+## Agent Observation Boundary
+
+Agent observations are project content, not an unrestricted raw log. They can contain bounded
+visible prompts and responses, meaningful tool summaries, errors, retries, remediation, and
+verification evidence. They must not contain hidden chain-of-thought, auth headers, cookies,
+credentials, provider keys, database URLs, private environment values, or unrestricted terminal
+output. Optional rationale is limited to a short owner-visible explanation.
+
+Every observation is bound to a project and session. The Workbench read model applies that project
+scope, uses bounded result windows, and keeps technical metadata collapsed. Bodies and metadata
+pass through secret redaction before durable storage. The Workbench and its APIs remain on the same
+private/authenticated management boundary as other project data.
+
+Observation retention defaults to 30 days and can be set with
+`RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS`. Native backups include observations. A confirmed
+targeted forget redacts selected observation content while keeping a content-free correlation
+envelope; a confirmed project purge removes all observation rows for that project. The system
+activity ledger remains separately de-identified governance evidence after purge.
+
 ## External Services And Deployment Profiles
 
 Projects may need to remember that an external service, private access provider, server inventory,

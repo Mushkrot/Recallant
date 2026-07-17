@@ -105,6 +105,10 @@ we call Recallant release-ready.
   targets plus bounded search and exact scope selectors, with no-write previews, digest-bound
   confirmation, transactional dependent cleanup, content-free receipts, and an explicit boundary
   that leaves owner-controlled external files or objects untouched.
+- Project-scoped agent observability with a correlated observation envelope, MCP/CLI/fail-soft hook
+  capture paths, compatible lifecycle event derivation, Workbench **Runs**, **Replay**, **Errors**,
+  and **Coverage**, evidence-based completeness, bounded retention, targeted forget, project purge,
+  and native backup/restore verification.
 
 ## Near Term
 
@@ -122,7 +126,8 @@ we call Recallant release-ready.
   open the Workbench. The interactive flow should use a polished modern terminal UI with structured
   panels, progress indicators, readable status graphics, and accessible fallbacks instead of a
   plain text-only command list.
-- Active agent feedback reports for Recallant audits: define an explicit contract that lets agents
+- Active agent feedback reports for Recallant product audits: extend the shipped run replay with an
+  explicit contract that lets agents
   working inside attached projects report Recallant-specific problems, confusing behavior, failed
   attempts, unexpected outputs, and suggested fixes back to Recallant as structured, redacted
   diagnostic messages. A dedicated audit mode should read those reports together with the existing

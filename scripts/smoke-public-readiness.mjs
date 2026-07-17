@@ -95,6 +95,7 @@ const publicDocs = [
   "docs/README.md",
   "docs/QUICKSTART.md",
   "docs/AGENT_READY_PROJECTS.md",
+  "docs/AGENT_OBSERVABILITY.md",
   "docs/CONTRACT_STATUS.md",
   "docs/STATUS.md",
   "docs/RUNBOOK.md",

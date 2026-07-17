@@ -39,7 +39,8 @@ step: run `recallant connect .` in the project folder.
   conflicts need resolution.
 - **Sources** — see which inputs are ready to cite, need setup, or need attention; attach or
   detach a source from the selected project.
-- **Activity** — inspect the recording flow, memory writes, checkpoints, and source-linked events.
+- **Activity** — replay what agents did, inspect errors and recovery, and see whether capture is
+  complete.
 
 **Settings** and **Diagnostics** are secondary destinations. They are available from **More** so
 the everyday path stays short.
@@ -64,6 +65,26 @@ first Review screen into an endless card list.
 Sources starts with health counts, source filtering, connected source cards, and **Add a source**.
 The **Open source map** disclosure contains the Memory Tree, provenance legend, and topology view
 for owners who need that context.
+
+## Agent activity without raw-log overload
+
+Activity opens on **Runs**, a bounded list of recent agent runs rather than a stream of every
+technical event. Each row summarizes status, client, last activity, and capture completeness. Pick a
+run, then use:
+
+- **Replay** for the chronological prompt, visible response, tool, error, retry, remediation, and
+  verification story;
+- **Errors** for grouped failure patterns, affected runs, and verified recovery state;
+- **Coverage** for missing prompt/response pairs, missing tool results, run sequence gaps,
+  unresolved errors, and adapter activity.
+
+Technical identifiers and redacted metadata stay inside collapsed details. The older memory-write,
+checkpoint, and source-event stream remains available under **Memory recording history**, also
+collapsed by default. Empty and partially instrumented projects explain what evidence is absent
+instead of showing a misleading success state.
+
+See [Agent observability](AGENT_OBSERVABILITY.md) for the capture, completeness, retention, and
+privacy contract.
 
 ## Safety and technical detail
 
