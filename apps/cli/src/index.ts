@@ -1538,15 +1538,20 @@ function currentCliExitCode(error?: unknown) {
 async function cliAuditScopeInput(argv: readonly string[]) {
   const dir = resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd());
   const [config, state] = await Promise.all([readProjectConfig(dir), readAgentSessionState(dir)]);
+  const auditUuid = (value: string | null | undefined) =>
+    value &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      ? value
+      : null;
   return {
-    developer_id: process.env.RECALLANT_DEVELOPER_ID ?? null,
-    project_id:
+    developer_id: auditUuid(process.env.RECALLANT_DEVELOPER_ID),
+    project_id: auditUuid(
       parseFlag(argv, "--project-id") ??
-      state?.project_id ??
-      config?.project_id ??
-      process.env.RECALLANT_PROJECT_ID ??
-      null,
-    session_id: parseFlag(argv, "--session-id") ?? state?.session_id ?? null,
+        state?.project_id ??
+        config?.project_id ??
+        process.env.RECALLANT_PROJECT_ID
+    ),
+    session_id: auditUuid(parseFlag(argv, "--session-id") ?? state?.session_id),
     project_path: dir
   };
 }

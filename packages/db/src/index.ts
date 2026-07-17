@@ -1227,6 +1227,7 @@ type ForgetManifest = {
   chunk_ids: string[];
   embedding_chunk_ids: string[];
   edge_ids: string[];
+  agent_observation_ids: string[];
   agent_memory_ids: string[];
   raw_artifact_ids: string[];
   source_ref_ids: string[];
@@ -1241,6 +1242,7 @@ type ForgetAffected = {
   chunks: number;
   embeddings: number;
   edges: number;
+  agent_observations: number;
   agent_memories: number;
   raw_artifacts: number;
   source_refs: number;
@@ -2307,6 +2309,7 @@ function forgetAffected(manifest: ForgetManifest): ForgetAffected {
     chunks: manifest.chunk_ids.length,
     embeddings: manifest.embedding_chunk_ids.length,
     edges: manifest.edge_ids.length,
+    agent_observations: manifest.agent_observation_ids.length,
     agent_memories: manifest.agent_memory_ids.length,
     raw_artifacts: manifest.raw_artifact_ids.length,
     source_refs: manifest.source_ref_ids.length,
@@ -2322,6 +2325,7 @@ function forgetAffectedTotal(affected: ForgetAffected) {
   return (
     affected.events +
     affected.chunks +
+    affected.agent_observations +
     affected.agent_memories +
     affected.raw_artifacts +
     affected.checkpoints
@@ -2949,12 +2953,27 @@ export class RecallantDb {
 
     const errorGroups = new Map<string, AgentErrorGroup>();
     const errors = recent.filter((item) => item.kind === "error");
+    const recoveryByTrace = new Map<string, AgentObservationRecord[]>();
+    const affectedRunsByFingerprint = new Map<string, Set<string>>();
+    for (const item of recent) {
+      if (
+        item.trace_id &&
+        (item.kind === "retry" || item.kind === "remediation" || item.kind === "verification")
+      ) {
+        const recovery = recoveryByTrace.get(item.trace_id) ?? [];
+        recovery.push(item);
+        recoveryByTrace.set(item.trace_id, recovery);
+      }
+      if (item.kind === "error") {
+        const fingerprint =
+          item.error_fingerprint ?? `unfingerprinted:${item.error_code ?? item.id}`;
+        const affectedRuns = affectedRunsByFingerprint.get(fingerprint) ?? new Set<string>();
+        affectedRuns.add(item.run_id);
+        affectedRunsByFingerprint.set(fingerprint, affectedRuns);
+      }
+    }
     for (const error of errors) {
-      const recovery = recent.filter(
-        (item) =>
-          item.trace_id === error.trace_id &&
-          (item.kind === "retry" || item.kind === "remediation" || item.kind === "verification")
-      );
+      const recovery = error.trace_id ? (recoveryByTrace.get(error.trace_id) ?? []) : [];
       const resolutionStatus: AgentErrorGroup["resolution_status"] = recovery.some(
         (item) => item.resolution_status === "resolved"
       )
@@ -2966,22 +2985,13 @@ export class RecallantDb {
         error.error_fingerprint ?? `unfingerprinted:${error.error_code ?? error.id}`;
       const existing = errorGroups.get(fingerprint);
       const severity = { resolved: 0, retrying: 1, unresolved: 2 } as const;
-      const affectedRuns = new Set(
-        errors
-          .filter(
-            (item) =>
-              (item.error_fingerprint ?? `unfingerprinted:${item.error_code ?? item.id}`) ===
-              fingerprint
-          )
-          .map((item) => item.run_id)
-      );
       errorGroups.set(fingerprint, {
         fingerprint,
         error_code: error.error_code,
         title: error.title ?? error.error_code ?? "Agent error",
         sample: (error.body ?? "No safe error summary was captured").slice(0, 500),
         occurrence_count: (existing?.occurrence_count ?? 0) + 1,
-        affected_run_count: affectedRuns.size,
+        affected_run_count: affectedRunsByFingerprint.get(fingerprint)?.size ?? 1,
         latest_at:
           !existing || error.occurred_at > existing.latest_at
             ? error.occurred_at
@@ -10132,6 +10142,7 @@ export class RecallantDb {
       "embeddings",
       "edges",
       "checkpoints",
+      "agent_observations",
       "agent_memories",
       "agent_memory_source_refs",
       "agent_memory_review_actions",
@@ -12443,6 +12454,7 @@ export class RecallantDb {
           (SELECT count(*)::int FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE project_id = $1)) AS embeddings,
           (SELECT count(*)::int FROM edges WHERE project_id = $1) AS edges,
           (SELECT count(*)::int FROM checkpoints WHERE project_id = $1) AS checkpoints,
+          (SELECT count(*)::int FROM agent_observations WHERE project_id = $1) AS agent_observations,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status NOT IN ('archived', 'rejected', 'superseded')) AS active_agent_memories,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_needed_memories,
@@ -12789,6 +12801,34 @@ export class RecallantDb {
           [[...artifactIds]]
         )
       : { rows: [{ count: 0 }] };
+    const observationEvidenceIds = forgetUniqueIds([
+      ...eventIds,
+      ...chunkIds,
+      ...artifactIds,
+      ...memoryIds
+    ]);
+    const observations = await queryable.query<{ id: string }>(
+      `
+        SELECT id::text
+        FROM agent_observations
+        WHERE project_id = $1
+          AND (
+            source_event_id = ANY($2::uuid[])
+            OR (
+              $3::text IS NOT NULL
+              AND concat_ws(
+                ' ', title, body, tool_name, error_code, rationale, redacted_metadata::text
+              ) ILIKE $3 ESCAPE '\\'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM unnest($4::text[]) evidence_id
+              WHERE redacted_metadata::text ILIKE ('%' || evidence_id || '%')
+            )
+          )
+      `,
+      [context.projectId, [...eventIds], searchPattern, observationEvidenceIds]
+    );
     relatedTraces.rows.forEach((row) => traceIds.add(row.id));
 
     const manifest: ForgetManifest = {
@@ -12798,6 +12838,7 @@ export class RecallantDb {
       chunk_ids: forgetUniqueIds([...chunkIds]),
       embedding_chunk_ids: forgetUniqueIds(embeddings.rows.map((row) => row.id)),
       edge_ids: forgetUniqueIds(edges.rows.map((row) => row.id)),
+      agent_observation_ids: forgetUniqueIds(observations.rows.map((row) => row.id)),
       agent_memory_ids: forgetUniqueIds([...memoryIds]),
       raw_artifact_ids: forgetUniqueIds([...artifactIds]),
       source_ref_ids: forgetUniqueIds(sourceRefs.rows.map((row) => row.id)),
@@ -12857,6 +12898,18 @@ export class RecallantDb {
       await client.query(
         "UPDATE events SET payload = $2, payload_hash = NULL WHERE id = ANY($1::uuid[])",
         [manifest.event_ids, redactedMetadata]
+      );
+    }
+    if (manifest.agent_observation_ids.length) {
+      await client.query(
+        `
+          UPDATE agent_observations
+          SET title = '[REDACTED]', body = '[REDACTED]', tool_name = NULL,
+              error_code = NULL, error_fingerprint = NULL, rationale = NULL,
+              redacted_metadata = $2, redacted = true, truncated = false
+          WHERE id = ANY($1::uuid[])
+        `,
+        [manifest.agent_observation_ids, redactedMetadata]
       );
     }
     if (manifest.source_ref_ids.length) {

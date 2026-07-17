@@ -94,6 +94,18 @@ try {
       "INSERT INTO agent_memories (developer_id, project_id, memory_type, title, body, created_by) VALUES ($1, $2, 'work_log', $3, $4, 'agent')",
       [developerId, projectId, "Backup smoke", searchNeedle]
     );
+    await database.query(
+      `
+        INSERT INTO agent_observations (
+          project_id, developer_id, session_id, run_id, turn_id, trace_id,
+          source_event_id, sequence_number, run_sequence_number, kind, status,
+          occurred_at, title, body, resolution_status, capture_profile, client_kind
+        )
+        VALUES ($1, $2, $3, $3, $4, $5, $6, 1, 1, 'user_prompt', 'success',
+                now(), 'Backup observation', $7, 'not_applicable', 'standard', 'codex')
+      `,
+      [projectId, developerId, sessionId, randomUUID(), randomUUID(), eventId, searchNeedle]
+    );
   } finally {
     await database.end();
   }
@@ -164,7 +176,8 @@ try {
     "remote_mcp_credentials",
     "remote_connect_requests",
     "settings_audit_events",
-    "system_activity_events"
+    "system_activity_events",
+    "agent_observations"
   ]) {
     assert(coveredTables.includes(table), `Backup inventory omitted ${table}`);
   }

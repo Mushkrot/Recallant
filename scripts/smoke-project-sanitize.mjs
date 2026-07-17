@@ -126,6 +126,7 @@ async function countProjectRows(projectId) {
           (SELECT count(*)::int FROM projects WHERE id = $1) AS projects,
           (SELECT count(*)::int FROM events WHERE project_id = $1) AS events,
           (SELECT count(*)::int FROM chunks WHERE project_id = $1) AS chunks,
+          (SELECT count(*)::int FROM agent_observations WHERE project_id = $1) AS agent_observations,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories,
           (SELECT count(*)::int FROM recall_traces WHERE project_id = $1) AS recall_traces,
           (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
@@ -141,6 +142,36 @@ async function countProjectRows(projectId) {
 
 async function addGovernanceRows(projectId) {
   await withClient(async (client) => {
+    const project = await client.query(
+      "SELECT developer_id::text FROM projects WHERE id = $1",
+      [projectId]
+    );
+    const projectDeveloperId = project.rows[0]?.developer_id;
+    if (!projectDeveloperId) throw new Error("Project sanitize fixture needs a project");
+    const session = await client.query(
+      "SELECT id::text FROM sessions WHERE project_id = $1 ORDER BY started_at DESC LIMIT 1",
+      [projectId]
+    );
+    const sessionId = session.rows[0]?.id ?? randomUUID();
+    if (!session.rows[0]?.id) {
+      await client.query(
+        "INSERT INTO sessions (id, project_id, client_kind, client_version) VALUES ($1, $2, 'codex', 'sanitize-smoke')",
+        [sessionId, projectId]
+      );
+    }
+    await client.query(
+      `
+        INSERT INTO agent_observations (
+          project_id, developer_id, session_id, run_id, turn_id, trace_id,
+          sequence_number, run_sequence_number, kind, status, occurred_at,
+          title, body, resolution_status, capture_profile, client_kind
+        )
+        VALUES ($1, $2, $3, $3, $4, $5, 1, 1, 'user_prompt', 'success', now(),
+                'Sanitize observation', 'Project sanitize should remove this observation.',
+                'not_applicable', 'standard', 'codex')
+      `,
+      [projectId, projectDeveloperId, sessionId, randomUUID(), randomUUID()]
+    );
     await client.query(
       `
         INSERT INTO settings_audit_events (
@@ -265,6 +296,7 @@ if (
   dryRun.database?.writes_database !== false ||
   !token ||
   dryRunCounts.events < 1 ||
+  dryRunCounts.agent_observations < 1 ||
   dryRunCounts.agent_memory_source_refs < 1 ||
   dryRunCounts.settings_audit_events < 1 ||
   dryRunCounts.system_activity_events < 1 ||
@@ -350,6 +382,7 @@ if (
   remainingRows.projects !== 0 ||
   remainingRows.events !== 0 ||
   remainingRows.chunks !== 0 ||
+  remainingRows.agent_observations !== 0 ||
   remainingRows.agent_memories !== 0 ||
   remainingRows.recall_traces !== 0 ||
   remainingRows.model_calls !== 0 ||

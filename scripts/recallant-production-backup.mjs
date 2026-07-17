@@ -115,6 +115,7 @@ function semanticProbes(expectedRows, restoredRows) {
     checkpoints: preserved("checkpoints"),
     chunks: preserved("chunks"),
     governed_memories: preserved("agent_memories"),
+    agent_observations: preserved("agent_observations"),
     graph: preserved("graph_candidates") && preserved("graph_candidate_source_refs"),
     remote_access: preserved("remote_mcp_credentials") && preserved("remote_connect_requests"),
     settings: preserved("system_settings") && preserved("project_settings"),

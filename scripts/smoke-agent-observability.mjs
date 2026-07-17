@@ -143,6 +143,35 @@ try {
   const gapCompleteness = analyzeAgentObservationCompleteness(artificialGap);
   assert(gapCompleteness.sequence_gaps.length > 0, "sequence gap was not detected");
 
+  const forgetPreview = await db.forget({
+    target: {
+      kind: "search_query",
+      selector: { query: "dependency did not answer", max_matches: 10 }
+    },
+    dry_run: true
+  });
+  assert(
+    forgetPreview.affected.agent_observations === 1,
+    `forget preview missed observation text: ${JSON.stringify(forgetPreview)}`
+  );
+  await db.forget({
+    target: {
+      kind: "search_query",
+      selector: { query: "dependency did not answer", max_matches: 10 }
+    },
+    dry_run: false,
+    confirmation: {
+      confirmed: true,
+      confirmation_token: forgetPreview.confirmation_token
+    }
+  });
+  const forgotten = await db.listAgentObservations({ session_id: sessionId, limit: 100 });
+  const forgottenError = forgotten.find((item) => item.id === error.id);
+  assert(
+    forgottenError?.body === "[REDACTED]" && forgottenError.redacted === true,
+    "confirmed forget did not redact the observation content"
+  );
+
   const storedRows = await client.query(
     "SELECT count(*)::int AS count FROM agent_observations WHERE project_id = $1",
     [project.projectId]
@@ -156,6 +185,7 @@ try {
         deduplication: "pass",
         redaction: "pass",
         retention: "pass",
+        confirmed_forget: "pass",
         error_chain: "resolved",
         completeness
       },
