@@ -54,9 +54,11 @@ import {
 } from "@recallant/contracts";
 import type {
   AgentObservationCompleteness,
+  AgentObservationKind,
   AgentObservationRecord,
   AppendAgentObservationInput
 } from "@recallant/contracts";
+import { agentObservationKindValues } from "@recallant/contracts";
 import { analyzeAgentObservationCompleteness, normalizeAgentObservation } from "@recallant/core";
 import { Pool, type PoolClient } from "pg";
 import {
@@ -70,6 +72,8 @@ import {
   normalizeSystemActivityFinish,
   normalizeSystemActivityStart,
   type FinishSystemActivityInput,
+  type ResolveSystemActivityScopeInput,
+  type ResolvedSystemActivityScope,
   type SystemActivityInput,
   type SystemActivityRecord
 } from "./system-activity.js";
@@ -101,6 +105,8 @@ export {
   redactedSystemActivityObject,
   systemActivitySchemaStatements,
   type FinishSystemActivityInput,
+  type ResolveSystemActivityScopeInput,
+  type ResolvedSystemActivityScope,
   type SystemActivityInput,
   type SystemActivityRecord,
   type SystemActivityStatus
@@ -946,6 +952,33 @@ export type AppendEventInput = {
   occurred_at?: string | null;
   dedup_key?: string | null;
 };
+
+const agentObservationKindSet = new Set<string>(agentObservationKindValues);
+
+function metadataString(metadata: JsonObject | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function metadataNumber(metadata: JsonObject | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function observationKindForLegacyEvent(
+  eventKind: string,
+  metadata?: JsonObject
+): AgentObservationKind {
+  const explicit = metadataString(metadata, "observation_kind");
+  if (explicit && agentObservationKindSet.has(explicit)) return explicit as AgentObservationKind;
+  if (eventKind === "turn_user") return "user_prompt";
+  if (eventKind === "turn_assistant") return "assistant_response";
+  if (eventKind === "tool_call") return "tool_call";
+  if (eventKind === "tool_result") return "tool_result";
+  if (eventKind === "terminal_output") return "terminal_output";
+  if (eventKind === "file_change") return "file_change";
+  return "system";
+}
 
 export type ImportSourceInput = {
   client_kind?: string;
@@ -2788,6 +2821,43 @@ export class RecallantDb {
     return analyzeAgentObservationCompleteness(observations);
   }
 
+  private async appendAgentObservationFailSoft(input: AppendAgentObservationInput) {
+    try {
+      const observation = await this.appendAgentObservation(input);
+      return {
+        status: "recorded" as const,
+        observation_id: observation.id,
+        sequence_number: observation.sequence_number,
+        redacted: observation.redacted,
+        truncated: observation.truncated
+      };
+    } catch {
+      return {
+        status: "failed" as const,
+        error_code: "OBSERVATION_CAPTURE_FAILED"
+      };
+    }
+  }
+
+  private async implicitLegacyTurnId(
+    sessionId: string,
+    role: "user" | "assistant",
+    sourceEventId: string
+  ) {
+    if (role === "user") return sourceEventId;
+    const recent = await this.listAgentObservations({ session_id: sessionId, limit: 200 });
+    const answered = new Set(
+      recent
+        .filter((item) => item.kind === "assistant_response" && item.turn_id)
+        .map((item) => item.turn_id)
+    );
+    return (
+      recent.find(
+        (item) => item.kind === "user_prompt" && item.turn_id && !answered.has(item.turn_id)
+      )?.turn_id ?? sourceEventId
+    );
+  }
+
   async ensureGraphCandidateSchema() {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS graph_candidates (
@@ -3123,6 +3193,81 @@ export class RecallantDb {
     return result.rows[0] as SystemActivityRecord;
   }
 
+  async resolveSystemActivityScope(
+    input: ResolveSystemActivityScopeInput = {}
+  ): Promise<ResolvedSystemActivityScope> {
+    const sessionId = stringOrNull(input.session_id);
+    if (sessionId) {
+      const session = await this.pool.query<{ project_id: string; developer_id: string }>(
+        `
+          SELECT s.project_id::text, p.developer_id::text
+          FROM sessions s
+          JOIN projects p ON p.id = s.project_id
+          WHERE s.id = $1
+        `,
+        [sessionId]
+      );
+      if (session.rows[0]) {
+        return {
+          developer_id: session.rows[0].developer_id,
+          project_id: session.rows[0].project_id,
+          session_id: sessionId,
+          resolved_by: "session_id"
+        };
+      }
+    }
+
+    const projectId = stringOrNull(input.project_id) ?? stringOrNull(this.config.projectId);
+    if (projectId) {
+      const project = await this.pool.query<{ developer_id: string }>(
+        "SELECT developer_id::text FROM projects WHERE id = $1",
+        [projectId]
+      );
+      if (project.rows[0]) {
+        return {
+          developer_id: project.rows[0].developer_id,
+          project_id: projectId,
+          session_id: null,
+          resolved_by: "project_id"
+        };
+      }
+    }
+
+    const projectPath = stringOrNull(input.project_path) ?? stringOrNull(this.config.projectPath);
+    if (projectPath) {
+      const developerId = stringOrNull(input.developer_id) ?? stringOrNull(this.config.developerId);
+      const values: unknown[] = [resolve(projectPath)];
+      const developerFilter = developerId ? "AND p.developer_id = $2::uuid" : "";
+      if (developerId) values.push(developerId);
+      const project = await this.pool.query<{ project_id: string; developer_id: string }>(
+        `
+          SELECT p.id::text AS project_id, p.developer_id::text
+          FROM projects p
+          WHERE p.primary_path = $1
+            ${developerFilter}
+          ORDER BY p.updated_at DESC
+          LIMIT 1
+        `,
+        values
+      );
+      if (project.rows[0]) {
+        return {
+          developer_id: project.rows[0].developer_id,
+          project_id: project.rows[0].project_id,
+          session_id: null,
+          resolved_by: "project_path"
+        };
+      }
+    }
+
+    return {
+      developer_id: null,
+      project_id: null,
+      session_id: null,
+      resolved_by: "not_found"
+    };
+  }
+
   async finishSystemActivity(input: FinishSystemActivityInput) {
     await this.ensureSystemActivitySchema();
     const activity = normalizeSystemActivityFinish(input);
@@ -3136,6 +3281,9 @@ export class RecallantDb {
             error_message = $4,
             related_ids = related_ids || $5::jsonb,
             redacted_metadata = redacted_metadata || $6::jsonb,
+            developer_id = coalesce($7::uuid, developer_id),
+            project_id = coalesce($8::uuid, project_id),
+            session_id = coalesce($9::uuid, session_id),
             updated_at = now()
         WHERE id = $1
         RETURNING *
@@ -3146,7 +3294,10 @@ export class RecallantDb {
         activity.error_code ?? null,
         activity.error_message,
         JSON.stringify(activity.related_ids),
-        JSON.stringify(activity.redacted_metadata)
+        JSON.stringify(activity.redacted_metadata),
+        activity.developer_id ?? null,
+        activity.project_id ?? null,
+        activity.session_id ?? null
       ]
     );
     return result.rows[0] ?? null;
@@ -6179,7 +6330,7 @@ export class RecallantDb {
       readPositiveIntEnv("RECALLANT_APPEND_TURN_MAX_CHARS", 200_000)
     );
     const context = await this.contextForSession(input.session_id);
-    return withTransaction(this.pool, async (client) => {
+    const legacy = await withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
       if (existing) return { event_id: existing, status: "duplicate" };
@@ -6234,6 +6385,24 @@ export class RecallantDb {
         embedding: embeddingResult
       };
     });
+    const sourceEventId = String(legacy.event_id);
+    const turnId = input.session_id
+      ? await this.implicitLegacyTurnId(input.session_id, input.role, sourceEventId)
+      : sourceEventId;
+    const observation = input.session_id
+      ? await this.appendAgentObservationFailSoft({
+          session_id: input.session_id,
+          turn_id: turnId,
+          source_event_id: sourceEventId,
+          dedup_key: `legacy-event:${sourceEventId}`,
+          kind: input.role === "user" ? "user_prompt" : "assistant_response",
+          status: "success",
+          occurred_at: input.occurred_at,
+          body: input.text,
+          client_kind: input.client_kind
+        })
+      : { status: "skipped" as const, reason: "session_id_required" };
+    return { ...legacy, observation };
   }
 
   async search(input: {
@@ -8485,7 +8654,7 @@ export class RecallantDb {
       );
     }
     const context = await this.contextForSession(input.session_id);
-    return withTransaction(this.pool, async (client) => {
+    const legacy = await withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
       if (existing) return { event_id: existing, raw_artifact_ids: [], status: "duplicate" };
@@ -8580,6 +8749,35 @@ export class RecallantDb {
         embedding: embeddingResult
       };
     });
+    const sourceEventId = String(legacy.event_id);
+    const observation = input.session_id
+      ? await this.appendAgentObservationFailSoft({
+          session_id: input.session_id,
+          run_id: metadataString(input.metadata, "run_id"),
+          turn_id: metadataString(input.metadata, "turn_id"),
+          trace_id: metadataString(input.metadata, "trace_id"),
+          parent_observation_id: metadataString(input.metadata, "parent_observation_id"),
+          source_event_id: sourceEventId,
+          dedup_key: `legacy-event:${sourceEventId}`,
+          kind: observationKindForLegacyEvent(input.event_kind, input.metadata),
+          status: metadataString(input.metadata, "status") as AppendAgentObservationInput["status"],
+          occurred_at: input.occurred_at,
+          duration_ms: metadataNumber(input.metadata, "duration_ms"),
+          title: metadataString(input.metadata, "title"),
+          body: input.text,
+          tool_name: metadataString(input.metadata, "tool_name"),
+          error_code: metadataString(input.metadata, "error_code"),
+          attempt_number: metadataNumber(input.metadata, "attempt_number"),
+          resolution_status: metadataString(
+            input.metadata,
+            "resolution_status"
+          ) as AppendAgentObservationInput["resolution_status"],
+          rationale: metadataString(input.metadata, "rationale"),
+          metadata: input.metadata,
+          client_kind: input.client_kind
+        })
+      : { status: "skipped" as const, reason: "session_id_required" };
+    return { ...legacy, observation };
   }
 
   async importSource(input: ImportSourceInput) {

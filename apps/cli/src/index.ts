@@ -56,6 +56,9 @@ import {
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
+  agentObservationKindValues,
+  agentObservationResolutionStatusValues,
+  agentObservationStatusValues,
   remoteMcpEndpointPath,
   remoteMcpBridgeEndpointUrl,
   remoteMcpBridgeHeaders,
@@ -67,6 +70,7 @@ import {
   graphCandidateSourceRefKindValues,
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
+  type AppendAgentObservationInput,
   type GraphCandidateMaintenanceActionKind,
   type GraphCandidateSourceRefKind,
   type RemoteMcpDoctorReport,
@@ -1335,6 +1339,22 @@ function eventKindForAgentKind(kind: string) {
   return "other";
 }
 
+function observationKindForAgentKind(kind: string) {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized === "prompt") return "user_prompt";
+  if (normalized === "assistant") return "assistant_response";
+  if (normalized === "tool" || normalized === "command") return "tool_call";
+  if (normalized === "command_result") return "tool_result";
+  if (normalized === "action" || normalized === "decision" || normalized === "checkpoint") {
+    return "system";
+  }
+  return agentObservationKindValues.includes(
+    normalized as (typeof agentObservationKindValues)[number]
+  )
+    ? (normalized as (typeof agentObservationKindValues)[number])
+    : "system";
+}
+
 function checkpointPayloadFromFlags(argv: readonly string[], fallbackSummary?: string): JsonObject {
   return {
     schema_version: 1,
@@ -1400,6 +1420,7 @@ async function appendSpoolRecord(
 const auditedCliCommands = new Set([
   "agent-checkpoint",
   "agent-event",
+  "agent-observe",
   "agent-start",
   "audit",
   "ask",
@@ -1514,6 +1535,22 @@ function currentCliExitCode(error?: unknown) {
   return error ? 1 : 0;
 }
 
+async function cliAuditScopeInput(argv: readonly string[]) {
+  const dir = resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd());
+  const [config, state] = await Promise.all([readProjectConfig(dir), readAgentSessionState(dir)]);
+  return {
+    developer_id: process.env.RECALLANT_DEVELOPER_ID ?? null,
+    project_id:
+      parseFlag(argv, "--project-id") ??
+      state?.project_id ??
+      config?.project_id ??
+      process.env.RECALLANT_PROJECT_ID ??
+      null,
+    session_id: parseFlag(argv, "--session-id") ?? state?.session_id ?? null,
+    project_path: dir
+  };
+}
+
 async function appendCliAuditSpool(
   argv: readonly string[],
   payload: Record<string, unknown>
@@ -1557,6 +1594,8 @@ async function startCliAudit(argv: readonly string[]): Promise<CliAuditContext |
     };
   }
   try {
+    const scopeInput = await cliAuditScopeInput(argv);
+    const scope = await database.resolveSystemActivityScope(scopeInput);
     const activity = await database.startSystemActivity({
       surface: "cli",
       operation,
@@ -1564,14 +1603,18 @@ async function startCliAudit(argv: readonly string[]): Promise<CliAuditContext |
       actor_id: "recallant-cli",
       client_kind: "recallant-cli",
       client_version: recallantCliVersion,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
       related_ids: {
-        project_id: process.env.RECALLANT_PROJECT_ID ?? null,
-        session_id: parseFlag(argv, "--session-id") ?? null
+        project_id: scope.project_id,
+        session_id: scope.session_id
       },
       metadata: {
         env_source: envLoadState.source,
         env_status: envLoadState.status,
-        argv: summarizeCliArgs(argv)
+        argv: summarizeCliArgs(argv),
+        scope_resolution: scope.resolved_by
       }
     });
     return {
@@ -1636,16 +1679,20 @@ async function finishCliAudit(
     });
   }
   try {
+    const scope = await audit.database.resolveSystemActivityScope(await cliAuditScopeInput(argv));
     const finished = await audit.database.finishSystemActivity({
       id: audit.activityId,
       status,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
       error_code: error
         ? cliAuditCodeFromError(error)
         : exitCode === 0
           ? null
           : `CLI_EXIT_${exitCode}`,
       error_message: error ? safeCliErrorMessage(error) : null,
-      metadata
+      metadata: { ...metadata, scope_resolution: scope.resolved_by }
     });
     return {
       durable: true,
@@ -1822,7 +1869,13 @@ function captureStatusFromState(state: AgentSessionState | null) {
 const captureTargetNames = [
   "session_start",
   "user_prompt",
+  "assistant_response",
+  "tool_call",
   "tool_result",
+  "error",
+  "retry",
+  "remediation",
+  "verification",
   "generic_event",
   "pre_compaction_checkpoint",
   "checkpoint",
@@ -6089,6 +6142,12 @@ async function runAgentEvent(argv: readonly string[]) {
   const clientKind = state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex";
   const metadata = {
     capture_kind: `agent_${kind}`,
+    observation_kind: observationKindForAgentKind(kind),
+    turn_id: parseFlag(argv, "--turn-id") || process.env.RECALLANT_HOOK_TURN_ID || null,
+    trace_id: parseFlag(argv, "--trace-id") || process.env.RECALLANT_HOOK_TRACE_ID || null,
+    parent_observation_id:
+      parseFlag(argv, "--parent-observation-id") || process.env.RECALLANT_HOOK_PARENT_ID || null,
+    tool_name: parseFlag(argv, "--tool-name") || null,
     project_dir: dir,
     title
   };
@@ -6206,6 +6265,155 @@ async function runAgentEvent(argv: readonly string[]) {
         local_id: record.local_id,
         spool_path: spoolPath(argv),
         warning: "Server write failed or is unavailable; event was spooled locally."
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+function optionalNumberFlag(argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`VALIDATION_ERROR: ${name} must be a number`);
+  return parsed;
+}
+
+function isAgentObservationValidationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.startsWith("VALIDATION_ERROR:") ||
+    message.includes(" must be a UUID") ||
+    message.includes("Unknown parent_observation_id") ||
+    message.includes("parent_observation_id must belong") ||
+    message.includes("occurred_at must be an ISO timestamp")
+  );
+}
+
+async function runAgentObserve(argv: readonly string[]) {
+  const kind = String(parseFlag(argv, "--kind") ?? "system")
+    .trim()
+    .toLowerCase();
+  if (!agentObservationKindValues.includes(kind as (typeof agentObservationKindValues)[number])) {
+    throw new Error(
+      `VALIDATION_ERROR: --kind must be one of ${agentObservationKindValues.join(", ")}`
+    );
+  }
+  const status = parseFlag(argv, "--status");
+  if (
+    status &&
+    !agentObservationStatusValues.includes(status as (typeof agentObservationStatusValues)[number])
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: --status must be one of ${agentObservationStatusValues.join(", ")}`
+    );
+  }
+  const resolutionStatus = parseFlag(argv, "--resolution-status");
+  if (
+    resolutionStatus &&
+    !agentObservationResolutionStatusValues.includes(
+      resolutionStatus as (typeof agentObservationResolutionStatusValues)[number]
+    )
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: --resolution-status must be one of ${agentObservationResolutionStatusValues.join(", ")}`
+    );
+  }
+
+  const dir = projectDir(argv);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  const body = (parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ")) || null;
+  const inputWithoutSession = {
+    run_id: parseFlag(argv, "--run-id") || null,
+    turn_id: parseFlag(argv, "--turn-id") || null,
+    trace_id: parseFlag(argv, "--trace-id") || null,
+    parent_observation_id: parseFlag(argv, "--parent-observation-id") || null,
+    source_event_id: parseFlag(argv, "--source-event-id") || null,
+    dedup_key: parseFlag(argv, "--dedup-key") || null,
+    kind: kind as (typeof agentObservationKindValues)[number],
+    status: (status || undefined) as AppendAgentObservationInput["status"],
+    occurred_at: parseFlag(argv, "--occurred-at") || null,
+    duration_ms: optionalNumberFlag(argv, "--duration-ms"),
+    title: parseFlag(argv, "--title") || null,
+    body,
+    tool_name: parseFlag(argv, "--tool-name") || null,
+    error_code: parseFlag(argv, "--error-code") || null,
+    attempt_number: optionalNumberFlag(argv, "--attempt-number"),
+    resolution_status: (resolutionStatus ||
+      undefined) as AppendAgentObservationInput["resolution_status"],
+    rationale: parseFlag(argv, "--rationale") || null,
+    metadata: parseJsonObjectOrEmpty(parseFlag(argv, "--metadata-json") ?? null),
+    client_kind: state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex",
+    client_version: parseFlag(argv, "--client-version") || null
+  };
+
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
+      }
+      const observation = await database.appendAgentObservation({
+        ...inputWithoutSession,
+        session_id: state.session_id
+      });
+      await writeAgentSessionState(dir, {
+        ...state,
+        updated_at: new Date().toISOString(),
+        last_memory_write_at: new Date().toISOString(),
+        last_event_id: observation.source_event_id ?? state.last_event_id
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_observe",
+            mode: "server",
+            project_id: state.project_id,
+            session_id: state.session_id,
+            observation
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      if (isHardProjectIdentityError(error) || isAgentObservationValidationError(error)) {
+        throw error;
+      }
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+
+  const record = await appendSpoolRecord(argv, "observation", {
+    ...inputWithoutSession,
+    metadata: {
+      ...(inputWithoutSession.metadata ?? {}),
+      local_session_id: state.session_id
+    }
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_observe",
+        mode: "offline_spool",
+        kind,
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        warning: "Server write failed or is unavailable; observation was spooled locally."
       },
       null,
       2
@@ -6514,7 +6722,11 @@ async function runAgentCloseout(argv: readonly string[]) {
       client_kind: state.client_kind,
       event_kind: "system",
       text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
-      metadata: { capture_kind: "agent_closeout", checkpoint_payload: payload },
+      metadata: {
+        capture_kind: "agent_closeout",
+        observation_kind: "closeout",
+        checkpoint_payload: payload
+      },
       raw_artifacts: []
     });
     await writeAgentSessionState(dir, {
@@ -6578,7 +6790,11 @@ async function runAgentCloseout(argv: readonly string[]) {
       client_kind: state.client_kind,
       event_kind: "system",
       text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
-      metadata: { capture_kind: "agent_closeout", checkpoint_payload: payload },
+      metadata: {
+        capture_kind: "agent_closeout",
+        observation_kind: "closeout",
+        checkpoint_payload: payload
+      },
       raw_artifacts: [],
       dedup_key: dedupHash("agent-closeout", {
         session_id: state.session_id,
@@ -7079,26 +7295,33 @@ async function runSyncSpool(argv: readonly string[]) {
     for (const record of unsynced) {
       const payload = record.payload as Record<string, unknown>;
       const result =
-        record.record_kind === "event"
-          ? await database.appendEvent({
-              session_id: syncSessionId,
-              client_kind: String(payload.client_kind ?? "codex"),
-              event_kind: String(payload.event_kind ?? "other"),
-              text: (payload.text as string | null | undefined) ?? null,
-              metadata: (payload.metadata as Record<string, unknown> | undefined) ?? {},
-              raw_artifacts: (payload.raw_artifacts as RawArtifactInput[] | undefined) ?? [],
+        record.record_kind === "observation"
+          ? await database.appendAgentObservation({
+              ...(payload as Omit<AppendAgentObservationInput, "session_id">),
+              session_id: String(syncSessionId),
               dedup_key: String(payload.dedup_key ?? record.dedup_key)
             })
-          : await database.appendTurn({
-              session_id: syncSessionId,
-              client_kind: String(payload.client_kind ?? "codex"),
-              role: payload.role === "assistant" ? "assistant" : "user",
-              text: String(payload.text ?? ""),
-              dedup_key: String(payload.dedup_key ?? record.dedup_key)
-            });
+          : record.record_kind === "event"
+            ? await database.appendEvent({
+                session_id: syncSessionId,
+                client_kind: String(payload.client_kind ?? "codex"),
+                event_kind: String(payload.event_kind ?? "other"),
+                text: (payload.text as string | null | undefined) ?? null,
+                metadata: (payload.metadata as Record<string, unknown> | undefined) ?? {},
+                raw_artifacts: (payload.raw_artifacts as RawArtifactInput[] | undefined) ?? [],
+                dedup_key: String(payload.dedup_key ?? record.dedup_key)
+              })
+            : await database.appendTurn({
+                session_id: syncSessionId,
+                client_kind: String(payload.client_kind ?? "codex"),
+                role: payload.role === "assistant" ? "assistant" : "user",
+                text: String(payload.text ?? ""),
+                dedup_key: String(payload.dedup_key ?? record.dedup_key)
+              });
       synced[String(record.local_id)] = {
-        server_event_id: result.event_id,
-        status: result.status,
+        server_event_id: "event_id" in result ? result.event_id : null,
+        server_observation_id: "id" in result ? result.id : null,
+        status: "status" in result ? result.status : "created",
         synced_at: new Date().toISOString()
       };
     }
@@ -7220,15 +7443,51 @@ function localHookKitFiles() {
   });
   const promptScript = failSoftHookScript({
     command:
-      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind prompt --title "User prompt captured by hook" --text "$TEXT"',
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind prompt --turn-id "${RECALLANT_HOOK_TURN_ID:-}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --title "User prompt captured by hook" --text "$TEXT"',
     stdinText: true,
     fallbackEventKind: "agent_prompt"
   });
   const toolResultScript = failSoftHookScript({
     command:
-      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind tool_result --title "Tool result captured by hook" --text "$TEXT"',
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind tool_result --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --title "Tool result captured by hook" --text "$TEXT"',
     stdinText: true,
     fallbackEventKind: "agent_tool_result"
+  });
+  const assistantResponseScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind assistant_response --turn-id "${RECALLANT_HOOK_TURN_ID:-}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_assistant_response"
+  });
+  const toolCallScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind tool_call --tool-name "${1:-tool}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_tool_call"
+  });
+  const errorScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind error --error-code "${1:-AGENT_ERROR}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --attempt-number "${RECALLANT_HOOK_ATTEMPT:-1}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_error"
+  });
+  const retryScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind retry --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --attempt-number "${RECALLANT_HOOK_ATTEMPT:-2}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_retry"
+  });
+  const remediationScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind remediation --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_remediation"
+  });
+  const verificationScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind verification --status success --resolution-status resolved --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_verification"
   });
   const startScript = failSoftHookScript({
     command:
@@ -7277,7 +7536,12 @@ Client integrations can call:
 
 - \`start-session.sh "<task hint>"\` at session start;
 - \`user-prompt.sh < prompt.txt\` when the owner sends a prompt;
+- \`assistant-response.sh < response.txt\` after an assistant response;
+- \`tool-call.sh "tool-name" < call.txt\` before a meaningful tool call;
 - \`tool-result.sh < result.txt\` after meaningful tool/command results;
+- \`error.sh "ERROR_CODE" < error.txt\`, then \`retry.sh\`, \`remediation.sh\`, and
+  \`verification.sh\` to preserve the recovery chain. Set \`RECALLANT_HOOK_TRACE_ID\`,
+  \`RECALLANT_HOOK_PARENT_ID\`, and \`RECALLANT_HOOK_ATTEMPT\` when correlation is available;
 - \`capture-event.sh action|decision|test < input.txt\` for generic capture;
 - \`pre-compaction.sh < summary.txt\` before context compaction; this records state only.
 - \`checkpoint.sh < summary.txt\` before pause or handoff; this is an advanced state helper,
@@ -7287,7 +7551,7 @@ Client integrations can call:
 `;
   const manifest = `${JSON.stringify(
     {
-      schema_version: 1,
+      schema_version: 2,
       name: "Recallant Local Hook Kit",
       fail_soft: true,
       writes_global_config: false,
@@ -7304,9 +7568,33 @@ Client integrations can call:
           script: ".recallant/hooks/user-prompt.sh",
           input: "owner prompt on stdin"
         },
+        assistant_response: {
+          script: ".recallant/hooks/assistant-response.sh",
+          input: "assistant response on stdin; optional turn and trace ids from environment"
+        },
+        tool_call: {
+          script: ".recallant/hooks/tool-call.sh",
+          input: "tool name argument and bounded call summary on stdin"
+        },
         tool_result: {
           script: ".recallant/hooks/tool-result.sh",
           input: "meaningful tool or command result on stdin"
+        },
+        error: {
+          script: ".recallant/hooks/error.sh",
+          input: "error code argument and safe error summary on stdin"
+        },
+        retry: {
+          script: ".recallant/hooks/retry.sh",
+          input: "retry summary on stdin with optional correlation environment"
+        },
+        remediation: {
+          script: ".recallant/hooks/remediation.sh",
+          input: "remediation summary on stdin with optional correlation environment"
+        },
+        verification: {
+          script: ".recallant/hooks/verification.sh",
+          input: "verification result on stdin with optional correlation environment"
         },
         generic_event: {
           script: ".recallant/hooks/capture-event.sh",
@@ -7351,8 +7639,38 @@ Client integrations can call:
       executable: true
     },
     {
+      path: ".recallant/hooks/assistant-response.sh",
+      content: assistantResponseScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/tool-call.sh",
+      content: toolCallScript,
+      executable: true
+    },
+    {
       path: ".recallant/hooks/tool-result.sh",
       content: toolResultScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/error.sh",
+      content: errorScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/retry.sh",
+      content: retryScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/remediation.sh",
+      content: remediationScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/verification.sh",
+      content: verificationScript,
       executable: true
     },
     {
@@ -11426,7 +11744,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -11499,6 +11817,7 @@ async function main(argv: readonly string[]) {
   if (command === "cleanup") return runCleanup(argv);
   if (command === "agent-start") return runAgentStart(argv);
   if (command === "agent-event") return runAgentEvent(argv);
+  if (command === "agent-observe") return runAgentObserve(argv);
   if (command === "agent-checkpoint") return runAgentCheckpoint(argv);
   if (command === "agent-closeout") return runAgentCloseout(argv);
   if (command === "demo-capture") return runDemoCapture(argv);

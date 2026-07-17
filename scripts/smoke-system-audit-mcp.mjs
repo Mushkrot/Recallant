@@ -12,7 +12,8 @@ const projectId = randomUUID();
 const projectPath = `/tmp/recallant-system-audit-mcp-${randomUUID()}`;
 const fakeApiKey = `sk-mcp-audit-${randomUUID().replaceAll("-", "")}`;
 const fakeBearer = `Bearer ${randomUUID().replaceAll("-", "")}`;
-const forbiddenMarkers = [fakeApiKey, fakeBearer, projectPath];
+const fakeDatabaseUrl = `postgres://fixture:fixture-secret@127.0.0.1/fixture`;
+const forbiddenMarkers = [fakeApiKey, fakeBearer, fakeDatabaseUrl, projectPath];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -57,16 +58,18 @@ async function queryAuditRows(sinceIso) {
     const result = await client.query(
       `
         SELECT operation, status, error_code, duration_ms, related_ids, redacted_metadata,
-               trace_id, error_message
+               trace_id, error_message, project_id, developer_id, session_id
         FROM system_activity_events
         WHERE surface = 'mcp'
           AND started_at >= $1::timestamptz
           AND operation = ANY($2::text[])
+          AND project_id = $3::uuid
         ORDER BY started_at ASC
       `,
       [
         sinceIso,
-        ["memory_start_session", "memory_create_agent_memory", "memory_heartbeat"]
+        ["memory_start_session", "memory_create_agent_memory", "memory_heartbeat"],
+        projectId
       ]
     );
     return result.rows;
@@ -102,7 +105,7 @@ await withMcpClient(async (client) => {
     memory_type: "decision",
     scope: "project",
     title: "Invalid source-free memory",
-    body: "This should produce a structured validation error.",
+    body: `This should reject the credentialed URL ${fakeDatabaseUrl}.`,
     created_by: "agent",
     source_refs: [],
     metadata: {
@@ -148,6 +151,16 @@ const rateLimitRow = rows.find(
 assert(successRow, `Missing successful MCP audit row: ${JSON.stringify(rows)}`);
 assert(validationRow, `Missing validation-error MCP audit row: ${JSON.stringify(rows)}`);
 assert(rateLimitRow, `Missing rate-limit MCP audit row: ${JSON.stringify(rows)}`);
+assert(
+  successRow.project_id === projectId &&
+    successRow.developer_id === developerId &&
+    successRow.session_id === successPayload.session_id,
+  `MCP audit scope was not resolved: ${JSON.stringify(successRow)}`
+);
+assert(
+  validationRow.project_id === projectId && validationRow.developer_id === developerId,
+  `MCP validation audit scope was not resolved: ${JSON.stringify(validationRow)}`
+);
 assert(!containsAny(rows, forbiddenMarkers), "MCP audit rows leaked raw argument values");
 
 delete process.env.RECALLANT_DATABASE_URL;
@@ -167,7 +180,9 @@ process.stdout.write(
         status: successRow.status,
         duration_recorded: typeof successRow.duration_ms === "number",
         related_id_keys: Object.keys(successRow.related_ids ?? {}).sort(),
-        trace_recorded: Boolean(successRow.trace_id)
+        trace_recorded: Boolean(successRow.trace_id),
+        project_scoped: successRow.project_id === projectId,
+        session_scoped: successRow.session_id === successPayload.session_id
       },
       validation_error_row: {
         operation: validationRow.operation,

@@ -33,6 +33,12 @@ type McpAuditContext = {
   database: RecallantDb | null;
   activity: SystemActivityRecord | null;
   status: McpAuditStatus;
+  scopeInput: {
+    developer_id?: string | null;
+    project_id?: string | null;
+    session_id?: string | null;
+    project_path?: string | null;
+  };
 };
 
 function readRateLimitPerMinute() {
@@ -158,9 +164,25 @@ function attachAuditStatus(payload: Record<string, unknown>, audit: McpAuditStat
 
 async function startMcpAudit(
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  context: RecallantToolsRuntimeContext
 ): Promise<McpAuditContext> {
   const database = createRecallantDbFromEnv();
+  const scopeInput = {
+    developer_id:
+      uuidOrNull(args.developer_id) ??
+      uuidOrNull(context.developerId) ??
+      uuidOrNull(process.env.RECALLANT_DEVELOPER_ID),
+    project_id:
+      uuidOrNull(args.project_id) ??
+      uuidOrNull(context.projectId) ??
+      uuidOrNull(process.env.RECALLANT_PROJECT_ID),
+    session_id: uuidOrNull(args.session_id) ?? uuidOrNull(context.sessionId),
+    project_path:
+      typeof args.project_path === "string"
+        ? args.project_path
+        : (context.projectPath ?? process.env.RECALLANT_PROJECT_PATH ?? null)
+  };
   const unavailable: McpAuditStatus = {
     durable: false,
     surface: "mcp",
@@ -168,8 +190,9 @@ async function startMcpAudit(
     status: "unavailable",
     reason: "Recallant storage is not configured for this MCP server process."
   };
-  if (!database) return { database: null, activity: null, status: unavailable };
+  if (!database) return { database: null, activity: null, status: unavailable, scopeInput };
   try {
+    const scope = await database.resolveSystemActivityScope(scopeInput);
     const activity = await database.startSystemActivity({
       surface: "mcp",
       operation: toolName,
@@ -180,18 +203,20 @@ async function startMcpAudit(
         typeof args.client_version === "string"
           ? args.client_version
           : process.env.RECALLANT_CLIENT_VERSION,
-      developer_id: null,
-      project_id: null,
-      session_id: null,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
       related_ids: relatedIdsFromArgs(args),
       metadata: {
         argument_keys: Object.keys(args).sort(),
-        arguments: summarizeArgs(args)
+        arguments: summarizeArgs(args),
+        scope_resolution: scope.resolved_by
       }
     });
     return {
       database,
       activity,
+      scopeInput,
       status: {
         durable: true,
         surface: "mcp",
@@ -205,6 +230,7 @@ async function startMcpAudit(
     return {
       database: null,
       activity: null,
+      scopeInput,
       status: {
         durable: false,
         surface: "mcp",
@@ -225,15 +251,24 @@ async function finishMcpAudit(
 ) {
   if (!audit.database || !audit.activity) return audit.status;
   try {
+    const scope = await audit.database.resolveSystemActivityScope({
+      ...audit.scopeInput,
+      project_id: uuidOrNull(payload?.project_id) ?? audit.scopeInput.project_id,
+      session_id: uuidOrNull(payload?.session_id) ?? audit.scopeInput.session_id
+    });
     const finished = await audit.database.finishSystemActivity({
       id: audit.activity.id,
       status,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
       error_code: error ? codeFromError(error) : null,
       error_message: error ? safeErrorMessage(error) : null,
       related_ids: payload ? relatedIdsFromResult(payload) : {},
       metadata: {
         result_keys: payload ? Object.keys(payload).sort() : [],
-        error_code: error ? codeFromError(error) : null
+        error_code: error ? codeFromError(error) : null,
+        scope_resolution: scope.resolved_by
       }
     });
     return {
@@ -274,7 +309,7 @@ export function createRecallantMcpServer(context: RecallantToolsRuntimeContext =
       },
       async (args) => {
         const toolArgs = args as Record<string, unknown>;
-        const audit = await startMcpAudit(tool.name, toolArgs);
+        const audit = await startMcpAudit(tool.name, toolArgs, context);
         try {
           checkRateLimit(tool.name);
           const payload = await tool.handler(toolArgs);

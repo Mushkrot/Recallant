@@ -123,4 +123,6 @@ export type AgentObservationCompleteness = {
   redacted_observations: number;
   truncated_observations: number;
   coverage: Partial<Record<AgentObservationKind, number>>;
+  client_coverage: Record<string, number>;
+  unknown_client_observations: number;
 };

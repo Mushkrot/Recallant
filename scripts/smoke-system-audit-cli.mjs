@@ -88,14 +88,21 @@ async function queryCliAuditRows(sinceIso, operations) {
     const result = await client.query(
       `
         SELECT operation, status, error_code, duration_ms, related_ids, redacted_metadata,
-               trace_id, error_message
+               trace_id, error_message, project_id, developer_id, session_id
         FROM system_activity_events
         WHERE surface = 'cli'
           AND started_at >= $1::timestamptz
           AND operation = ANY($2::text[])
+          AND (
+            developer_id = $3::uuid
+            OR (
+              developer_id IS NULL
+              AND redacted_metadata->'argv'->>'project_dir_basename' = $4
+            )
+          )
         ORDER BY started_at ASC
       `,
-      [sinceIso, operations]
+      [sinceIso, operations, developerId, projectDir.split("/").filter(Boolean).at(-1)]
     );
     return result.rows;
   } finally {
@@ -130,6 +137,7 @@ const requiredOperations = [
   "ask",
   "agent-start",
   "agent-event",
+  "agent-observe",
   "agent-checkpoint"
 ];
 const sinceIso = new Date(Date.now() - 1000).toISOString();
@@ -143,10 +151,16 @@ const onboard = runCliJson([
   "--format",
   "json"
 ]);
-assert(onboard.status === "plan_only", `onboard dry-run did not succeed: ${JSON.stringify(onboard)}`);
+assert(
+  onboard.status === "plan_only",
+  `onboard dry-run did not succeed: ${JSON.stringify(onboard)}`
+);
 
 const doctor = runCliJson(["doctor", "--project-dir", projectDir, "--format", "json"]);
-assert(doctor.postgres?.reachable === true, `doctor did not reach postgres: ${JSON.stringify(doctor.postgres)}`);
+assert(
+  doctor.postgres?.reachable === true,
+  `doctor did not reach postgres: ${JSON.stringify(doctor.postgres)}`
+);
 
 const agentStart = runCliJson([
   "agent-start",
@@ -157,7 +171,10 @@ const agentStart = runCliJson([
   "--task-hint",
   "system audit cli smoke"
 ]);
-assert(agentStart.ok === true && agentStart.project_id, `agent-start failed: ${JSON.stringify(agentStart)}`);
+assert(
+  agentStart.ok === true && agentStart.project_id,
+  `agent-start failed: ${JSON.stringify(agentStart)}`
+);
 
 const agentEvent = runCliJson([
   "agent-event",
@@ -170,7 +187,10 @@ const agentEvent = runCliJson([
   "--text",
   "System audit CLI smoke recorded a durable decision."
 ]);
-assert(agentEvent.ok === true && agentEvent.mode === "server", `agent-event failed: ${JSON.stringify(agentEvent)}`);
+assert(
+  agentEvent.ok === true && agentEvent.mode === "server",
+  `agent-event failed: ${JSON.stringify(agentEvent)}`
+);
 
 const duplicateEvent = runCliJson([
   "agent-event",
@@ -186,6 +206,26 @@ const duplicateEvent = runCliJson([
 assert(
   duplicateEvent.ok === true && duplicateEvent.mode === "server",
   `duplicate-key agent-event failed: ${JSON.stringify(duplicateEvent)}`
+);
+
+const observation = runCliJson([
+  "agent-observe",
+  "--project-dir",
+  projectDir,
+  "--kind",
+  "terminal_command",
+  "--title",
+  "Inspect scoped CLI audit",
+  "--text",
+  "Run the bounded CLI audit verification fixture.",
+  "--rationale",
+  "Verify the new observation command and project scope."
+]);
+assert(
+  observation.ok === true &&
+    observation.mode === "server" &&
+    observation.observation?.kind === "terminal_command",
+  `agent-observe failed: ${JSON.stringify(observation)}`
 );
 
 const checkpoint = runCliJson([
@@ -239,36 +279,30 @@ assert(
   `project-sanitize dry-run failed: ${JSON.stringify(sanitize.database)}`
 );
 
+runCli(["agent-event", "--project-dir", projectDir, "--kind", "action", "--text", ""], {
+  expectedStatus: 1
+});
+
 runCli(
   [
     "agent-event",
     "--project-dir",
-    projectDir,
+    offlineProjectDir,
+    "--spool-dir",
+    offlineSpoolDir,
     "--kind",
     "action",
     "--text",
-    ""
+    `Offline audit fallback must redact ${fakeApiKey} ${fakeBearer} ${fakeDatabaseUrl}`
   ],
-  { expectedStatus: 1 }
-);
-
-runCli([
-  "agent-event",
-  "--project-dir",
-  offlineProjectDir,
-  "--spool-dir",
-  offlineSpoolDir,
-  "--kind",
-  "action",
-  "--text",
-  `Offline audit fallback must redact ${fakeApiKey} ${fakeBearer} ${fakeDatabaseUrl}`
-], {
-  omitDatabaseUrl: true,
-  env: {
-    HOME: offlineHome,
-    RECALLANT_ENV_FILE: join(offlineProjectDir, "missing-recallant.env")
+  {
+    omitDatabaseUrl: true,
+    env: {
+      HOME: offlineHome,
+      RECALLANT_ENV_FILE: join(offlineProjectDir, "missing-recallant.env")
+    }
   }
-});
+);
 
 const rows = await queryCliAuditRows(sinceIso, requiredOperations);
 const successByOperation = Object.fromEntries(
@@ -285,22 +319,44 @@ const validationErrorRow = rows.find(
 );
 assert(validationErrorRow, `missing validation error audit row: ${JSON.stringify(rows)}`);
 const keyedOutcomeRow = rows.find(
-  (row) => row.operation === "agent-event" && row.redacted_metadata?.outcome_kind === "idempotent_keyed"
+  (row) =>
+    row.operation === "agent-event" && row.redacted_metadata?.outcome_kind === "idempotent_keyed"
 );
 assert(keyedOutcomeRow, `missing idempotent-keyed outcome row: ${JSON.stringify(rows)}`);
 assert(!containsAny(rows, forbiddenMarkers), "CLI durable audit rows leaked raw sensitive markers");
 
 const auditSpool = await readJsonl(join(offlineSpoolDir, "audit.jsonl"));
 const fallbackRecord = auditSpool.at(-1);
-assert(fallbackRecord?.record_kind === "cli_audit", `missing cli audit spool record: ${JSON.stringify(auditSpool)}`);
+assert(
+  fallbackRecord?.record_kind === "cli_audit",
+  `missing cli audit spool record: ${JSON.stringify(auditSpool)}`
+);
 assert(
   fallbackRecord.payload?.durable_status?.status === "pending_durable_audit",
   `fallback audit did not report pending durable audit: ${JSON.stringify(fallbackRecord)}`
 );
-assert(fallbackRecord.payload?.status === "success", `fallback audit did not finish success: ${JSON.stringify(fallbackRecord)}`);
-assert(!containsAny(auditSpool, forbiddenMarkers), "CLI fallback audit spool leaked raw sensitive markers");
+assert(
+  fallbackRecord.payload?.status === "success",
+  `fallback audit did not finish success: ${JSON.stringify(fallbackRecord)}`
+);
+assert(
+  !containsAny(auditSpool, forbiddenMarkers),
+  "CLI fallback audit spool leaked raw sensitive markers"
+);
 
 const successRows = rows.filter((row) => row.status === "success");
+const scopedSuccessRows = successRows.filter((row) => row.operation !== "onboard");
+assert(
+  scopedSuccessRows.every(
+    (row) => row.project_id === agentStart.project_id && row.developer_id === developerId
+  ),
+  `CLI audit rows were not project scoped: ${JSON.stringify(scopedSuccessRows)}`
+);
+const agentStartAudit = scopedSuccessRows.find((row) => row.operation === "agent-start");
+assert(
+  agentStartAudit?.session_id === agentStart.session_id,
+  `agent-start audit was not session scoped: ${JSON.stringify(agentStartAudit)}`
+);
 process.stdout.write(
   `${JSON.stringify(
     {
@@ -309,6 +365,8 @@ process.stdout.write(
         (operation) => successByOperation[operation]
       ),
       success_row_count: successRows.length,
+      project_scoped_success_count: scopedSuccessRows.length,
+      agent_start_session_scoped: agentStartAudit?.session_id === agentStart.session_id,
       validation_error_row: {
         operation: validationErrorRow.operation,
         status: validationErrorRow.status,

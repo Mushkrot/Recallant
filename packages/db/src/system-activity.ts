@@ -21,10 +21,27 @@ export type SystemActivityInput = {
 export type FinishSystemActivityInput = {
   id: string;
   status: Exclude<SystemActivityStatus, "started">;
+  developer_id?: string | null;
+  project_id?: string | null;
+  session_id?: string | null;
   error_code?: string | null;
   error_message?: string | null;
   related_ids?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
+};
+
+export type ResolveSystemActivityScopeInput = {
+  developer_id?: string | null;
+  project_id?: string | null;
+  session_id?: string | null;
+  project_path?: string | null;
+};
+
+export type ResolvedSystemActivityScope = {
+  developer_id: string | null;
+  project_id: string | null;
+  session_id: string | null;
+  resolved_by: "session_id" | "project_id" | "project_path" | "not_found";
 };
 
 export type SystemActivityRecord = {

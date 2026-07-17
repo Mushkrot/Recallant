@@ -637,7 +637,17 @@ assert(
 );
 const hookScript = await readFile(`${projectDir}/.recallant/hooks/capture-event.sh`, "utf8");
 const promptHookScript = await readFile(`${projectDir}/.recallant/hooks/user-prompt.sh`, "utf8");
+const assistantHookScript = await readFile(
+  `${projectDir}/.recallant/hooks/assistant-response.sh`,
+  "utf8"
+);
+const toolCallHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-call.sh`, "utf8");
 const toolHookScript = await readFile(`${projectDir}/.recallant/hooks/tool-result.sh`, "utf8");
+const errorHookScript = await readFile(`${projectDir}/.recallant/hooks/error.sh`, "utf8");
+const verificationHookScript = await readFile(
+  `${projectDir}/.recallant/hooks/verification.sh`,
+  "utf8"
+);
 const preCompactionHookScript = await readFile(
   `${projectDir}/.recallant/hooks/pre-compaction.sh`,
   "utf8"
@@ -655,7 +665,13 @@ assert(
   `Capture hook should be fail-soft and call agent-event: ${hookScript}`
 );
 assert(
-  promptHookScript.includes("--kind prompt") && toolHookScript.includes("--kind tool_result"),
+  promptHookScript.includes("--kind prompt") &&
+    promptHookScript.includes("--turn-id") &&
+    assistantHookScript.includes("--kind assistant_response") &&
+    toolCallHookScript.includes("--kind tool_call") &&
+    toolHookScript.includes("--kind tool_result") &&
+    errorHookScript.includes("--kind error") &&
+    verificationHookScript.includes("--resolution-status resolved"),
   `Prompt/tool hooks should target explicit capture kinds: ${promptHookScript} ${toolHookScript}`
 );
 assert(
@@ -678,7 +694,13 @@ assert(
   hookManifest.fail_soft === true &&
     hookManifest.writes_global_config === false &&
     hookManifest.targets?.user_prompt?.script === ".recallant/hooks/user-prompt.sh" &&
+    hookManifest.targets?.assistant_response?.script === ".recallant/hooks/assistant-response.sh" &&
+    hookManifest.targets?.tool_call?.script === ".recallant/hooks/tool-call.sh" &&
     hookManifest.targets?.tool_result?.script === ".recallant/hooks/tool-result.sh" &&
+    hookManifest.targets?.error?.script === ".recallant/hooks/error.sh" &&
+    hookManifest.targets?.retry?.script === ".recallant/hooks/retry.sh" &&
+    hookManifest.targets?.remediation?.script === ".recallant/hooks/remediation.sh" &&
+    hookManifest.targets?.verification?.script === ".recallant/hooks/verification.sh" &&
     hookManifest.targets?.pre_compaction_checkpoint?.input?.includes("state-only") &&
     hookManifest.targets?.checkpoint?.input?.includes("not semantic closeout proof") &&
     hookManifest.targets?.stop_closeout?.input?.includes("normal closeout") &&
@@ -774,18 +796,47 @@ assert(
   `Hook fallback did not write local spool JSONL: ${hookSpoolText}`
 );
 
-function runHook(name, args = [], input = "") {
+function runHook(name, args = [], input = "", extraEnv = {}) {
   const result = spawnSync(`${projectDir}/.recallant/hooks/${name}`, args, {
     input,
-    env: hookEnv,
+    env: { ...hookEnv, ...extraEnv },
     encoding: "utf8"
   });
   assert(result.status === 0, `${name} should exit 0: ${result.stderr}`);
 }
 
 runHook("start-session.sh", ["connect smoke hook session"]);
-runHook("user-prompt.sh", [], "Owner prompt captured through the Recallant local hook kit.");
-runHook("tool-result.sh", [], "Tool result captured through the Recallant local hook kit.");
+const hookTurnId = randomUUID();
+const hookToolTraceId = randomUUID();
+const hookErrorTraceId = randomUUID();
+runHook("user-prompt.sh", [], "Owner prompt captured through the Recallant local hook kit.", {
+  RECALLANT_HOOK_TURN_ID: hookTurnId
+});
+runHook(
+  "assistant-response.sh",
+  [],
+  "Assistant response captured through the Recallant local hook kit.",
+  { RECALLANT_HOOK_TURN_ID: hookTurnId }
+);
+runHook("tool-call.sh", ["fixture_tool"], "Tool call captured through the hook kit.", {
+  RECALLANT_HOOK_TRACE_ID: hookToolTraceId
+});
+runHook("tool-result.sh", [], "Tool result captured through the Recallant local hook kit.", {
+  RECALLANT_HOOK_TRACE_ID: hookToolTraceId
+});
+runHook("error.sh", ["FIXTURE_ERROR"], "Recoverable hook fixture error.", {
+  RECALLANT_HOOK_TRACE_ID: hookErrorTraceId
+});
+runHook("retry.sh", [], "Retry the hook fixture.", {
+  RECALLANT_HOOK_TRACE_ID: hookErrorTraceId,
+  RECALLANT_HOOK_ATTEMPT: "2"
+});
+runHook("remediation.sh", [], "Repair the hook fixture.", {
+  RECALLANT_HOOK_TRACE_ID: hookErrorTraceId
+});
+runHook("verification.sh", [], "Hook fixture recovery verified.", {
+  RECALLANT_HOOK_TRACE_ID: hookErrorTraceId
+});
 runHook(
   "pre-compaction.sh",
   [],
@@ -850,6 +901,39 @@ try {
       `Hook capture missing ${expected}: ${JSON.stringify(captured.rows)}`
     );
   }
+  const observations = await client.query(
+    `
+      SELECT kind, trace_id::text, resolution_status
+      FROM agent_observations
+      WHERE project_id = $1
+      ORDER BY sequence_number ASC
+    `,
+    [attached.project_id]
+  );
+  const observedKinds = new Set(observations.rows.map((row) => row.kind));
+  for (const expected of [
+    "user_prompt",
+    "assistant_response",
+    "tool_call",
+    "tool_result",
+    "error",
+    "retry",
+    "remediation",
+    "verification",
+    "closeout"
+  ]) {
+    assert(
+      observedKinds.has(expected),
+      `Observation hook capture missing ${expected}: ${JSON.stringify(observations.rows)}`
+    );
+  }
+  const errorRow = observations.rows.find((row) => row.kind === "error");
+  const verificationRow = observations.rows.find((row) => row.kind === "verification");
+  assert(
+    errorRow?.trace_id === verificationRow?.trace_id &&
+      verificationRow?.resolution_status === "resolved",
+    `Hook error recovery chain was not correlated: ${JSON.stringify(observations.rows)}`
+  );
 } finally {
   await client.end();
 }

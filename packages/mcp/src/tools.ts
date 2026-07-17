@@ -5,6 +5,10 @@ import { join, resolve } from "node:path";
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
+  agentObservationCaptureProfileValues,
+  agentObservationKindValues,
+  agentObservationResolutionStatusValues,
+  agentObservationStatusValues,
   graphCandidateExtractionMethodValues,
   graphCandidateKindValues,
   graphCandidateMaintenanceActionKindValues,
@@ -15,6 +19,7 @@ import {
   graphTreeNodeKindValues,
   type AgentLifecycleCloseoutProof,
   type AgentLifecycleMemoryProofStatus,
+  type AppendAgentObservationInput,
   type CreateGraphCandidateInput,
   type GraphCandidateMaintenanceApplyInput,
   type GetGraphCandidateMaintenancePlanInput,
@@ -72,7 +77,19 @@ const nullableString = z.string().nullable().optional();
 const metadata = z.record(z.string(), z.unknown()).default({});
 const uuidString = z.string().uuid();
 
-const clientKind = z.enum(["codex", "cursor", "windsurf", "claude_code", "unknown", "other"]);
+const clientKind = z.enum([
+  "codex",
+  "cursor",
+  "windsurf",
+  "claude_code",
+  "generic",
+  "unknown",
+  "other"
+]);
+const agentObservationKind = z.enum(agentObservationKindValues);
+const agentObservationStatus = z.enum(agentObservationStatusValues);
+const agentObservationResolutionStatus = z.enum(agentObservationResolutionStatusValues);
+const agentObservationCaptureProfile = z.enum(agentObservationCaptureProfileValues);
 const scope = z.enum(["project", "developer", "all"]);
 const memoryScope = z.enum(["project", "developer"]);
 const sourceKind = z.enum(["event", "chunk", "raw_artifact", "edge", "checkpoint", "external"]);
@@ -187,6 +204,7 @@ export type RecallantToolName =
   | "memory_get_context_pack"
   | "memory_append_turn"
   | "memory_append_event"
+  | "memory_append_observation"
   | "memory_search"
   | "memory_fetch_chunk"
   | "memory_link"
@@ -1106,6 +1124,46 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           randomUUID()
         ),
         status: "created"
+      });
+    }
+  },
+  {
+    name: "memory_append_observation",
+    title: "Record Agent Observation",
+    description:
+      "Record one correlated, bounded, secret-redacted agent observation for replay and error analysis. Rationale is an optional short user-visible reason, never hidden chain-of-thought.",
+    inputSchema: z.object({
+      session_id: uuidString,
+      run_id: uuidString.nullable().optional(),
+      turn_id: nullableString,
+      trace_id: uuidString.nullable().optional(),
+      parent_observation_id: uuidString.nullable().optional(),
+      source_event_id: uuidString.nullable().optional(),
+      dedup_key: z.string().max(240).nullable().optional(),
+      kind: agentObservationKind,
+      status: agentObservationStatus.optional(),
+      occurred_at: nullableString,
+      duration_ms: z.number().int().nonnegative().nullable().optional(),
+      title: z.string().max(2_000).nullable().optional(),
+      body: z.string().max(200_000).nullable().optional(),
+      tool_name: z.string().max(2_000).nullable().optional(),
+      error_code: z.string().max(2_000).nullable().optional(),
+      attempt_number: z.number().int().positive().nullable().optional(),
+      resolution_status: agentObservationResolutionStatus.optional(),
+      rationale: z.string().max(20_000).nullable().optional(),
+      metadata,
+      capture_profile: agentObservationCaptureProfile.nullable().optional(),
+      client_kind: clientKind.nullable().optional(),
+      client_version: nullableString
+    }),
+    handler: async (args) => {
+      const database = db();
+      if (database) return database.appendAgentObservation(args as AppendAgentObservationInput);
+      return stubResponse("memory_append_observation", {
+        id: randomUUID(),
+        sequence_number: 1,
+        status: "success",
+        durable: false
       });
     }
   },

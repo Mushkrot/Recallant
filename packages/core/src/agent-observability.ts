@@ -289,6 +289,11 @@ export function analyzeAgentObservationCompleteness(
   ).length;
   const coverage: AgentObservationCompleteness["coverage"] = {};
   for (const item of observations) coverage[item.kind] = (coverage[item.kind] ?? 0) + 1;
+  const clientCoverage: Record<string, number> = {};
+  for (const item of observations) {
+    const client = item.client_kind?.trim() || "unknown";
+    clientCoverage[client] = (clientCoverage[client] ?? 0) + 1;
+  }
 
   const deductions =
     Math.min(
@@ -316,6 +321,8 @@ export function analyzeAgentObservationCompleteness(
     unresolved_errors: unresolvedErrors,
     redacted_observations: observations.filter((item) => item.redacted).length,
     truncated_observations: observations.filter((item) => item.truncated).length,
-    coverage
+    coverage,
+    client_coverage: clientCoverage,
+    unknown_client_observations: clientCoverage.unknown ?? 0
   };
 }
