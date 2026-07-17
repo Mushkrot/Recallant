@@ -1,5 +1,6 @@
 import { recallantContractVersion } from "@recallant/contracts";
 
+export * from "./agent-observability.js";
 export * from "./memory-keeper.js";
 export * from "./project-log-sync.js";
 

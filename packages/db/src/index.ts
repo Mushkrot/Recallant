@@ -52,7 +52,18 @@ import {
   type ReviewGraphCandidateInput,
   type ReviewGraphCandidateResult
 } from "@recallant/contracts";
+import type {
+  AgentObservationCompleteness,
+  AgentObservationRecord,
+  AppendAgentObservationInput
+} from "@recallant/contracts";
+import { analyzeAgentObservationCompleteness, normalizeAgentObservation } from "@recallant/core";
 import { Pool, type PoolClient } from "pg";
+import {
+  ensureAgentObservationSchema,
+  listStoredAgentObservations,
+  storeAgentObservation
+} from "./agent-observability.js";
 import { deriveCanonCapabilityContext } from "./canon-capability-context.js";
 import {
   ensureSystemActivitySchema,
@@ -63,6 +74,10 @@ import {
   type SystemActivityRecord
 } from "./system-activity.js";
 
+export {
+  agentObservationSchemaStatements,
+  ensureAgentObservationSchema
+} from "./agent-observability.js";
 export {
   buildCanonCapabilityContext,
   canonCapabilityContextContainsRawSecret,
@@ -2704,6 +2719,73 @@ export class RecallantDb {
 
   async ensureSystemActivitySchema() {
     await ensureSystemActivitySchema(this.pool);
+  }
+
+  async ensureAgentObservationSchema() {
+    await ensureAgentObservationSchema(this.pool);
+  }
+
+  async appendAgentObservation(
+    input: AppendAgentObservationInput
+  ): Promise<AgentObservationRecord> {
+    await this.ensureAgentObservationSchema();
+    const context = await this.contextForSession(input.session_id);
+    return withTransaction(this.pool, async (client) => {
+      await this.touchSession(client, input.session_id);
+      const capturePolicy = await this.resolveCapturePolicy(
+        client,
+        context.projectId,
+        context.developerId,
+        input.session_id
+      );
+      const normalized = normalizeAgentObservation(input, {
+        capture_profile: capturePolicy.profile,
+        body_max_chars:
+          input.kind === "user_prompt" || input.kind === "assistant_response"
+            ? capturePolicy.turnTextMaxChars
+            : capturePolicy.workflowTextMaxChars
+      });
+      return storeAgentObservation(
+        client,
+        {
+          ...normalized,
+          project_id: context.projectId,
+          developer_id: context.developerId
+        },
+        readPositiveIntEnv("RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS", 30)
+      );
+    });
+  }
+
+  async listAgentObservations(input: {
+    project_id?: string | null;
+    session_id?: string | null;
+    run_id?: string | null;
+    limit?: number;
+  }): Promise<AgentObservationRecord[]> {
+    await this.ensureAgentObservationSchema();
+    const context = input.session_id
+      ? await this.contextForSession(input.session_id)
+      : input.project_id
+        ? await this.contextForProject(input.project_id)
+        : await this.ensureProject();
+    return withTransaction(this.pool, (client) =>
+      listStoredAgentObservations(client, {
+        project_id: context.projectId,
+        session_id: input.session_id,
+        run_id: input.run_id,
+        limit: Math.max(1, Math.min(input.limit ?? 500, 5_000))
+      })
+    );
+  }
+
+  async getAgentObservationCompleteness(input: {
+    project_id?: string | null;
+    session_id?: string | null;
+    run_id?: string | null;
+  }): Promise<AgentObservationCompleteness> {
+    const observations = await this.listAgentObservations({ ...input, limit: 5_000 });
+    return analyzeAgentObservationCompleteness(observations);
   }
 
   async ensureGraphCandidateSchema() {

@@ -662,6 +662,53 @@ CREATE TABLE system_activity_events (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE agent_observations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  run_id UUID NOT NULL,
+  turn_id TEXT,
+  trace_id UUID NOT NULL DEFAULT gen_random_uuid(),
+  parent_observation_id UUID REFERENCES agent_observations(id) ON DELETE SET NULL,
+  source_event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  dedup_key TEXT,
+  sequence_number BIGINT NOT NULL,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'user_prompt', 'assistant_response', 'tool_call', 'tool_result',
+      'terminal_command', 'terminal_output', 'file_change', 'test', 'error',
+      'retry', 'remediation', 'verification', 'commit', 'deploy', 'closeout',
+      'gap', 'system'
+    )
+  ),
+  status TEXT NOT NULL CHECK (
+    status IN ('started', 'success', 'error', 'cancelled', 'skipped', 'unknown')
+  ),
+  occurred_at TIMESTAMPTZ NOT NULL,
+  duration_ms INT CHECK (duration_ms IS NULL OR duration_ms >= 0),
+  title TEXT,
+  body TEXT,
+  tool_name TEXT,
+  error_code TEXT,
+  error_fingerprint TEXT,
+  attempt_number INT CHECK (attempt_number IS NULL OR attempt_number >= 1),
+  resolution_status TEXT NOT NULL DEFAULT 'not_applicable' CHECK (
+    resolution_status IN ('not_applicable', 'unresolved', 'retrying', 'resolved', 'unknown')
+  ),
+  rationale TEXT,
+  redacted_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  capture_profile TEXT NOT NULL DEFAULT 'standard' CHECK (
+    capture_profile IN ('light', 'standard', 'detailed', 'custom')
+  ),
+  redacted BOOLEAN NOT NULL DEFAULT false,
+  truncated BOOLEAN NOT NULL DEFAULT false,
+  client_kind TEXT,
+  client_version TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (session_id, sequence_number)
+);
+
 CREATE INDEX idx_projects_developer_parent ON projects (developer_id, parent_project_id);
 CREATE INDEX idx_projects_developer_domain_kind ON projects (developer_id, memory_domain, project_kind);
 CREATE INDEX idx_project_sources_project_status ON project_sources (project_id, status, is_primary DESC);
@@ -669,6 +716,26 @@ CREATE INDEX idx_project_sources_kind_uri ON project_sources (source_kind, uri) 
 CREATE UNIQUE INDEX idx_project_sources_one_primary ON project_sources (project_id) WHERE is_primary = true AND status = 'active';
 
 CREATE INDEX idx_sessions_project_status_seen ON sessions (project_id, status, last_seen_at DESC);
+
+CREATE UNIQUE INDEX idx_agent_observations_project_dedup
+  ON agent_observations (project_id, dedup_key)
+  WHERE dedup_key IS NOT NULL;
+CREATE INDEX idx_agent_observations_project_time
+  ON agent_observations (project_id, occurred_at DESC);
+CREATE INDEX idx_agent_observations_run_sequence
+  ON agent_observations (run_id, sequence_number);
+CREATE INDEX idx_agent_observations_session_sequence
+  ON agent_observations (session_id, sequence_number);
+CREATE INDEX idx_agent_observations_trace ON agent_observations (trace_id);
+CREATE INDEX idx_agent_observations_parent
+  ON agent_observations (parent_observation_id)
+  WHERE parent_observation_id IS NOT NULL;
+CREATE INDEX idx_agent_observations_errors
+  ON agent_observations (project_id, resolution_status, occurred_at DESC)
+  WHERE kind = 'error';
+CREATE INDEX idx_agent_observations_error_fingerprint
+  ON agent_observations (project_id, error_fingerprint, occurred_at DESC)
+  WHERE error_fingerprint IS NOT NULL;
 
 CREATE INDEX idx_events_project_occurred ON events (project_id, occurred_at DESC);
 CREATE INDEX idx_events_payload_hash ON events (project_id, payload_hash) WHERE payload_hash IS NOT NULL;

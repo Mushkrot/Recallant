@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@recallant/contracts": "file:../contracts",
+    "@recallant/core": "file:../core",
     "pg": "^8.22.0"
   },
   "devDependencies": {
