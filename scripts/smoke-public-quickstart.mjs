@@ -123,11 +123,7 @@ function assertNoPrivatePathLeak(value, label) {
 
 function acceptanceStatus(checks, warnings) {
   const blockingFailures = checks.filter((check) => check.status === "fail");
-  return blockingFailures.length > 0
-    ? "fail"
-    : warnings.length > 0
-      ? "pass_with_warnings"
-      : "pass";
+  return blockingFailures.length > 0 ? "fail" : warnings.length > 0 ? "pass_with_warnings" : "pass";
 }
 
 function makeAcceptanceReport({ checks, warnings, evidence, examples }) {
@@ -176,10 +172,7 @@ async function withAuthRequiredOrigin(callback) {
 
 async function publicReadiness(recallant, originUrl, extraEnv = {}) {
   return (
-    await runJsonAsync(
-    recallant,
-    ["doctor", "--project-dir", projectDir, "--format", "json"],
-    {
+    await runJsonAsync(recallant, ["doctor", "--project-dir", projectDir, "--format", "json"], {
       cwd: projectDir,
       env: {
         RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
@@ -189,8 +182,7 @@ async function publicReadiness(recallant, originUrl, extraEnv = {}) {
         RECALLANT_ADMIN_EMAILS: "admin@example.invalid",
         ...extraEnv
       }
-    }
-    )
+    })
   ).production_readiness?.public_workbench_readiness;
 }
 
@@ -225,33 +217,42 @@ async function workbenchNavigationProof(projectId) {
   assert(address && typeof address !== "string", "Workbench smoke server did not bind");
   const baseUrl = `http://127.0.0.1:${address.port}`;
   try {
-    const rootResponse = await fetch(`${baseUrl}/review?view=review`, {
+    const rootResponse = await fetch(`${baseUrl}/review`, {
       headers: { authorization: `Bearer ${token}` }
     });
     const rootHtml = await rootResponse.text();
-    const selectedResponse = await fetch(`${baseUrl}/review?project_id=${projectId}`, {
+    const chooserResponse = await fetch(`${baseUrl}/review?choose_project=1&view=review`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const chooserHtml = await chooserResponse.text();
+    const selectedResponse = await fetch(`${baseUrl}/review?project_id=${projectId}&view=ask`, {
       headers: { authorization: `Bearer ${token}` }
     });
     const selectedHtml = await selectedResponse.text();
-    const rootChooser =
+    const rootHome =
       rootResponse.status === 200 &&
-      rootHtml.includes('id="project-chooser"') &&
-      rootHtml.includes("Choose a memory space");
-    const viewPreserved = rootHtml.includes(
+      rootHtml.includes("Recallant is recording") &&
+      !rootHtml.includes('id="project-chooser"');
+    const rootChooser =
+      chooserResponse.status === 200 &&
+      chooserHtml.includes('id="project-chooser"') &&
+      chooserHtml.includes("Choose a project for Review");
+    const viewPreserved = chooserHtml.includes(
       `href="/review?project_id=${projectId}&amp;view=review"`
     );
     const selectedContext =
       selectedResponse.status === 200 &&
       selectedHtml.includes('aria-label="Selected project context"') &&
-      selectedHtml.includes(`id ${projectId.slice(0, 8)}`) &&
-      selectedHtml.includes("Current:");
-    assert(rootChooser, `Workbench root chooser missing: ${rootHtml.slice(0, 900)}`);
-    assert(viewPreserved, `Workbench chooser did not preserve view: ${rootHtml.slice(0, 900)}`);
+      selectedHtml.includes(`id ${projectId.slice(0, 8)}`);
+    assert(rootHome, `Workbench root Home missing: ${rootHtml.slice(0, 900)}`);
+    assert(rootChooser, `Workbench explicit chooser missing: ${chooserHtml.slice(0, 900)}`);
+    assert(viewPreserved, `Workbench chooser did not preserve view: ${chooserHtml.slice(0, 900)}`);
     assert(
       selectedContext,
       `Workbench selected project context missing: ${selectedHtml.slice(0, 900)}`
     );
     return {
+      root_home: rootHome,
       root_chooser: rootChooser,
       view_preserved: viewPreserved,
       selected_project_context: selectedContext
@@ -283,7 +284,10 @@ assert((wrapperStat.mode & 0o111) !== 0, "Installed recallant wrapper is not exe
 
 const version = run(recallant, ["--version"], { cwd: projectDir }).trim();
 assert(/^recallant \d+\.\d+\.\d+/.test(version), `Unexpected version output: ${version}`);
-assert(!/^recallant 0\.0\.0(?:$|[-+])/.test(version), `Version output must not be 0.0.0: ${version}`);
+assert(
+  !/^recallant 0\.0\.0(?:$|[-+])/.test(version),
+  `Version output must not be 0.0.0: ${version}`
+);
 
 const doctorBefore = runJson(recallant, ["doctor", "--format", "json"], { cwd: projectDir });
 assert(
@@ -578,7 +582,10 @@ const acceptanceReport = makeAcceptanceReport({
   },
   examples
 });
-assert(acceptanceReport.status === "pass", `Acceptance report was not pass: ${JSON.stringify(acceptanceReport)}`);
+assert(
+  acceptanceReport.status === "pass",
+  `Acceptance report was not pass: ${JSON.stringify(acceptanceReport)}`
+);
 
 process.stdout.write(
   JSON.stringify(

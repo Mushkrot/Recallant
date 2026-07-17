@@ -242,6 +242,93 @@ function createSessionCookie(email: string) {
     .join("; ");
 }
 
+type WorkbenchPreferences = {
+  last_project_id?: string;
+  favorite_project_ids: string[];
+};
+
+const workbenchPreferencesCookieName = "recallant_workbench";
+const maxFavoriteProjects = 12;
+const projectIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizePreferenceProjectId(value: unknown) {
+  const projectId = optionalInput(value);
+  return projectId && projectIdPattern.test(projectId) ? projectId.toLowerCase() : undefined;
+}
+
+function normalizeWorkbenchPreferences(value: unknown): WorkbenchPreferences {
+  const input = isRecord(value) ? value : {};
+  const favorites = Array.isArray(input.favorite_project_ids)
+    ? input.favorite_project_ids
+        .map(normalizePreferenceProjectId)
+        .filter((projectId): projectId is string => Boolean(projectId))
+    : [];
+  return {
+    last_project_id: normalizePreferenceProjectId(input.last_project_id),
+    favorite_project_ids: [...new Set(favorites)].slice(0, maxFavoriteProjects)
+  };
+}
+
+function signWorkbenchPreferencesPayload(payload: string) {
+  const secret = getSessionSecret();
+  if (!secret) return "";
+  return createHmac("sha256", secret)
+    .update(`workbench-preferences:${payload}`)
+    .digest("base64url");
+}
+
+function createWorkbenchPreferencesCookie(preferences: WorkbenchPreferences) {
+  const normalized = normalizeWorkbenchPreferences(preferences);
+  const payload = Buffer.from(JSON.stringify({ version: 1, ...normalized }), "utf8").toString(
+    "base64url"
+  );
+  const signature = signWorkbenchPreferencesPayload(payload);
+  if (!signature) return "";
+  const secure = process.env.RECALLANT_CLOUDFLARE_MODE === "enabled" ? "; Secure" : "";
+  return [
+    `${workbenchPreferencesCookieName}=${encodeURIComponent(`${payload}.${signature}`)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    "Max-Age=31536000",
+    secure
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function readWorkbenchPreferences(request: IncomingMessage): WorkbenchPreferences {
+  const cookie = parseCookies(request).get(workbenchPreferencesCookieName);
+  if (!cookie) return { favorite_project_ids: [] };
+  const [payload, signature] = cookie.split(".");
+  if (!payload || !signature) return { favorite_project_ids: [] };
+  const expected = signWorkbenchPreferencesPayload(payload);
+  if (!expected) return { favorite_project_ids: [] };
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return { favorite_project_ids: [] };
+  }
+  try {
+    return normalizeWorkbenchPreferences(
+      JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
+    );
+  } catch {
+    return { favorite_project_ids: [] };
+  }
+}
+
+function responseCookieHeaders(
+  ...cookies: Array<string | undefined>
+): Record<string, string | string[]> {
+  const values = cookies.filter((cookie): cookie is string => Boolean(cookie));
+  return values.length > 0 ? { "set-cookie": values } : {};
+}
+
 function verifySessionCookie(request: IncomingMessage) {
   const cookie = parseCookies(request).get("recallant_session");
   if (!cookie) return undefined;
@@ -2311,8 +2398,10 @@ function graphReviewRedirectPath(body: Record<string, unknown>, graphCandidateId
   });
 }
 
-function rootWorkbenchPath(view: WorkbenchView) {
-  return view === "all" || view === "home" ? "/review" : `/review?view=${encodeURIComponent(view)}`;
+function projectChooserPath(view: WorkbenchView) {
+  const params = new URLSearchParams({ choose_project: "1" });
+  if (view !== "all" && view !== "home") params.set("view", view);
+  return `/review?${params.toString()}`;
 }
 
 function projectSelectionPath(projectId: unknown, view: WorkbenchView) {
@@ -6891,7 +6980,7 @@ function renderWorkbenchNav(
     { view: "audit", label: "Diagnostics" }
   ];
   const href = (view: WorkbenchView) =>
-    options?.rootChooser ? rootWorkbenchPath(view) : workbenchViewHref(data, view);
+    options?.rootChooser ? projectChooserPath(view) : workbenchViewHref(data, view);
   const active = (view: WorkbenchView) =>
     view === activeView || (view === "ask" && activeView === "search");
   return `<nav class="workbench-nav" aria-label="Primary Workbench navigation">
@@ -8541,7 +8630,7 @@ function renderDashboard(
       ${
         projectChooser
           ? `<span class="pill">Choose a project · ${escapeHtml(workbenchModeCopy(activeView).label)}</span>`
-          : `<a class="pill project-switcher" href="${escapeHtml(rootWorkbenchPath(activeView))}">Switch project</a><span class="pill project-current">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
+          : `<a class="pill project-switcher" href="${escapeHtml(projectChooserPath(activeView))}">Switch project</a><span class="pill project-current">${escapeHtml(currentProjectHeaderLabel(data))}</span>`
       }
     </div>
   </header>
@@ -8777,6 +8866,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       }
       const sessionCookie =
         auth.mode === "cloudflare" && auth.email ? createSessionCookie(auth.email) : "";
+      const workbenchPreferences = readWorkbenchPreferences(request);
       const database = options.workbenchDatabase ?? createRecallantDbFromEnv();
       if (!database) {
         write(response, 503, "RECALLANT_DATABASE_URL is required", "text/plain");
@@ -8800,6 +8890,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       };
       const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
       const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
+      const projectChooserRequested = requestUrl.searchParams.get("choose_project") === "1";
       if (request.method === "GET" && requestUrl.pathname === remoteConnectApprovePath) {
         const code = optionalInput(requestUrl.searchParams.get("code"));
         const remoteConnectRequest = code
@@ -8851,23 +8942,46 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         return;
       }
       if (requestUrl.pathname === "/" || requestUrl.pathname === "/review") {
+        const requestedProjectId =
+          explicitProjectId ?? workbenchPreferences.last_project_id ?? null;
         const dashboard = await withSearchResults(
           database,
           await withAuditReport(
             database,
-            sanitizeDashboardForClient(await database.getReviewDashboard(dashboardInput)),
+            sanitizeDashboardForClient(
+              await database.getReviewDashboard({
+                ...dashboardInput,
+                project_id: requestedProjectId
+              })
+            ),
             requestUrl,
             workbenchView
           ),
           requestUrl,
           workbenchView
         );
+        const visibleProjectIds = new Set(
+          dashboard.projects.map((project) => String(project.project_id).toLowerCase())
+        );
+        const currentProjectId = normalizePreferenceProjectId(dashboard.current_project_id);
+        const nextWorkbenchPreferences = createWorkbenchPreferencesCookie({
+          last_project_id:
+            currentProjectId && visibleProjectIds.has(currentProjectId)
+              ? currentProjectId
+              : undefined,
+          favorite_project_ids: workbenchPreferences.favorite_project_ids.filter((projectId) =>
+            visibleProjectIds.has(projectId)
+          )
+        });
         write(
           response,
           200,
-          renderDashboard(dashboard, { view: workbenchView, projectChooser: !explicitProjectId }),
+          renderDashboard(dashboard, {
+            view: workbenchView,
+            projectChooser: projectChooserRequested || dashboard.projects.length === 0
+          }),
           "text/html",
-          sessionCookie ? { "set-cookie": sessionCookie } : {}
+          responseCookieHeaders(sessionCookie, nextWorkbenchPreferences)
         );
         return;
       }

@@ -1129,7 +1129,26 @@ try {
     }
   }
 
-  const chooser = await fetch(`${baseUrl}/review?view=review`, {
+  const rootHome = await fetch(`${baseUrl}/review`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const rootHomeText = await rootHome.text();
+  const rootHomeCookie = rootHome.headers.get("set-cookie") ?? "";
+  if (
+    rootHome.status !== 200 ||
+    !rootHomeText.includes("Recallant is recording") ||
+    !rootHomeText.includes('href="/review?choose_project=1"') ||
+    rootHomeText.includes('id="project-chooser"') ||
+    !rootHomeCookie.includes("recallant_workbench=") ||
+    !rootHomeCookie.includes("HttpOnly") ||
+    !rootHomeCookie.includes("SameSite=Lax")
+  ) {
+    throw new Error(
+      `Home-first root smoke failed: ${rootHome.status}; cookie=${rootHomeCookie}; ${rootHomeText.slice(0, 900)}`
+    );
+  }
+
+  const chooser = await fetch(`${baseUrl}/review?choose_project=1&view=review`, {
     headers: { authorization: `Bearer ${token}` }
   });
   const chooserText = await chooser.text();
@@ -1161,7 +1180,7 @@ try {
     );
   }
 
-  const askChooser = await fetch(`${baseUrl}/review?view=ask`, {
+  const askChooser = await fetch(`${baseUrl}/review?choose_project=1&view=ask`, {
     headers: { authorization: `Bearer ${token}` }
   });
   const askChooserText = await askChooser.text();
@@ -1176,6 +1195,49 @@ try {
   if (askChooser.status !== 200 || askChooserMissing.length > 0) {
     throw new Error(
       `Mode-aware project chooser smoke failed: ${askChooser.status}; missing ${JSON.stringify(askChooserMissing)}`
+    );
+  }
+
+  const selectedProject = await fetch(
+    `${baseUrl}/review?project_id=${humanMemorySpace.project_id}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  const selectedProjectCookieHeader = selectedProject.headers.get("set-cookie") ?? "";
+  const selectedProjectCookie = selectedProjectCookieHeader.split(";", 1)[0];
+  const restoredProject = await fetch(`${baseUrl}/review`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      cookie: selectedProjectCookie
+    }
+  });
+  const restoredProjectText = await restoredProject.text();
+  if (
+    selectedProject.status !== 200 ||
+    !selectedProjectCookie.startsWith("recallant_workbench=") ||
+    restoredProject.status !== 200 ||
+    !restoredProjectText.includes("Project: Personal Operations UI Smoke") ||
+    restoredProjectText.includes('id="project-chooser"')
+  ) {
+    throw new Error(
+      `Last-project preference smoke failed: selected=${selectedProject.status}; restored=${restoredProject.status}; cookie=${selectedProjectCookieHeader}; ${restoredProjectText.slice(0, 900)}`
+    );
+  }
+  const tamperedProjectCookie = `${selectedProjectCookie.slice(0, -1)}${selectedProjectCookie.endsWith("a") ? "b" : "a"}`;
+  const tamperedProject = await fetch(`${baseUrl}/review`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      cookie: tamperedProjectCookie
+    }
+  });
+  const tamperedProjectText = await tamperedProject.text();
+  if (
+    tamperedProject.status !== 200 ||
+    !tamperedProjectText.includes("Recallant is recording") ||
+    tamperedProjectText.includes("Project: Personal Operations UI Smoke") ||
+    tamperedProjectText.includes('id="project-chooser"')
+  ) {
+    throw new Error(
+      `Tampered project preference did not fail closed: ${tamperedProject.status}; ${tamperedProjectText.slice(0, 900)}`
     );
   }
 
