@@ -13,9 +13,22 @@ action, a short attention list, and recent activity. The first screen should ans
 - Where do I go next?
 
 Use **Switch project** in the header to choose another connected project. Project cards show a
-human-readable name, source count, and memory count; technical identifiers are intentionally kept
-out of the first decision. When no project is selected, the chooser keeps the requested destination
-visible (for example, **Ask & Search**) and each project card opens directly in that destination.
+human-readable name, recording state, and last activity; technical identifiers and counters are
+intentionally kept out of the first decision. Recallant remembers the last valid project in a
+signed browser preference, so `/review` returns to that project's Home. Invalid, stale, or
+unauthorized project preferences fall back safely to an available project.
+
+The chooser is an explicit switching surface rather than the default landing page:
+
+- search by project name;
+- keep frequently used projects in **Favorites**;
+- see at most four favorite or recent cards at once;
+- open the remaining inventory from **All other projects**;
+- expand **Technical details** only when source, session, memory, or event counts are needed.
+
+The chooser keeps the requested destination visible (for example, **Ask & Search**) and opens the
+selected project directly in that destination. If no project is connected, it shows one onboarding
+step: run `recallant connect .` in the project folder.
 
 ## Five primary destinations
 
@@ -68,8 +81,10 @@ sees.
 ## Keyboard and mobile behavior
 
 Primary buttons, links, form controls, and disclosure summaries use comfortable touch targets and
-visible keyboard focus. The five primary destinations wrap on small screens, long source names and
-memory text wrap instead of creating horizontal scroll, and advanced panels remain collapsible.
+visible keyboard focus. Project search and selection work by keyboard, project names wrap without
+horizontal scroll, and the full project inventory stays collapsed by default. The five primary
+destinations wrap on small screens, long source names and memory text wrap instead of creating
+horizontal scroll, and advanced panels remain collapsible.
 
 For contributors changing the Workbench, run the focused UI smoke and browser checks:
 
