@@ -2404,6 +2404,14 @@ function projectChooserPath(view: WorkbenchView) {
   return `/review?${params.toString()}`;
 }
 
+function projectChooserSearchPath(view: WorkbenchView, query: unknown) {
+  const params = new URLSearchParams({ choose_project: "1" });
+  if (view !== "all" && view !== "home") params.set("view", view);
+  const normalizedQuery = normalizeProjectSearchQuery(query);
+  if (normalizedQuery) params.set("project_q", normalizedQuery);
+  return `/review?${params.toString()}`;
+}
+
 function projectSelectionPath(projectId: unknown, view: WorkbenchView) {
   return view === "all" || view === "home"
     ? reviewPath(projectId)
@@ -3903,55 +3911,201 @@ function workbenchModeCopy(activeView: WorkbenchView) {
   return copy[activeView] ?? fallback;
 }
 
-function renderProjectChooser(data: ReviewDashboardData, activeView: WorkbenchView) {
+function normalizeProjectSearchQuery(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .slice(0, 80);
+}
+
+function projectLastActivity(row: Record<string, unknown>) {
+  const candidates = [
+    row.last_memory_write_at,
+    row.last_context_read_at,
+    row.checkpoint_updated_at,
+    row.updated_at
+  ]
+    .map((value) => {
+      const date = new Date(String(value ?? ""));
+      return Number.isNaN(date.getTime()) ? null : date;
+    })
+    .filter((value): value is Date => Boolean(value));
+  return candidates.sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+}
+
+function projectActivityLabel(row: Record<string, unknown>) {
+  const activity = projectLastActivity(row);
+  if (!activity) return "No activity yet";
+  const days = Math.floor((Date.now() - activity.getTime()) / 86_400_000);
+  if (days <= 0) return "Active today";
+  if (days === 1) return "Active yesterday";
+  if (days < 30) return `Active ${days} days ago`;
+  return `Last active ${activity.toLocaleDateString("en", {
+    month: "short",
+    day: "numeric",
+    year: activity.getUTCFullYear() === new Date().getUTCFullYear() ? undefined : "numeric",
+    timeZone: "UTC"
+  })}`;
+}
+
+function projectTechnicalDetails(row: Record<string, unknown>) {
+  const profile = memoryProfile(row);
+  const sources = Array.isArray(row.sources) ? (row.sources as Array<Record<string, unknown>>) : [];
+  const activeSources = sources.filter((source) => source.status === "active").length;
+  return `<dl class="project-choice-meta">
+    <div><dt>Memory space</dt><dd>${escapeHtml(profile.label)}</dd></div>
+    <div><dt>Sources</dt><dd>${escapeHtml(activeSources)} active · ${escapeHtml(sources.length)} connected</dd></div>
+    <div><dt>Sessions</dt><dd>${escapeHtml(row.session_count ?? 0)}</dd></div>
+    <div><dt>Memories</dt><dd>${escapeHtml(row.memory_count ?? 0)}</dd></div>
+    <div><dt>Events</dt><dd>${escapeHtml(row.event_count ?? 0)}</dd></div>
+  </dl>`;
+}
+
+function renderProjectFavoriteForm(input: {
+  row: Record<string, unknown>;
+  activeView: WorkbenchView;
+  projectQuery: string;
+  favorite: boolean;
+}) {
+  const label = input.favorite ? "Remove from favorites" : "Add to favorites";
+  return `<form class="project-favorite-form" method="post" action="/workbench-preferences">
+    <input type="hidden" name="project_id" value="${escapeHtml(input.row.project_id)}" />
+    <input type="hidden" name="action" value="${input.favorite ? "unfavorite" : "favorite"}" />
+    <input type="hidden" name="view" value="${escapeHtml(input.activeView)}" />
+    ${input.projectQuery ? `<input type="hidden" name="project_q" value="${escapeHtml(input.projectQuery)}" />` : ""}
+    <button class="project-favorite-toggle" type="submit" aria-pressed="${input.favorite}">${escapeHtml(label)}</button>
+  </form>`;
+}
+
+function renderProjectChooser(
+  data: ReviewDashboardData,
+  activeView: WorkbenchView,
+  preferences: WorkbenchPreferences,
+  projectQueryValue: unknown
+) {
   const rows = data.projects;
   const mode = workbenchModeCopy(activeView);
+  const projectQuery = normalizeProjectSearchQuery(projectQueryValue);
   if (rows.length === 0) {
     return `<section class="panel project-chooser empty-project-chooser" id="project-chooser" data-workbench-view="${escapeHtml(activeView)}">
       <div class="section-head">
         <div>
-          <span class="section-kicker">Project chooser</span>
-          <h2>${escapeHtml(mode.heading)}</h2>
+          <span class="section-kicker">Get started</span>
+          <h2>Connect your first project</h2>
         </div>
       </div>
-      <p class="empty">No projects are connected yet. Connect a project to open ${escapeHtml(mode.label)}.</p>
+      <p class="empty-project-copy">Run this command in the project folder. Recallant will connect it and open its Home automatically.</p>
+      <pre class="connect-command"><code>recallant connect .</code></pre>
     </section>`;
   }
+  const favorites = new Set(
+    preferences.favorite_project_ids.filter((projectId) =>
+      rows.some((row) => String(row.project_id).toLowerCase() === projectId)
+    )
+  );
+  const sortedRows = [...rows].sort((left, right) => {
+    const rightTime = projectLastActivity(right)?.getTime() ?? 0;
+    const leftTime = projectLastActivity(left)?.getTime() ?? 0;
+    return rightTime - leftTime;
+  });
+  const favoriteRows = sortedRows
+    .filter((row) => favorites.has(String(row.project_id).toLowerCase()))
+    .slice(0, 4);
+  const favoriteIds = new Set(favoriteRows.map((row) => String(row.project_id).toLowerCase()));
+  const recentRows = sortedRows
+    .filter((row) => !favoriteIds.has(String(row.project_id).toLowerCase()))
+    .slice(0, 4);
+  const spotlightIds = new Set(
+    [...favoriteRows, ...recentRows].map((row) => String(row.project_id).toLowerCase())
+  );
+  const remainingRows = sortedRows.filter(
+    (row) => !spotlightIds.has(String(row.project_id).toLowerCase())
+  );
+  const searchRows = projectQuery
+    ? sortedRows.filter((row) =>
+        `${projectDisplayName(row)} ${memoryProfile(row).label}`
+          .toLocaleLowerCase()
+          .includes(projectQuery.toLocaleLowerCase())
+      )
+    : [];
   const renderChoice = (row: Record<string, unknown>) => {
     const state = captureState(row);
-    const profile = memoryProfile(row);
-    const sources = Array.isArray(row.sources)
-      ? (row.sources as Array<Record<string, unknown>>)
-      : [];
-    const activeSources = sources.filter((source) => source.status === "active").length;
-    return `<a class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}" aria-label="Open ${escapeHtml(projectDisplayName(row))} in ${escapeHtml(mode.label)}">
-      <article>
-        <div class="memory-space-head">
+    const favorite = favorites.has(String(row.project_id).toLowerCase());
+    return `<article class="project-choice ${isHumanMemorySpace(row) ? "human-domain" : "code-domain"}" data-project-id="${escapeHtml(row.project_id)}">
+      <div class="project-choice-head">
+        <div>
           <h3>${escapeHtml(projectDisplayName(row))}</h3>
-          <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+          <p>${escapeHtml(projectActivityLabel(row))}</p>
         </div>
-        <p><strong>${escapeHtml(profile.label)}</strong></p>
-        <p class="project-choice-summary">${escapeHtml(activeSources)} active source${activeSources === 1 ? "" : "s"} · ${escapeHtml(sources.length)} connected</p>
-        <div class="metrics">
-          <span>${escapeHtml(row.session_count ?? 0)} sessions</span>
-          <span>${escapeHtml(row.memory_count ?? 0)} memories</span>
-          <span>${escapeHtml(row.event_count ?? 0)} events</span>
-        </div>
-        <span class="project-choice-action">Open ${escapeHtml(mode.label)} <span aria-hidden="true">→</span></span>
-      </article>
-    </a>`;
+        <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+      </div>
+      <div class="project-choice-actions">
+        <a class="project-choice-link" href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}" aria-label="Open ${escapeHtml(projectDisplayName(row))} in ${escapeHtml(mode.label)}">Open ${escapeHtml(mode.label)}</a>
+        ${renderProjectFavoriteForm({ row, activeView, projectQuery, favorite })}
+      </div>
+      <details class="project-choice-details">
+        <summary>Technical details</summary>
+        ${projectTechnicalDetails(row)}
+      </details>
+    </article>`;
   };
+  const renderListRow = (row: Record<string, unknown>) => {
+    const state = captureState(row);
+    const favorite = favorites.has(String(row.project_id).toLowerCase());
+    return `<li class="project-list-row" data-project-id="${escapeHtml(row.project_id)}">
+      <div class="project-list-copy">
+        <a href="${escapeHtml(projectSelectionPath(row.project_id, activeView))}">${escapeHtml(projectDisplayName(row))}</a>
+        <span>${escapeHtml(projectActivityLabel(row))}</span>
+      </div>
+      <span class="state ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+      ${renderProjectFavoriteForm({ row, activeView, projectQuery, favorite })}
+      <details class="project-list-details">
+        <summary>Details</summary>
+        ${projectTechnicalDetails(row)}
+      </details>
+    </li>`;
+  };
+  const renderCardSection = (title: string, sectionRows: Array<Record<string, unknown>>) =>
+    sectionRows.length
+      ? `<section class="project-chooser-group">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="project-choice-grid">${sectionRows.map(renderChoice).join("")}</div>
+        </section>`
+      : "";
   return `<section class="panel project-chooser" id="project-chooser" data-workbench-view="${escapeHtml(activeView)}">
     <div class="section-head">
       <div>
-        <span class="section-kicker">Project chooser</span>
+        <span class="section-kicker">Switch project</span>
         <h2>${escapeHtml(mode.heading)}</h2>
       </div>
       <p>${escapeHtml(mode.description)}</p>
     </div>
-    <div class="project-choice-grid">
-      ${rows.map(renderChoice).join("")}
-    </div>
+    <form class="project-search" method="get" action="/review" role="search">
+      <input type="hidden" name="choose_project" value="1" />
+      ${activeView !== "home" ? `<input type="hidden" name="view" value="${escapeHtml(activeView)}" />` : ""}
+      <label for="project-q">Find a project</label>
+      <div class="project-search-row">
+        <input id="project-q" name="project_q" type="search" value="${escapeHtml(projectQuery)}" placeholder="Search by project name" maxlength="80" autocomplete="off" />
+        <button type="submit">Search</button>
+        ${projectQuery ? `<a class="project-search-clear" href="${escapeHtml(projectChooserSearchPath(activeView, ""))}">Clear</a>` : ""}
+      </div>
+    </form>
+    ${
+      projectQuery
+        ? `<section class="project-search-results" aria-live="polite">
+            <h3>Search results <span>${escapeHtml(searchRows.length)}</span></h3>
+            ${searchRows.length ? `<ul class="project-list">${searchRows.map(renderListRow).join("")}</ul>` : `<p class="empty">No projects match “${escapeHtml(projectQuery)}”. Try another name.</p>`}
+          </section>`
+        : `${renderCardSection("Favorites", favoriteRows)}
+          ${renderCardSection("Recent projects", recentRows)}
+          ${
+            remainingRows.length
+              ? `<details class="all-projects">
+                  <summary>All other projects <span>${escapeHtml(remainingRows.length)}</span></summary>
+                  <ul class="project-list">${remainingRows.map(renderListRow).join("")}</ul>
+                </details>`
+              : ""
+          }`
+    }
   </section>`;
 }
 
@@ -7016,6 +7170,8 @@ function renderDashboard(
     remoteCredential?: RemoteCredentialRenderState;
     view?: WorkbenchView;
     projectChooser?: boolean;
+    workbenchPreferences?: WorkbenchPreferences;
+    projectQuery?: string;
   }
 ) {
   const chat = state?.chat;
@@ -7027,6 +7183,7 @@ function renderDashboard(
   const remoteCredential = state?.remoteCredential;
   const activeView = normalizeWorkbenchView(state?.view);
   const projectChooser = state?.projectChooser === true;
+  const workbenchPreferences = state?.workbenchPreferences ?? { favorite_project_ids: [] };
   const showHome = !projectChooser && activeView === "home";
   const showAsk = !projectChooser && (activeView === "ask" || activeView === "search");
   const showMemory = !projectChooser && activeView === "memory";
@@ -8618,6 +8775,89 @@ function renderDashboard(
       .home-action { width: 100%; }
     }
 
+    /* Compact project switcher */
+    .project-chooser { max-width: 960px; padding: 24px; }
+    .project-search { display: grid; gap: 7px; border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 20px; }
+    .project-search > label { color: var(--text); font-size: 13px; font-weight: 700; }
+    .project-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+    .project-search-row input { width: 100%; border: 1px solid var(--line-strong); padding: 9px 11px; font: inherit; }
+    .project-search-row button,
+    .project-search-clear,
+    .project-choice-link,
+    .project-favorite-toggle {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      padding: 8px 12px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .project-search-row button,
+    .project-choice-link { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .project-chooser-group { margin-top: 20px; }
+    .project-chooser-group > h3,
+    .project-search-results > h3 { margin: 0 0 10px; font-size: 14px; }
+    .project-search-results > h3 span,
+    .all-projects > summary span { color: var(--text-muted); font-weight: 500; }
+    .project-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .project-choice {
+      display: grid;
+      grid-template-rows: 1fr auto auto;
+      min-height: 188px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+      color: inherit;
+    }
+    .project-choice:hover { border-color: var(--line-strong); }
+    .project-choice-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .project-choice-head h3 { margin: 0; max-width: 28ch; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+    .project-choice-head p { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; }
+    .project-choice .state,
+    .project-list-row .state { flex: 0 0 auto; border: 1px solid currentColor; padding: 3px 6px; font-size: 10.5px; white-space: nowrap; }
+    .project-choice-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+    .project-favorite-form { margin: 0; }
+    .project-favorite-toggle { width: 100%; }
+    .project-choice-details { border-top: 1px solid var(--line); margin-top: 12px; }
+    .project-choice-details > summary { min-height: 44px; color: var(--text-muted); font-size: 11px; }
+    .project-choice-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 0 0 4px; }
+    .project-choice-meta > div { min-width: 0; }
+    .project-choice-meta dt { color: var(--text-faint); font-size: 10px; }
+    .project-choice-meta dd { margin: 2px 0 0; color: var(--text); font-size: 11px; overflow-wrap: anywhere; }
+    .all-projects { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 8px; }
+    .all-projects > summary { min-height: 48px; color: var(--text); font-size: 13px; }
+    .project-list { list-style: none; margin: 0; padding: 0; }
+    .project-list-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(142px, auto) auto; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding: 9px 0; }
+    .project-list-row:first-child { border-top: 0; }
+    .project-list-copy { min-width: 0; }
+    .project-list-copy > a { display: block; color: var(--text); font-size: 13px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+    .project-list-copy > span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; }
+    .project-list-details { position: relative; }
+    .project-list-details > summary { min-width: 64px; justify-content: center; color: var(--text-muted); font-size: 11px; }
+    .project-list-details[open] { grid-column: 1 / -1; border-top: 1px dashed var(--line); padding-top: 7px; }
+    .empty-project-chooser { max-width: 680px; }
+    .empty-project-copy { max-width: 560px; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+    .connect-command { margin: 16px 0 0; border: 1px solid var(--line); border-radius: 6px; padding: 14px; background: var(--surface-soft); color: var(--text); overflow-x: auto; }
+    @media (max-width: 760px) {
+      .project-chooser { padding: 16px; }
+      .project-search-row { grid-template-columns: 1fr 1fr; }
+      .project-search-row input { grid-column: 1 / -1; }
+      .project-choice-grid { grid-template-columns: 1fr; }
+      .project-list-row { grid-template-columns: minmax(0, 1fr) auto; }
+      .project-list-row .project-favorite-form,
+      .project-list-details { grid-column: 1 / -1; }
+      .project-list-details > summary { justify-content: flex-start; }
+    }
+
   </style>
 </head>
 <body>
@@ -8635,7 +8875,11 @@ function renderDashboard(
     </div>
   </header>
   <main>
-    ${projectChooser ? renderProjectChooser(data, activeView) : ""}
+    ${
+      projectChooser
+        ? renderProjectChooser(data, activeView, workbenchPreferences, state?.projectQuery)
+        : ""
+    }
     ${showHome ? renderHome(data) : ""}
     ${
       showAsk
@@ -8891,6 +9135,51 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
       const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));
       const projectChooserRequested = requestUrl.searchParams.get("choose_project") === "1";
+      if (request.method === "POST" && requestUrl.pathname === "/workbench-preferences") {
+        const body = await readForm(request);
+        const projectId = normalizePreferenceProjectId(body.project_id);
+        const action = optionalInput(body.action);
+        const redirectView = normalizeWorkbenchView(body.view);
+        if (!projectId || (action !== "favorite" && action !== "unfavorite")) {
+          write(response, 400, "Invalid project preference", "text/plain");
+          return;
+        }
+        const preferenceDashboard = sanitizeDashboardForClient(
+          await database.getReviewDashboard({
+            project_id: workbenchPreferences.last_project_id ?? dashboardInput.project_id
+          })
+        );
+        const visibleProjectIds = new Set(
+          preferenceDashboard.projects.map((project) => String(project.project_id).toLowerCase())
+        );
+        if (!visibleProjectIds.has(projectId)) {
+          write(response, 404, "Project is not available", "text/plain");
+          return;
+        }
+        const favoriteProjectIds =
+          action === "favorite"
+            ? [projectId, ...workbenchPreferences.favorite_project_ids]
+            : workbenchPreferences.favorite_project_ids.filter(
+                (favoriteId) => favoriteId !== projectId
+              );
+        const currentProjectId = normalizePreferenceProjectId(
+          preferenceDashboard.current_project_id
+        );
+        const preferenceCookie = createWorkbenchPreferencesCookie({
+          last_project_id:
+            currentProjectId && visibleProjectIds.has(currentProjectId)
+              ? currentProjectId
+              : undefined,
+          favorite_project_ids: favoriteProjectIds.filter((favoriteId) =>
+            visibleProjectIds.has(favoriteId)
+          )
+        });
+        write(response, 303, "See other", "text/plain", {
+          ...responseCookieHeaders(sessionCookie, preferenceCookie),
+          location: projectChooserSearchPath(redirectView, body.project_q)
+        });
+        return;
+      }
       if (request.method === "GET" && requestUrl.pathname === remoteConnectApprovePath) {
         const code = optionalInput(requestUrl.searchParams.get("code"));
         const remoteConnectRequest = code
@@ -8964,7 +9253,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
           dashboard.projects.map((project) => String(project.project_id).toLowerCase())
         );
         const currentProjectId = normalizePreferenceProjectId(dashboard.current_project_id);
-        const nextWorkbenchPreferences = createWorkbenchPreferencesCookie({
+        const nextWorkbenchPreferenceState = normalizeWorkbenchPreferences({
           last_project_id:
             currentProjectId && visibleProjectIds.has(currentProjectId)
               ? currentProjectId
@@ -8973,12 +9262,17 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
             visibleProjectIds.has(projectId)
           )
         });
+        const nextWorkbenchPreferences = createWorkbenchPreferencesCookie(
+          nextWorkbenchPreferenceState
+        );
         write(
           response,
           200,
           renderDashboard(dashboard, {
             view: workbenchView,
-            projectChooser: projectChooserRequested || dashboard.projects.length === 0
+            projectChooser: projectChooserRequested || dashboard.projects.length === 0,
+            workbenchPreferences: nextWorkbenchPreferenceState,
+            projectQuery: normalizeProjectSearchQuery(requestUrl.searchParams.get("project_q"))
           }),
           "text/html",
           responseCookieHeaders(sessionCookie, nextWorkbenchPreferences)

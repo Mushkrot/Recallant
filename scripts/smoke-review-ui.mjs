@@ -1129,6 +1129,44 @@ try {
     }
   }
 
+  const emptyProjectServer = createRecallantHttpServer({
+    workbenchDatabase: {
+      async getReviewDashboard() {
+        return {
+          current_project_id: projectId,
+          current_project: null,
+          projects: [],
+          settings: []
+        };
+      }
+    }
+  });
+  emptyProjectServer.listen(0, "127.0.0.1");
+  await once(emptyProjectServer, "listening");
+  const emptyProjectAddress = emptyProjectServer.address();
+  if (!emptyProjectAddress || typeof emptyProjectAddress === "string") {
+    throw new Error("Empty project UI smoke server did not bind");
+  }
+  try {
+    const emptyProjectResponse = await fetch(
+      `http://127.0.0.1:${emptyProjectAddress.port}/review`,
+      { headers: { authorization: `Bearer ${token}` } }
+    );
+    const emptyProjectText = await emptyProjectResponse.text();
+    if (
+      emptyProjectResponse.status !== 200 ||
+      !emptyProjectText.includes("Connect your first project") ||
+      !emptyProjectText.includes("recallant connect .") ||
+      emptyProjectText.includes('<div class="project-choice-grid">')
+    ) {
+      throw new Error(`Empty project onboarding failed: ${emptyProjectResponse.status}`);
+    }
+  } finally {
+    await new Promise((resolve, reject) => {
+      emptyProjectServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+
   const rootHome = await fetch(`${baseUrl}/review`, {
     headers: { authorization: `Bearer ${token}` }
   });
@@ -1153,12 +1191,16 @@ try {
   });
   const chooserText = await chooser.text();
   const chooserRequired = [
-    "Project chooser",
-    "Choose a project",
+    "Switch project",
+    "Choose a project for Review",
     "Choose the project whose memories and decisions you want to review.",
     `href="/review?project_id=${projectId}&amp;view=review"`,
     "Personal Operations UI Smoke",
-    "Registered only"
+    "Registered only",
+    "Find a project",
+    "Recent projects",
+    "All other projects",
+    "Technical details"
   ];
   const chooserMissing = chooserRequired.filter((marker) => !chooserText.includes(marker));
   const chooserProjectCaptureStatus = [
@@ -1179,6 +1221,10 @@ try {
       `Project chooser smoke failed: ${chooser.status}; missing ${JSON.stringify(chooserMissing)}; captureStatus=${chooserProjectCaptureStatus}; ${chooserText.slice(0, 900)}`
     );
   }
+  const chooserCardCount = (chooserText.match(/<article class="project-choice /g) ?? []).length;
+  if (chooserCardCount < 1 || chooserCardCount > 4) {
+    throw new Error(`Project chooser card count was not bounded: ${chooserCardCount}`);
+  }
 
   const askChooser = await fetch(`${baseUrl}/review?choose_project=1&view=ask`, {
     headers: { authorization: `Bearer ${token}` }
@@ -1195,6 +1241,76 @@ try {
   if (askChooser.status !== 200 || askChooserMissing.length > 0) {
     throw new Error(
       `Mode-aware project chooser smoke failed: ${askChooser.status}; missing ${JSON.stringify(askChooserMissing)}`
+    );
+  }
+
+  const chooserCookie = (chooser.headers.get("set-cookie") ?? "").split(";", 1)[0];
+  const favoriteResponse = await fetch(`${baseUrl}/workbench-preferences`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      cookie: chooserCookie,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: humanMemorySpace.project_id,
+      action: "favorite",
+      view: "review"
+    })
+  });
+  const favoriteCookie = (favoriteResponse.headers.get("set-cookie") ?? "").split(";", 1)[0];
+  if (
+    favoriteResponse.status !== 303 ||
+    favoriteResponse.headers.get("location") !== "/review?choose_project=1&view=review" ||
+    !favoriteCookie.startsWith("recallant_workbench=")
+  ) {
+    throw new Error(
+      `Favorite preference failed: ${favoriteResponse.status}; ${favoriteResponse.headers.get("location")}; ${favoriteCookie}`
+    );
+  }
+  const favoriteChooser = await fetch(`${baseUrl}/review?choose_project=1&view=review`, {
+    headers: { authorization: `Bearer ${token}`, cookie: favoriteCookie }
+  });
+  const favoriteChooserText = await favoriteChooser.text();
+  if (
+    favoriteChooser.status !== 200 ||
+    !favoriteChooserText.includes("Favorites") ||
+    !favoriteChooserText.includes('value="unfavorite"') ||
+    !favoriteChooserText.includes("Personal Operations UI Smoke")
+  ) {
+    throw new Error(`Favorite chooser state failed: ${favoriteChooser.status}`);
+  }
+  const projectSearch = await fetch(
+    `${baseUrl}/review?choose_project=1&view=review&project_q=Personal`,
+    { headers: { authorization: `Bearer ${token}`, cookie: favoriteCookie } }
+  );
+  const projectSearchText = await projectSearch.text();
+  if (
+    projectSearch.status !== 200 ||
+    !projectSearchText.includes("Search results") ||
+    !projectSearchText.includes("Personal Operations UI Smoke") ||
+    projectSearchText.includes("Recent projects")
+  ) {
+    throw new Error(`Project chooser search failed: ${projectSearch.status}`);
+  }
+  const missingProjectPreference = await fetch(`${baseUrl}/workbench-preferences`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${token}`,
+      cookie: favoriteCookie,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      project_id: randomUUID(),
+      action: "favorite",
+      view: "review"
+    })
+  });
+  if (missingProjectPreference.status !== 404) {
+    throw new Error(
+      `Invisible project preference did not fail closed: ${missingProjectPreference.status}`
     );
   }
 
