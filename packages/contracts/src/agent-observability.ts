@@ -91,6 +91,7 @@ export type AgentObservationRecord = {
   source_event_id: string | null;
   dedup_key: string | null;
   sequence_number: number;
+  run_sequence_number: number;
   kind: AgentObservationKind;
   status: AgentObservationStatus;
   occurred_at: Date;
@@ -125,4 +126,69 @@ export type AgentObservationCompleteness = {
   coverage: Partial<Record<AgentObservationKind, number>>;
   client_coverage: Record<string, number>;
   unknown_client_observations: number;
+};
+
+export type AgentRunStatus = "running" | "complete" | "incomplete" | "needs_attention";
+
+export type AgentRunSummary = {
+  run_id: string;
+  session_id: string;
+  client_kind: string;
+  client_version: string | null;
+  session_status: string;
+  status: AgentRunStatus;
+  started_at: Date;
+  last_activity_at: Date;
+  duration_ms: number;
+  prompt_summary: string;
+  observation_count: number;
+  completeness: AgentObservationCompleteness;
+};
+
+export type AgentErrorGroup = {
+  fingerprint: string;
+  error_code: string | null;
+  title: string;
+  sample: string;
+  occurrence_count: number;
+  affected_run_count: number;
+  latest_at: Date;
+  resolution_status: "unresolved" | "retrying" | "resolved";
+  latest_run_id: string;
+  recovery_kinds: AgentObservationKind[];
+};
+
+export type AgentObservabilityCoverage = {
+  observation_count: number;
+  run_count: number;
+  complete_runs: number;
+  incomplete_runs: number;
+  runs_needing_attention: number;
+  average_score: number;
+  sequence_gap_count: number;
+  unmatched_user_prompts: number;
+  unmatched_tool_calls: number;
+  unresolved_errors: number;
+  redacted_observations: number;
+  truncated_observations: number;
+  adapters: Array<{
+    client_kind: string;
+    observation_count: number;
+    last_seen_at: Date | null;
+    status: "observed" | "not_observed";
+  }>;
+  next_actions: string[];
+};
+
+export type AgentObservabilityWorkbench = {
+  active_tab: "runs" | "replay" | "errors" | "coverage";
+  selected_run_id: string | null;
+  runs: AgentRunSummary[];
+  selected_run: AgentRunSummary | null;
+  replay: AgentObservationRecord[];
+  errors: AgentErrorGroup[];
+  coverage: AgentObservabilityCoverage;
+  retention_days: number;
+  bounded: true;
+  empty: boolean;
 };

@@ -6522,6 +6522,309 @@ function renderActivityReplay(data: ReviewDashboardData) {
   </div>`;
 }
 
+const agentObservationLabels: Record<string, string> = {
+  user_prompt: "Request",
+  assistant_response: "Agent response",
+  tool_call: "Tool started",
+  tool_result: "Tool result",
+  terminal_command: "Command",
+  terminal_output: "Command output",
+  file_change: "File changed",
+  test: "Check",
+  error: "Error",
+  retry: "Retry",
+  remediation: "Fix",
+  verification: "Verification",
+  commit: "Commit",
+  deploy: "Deployment",
+  closeout: "Finished",
+  gap: "Recording gap",
+  system: "System"
+};
+
+function agentObservationLabel(kind: unknown) {
+  return agentObservationLabels[String(kind ?? "")] ?? "Activity";
+}
+
+function agentRunStatus(status: unknown) {
+  const labels: Record<string, { label: string; note: string }> = {
+    running: { label: "In progress", note: "The agent is still working." },
+    complete: { label: "Complete", note: "The request, work, and finish were recorded." },
+    incomplete: { label: "Recording incomplete", note: "Some expected activity is missing." },
+    needs_attention: { label: "Needs attention", note: "An unresolved error was recorded." }
+  };
+  return (
+    labels[String(status ?? "")] ?? {
+      label: "Unknown",
+      note: "Recallant could not determine the result."
+    }
+  );
+}
+
+function formatDuration(value: unknown) {
+  const milliseconds = Math.max(0, Number(value ?? 0));
+  if (milliseconds < 1_000) return "under 1 sec";
+  const seconds = Math.round(milliseconds / 1_000);
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60)
+    return remainingSeconds > 0 ? `${minutes} min ${remainingSeconds} sec` : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+}
+
+function observabilityData(data: ReviewDashboardData) {
+  return asRecord(data.agent_observability);
+}
+
+function renderObservabilityTabs(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const activeTab = String(observability.active_tab ?? "runs");
+  const selectedRunId = observability.selected_run_id;
+  const tabs = [
+    { id: "runs", label: "Runs" },
+    { id: "replay", label: "Replay" },
+    { id: "errors", label: "Errors" },
+    { id: "coverage", label: "Coverage" }
+  ];
+  return `<nav class="observability-tabs" aria-label="Agent activity views">
+    ${tabs
+      .map(
+        (tab) =>
+          `<a href="${escapeHtml(
+            reviewPathWithParams(data.current_project_id, {
+              view: "activity",
+              activity_tab: tab.id,
+              run_id: tab.id === "replay" ? selectedRunId : null
+            })
+          )}"${activeTab === tab.id ? ' aria-current="page"' : ""}>${escapeHtml(tab.label)}</a>`
+      )
+      .join("")}
+  </nav>`;
+}
+
+function renderAgentRuns(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const runs = asArray(observability.runs).map(asRecord);
+  if (runs.length === 0) {
+    return `<div class="observability-empty">
+      <h3>No agent runs recorded yet</h3>
+      <p>Start an agent session and send a request. Recallant will show the request, response, tools, errors, fixes, and final result here.</p>
+    </div>`;
+  }
+  return `<div class="agent-run-list" aria-label="Recent agent runs">
+    <div class="agent-run-heading" aria-hidden="true">
+      <span>Started</span><span>Agent</span><span>Request and result</span><span>Coverage</span>
+    </div>
+    ${runs
+      .map((run) => {
+        const status = agentRunStatus(run.status);
+        const completeness = asRecord(run.completeness);
+        const score = Number(completeness.score ?? 0);
+        return `<a class="agent-run-row" href="${escapeHtml(
+          reviewPathWithParams(data.current_project_id, {
+            view: "activity",
+            activity_tab: "replay",
+            run_id: run.run_id
+          })
+        )}">
+          <time>${escapeHtml(formatDate(run.started_at))}<small>${escapeHtml(formatDuration(run.duration_ms))}</small></time>
+          <span class="agent-run-client">${escapeHtml(run.client_kind ?? "Unknown client")}</span>
+          <span class="agent-run-main">
+            <strong>${escapeHtml(run.prompt_summary ?? "No request was captured")}</strong>
+            <span class="agent-run-state ${escapeHtml(String(run.status ?? "unknown"))}">${escapeHtml(status.label)}</span>
+            <small>${escapeHtml(status.note)} ${escapeHtml(run.observation_count ?? 0)} recorded steps.</small>
+          </span>
+          <span class="agent-run-score"><strong>${escapeHtml(score)}%</strong><small>captured</small></span>
+        </a>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderObservationTechnicalDetails(observation: Record<string, unknown>) {
+  const metadata = asRecord(observation.redacted_metadata);
+  const details = {
+    sequence: observation.sequence_number,
+    status: observation.status,
+    tool: observation.tool_name ?? undefined,
+    error_code: observation.error_code ?? undefined,
+    attempt: observation.attempt_number ?? undefined,
+    trace_id: observation.trace_id,
+    redacted: observation.redacted === true || undefined,
+    truncated: observation.truncated === true || undefined,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined
+  };
+  return `<details class="observation-technical">
+    <summary>Technical details</summary>
+    <pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre>
+  </details>`;
+}
+
+function renderAgentReplay(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const selectedRun = asRecord(observability.selected_run);
+  const replay = asArray(observability.replay).map(asRecord);
+  if (!selectedRun.run_id) {
+    return `<div class="observability-empty"><h3>No run to replay</h3><p>Once an agent run is recorded, its request, response, actions, and outcome will appear here in order.</p></div>`;
+  }
+  const status = agentRunStatus(selectedRun.status);
+  const completeness = asRecord(selectedRun.completeness);
+  return `<section class="agent-replay" aria-label="Selected agent run">
+    <div class="agent-replay-head">
+      <div>
+        <a class="text-link" href="${escapeHtml(
+          reviewPathWithParams(data.current_project_id, { view: "activity", activity_tab: "runs" })
+        )}">← All runs</a>
+        <h3>${escapeHtml(selectedRun.prompt_summary ?? "Agent run")}</h3>
+        <p>${escapeHtml(status.note)}</p>
+      </div>
+      <dl>
+        <div><dt>Result</dt><dd>${escapeHtml(status.label)}</dd></div>
+        <div><dt>Agent</dt><dd>${escapeHtml(selectedRun.client_kind ?? "Unknown")}</dd></div>
+        <div><dt>Duration</dt><dd>${escapeHtml(formatDuration(selectedRun.duration_ms))}</dd></div>
+        <div><dt>Coverage</dt><dd>${escapeHtml(completeness.score ?? 0)}%</dd></div>
+      </dl>
+    </div>
+    <ol class="observation-timeline">
+      ${replay
+        .map((observation) => {
+          const body = String(observation.body ?? "").trim();
+          const title = String(observation.title ?? "").trim();
+          const rationale = String(observation.rationale ?? "").trim();
+          const kind = String(observation.kind ?? "system");
+          return `<li class="observation-row ${escapeHtml(kind)}">
+            <div class="observation-marker" aria-hidden="true"></div>
+            <article>
+              <header><span>${escapeHtml(agentObservationLabel(kind))}</span><time>${escapeHtml(
+                formatDate(observation.occurred_at)
+              )}</time></header>
+              ${title ? `<h4>${escapeHtml(title)}</h4>` : ""}
+              ${body ? `<p class="observation-body">${escapeHtml(body)}</p>` : '<p class="observation-muted">No safe text was captured for this step.</p>'}
+              ${rationale ? `<p class="observation-reason"><strong>Reason given:</strong> ${escapeHtml(rationale)}</p>` : ""}
+              ${renderObservationTechnicalDetails(observation)}
+            </article>
+          </li>`;
+        })
+        .join("")}
+    </ol>
+  </section>`;
+}
+
+function renderAgentErrors(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const errors = asArray(observability.errors).map(asRecord);
+  if (errors.length === 0) {
+    return `<div class="observability-empty"><h3>No recorded errors</h3><p>No error remains visible in the retained runs. Coverage still shows whether any clients or steps are missing.</p></div>`;
+  }
+  return `<div class="agent-error-list" aria-label="Grouped agent errors">
+    ${errors
+      .map((error) => {
+        const resolution = String(error.resolution_status ?? "unresolved");
+        const resolutionLabel =
+          resolution === "resolved"
+            ? "Resolved and verified"
+            : resolution === "retrying"
+              ? "Recovery recorded"
+              : "Unresolved";
+        const recoveryKinds = asArray(error.recovery_kinds).map(agentObservationLabel).join(", ");
+        return `<article class="agent-error-row">
+          <div class="agent-error-main">
+            <span class="agent-error-state ${escapeHtml(resolution)}">${escapeHtml(resolutionLabel)}</span>
+            <h3>${escapeHtml(error.title ?? "Agent error")}</h3>
+            <p>${escapeHtml(error.sample ?? "No safe error summary was captured.")}</p>
+            ${recoveryKinds ? `<p class="agent-error-recovery"><strong>Recovery trail:</strong> ${escapeHtml(recoveryKinds)}</p>` : ""}
+          </div>
+          <div class="agent-error-facts">
+            <span><strong>${escapeHtml(error.occurrence_count ?? 0)}</strong> occurrences</span>
+            <span><strong>${escapeHtml(error.affected_run_count ?? 0)}</strong> affected runs</span>
+            <time>${escapeHtml(formatDate(error.latest_at))}</time>
+            <a href="${escapeHtml(
+              reviewPathWithParams(data.current_project_id, {
+                view: "activity",
+                activity_tab: "replay",
+                run_id: error.latest_run_id
+              })
+            )}">Open latest run →</a>
+          </div>
+        </article>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function renderAgentCoverage(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const coverage = asRecord(observability.coverage);
+  const adapters = asArray(coverage.adapters).map(asRecord);
+  const actions = asArray(coverage.next_actions);
+  const runCount = Number(coverage.run_count ?? 0);
+  return `<section class="agent-coverage" aria-label="Agent recording coverage">
+    <div class="coverage-intro">
+      <div><span>Overall coverage</span><strong>${escapeHtml(coverage.average_score ?? 0)}%</strong></div>
+      <p>Based on ${escapeHtml(runCount)} retained run${runCount === 1 ? "" : "s"}. Recallant checks request/response pairing, tool results, sequence continuity, and error resolution.</p>
+    </div>
+    <dl class="coverage-facts">
+      <div><dt>Complete runs</dt><dd>${escapeHtml(coverage.complete_runs ?? 0)}</dd></div>
+      <div><dt>Need attention</dt><dd>${escapeHtml(coverage.runs_needing_attention ?? 0)}</dd></div>
+      <div><dt>Missing sequence steps</dt><dd>${escapeHtml(coverage.sequence_gap_count ?? 0)}</dd></div>
+      <div><dt>Unmatched requests</dt><dd>${escapeHtml(coverage.unmatched_user_prompts ?? 0)}</dd></div>
+      <div><dt>Tools without results</dt><dd>${escapeHtml(coverage.unmatched_tool_calls ?? 0)}</dd></div>
+      <div><dt>Unresolved errors</dt><dd>${escapeHtml(coverage.unresolved_errors ?? 0)}</dd></div>
+      <div><dt>Redacted records</dt><dd>${escapeHtml(coverage.redacted_observations ?? 0)}</dd></div>
+      <div><dt>Shortened records</dt><dd>${escapeHtml(coverage.truncated_observations ?? 0)}</dd></div>
+    </dl>
+    <div class="coverage-columns">
+      <section>
+        <h3>Capture adapters</h3>
+        <div class="adapter-list">
+          ${adapters
+            .map(
+              (adapter) =>
+                `<div><span class="adapter-state ${escapeHtml(String(adapter.status ?? "not_observed"))}"></span><strong>${escapeHtml(adapter.client_kind ?? "Unknown")}</strong><span>${
+                  adapter.status === "observed"
+                    ? `${escapeHtml(adapter.observation_count ?? 0)} observations · ${escapeHtml(formatDate(adapter.last_seen_at))}`
+                    : "No retained activity"
+                }</span></div>`
+            )
+            .join("")}
+        </div>
+      </section>
+      <section>
+        <h3>What to do next</h3>
+        <ul class="coverage-actions">${actions.map((action) => `<li>${escapeHtml(action)}</li>`).join("")}</ul>
+      </section>
+    </div>
+    <p class="retention-note">Detailed observations are retained for ${escapeHtml(observability.retention_days ?? 30)} days. Lists are intentionally bounded so this page stays fast.</p>
+  </section>`;
+}
+
+function renderAgentObservability(data: ReviewDashboardData) {
+  const observability = observabilityData(data);
+  const activeTab = String(observability.active_tab ?? "runs");
+  const content =
+    activeTab === "replay"
+      ? renderAgentReplay(data)
+      : activeTab === "errors"
+        ? renderAgentErrors(data)
+        : activeTab === "coverage"
+          ? renderAgentCoverage(data)
+          : renderAgentRuns(data);
+  return `<div class="agent-observability">
+    <div class="observability-intro">
+      <p>See what agents were asked, what they answered, which tools they used, where they failed, and whether recovery worked.</p>
+    </div>
+    ${renderObservabilityTabs(data)}
+    <div class="observability-content">${content}</div>
+    <details class="legacy-activity">
+      <summary>Memory recording history <span>Sessions, context reads, memory writes, and checkpoints</span></summary>
+      ${renderActivityReplay(data)}
+    </details>
+  </div>`;
+}
+
 function renderHomeRecentActivity(data: ReviewDashboardData) {
   const rows = Array.isArray(data.recent_activity)
     ? (data.recent_activity as Array<Record<string, unknown>>).slice(0, 5)
@@ -8874,6 +9177,233 @@ function renderDashboard(
       .project-list-details > summary { justify-content: flex-start; }
     }
 
+    /* Agent observability workbench */
+    .observability-title { margin-bottom: 6px; }
+    .observability-title > p { max-width: 560px; }
+    .observability-intro > p {
+      max-width: 820px;
+      margin: 0 0 14px;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .observability-tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 18px;
+      overflow-x: auto;
+    }
+    .observability-tabs a {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      border-bottom: 3px solid transparent;
+      padding: 8px 16px 6px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .observability-tabs a:hover { color: var(--text); }
+    .observability-tabs a[aria-current="page"] {
+      border-bottom-color: var(--accent);
+      color: var(--accent-strong);
+    }
+    .observability-content { min-height: 240px; }
+    .observability-empty {
+      max-width: 720px;
+      border: 1px dashed var(--line-strong);
+      padding: 24px;
+      background: var(--surface-soft);
+    }
+    .observability-empty h3 { margin: 0 0 6px; font-size: 17px; }
+    .observability-empty p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+    .agent-run-list { border-top: 1px solid var(--line); }
+    .agent-run-heading,
+    .agent-run-row {
+      display: grid;
+      grid-template-columns: minmax(130px, 0.66fr) minmax(100px, 0.55fr) minmax(280px, 2fr) minmax(80px, 0.45fr);
+      gap: 16px;
+      align-items: center;
+    }
+    .agent-run-heading {
+      min-height: 38px;
+      padding: 0 12px;
+      color: var(--text-faint);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .agent-run-row {
+      min-height: 92px;
+      border-top: 1px solid var(--line);
+      padding: 13px 12px;
+      color: var(--text);
+    }
+    .agent-run-row:hover { background: var(--surface-soft); }
+    .agent-run-row time,
+    .agent-run-client { color: var(--text-muted); font-size: 11px; }
+    .agent-run-row time small,
+    .agent-run-main small,
+    .agent-run-score small { display: block; margin-top: 4px; color: var(--text-faint); font-size: 10.5px; }
+    .agent-run-main { min-width: 0; }
+    .agent-run-main > strong {
+      display: block;
+      max-width: 74ch;
+      margin-bottom: 7px;
+      font-size: 13px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .agent-run-state,
+    .agent-error-state {
+      display: inline-block;
+      border-left: 3px solid var(--neutral);
+      padding-left: 7px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .agent-run-state.complete,
+    .agent-error-state.resolved { border-color: var(--success); color: var(--success); }
+    .agent-run-state.running,
+    .agent-error-state.retrying { border-color: var(--info); color: var(--info); }
+    .agent-run-state.incomplete { border-color: var(--warning); color: var(--warning); }
+    .agent-run-state.needs_attention,
+    .agent-error-state.unresolved { border-color: var(--danger); color: var(--danger); }
+    .agent-run-score { text-align: right; }
+    .agent-run-score strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .agent-replay-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.65fr);
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+    }
+    .agent-replay-head h3 { max-width: 760px; margin: 12px 0 5px; font-size: 18px; line-height: 1.35; }
+    .agent-replay-head p { margin: 0; color: var(--text-muted); }
+    .text-link { font-size: 12px; font-weight: 700; }
+    .agent-replay-head dl,
+    .coverage-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      margin: 0;
+      background: var(--line);
+      border: 1px solid var(--line);
+    }
+    .agent-replay-head dl > div,
+    .coverage-facts > div { padding: 9px 11px; background: #fff; }
+    .agent-replay-head dt,
+    .coverage-facts dt { color: var(--text-faint); font-size: 10px; }
+    .agent-replay-head dd { margin: 3px 0 0; font-size: 12px; font-weight: 700; }
+    .observation-timeline { position: relative; list-style: none; margin: 22px 0 0; padding: 0; }
+    .observation-timeline::before {
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 7px;
+      width: 1px;
+      background: var(--line-strong);
+      content: "";
+    }
+    .observation-row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 14px; padding: 0 0 18px; }
+    .observation-marker {
+      width: 9px;
+      height: 9px;
+      margin-top: 7px;
+      border: 2px solid #fff;
+      background: var(--neutral);
+      box-shadow: 0 0 0 1px var(--line-strong);
+      z-index: 1;
+    }
+    .observation-row.user_prompt .observation-marker,
+    .observation-row.assistant_response .observation-marker { background: var(--accent); }
+    .observation-row.error .observation-marker { background: var(--danger); }
+    .observation-row.remediation .observation-marker,
+    .observation-row.verification .observation-marker { background: var(--success); }
+    .observation-row article { min-width: 0; border-bottom: 1px solid var(--line); padding: 0 0 15px; }
+    .observation-row article > header { display: flex; min-height: 24px; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .observation-row article > header span { color: var(--accent-strong); font-size: 11px; font-weight: 750; }
+    .observation-row article > header time { color: var(--text-faint); font-family: var(--mono); font-size: 10px; }
+    .observation-row h4 { margin: 6px 0 4px; font-size: 13px; }
+    .observation-body { max-width: 1000px; margin: 5px 0 0; white-space: pre-wrap; color: var(--text); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .observation-muted { margin: 5px 0 0; color: var(--text-faint); font-size: 12px; }
+    .observation-reason { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; }
+    .observation-technical { margin-top: 8px; }
+    .observation-technical > summary { min-height: 36px; justify-content: flex-start; color: var(--text-muted); font-size: 11px; }
+    .observation-technical pre { max-height: 360px; overflow: auto; }
+    .agent-error-list { border-top: 1px solid var(--line); }
+    .agent-error-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(210px, 0.3fr);
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      padding: 18px 8px;
+    }
+    .agent-error-main h3 { margin: 9px 0 5px; font-size: 15px; }
+    .agent-error-main > p { max-width: 900px; margin: 0; color: var(--text-muted); line-height: 1.45; white-space: pre-wrap; }
+    .agent-error-recovery { margin-top: 8px !important; font-size: 12px; }
+    .agent-error-facts { display: grid; gap: 6px; align-content: start; color: var(--text-muted); font-size: 11px; }
+    .agent-error-facts span strong { color: var(--text); }
+    .agent-error-facts a { margin-top: 4px; font-weight: 700; }
+    .coverage-intro { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 24px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+    .coverage-intro div > span { display: block; color: var(--text-faint); font-size: 11px; }
+    .coverage-intro div > strong { display: block; margin-top: 2px; font-size: 34px; font-variant-numeric: tabular-nums; }
+    .coverage-intro p { max-width: 720px; margin: 0; color: var(--text-muted); line-height: 1.5; }
+    .coverage-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 16px; }
+    .coverage-facts dd { margin: 4px 0 0; font-size: 17px; font-weight: 750; }
+    .coverage-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 24px; }
+    .coverage-columns h3 { margin: 0 0 10px; font-size: 14px; }
+    .adapter-list { border-top: 1px solid var(--line); }
+    .adapter-list > div { display: grid; grid-template-columns: 9px minmax(90px, 0.5fr) minmax(0, 1fr); gap: 9px; align-items: center; border-bottom: 1px solid var(--line); padding: 9px 0; }
+    .adapter-list strong { font-size: 12px; }
+    .adapter-list span:last-child { color: var(--text-muted); font-size: 11px; }
+    .adapter-state { width: 7px; height: 7px; background: var(--line-strong); }
+    .adapter-state.observed { background: var(--success); }
+    .coverage-actions { margin: 0; padding-left: 19px; color: var(--text-muted); line-height: 1.55; }
+    .coverage-actions li + li { margin-top: 6px; }
+    .retention-note { border-top: 1px solid var(--line); margin: 22px 0 0; padding-top: 12px; color: var(--text-faint); font-size: 11px; }
+    .legacy-activity { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 8px; }
+    .legacy-activity > summary { justify-content: space-between; gap: 12px; color: var(--text); font-size: 12px; font-weight: 700; }
+    .legacy-activity > summary span { color: var(--text-muted); font-weight: 400; }
+    .legacy-activity[open] > summary { margin-bottom: 14px; }
+    @media (max-width: 900px) {
+      .agent-run-heading { display: none; }
+      .agent-run-row { grid-template-columns: 120px minmax(0, 1fr) 72px; }
+      .agent-run-client { display: none; }
+      .agent-replay-head { grid-template-columns: 1fr; }
+      .coverage-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .agent-observability,
+      .observability-content,
+      .agent-run-list,
+      .agent-replay,
+      .observation-timeline,
+      .agent-error-list,
+      .agent-coverage { max-width: 100%; min-width: 0; }
+      .observability-title { display: block; }
+      .observability-title > p { margin-top: 5px; }
+      .observability-tabs { margin-left: -8px; margin-right: -8px; padding: 0 8px; }
+      .observability-tabs a { flex: 1 0 auto; justify-content: center; padding-left: 12px; padding-right: 12px; }
+      .agent-run-row { grid-template-columns: 1fr 62px; gap: 10px; padding: 14px 4px; }
+      .agent-run-row time { grid-column: 1; }
+      .agent-run-main { grid-column: 1; }
+      .agent-run-score { grid-column: 2; grid-row: 1 / span 2; }
+      .agent-error-row,
+      .coverage-intro,
+      .coverage-columns { grid-template-columns: 1fr; gap: 14px; }
+      .agent-replay-head dl,
+      .coverage-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .observation-row article > header { display: block; }
+      .observation-row article > header time { display: block; margin-top: 3px; }
+      .legacy-activity > summary { display: block; padding: 10px 0; }
+      .legacy-activity > summary span { display: block; margin-top: 4px; }
+    }
+
   </style>
 </head>
 <body>
@@ -8936,8 +9466,14 @@ function renderDashboard(
         ${
           showActivity
             ? `<section class="panel ${focused ? "" : "overview-activity"}" id="activity-replay">
-          <h2>Activity / Replay</h2>
-          ${renderActivityReplay(data)}
+          <div class="section-head observability-title">
+            <div>
+              <span class="section-kicker">Agent observability</span>
+              <h2>Agent activity</h2>
+            </div>
+            <p>Follow a request from start to finish without reading raw logs.</p>
+          </div>
+          ${renderAgentObservability(data)}
         </section>`
             : ""
         }
@@ -9146,7 +9682,9 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         rule_scope: requestUrl.searchParams.get("scope"),
         rule_scope_kind: requestUrl.searchParams.get("scope_kind"),
         rule_memory_type: requestUrl.searchParams.get("rule_type"),
-        rule_memory_domain: requestUrl.searchParams.get("rule_domain")
+        rule_memory_domain: requestUrl.searchParams.get("rule_domain"),
+        activity_tab: requestUrl.searchParams.get("activity_tab"),
+        selected_run_id: requestUrl.searchParams.get("run_id")
       };
       const workbenchView = normalizeWorkbenchView(requestUrl.searchParams.get("view"));
       const explicitProjectId = optionalInput(requestUrl.searchParams.get("project_id"));

@@ -237,16 +237,16 @@ export function normalizeAgentObservation(
 export function analyzeAgentObservationCompleteness(
   observations: readonly AgentObservationRecord[]
 ): AgentObservationCompleteness {
-  const sorted = [...observations].sort((a, b) => a.sequence_number - b.sequence_number);
+  const sorted = [...observations].sort((a, b) => a.run_sequence_number - b.run_sequence_number);
   const sequenceGaps: AgentObservationCompleteness["sequence_gaps"] = [];
   for (let index = 1; index < sorted.length; index += 1) {
     const previous = sorted[index - 1];
     const current = sorted[index];
-    if (previous && current && current.sequence_number > previous.sequence_number + 1) {
+    if (previous && current && current.run_sequence_number > previous.run_sequence_number + 1) {
       sequenceGaps.push({
-        after: previous.sequence_number,
-        before: current.sequence_number,
-        missing: current.sequence_number - previous.sequence_number - 1
+        after: previous.run_sequence_number,
+        before: current.run_sequence_number,
+        missing: current.run_sequence_number - previous.run_sequence_number - 1
       });
     }
   }

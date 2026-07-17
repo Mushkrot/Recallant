@@ -122,6 +122,13 @@ async function assertResponsiveBounds(page, label) {
       ".graph-candidate-detail",
       ".activity-group",
       ".activity-item",
+      ".agent-observability",
+      ".observability-tabs",
+      ".agent-run-row",
+      ".agent-replay",
+      ".observation-row",
+      ".agent-error-row",
+      ".agent-coverage",
       "button",
       ".filter-chip",
       ".source-filter-chip",
@@ -158,7 +165,7 @@ async function assertResponsiveBounds(page, label) {
   const clippedControls = await page.evaluate(() =>
     Array.from(
       globalThis.document.querySelectorAll(
-        "button,.filter-chip,.source-filter-chip,.workbench-nav a,.pill"
+        "button,.filter-chip,.source-filter-chip,.workbench-nav a,.observability-tabs a,.pill"
       )
     )
       .map((element) => ({
@@ -674,6 +681,118 @@ async function run() {
     text: "Playwright visual QA is checking Recallant Workbench layout.",
     dedup_key: `playwright-turn-${randomUUID()}`
   });
+  const observabilityRunId = randomUUID();
+  const observabilityTurnId = randomUUID();
+  const observabilityTraceId = randomUUID();
+  const requestObservation = await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    client_kind: "codex",
+    client_version: "playwright-smoke",
+    kind: "user_prompt",
+    title: "Check the release and repair any failing verification",
+    body: "Review the release candidate, fix a failed browser check, and verify that the repair works."
+  });
+  const toolObservation = await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: requestObservation.id,
+    client_kind: "codex",
+    kind: "tool_call",
+    tool_name: "browser_check",
+    title: "Run browser verification",
+    body: "Opened the release candidate in a desktop browser."
+  });
+  const errorObservation = await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: toolObservation.id,
+    client_kind: "codex",
+    kind: "error",
+    error_code: "LAYOUT_OVERFLOW",
+    title: "Mobile layout overflowed the viewport",
+    body: "The activity timeline extended beyond the mobile viewport during verification.",
+    resolution_status: "unresolved"
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: errorObservation.id,
+    client_kind: "codex",
+    kind: "retry",
+    title: "Retry after narrowing the timeline",
+    body: "Re-ran the same mobile browser check after the layout change.",
+    attempt_number: 2,
+    resolution_status: "retrying"
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: errorObservation.id,
+    client_kind: "codex",
+    kind: "remediation",
+    title: "Constrain the activity timeline",
+    body: "Changed the mobile activity layout to a single readable column.",
+    rationale: "The overflow came from a desktop grid that did not collapse on narrow screens.",
+    resolution_status: "retrying"
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: errorObservation.id,
+    client_kind: "codex",
+    kind: "verification",
+    title: "Mobile verification passed",
+    body: "The repaired activity timeline stayed inside the viewport and all controls remained usable.",
+    resolution_status: "resolved"
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: toolObservation.id,
+    client_kind: "codex",
+    kind: "tool_result",
+    status: "success",
+    tool_name: "browser_check",
+    title: "Browser check passed",
+    body: "The repeated desktop and mobile checks completed successfully."
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    parent_observation_id: requestObservation.id,
+    client_kind: "codex",
+    kind: "assistant_response",
+    title: "Release verification completed",
+    body: "The failed mobile check was repaired and the repeated browser verification passed.",
+    status: "success"
+  });
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    run_id: observabilityRunId,
+    turn_id: observabilityTurnId,
+    trace_id: observabilityTraceId,
+    client_kind: "codex",
+    kind: "closeout",
+    title: "Run completed",
+    body: "The request, repair, and verification are complete."
+  });
   await db.appendEvent({
     session_id: session.session_id,
     client_kind: "codex",
@@ -695,7 +814,7 @@ async function run() {
     memory_type: "environment_fact",
     scope: "project",
     title: "Team handbook source is visible in Activity",
-    body: "Source-filtered Activity / Replay should show memory writes that came from the team handbook.",
+    body: "Source-filtered Agent activity should show memory writes that came from the team handbook.",
     created_by: "agent",
     source_refs: [
       {
@@ -803,7 +922,7 @@ async function run() {
       memory_type: index % 3 === 0 ? "decision" : index % 3 === 1 ? "action" : "test_result",
       scope: "project",
       title,
-      body: "Dense Workbench QA uses this synthetic record to prove long human-readable text remains scannable in Activity / Replay and Review without showing raw database fields.",
+      body: "Dense Workbench QA uses this synthetic record to prove long human-readable text remains scannable in Agent activity and Review without showing raw database fields.",
       created_by: "agent",
       confidence: index === denseActivityTitles.length - 1 ? 0.45 : 0.78,
       metadata: {
@@ -1250,7 +1369,7 @@ async function run() {
         waitUntil: "networkidle"
       }
     );
-    await desktop.getByRole("heading", { name: "Activity / Replay" }).waitFor();
+    await desktop.getByRole("heading", { name: "Agent activity" }).waitFor();
     await noHorizontalScroll(desktop, "desktop focused source-filtered Activity view");
     await assertResponsiveBounds(desktop, "desktop focused source-filtered Activity view");
     uiMetrics.desktop_activity = await collectUiMetrics(desktop, "desktop_activity");
@@ -1258,13 +1377,34 @@ async function run() {
       desktop.locator("#activity-replay"),
       "desktop focused source-filtered Activity"
     );
-    await visibleBox(
-      desktop.locator("#activity-replay .activity-summary"),
-      "desktop Activity replay summary"
-    );
     assert(
       focusedActivityBox.width >= 980,
       `desktop focused source-filtered Activity is too narrow: ${JSON.stringify(focusedActivityBox)}`
+    );
+    for (const tab of ["Runs", "Replay", "Errors", "Coverage"]) {
+      await desktop.getByRole("link", { name: tab, exact: true }).waitFor();
+    }
+    await desktop
+      .locator('.observability-tabs a[aria-current="page"]', { hasText: "Runs" })
+      .waitFor();
+    await desktop
+      .locator(".agent-run-row", {
+        hasText: "Review the release candidate"
+      })
+      .waitFor();
+    await desktop.getByText("See what agents were asked").waitFor();
+    await saveScreenshotPair(
+      desktop,
+      join(reportDir, "recallant-workbench-desktop-focused-activity-runs.png"),
+      publicScreenshots.activity,
+      "desktop focused Activity runs",
+      forbiddenPublicText
+    );
+
+    await desktop.locator("details.legacy-activity > summary").click();
+    await visibleBox(
+      desktop.locator("#activity-replay .activity-summary"),
+      "desktop memory recording history summary"
     );
     await desktop.getByText("Filtered to Team handbook").waitFor();
     await desktop.getByRole("heading", { name: "Recording flow" }).waitFor();
@@ -1279,13 +1419,58 @@ async function run() {
     await desktop.getByText("Source: Team handbook").first().waitFor();
     await desktop.getByText("Context was read").waitFor();
     await absent(desktop.locator("#ask-recallant"), "focused Activity Ask panel");
-    await saveScreenshotPair(
-      desktop,
-      join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
-      publicScreenshots.activity,
-      "desktop focused Activity",
-      forbiddenPublicText
-    );
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-focused-activity-source.png"),
+      fullPage: true
+    });
+
+    await desktop
+      .locator(".agent-run-row", {
+        hasText: "Review the release candidate"
+      })
+      .click();
+    await desktop
+      .locator('.observability-tabs a[aria-current="page"]', { hasText: "Replay" })
+      .waitFor();
+    await desktop
+      .getByRole("heading", {
+        name: "Review the release candidate, fix a failed browser check, and verify that the repair works."
+      })
+      .waitFor();
+    await desktop.getByText("Mobile layout overflowed the viewport").waitFor();
+    await desktop.getByText("Constrain the activity timeline").waitFor();
+    await desktop.getByText("Mobile verification passed").waitFor();
+    await noHorizontalScroll(desktop, "desktop Agent replay");
+    await assertResponsiveBounds(desktop, "desktop Agent replay");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-agent-replay.png"),
+      fullPage: true
+    });
+
+    await desktop.getByRole("link", { name: "Errors", exact: true }).click();
+    await desktop
+      .locator('.observability-tabs a[aria-current="page"]', { hasText: "Errors" })
+      .waitFor();
+    await desktop.getByText("Resolved and verified").waitFor();
+    await desktop.getByText("Recovery trail:").waitFor();
+    await noHorizontalScroll(desktop, "desktop Agent errors");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-agent-errors.png"),
+      fullPage: true
+    });
+
+    await desktop.getByRole("link", { name: "Coverage", exact: true }).click();
+    await desktop
+      .locator('.observability-tabs a[aria-current="page"]', { hasText: "Coverage" })
+      .waitFor();
+    await desktop.getByText("Overall coverage").waitFor();
+    await desktop.getByRole("heading", { name: "Capture adapters" }).waitFor();
+    await desktop.getByRole("heading", { name: "What to do next" }).waitFor();
+    await noHorizontalScroll(desktop, "desktop Agent coverage");
+    await desktop.screenshot({
+      path: join(reportDir, "recallant-workbench-desktop-agent-coverage.png"),
+      fullPage: true
+    });
 
     await desktop.goto(`${baseUrl}/review?project_id=${projectId}&view=audit`, {
       waitUntil: "networkidle"
@@ -1558,6 +1743,31 @@ async function run() {
     });
     await mobile.screenshot({
       path: publicScreenshots.mobile,
+      fullPage: true
+    });
+    await mobile.goto(`${baseUrl}/review?project_id=${projectId}&view=activity`, {
+      waitUntil: "networkidle"
+    });
+    await mobile.getByRole("heading", { name: "Agent activity" }).waitFor();
+    await mobile
+      .locator(".agent-run-row", {
+        hasText: "Review the release candidate"
+      })
+      .waitFor();
+    await noHorizontalScroll(mobile, "mobile Agent runs");
+    await assertResponsiveBounds(mobile, "mobile Agent runs");
+    await mobile
+      .locator(".agent-run-row", {
+        hasText: "Review the release candidate"
+      })
+      .click();
+    await mobile.getByText("Mobile layout overflowed the viewport").waitFor();
+    await mobile.getByText("Mobile verification passed").waitFor();
+    await noHorizontalScroll(mobile, "mobile Agent replay");
+    await assertResponsiveBounds(mobile, "mobile Agent replay");
+    uiMetrics.mobile_activity = await collectUiMetrics(mobile, "mobile_activity");
+    await mobile.screenshot({
+      path: join(reportDir, "recallant-workbench-mobile-agent-replay.png"),
       fullPage: true
     });
     await mobile.goto(

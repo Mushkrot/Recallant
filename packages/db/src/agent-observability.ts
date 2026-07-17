@@ -24,6 +24,7 @@ export const agentObservationSchemaStatements = [
       source_event_id UUID REFERENCES events(id) ON DELETE SET NULL,
       dedup_key TEXT,
       sequence_number BIGINT NOT NULL,
+      run_sequence_number BIGINT NOT NULL,
       kind TEXT NOT NULL,
       status TEXT NOT NULL,
       occurred_at TIMESTAMPTZ NOT NULL,
@@ -57,9 +58,24 @@ export const agentObservationSchemaStatements = [
       UNIQUE (session_id, sequence_number)
     )
   `,
+  "ALTER TABLE agent_observations ADD COLUMN IF NOT EXISTS run_sequence_number BIGINT",
+  `
+    WITH numbered AS (
+      SELECT id, row_number() OVER (
+        PARTITION BY run_id ORDER BY sequence_number ASC, occurred_at ASC, id ASC
+      ) AS run_sequence_number
+      FROM agent_observations
+      WHERE run_sequence_number IS NULL
+    )
+    UPDATE agent_observations observations
+    SET run_sequence_number = numbered.run_sequence_number
+    FROM numbered
+    WHERE observations.id = numbered.id
+  `,
+  "ALTER TABLE agent_observations ALTER COLUMN run_sequence_number SET NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_observations_project_dedup ON agent_observations (project_id, dedup_key) WHERE dedup_key IS NOT NULL",
   "CREATE INDEX IF NOT EXISTS idx_agent_observations_project_time ON agent_observations (project_id, occurred_at DESC)",
-  "CREATE INDEX IF NOT EXISTS idx_agent_observations_run_sequence ON agent_observations (run_id, sequence_number)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_observations_run_position ON agent_observations (run_id, run_sequence_number)",
   "CREATE INDEX IF NOT EXISTS idx_agent_observations_session_sequence ON agent_observations (session_id, sequence_number)",
   "CREATE INDEX IF NOT EXISTS idx_agent_observations_trace ON agent_observations (trace_id)",
   "CREATE INDEX IF NOT EXISTS idx_agent_observations_parent ON agent_observations (parent_observation_id) WHERE parent_observation_id IS NOT NULL",
@@ -73,8 +89,9 @@ export async function ensureAgentObservationSchema(client: Queryable) {
 
 function mapAgentObservation(row: Record<string, unknown>): AgentObservationRecord {
   return {
-    ...(row as Omit<AgentObservationRecord, "sequence_number">),
+    ...(row as Omit<AgentObservationRecord, "sequence_number" | "run_sequence_number">),
     sequence_number: Number(row.sequence_number),
+    run_sequence_number: Number(row.run_sequence_number ?? row.sequence_number),
     status: row.status as AgentObservationStatus,
     resolution_status: row.resolution_status as AgentObservationResolutionStatus,
     redacted_metadata:
@@ -114,7 +131,9 @@ export async function storeAgentObservation(
     }
   }
 
-  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.session_id]);
+  for (const lockKey of Array.from(new Set([input.session_id, input.run_id])).sort()) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [lockKey]);
+  }
   const sequence = await client.query<{ next_sequence: string }>(
     `
       SELECT (coalesce(max(sequence_number), 0) + 1)::text AS next_sequence
@@ -124,20 +143,29 @@ export async function storeAgentObservation(
     [input.session_id]
   );
   const nextSequence = Number(sequence.rows[0]?.next_sequence ?? "1");
+  const runSequence = await client.query<{ next_sequence: string }>(
+    `
+      SELECT (coalesce(max(run_sequence_number), 0) + 1)::text AS next_sequence
+      FROM agent_observations
+      WHERE run_id = $1
+    `,
+    [input.run_id]
+  );
+  const nextRunSequence = Number(runSequence.rows[0]?.next_sequence ?? "1");
   const inserted = await client.query(
     `
       INSERT INTO agent_observations (
         project_id, developer_id, session_id, run_id, turn_id, trace_id,
-        parent_observation_id, source_event_id, dedup_key, sequence_number,
+        parent_observation_id, source_event_id, dedup_key, sequence_number, run_sequence_number,
         kind, status, occurred_at, duration_ms, title, body, tool_name, error_code,
         error_fingerprint, attempt_number, resolution_status, rationale,
         redacted_metadata, capture_profile, redacted, truncated, client_kind, client_version
       ) VALUES (
         $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18,
-        $19, $20, $21, $22,
-        $23, $24, $25, $26, $27, $28
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23,
+        $24, $25, $26, $27, $28, $29
       )
       RETURNING *
     `,
@@ -152,6 +180,7 @@ export async function storeAgentObservation(
       input.source_event_id,
       input.dedup_key,
       nextSequence,
+      nextRunSequence,
       input.kind,
       input.status,
       input.occurred_at,

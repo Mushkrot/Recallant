@@ -674,6 +674,7 @@ CREATE TABLE agent_observations (
   source_event_id UUID REFERENCES events(id) ON DELETE SET NULL,
   dedup_key TEXT,
   sequence_number BIGINT NOT NULL,
+  run_sequence_number BIGINT NOT NULL,
   kind TEXT NOT NULL CHECK (
     kind IN (
       'user_prompt', 'assistant_response', 'tool_call', 'tool_result',
@@ -722,8 +723,8 @@ CREATE UNIQUE INDEX idx_agent_observations_project_dedup
   WHERE dedup_key IS NOT NULL;
 CREATE INDEX idx_agent_observations_project_time
   ON agent_observations (project_id, occurred_at DESC);
-CREATE INDEX idx_agent_observations_run_sequence
-  ON agent_observations (run_id, sequence_number);
+CREATE UNIQUE INDEX idx_agent_observations_run_position
+  ON agent_observations (run_id, run_sequence_number);
 CREATE INDEX idx_agent_observations_session_sequence
   ON agent_observations (session_id, sequence_number);
 CREATE INDEX idx_agent_observations_trace ON agent_observations (trace_id);

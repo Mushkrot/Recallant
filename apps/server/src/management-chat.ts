@@ -2169,7 +2169,7 @@ function answerRu(
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nВот что Recallant нашел в governed memory по запросу “${memoryLookupResult.query}”:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
       }
-      return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Принято: ${facts.accepted_memories}, отклонено: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Для быстрого просмотра смотри Activity / Replay; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
+      return `${baseline}\n\nВ этом memory space сейчас видно ${facts.memory_count} воспоминаний, ${facts.capture_events} capture-событий и ${facts.captured_decisions} сохраненных решений. Принято: ${facts.accepted_memories}, отклонено: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Для быстрого просмотра открой Agent activity; для вещей, которые могут стать правилами или требуют решения владельца, смотри Review.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nЯ нашел возможные связанные правила/память по запросу “${memoryLookupResult.query}”. Диагностика ниже показывает, применяется ли каждая запись как binding rule и почему.\n\n${formatRuleDiagnosticsRu(memoryLookupResult)}`;
@@ -2296,7 +2296,7 @@ function answerEn(
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nHere is what Recallant found in governed memory for “${memoryLookupResult.query}”:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;
       }
-      return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Accepted: ${facts.accepted_memories}, rejected: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Use Activity / Replay for the latest captured work; use Review for items that may become rules or need an owner decision.`;
+      return `${baseline}\n\nThis memory space currently shows ${facts.memory_count} memories, ${facts.capture_events} capture events, and ${facts.captured_decisions} captured decisions. Accepted: ${facts.accepted_memories}, rejected: ${facts.rejected_memories}, stale: ${facts.stale_memories}, conflict: ${facts.conflict_memories}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Use Agent activity for the latest captured work; use Review for items that may become rules or need an owner decision.`;
     case "rule_diagnostics":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nI found possibly related rules/memory for “${memoryLookupResult.query}”. The diagnostics below show whether each record applies as a binding rule and why.\n\n${formatRuleDiagnosticsEn(memoryLookupResult)}`;

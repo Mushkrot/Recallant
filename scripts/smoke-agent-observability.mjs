@@ -138,7 +138,7 @@ try {
   );
   assert(completeness.unresolved_errors === 0, "resolved error remained open");
   const artificialGap = observations.map((item, index) =>
-    index === 0 ? { ...item, sequence_number: item.sequence_number + 2 } : item
+    index === 0 ? { ...item, run_sequence_number: item.run_sequence_number + 2 } : item
   );
   const gapCompleteness = analyzeAgentObservationCompleteness(artificialGap);
   assert(gapCompleteness.sequence_gaps.length > 0, "sequence gap was not detected");

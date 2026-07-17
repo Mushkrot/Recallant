@@ -1430,6 +1430,43 @@ try {
     );
   }
 
+  const activityView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=activity`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const activityViewText = await activityView.text();
+  if (
+    activityView.status !== 200 ||
+    !activityViewText.includes("Agent activity") ||
+    !activityViewText.includes('aria-label="Agent activity views"') ||
+    !activityViewText.includes('aria-current="page">Runs</a>') ||
+    !activityViewText.includes("Replay") ||
+    !activityViewText.includes("Errors") ||
+    !activityViewText.includes("Coverage") ||
+    !activityViewText.includes("Memory recording history") ||
+    activityViewText.includes('id="ask-recallant"')
+  ) {
+    throw new Error(
+      `Agent activity focused view failed: ${activityView.status}; ${activityViewText.slice(0, 700)}`
+    );
+  }
+
+  const activityCoverageView = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=activity&activity_tab=coverage`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  const activityCoverageText = await activityCoverageView.text();
+  if (
+    activityCoverageView.status !== 200 ||
+    !activityCoverageText.includes('aria-current="page">Coverage</a>') ||
+    !activityCoverageText.includes("Overall coverage") ||
+    !activityCoverageText.includes("Capture adapters") ||
+    !activityCoverageText.includes("What to do next")
+  ) {
+    throw new Error(
+      `Agent activity Coverage view failed: ${activityCoverageView.status}; ${activityCoverageText.slice(0, 700)}`
+    );
+  }
+
   const settingsView = await fetch(`${baseUrl}/review?project_id=${projectId}&view=settings`, {
     headers: { authorization: `Bearer ${token}` }
   });
@@ -1530,6 +1567,11 @@ try {
     ".graph-maintenance-lanes { display: grid",
     ".graph-maintenance-form button { width: 100%; }",
     ".activity-summary { display: grid",
+    ".observability-tabs {",
+    ".agent-run-row {",
+    ".observation-timeline {",
+    ".agent-error-row {",
+    ".coverage-facts {",
     ".audit-summary { display: grid",
     ".audit-filter-form { display: grid",
     ".audit-row { display: grid",
@@ -1627,6 +1669,15 @@ try {
     serializedDashboard.includes(rawProviderSecret) ||
     serializedDashboard.includes(rawDatabaseSecret) ||
     serializedDashboard.includes(forbiddenGraphFixtureToken) ||
+    json.agent_observability?.active_tab !== "runs" ||
+    json.agent_observability?.bounded !== true ||
+    !Array.isArray(json.agent_observability?.runs) ||
+    json.agent_observability?.runs.length < 1 ||
+    !Array.isArray(json.agent_observability?.replay) ||
+    !Array.isArray(json.agent_observability?.errors) ||
+    !Array.isArray(json.agent_observability?.coverage?.adapters) ||
+    !Array.isArray(json.agent_observability?.coverage?.next_actions) ||
+    Number(json.agent_observability?.coverage?.observation_count ?? 0) < 1 ||
     !json.settings.some(
       (setting) =>
         setting.key === "provider_api_key" &&
@@ -3254,7 +3305,7 @@ try {
     rememberedChatJson.intent !== "memory_summary" ||
     rememberedChatJson.result_type !== "read_only_answer" ||
     rememberedChatJson.facts.memory_count < 1 ||
-    !String(rememberedChatJson.answer).includes("Activity / Replay")
+    !String(rememberedChatJson.answer).includes("Agent activity")
   ) {
     throw new Error(`Remembered memory chat failed: ${JSON.stringify(rememberedChatJson)}`);
   }

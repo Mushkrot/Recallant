@@ -56,6 +56,9 @@ import type {
   AgentObservationCompleteness,
   AgentObservationKind,
   AgentObservationRecord,
+  AgentObservabilityWorkbench,
+  AgentErrorGroup,
+  AgentRunSummary,
   AppendAgentObservationInput
 } from "@recallant/contracts";
 import { agentObservationKindValues } from "@recallant/contracts";
@@ -954,6 +957,17 @@ export type AppendEventInput = {
 };
 
 const agentObservationKindSet = new Set<string>(agentObservationKindValues);
+const agentObservabilityTabSet = new Set(["runs", "replay", "errors", "coverage"]);
+const agentObservabilityClientKinds = [
+  "codex",
+  "cursor",
+  "claude_code",
+  "windsurf",
+  "generic",
+  "other"
+] as const;
+const observationUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function metadataString(metadata: JsonObject | undefined, key: string) {
   const value = metadata?.[key];
@@ -2741,6 +2755,7 @@ export class RecallantDb {
   private readonly pool: Pool;
   private readonly fallbackDeveloperId = randomUUID();
   private projectContext?: ProjectContext;
+  private agentObservationSchemaReady?: Promise<void>;
 
   constructor(private readonly config: RecallantDbConfig) {
     this.pool = new Pool({ connectionString: config.databaseUrl });
@@ -2755,7 +2770,11 @@ export class RecallantDb {
   }
 
   async ensureAgentObservationSchema() {
-    await ensureAgentObservationSchema(this.pool);
+    this.agentObservationSchemaReady ??= ensureAgentObservationSchema(this.pool).catch((error) => {
+      this.agentObservationSchemaReady = undefined;
+      throw error;
+    });
+    await this.agentObservationSchemaReady;
   }
 
   async appendAgentObservation(
@@ -2821,13 +2840,267 @@ export class RecallantDb {
     return analyzeAgentObservationCompleteness(observations);
   }
 
+  async getAgentObservabilityWorkbench(input: {
+    project_id: string;
+    active_tab?: string | null;
+    selected_run_id?: string | null;
+  }): Promise<AgentObservabilityWorkbench> {
+    const context = await this.contextForProject(input.project_id);
+    const activeTab = agentObservabilityTabSet.has(String(input.active_tab))
+      ? (String(input.active_tab) as AgentObservabilityWorkbench["active_tab"])
+      : "runs";
+    const requestedRunId =
+      input.selected_run_id && observationUuidPattern.test(input.selected_run_id)
+        ? input.selected_run_id
+        : null;
+    const recent = await this.listAgentObservations({
+      project_id: context.projectId,
+      limit: 5_000
+    });
+    if (requestedRunId && !recent.some((item) => item.run_id === requestedRunId)) {
+      const selected = await this.listAgentObservations({
+        project_id: context.projectId,
+        run_id: requestedRunId,
+        limit: 2_000
+      });
+      recent.push(...selected);
+    }
+
+    const byRun = new Map<string, AgentObservationRecord[]>();
+    for (const observation of recent) {
+      const rows = byRun.get(observation.run_id) ?? [];
+      rows.push(observation);
+      byRun.set(observation.run_id, rows);
+    }
+    for (const rows of byRun.values()) {
+      rows.sort(
+        (left, right) =>
+          left.run_sequence_number - right.run_sequence_number ||
+          left.occurred_at.getTime() - right.occurred_at.getTime()
+      );
+    }
+
+    const sessionIds = Array.from(new Set(recent.map((item) => item.session_id)));
+    const sessions =
+      sessionIds.length > 0
+        ? await this.pool.query<{
+            id: string;
+            client_kind: string;
+            client_version: string | null;
+            status: string;
+            started_at: Date;
+            last_seen_at: Date;
+            ended_at: Date | null;
+          }>(
+            `
+              SELECT id::text, client_kind, client_version, status,
+                     started_at, last_seen_at, ended_at
+              FROM sessions
+              WHERE project_id = $1
+                AND id = ANY($2::uuid[])
+            `,
+            [context.projectId, sessionIds]
+          )
+        : { rows: [] };
+    const sessionsById = new Map(sessions.rows.map((session) => [session.id, session]));
+    const runSummaries = Array.from(byRun.entries()).map(([runId, rows]) => {
+      const session = sessionsById.get(rows[0]?.session_id ?? "");
+      const completeness = analyzeAgentObservationCompleteness(rows);
+      const startedAt = rows[0]?.occurred_at ?? session?.started_at ?? new Date(0);
+      const lastActivityAt = rows.at(-1)?.occurred_at ?? session?.last_seen_at ?? startedAt;
+      const sessionRunning =
+        session?.status === "active" && !rows.some((row) => row.kind === "closeout");
+      const status: AgentRunSummary["status"] =
+        completeness.unresolved_errors > 0
+          ? "needs_attention"
+          : sessionRunning
+            ? "running"
+            : completeness.state === "complete"
+              ? "complete"
+              : "incomplete";
+      const prompt = rows.find((row) => row.kind === "user_prompt");
+      return {
+        run_id: runId,
+        session_id: rows[0]?.session_id ?? "",
+        client_kind:
+          session?.client_kind ?? rows.find((row) => row.client_kind)?.client_kind ?? "unknown",
+        client_version: session?.client_version ?? null,
+        session_status: session?.status ?? "unknown",
+        status,
+        started_at: startedAt,
+        last_activity_at: lastActivityAt,
+        duration_ms: Math.max(0, lastActivityAt.getTime() - startedAt.getTime()),
+        prompt_summary: (prompt?.body ?? prompt?.title ?? "No user prompt was captured").slice(
+          0,
+          240
+        ),
+        observation_count: rows.length,
+        completeness
+      } satisfies AgentRunSummary;
+    });
+    runSummaries.sort(
+      (left, right) => right.last_activity_at.getTime() - left.last_activity_at.getTime()
+    );
+    const visibleRuns = runSummaries.slice(0, 50);
+    const selectedRunId = requestedRunId ?? visibleRuns[0]?.run_id ?? null;
+    const selectedRun =
+      runSummaries.find((run) => run.run_id === selectedRunId) ?? visibleRuns[0] ?? null;
+    const replay = selectedRun ? (byRun.get(selectedRun.run_id) ?? []).slice(0, 2_000) : [];
+
+    const errorGroups = new Map<string, AgentErrorGroup>();
+    const errors = recent.filter((item) => item.kind === "error");
+    for (const error of errors) {
+      const recovery = recent.filter(
+        (item) =>
+          item.trace_id === error.trace_id &&
+          (item.kind === "retry" || item.kind === "remediation" || item.kind === "verification")
+      );
+      const resolutionStatus: AgentErrorGroup["resolution_status"] = recovery.some(
+        (item) => item.resolution_status === "resolved"
+      )
+        ? "resolved"
+        : recovery.length > 0
+          ? "retrying"
+          : "unresolved";
+      const fingerprint =
+        error.error_fingerprint ?? `unfingerprinted:${error.error_code ?? error.id}`;
+      const existing = errorGroups.get(fingerprint);
+      const severity = { resolved: 0, retrying: 1, unresolved: 2 } as const;
+      const affectedRuns = new Set(
+        errors
+          .filter(
+            (item) =>
+              (item.error_fingerprint ?? `unfingerprinted:${item.error_code ?? item.id}`) ===
+              fingerprint
+          )
+          .map((item) => item.run_id)
+      );
+      errorGroups.set(fingerprint, {
+        fingerprint,
+        error_code: error.error_code,
+        title: error.title ?? error.error_code ?? "Agent error",
+        sample: (error.body ?? "No safe error summary was captured").slice(0, 500),
+        occurrence_count: (existing?.occurrence_count ?? 0) + 1,
+        affected_run_count: affectedRuns.size,
+        latest_at:
+          !existing || error.occurred_at > existing.latest_at
+            ? error.occurred_at
+            : existing.latest_at,
+        resolution_status:
+          existing && severity[existing.resolution_status] > severity[resolutionStatus]
+            ? existing.resolution_status
+            : resolutionStatus,
+        latest_run_id:
+          !existing || error.occurred_at > existing.latest_at
+            ? error.run_id
+            : existing.latest_run_id,
+        recovery_kinds: Array.from(
+          new Set([...(existing?.recovery_kinds ?? []), ...recovery.map((item) => item.kind)])
+        )
+      });
+    }
+    const groupedErrors = Array.from(errorGroups.values()).sort(
+      (left, right) => right.latest_at.getTime() - left.latest_at.getTime()
+    );
+
+    const completeRuns = runSummaries.filter((run) => run.status === "complete").length;
+    const attentionRuns = runSummaries.filter((run) => run.status === "needs_attention").length;
+    const incompleteRuns = runSummaries.length - completeRuns;
+    const scoreTotal = runSummaries.reduce((sum, run) => sum + run.completeness.score, 0);
+    const clientStats = new Map<string, { count: number; lastSeen: Date }>();
+    for (const item of recent) {
+      const clientKind = item.client_kind?.trim() || "unknown";
+      const current = clientStats.get(clientKind);
+      clientStats.set(clientKind, {
+        count: (current?.count ?? 0) + 1,
+        lastSeen:
+          !current || item.occurred_at > current.lastSeen ? item.occurred_at : current.lastSeen
+      });
+    }
+    const adapterKinds = Array.from(
+      new Set([...agentObservabilityClientKinds, ...clientStats.keys()])
+    );
+    const sequenceGapCount = runSummaries.reduce(
+      (sum, run) =>
+        sum + run.completeness.sequence_gaps.reduce((count, gap) => count + gap.missing, 0),
+      0
+    );
+    const unmatchedPrompts = runSummaries.reduce(
+      (sum, run) => sum + run.completeness.unmatched_user_prompts,
+      0
+    );
+    const unmatchedTools = runSummaries.reduce(
+      (sum, run) => sum + run.completeness.unmatched_tool_calls,
+      0
+    );
+    const unresolvedErrors = runSummaries.reduce(
+      (sum, run) => sum + run.completeness.unresolved_errors,
+      0
+    );
+    const nextActions: string[] = [];
+    if (recent.length === 0) {
+      nextActions.push("Start an agent session and record a prompt to create the first run.");
+    }
+    if (sequenceGapCount > 0) {
+      nextActions.push("Check the client or hook around missing sequence numbers.");
+    }
+    if (unmatchedPrompts > 0) {
+      nextActions.push("Capture assistant responses with the same turn ID as their prompts.");
+    }
+    if (unmatchedTools > 0) {
+      nextActions.push("Capture tool results with the same trace ID as their tool calls.");
+    }
+    if (unresolvedErrors > 0) {
+      nextActions.push("Open Errors and record remediation plus a successful verification.");
+    }
+    if (clientStats.has("unknown")) {
+      nextActions.push("Set client_kind in the capture adapter so ownership is visible.");
+    }
+    if (nextActions.length === 0) {
+      nextActions.push("No capture gaps need attention in the retained runs.");
+    }
+
+    return {
+      active_tab: activeTab,
+      selected_run_id: selectedRun?.run_id ?? null,
+      runs: visibleRuns,
+      selected_run: selectedRun,
+      replay,
+      errors: groupedErrors,
+      coverage: {
+        observation_count: recent.length,
+        run_count: runSummaries.length,
+        complete_runs: completeRuns,
+        incomplete_runs: incompleteRuns,
+        runs_needing_attention: attentionRuns,
+        average_score: runSummaries.length > 0 ? Math.round(scoreTotal / runSummaries.length) : 0,
+        sequence_gap_count: sequenceGapCount,
+        unmatched_user_prompts: unmatchedPrompts,
+        unmatched_tool_calls: unmatchedTools,
+        unresolved_errors: unresolvedErrors,
+        redacted_observations: recent.filter((item) => item.redacted).length,
+        truncated_observations: recent.filter((item) => item.truncated).length,
+        adapters: adapterKinds.map((clientKind) => ({
+          client_kind: clientKind,
+          observation_count: clientStats.get(clientKind)?.count ?? 0,
+          last_seen_at: clientStats.get(clientKind)?.lastSeen ?? null,
+          status: clientStats.has(clientKind) ? "observed" : "not_observed"
+        })),
+        next_actions: nextActions
+      },
+      retention_days: readPositiveIntEnv("RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS", 30),
+      bounded: true,
+      empty: recent.length === 0
+    };
+  }
+
   private async appendAgentObservationFailSoft(input: AppendAgentObservationInput) {
     try {
       const observation = await this.appendAgentObservation(input);
       return {
         status: "recorded" as const,
         observation_id: observation.id,
-        sequence_number: observation.sequence_number,
+        sequence_number: observation.run_sequence_number,
         redacted: observation.redacted,
         truncated: observation.truncated
       };
@@ -10597,6 +10870,8 @@ export class RecallantDb {
     rule_scope_kind?: string | null;
     rule_memory_type?: string | null;
     rule_memory_domain?: string | null;
+    activity_tab?: string | null;
+    selected_run_id?: string | null;
   }) {
     const context = await this.ensureProject();
     let dashboardProjectId = input?.project_id ?? context.projectId;
@@ -11196,6 +11471,11 @@ export class RecallantDb {
       [dashboardProjectId]
     );
     const projectReadiness = await this.getProjectReadiness({ project_id: dashboardProjectId });
+    const agentObservability = await this.getAgentObservabilityWorkbench({
+      project_id: dashboardProjectId,
+      active_tab: input?.activity_tab,
+      selected_run_id: input?.selected_run_id
+    });
     const activitySourceClauses: string[] = [];
     const activitySourceValues: unknown[] = [dashboardProjectId];
     this.addSourceFilterClause(activitySourceClauses, activitySourceValues, sourceFilter, "m");
@@ -11357,6 +11637,7 @@ export class RecallantDb {
       pending_paid_api_approvals: pendingPaidApprovals.rows,
       settings: settings.rows,
       project_readiness: projectReadiness,
+      agent_observability: agentObservability,
       recent_activity: recentActivity.rows,
       project_cleanup: {
         dry_run_first: true,
