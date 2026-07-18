@@ -23,6 +23,7 @@ import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  codexHookEventNames,
   mapCodexHookEvent,
   parseCodexHookPayload,
   supportedClientKinds,
@@ -60,6 +61,11 @@ import {
 } from "./documentation-posture.js";
 import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
 import { runAttach } from "./attach.js";
+import {
+  inspectCodexHookConfig,
+  recallantCodexHookCommand,
+  renderCodexHookConfig
+} from "./codex-hook-config.js";
 import {
   clientTargetConfig,
   codexConfigHasRecallantMcp,
@@ -1988,6 +1994,50 @@ async function hookKitReadiness(projectDir: string) {
   };
 }
 
+async function codexNativeHookReadiness(projectDir: string) {
+  const path = ".codex/hooks.json";
+  const content = await readOptional(join(projectDir, path));
+  const config = inspectCodexHookConfig(content);
+  const state = await readAgentSessionState(projectDir).catch(() => null);
+  const observed =
+    state?.native_hook?.client === "codex" && Boolean(state.native_hook.last_observed_at);
+  const captureActive = config.configured && observed;
+  const status =
+    config.status === "invalid_json" || config.status === "invalid_shape"
+      ? config.status
+      : !config.configured
+        ? config.status === "partial"
+          ? "partial"
+          : "not_configured"
+        : !observed
+          ? "configured_unobserved"
+          : state.native_hook?.last_mode === "offline_spool"
+            ? "observed_offline_spool"
+            : "observed_server";
+  return {
+    path,
+    status,
+    configured: config.configured,
+    observed,
+    capture_active: captureActive,
+    configured_events: config.configured_events,
+    missing_events: config.missing_events,
+    command: config.command,
+    timeout_seconds: config.timeout_seconds,
+    last_observed_at: state?.native_hook?.last_observed_at ?? null,
+    last_event_name: state?.native_hook?.last_event_name ?? null,
+    last_mode: state?.native_hook?.last_mode ?? null,
+    observation_count: state?.native_hook?.observation_count ?? 0,
+    trust_status: observed
+      ? "not_programmatically_verifiable"
+      : "review_required_before_first_native_run",
+    trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+    proof_command: `recallant doctor --project-dir ${projectDir} --require-agent-audit --format json`,
+    fail_soft: true,
+    writes_global_config: false
+  };
+}
+
 async function clientConnectionReadiness(projectDir: string) {
   const candidates = [
     { client: "codex", path: ".codex/config.toml", legacy_reference_only: false },
@@ -2016,14 +2066,23 @@ async function clientConnectionReadiness(projectDir: string) {
     });
   }
   const mcpConfigured = configs.some((config) => config.configured);
+  const codexMcpConfigured = configs.some(
+    (config) => config.client === "codex" && config.configured
+  );
   const hookKit = await hookKitReadiness(projectDir);
+  const codexNativeHook = await codexNativeHookReadiness(projectDir);
+  const effectiveHookReady = codexMcpConfigured ? codexNativeHook.configured : hookKit.ready;
   const nativeHooks = [
     {
       client: "codex",
-      status: "local_hook_kit_supported",
-      ready: hookKit.ready,
+      ...codexNativeHook,
+      ready: codexNativeHook.configured,
       install_command: `recallant connect codex --project-dir ${projectDir} --install-local-hooks`,
-      note: "Codex currently uses the Recallant project-local fail-soft hook kit. Native global hook wiring is not written automatically."
+      note: codexNativeHook.capture_active
+        ? "Recallant has observed the installed native Codex hook command. Codex trust remains external and is not read from private client state."
+        : codexNativeHook.configured
+          ? "Native project hooks are configured but no hook invocation has been observed yet. Review them in /hooks."
+          : "Native project hooks are not configured. The helper hook kit alone is not automatic Codex capture."
     },
     {
       client: "cursor",
@@ -2049,26 +2108,29 @@ async function clientConnectionReadiness(projectDir: string) {
   ];
   return {
     status:
-      mcpConfigured && hookKit.ready
+      mcpConfigured && effectiveHookReady
         ? "mcp_and_hooks_ready"
         : mcpConfigured
           ? "mcp_only"
-          : hookKit.ready
+          : effectiveHookReady
             ? "hooks_without_mcp"
             : "not_configured",
     mcp_configured: mcpConfigured,
     mcp_configs: configs,
     hook_kit: hookKit,
     native_hooks: nativeHooks,
-    hook_installation_status: hookKit.ready
-      ? "local_hook_kit_ready"
-      : hookKit.status === "not_installed"
-        ? "mcp_only_or_manual_hooks"
-        : hookKit.status,
+    automatic_agent_audit: codexNativeHook,
+    hook_installation_status: codexMcpConfigured
+      ? codexNativeHook.status
+      : hookKit.ready
+        ? "local_hook_kit_ready"
+        : hookKit.status === "not_installed"
+          ? "mcp_only_or_manual_hooks"
+          : hookKit.status,
     fail_soft: true,
     writes_global_config: false,
-    proof_command: `recallant doctor --project-dir ${projectDir} --require-capture`,
-    note: "Client must be configured to call the MCP server and hook scripts; capture-active is proven by context read + memory write + checkpoint."
+    proof_command: codexNativeHook.proof_command,
+    note: "Automatic Codex audit is active only after native project hooks are configured and a codex-hook invocation is observed. MCP memory readiness remains a separate contract."
   };
 }
 
@@ -3092,13 +3154,17 @@ function doctorOwnerSummary(input: {
   const remoteOnly = remoteReady && !attached;
   const captureReady = input.captureReadiness.ready === true;
   const hookKit = objectValue(input.clientConnection.hook_kit);
+  const automaticAgentAudit = objectValue(input.clientConnection.automatic_agent_audit);
+  const automaticAgentAuditConfigured = automaticAgentAudit.configured === true;
+  const automaticAgentAuditActive = automaticAgentAudit.capture_active === true;
   const localConfigured =
     attached &&
     (input.clientConnection.mcp_configured === true ||
+      automaticAgentAuditConfigured ||
       hookKit.ready === true ||
       input.clientConnection.status === "mcp_and_hooks_ready");
   const configured = remoteOnly || localConfigured;
-  const hookCaptureReady = hookKit.ready === true;
+  const hookCaptureReady = automaticAgentAuditConfigured;
   const clientConfigured = input.clientConnection.mcp_configured === true;
   const connectionStatus =
     typeof input.clientConnection.status === "string"
@@ -3123,7 +3189,11 @@ function doctorOwnerSummary(input: {
           ? "Project is attached, but the agent client is not fully connected yet."
           : "Project is not attached to Recallant yet.";
   const nextStep = captureReady
-    ? "No startup-layer action is required. Continue normal work and close out the session when done."
+    ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
+      ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks, then review the command hook in /hooks.`
+      : automaticAgentAuditConfigured && !automaticAgentAuditActive
+        ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-agent-audit."
+        : "No startup-layer action is required. Continue normal work and close out the session when done."
     : remoteOnly
       ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
       : !attached
@@ -3144,13 +3214,20 @@ function doctorOwnerSummary(input: {
     remote_destination: input.remoteConsentScope?.destination ?? null,
     client_configured: clientConfigured,
     hook_capture_ready: hookCaptureReady,
+    automatic_agent_audit_configured: automaticAgentAuditConfigured,
+    automatic_agent_audit_active: automaticAgentAuditActive,
+    automatic_agent_audit_status: automaticAgentAudit.status ?? "not_configured",
+    automatic_agent_audit_last_seen_at: automaticAgentAudit.last_observed_at ?? null,
+    codex_hook_trust_action:
+      automaticAgentAudit.trust_action ??
+      "Open /hooks in Codex, review the Recallant command hook, and trust it.",
     connection_status: connectionStatus,
     configured,
     actually_recording: captureReady,
     require_capture_gate: input.requireCapture,
     next_step: nextStep,
     proof:
-      "Recording means Recallant has observed context read, memory write, and checkpoint evidence.",
+      "Memory capture means Recallant observed context read, memory write, and checkpoint evidence. Automatic agent audit separately requires configured native Codex hooks plus an observed codex-hook invocation.",
     postgres_ready: input.postgres.reachable
   };
 }
@@ -3219,6 +3296,8 @@ function doctorHumanReport(result: {
     `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
     `- Agent capture active: ${okNo(summary.actually_recording)}`,
+    `- Automatic Codex audit configured: ${okNo(summary.automatic_agent_audit_configured)}`,
+    `- Automatic Codex audit active: ${okNo(summary.automatic_agent_audit_active)}`,
     `- Semantic memory proof: ${
       result.semantic_memory_proof.requested
         ? `${result.semantic_memory_proof.status} (${result.semantic_memory_proof.code})`
@@ -3234,6 +3313,9 @@ function doctorHumanReport(result: {
       ? `- Remote destination: ${summary.remote_destination.server_url}${summary.remote_destination.endpoint_path}`
       : "- Remote destination: not configured",
     `- Client connection: ${summary.connection_status}`,
+    `- Automatic Codex audit: ${String(summary.automatic_agent_audit_status)}`,
+    `- Automatic audit last seen: ${String(summary.automatic_agent_audit_last_seen_at ?? "never")}`,
+    `- Codex hook review: ${String(summary.codex_hook_trust_action)}`,
     `- Capture status: ${result.capture_readiness.status}`,
     `- Embedding recovery: ${result.pending_embeddings.recommendation}`,
     `- Spool path: ${spool.spool_path}`,
@@ -5165,6 +5247,7 @@ async function runDoctor(argv: readonly string[]) {
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const projectConfig = await readProjectConfig(projectDir);
   const requireCapture = argv.includes("--require-capture");
+  const requireAgentAudit = argv.includes("--require-agent-audit");
   const semanticProofRequested = argv.includes("--semantic-proof");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
@@ -5241,6 +5324,10 @@ async function runDoctor(argv: readonly string[]) {
       capture_readiness: {
         ...captureReadiness,
         required: requireCapture
+      },
+      agent_audit: {
+        ...objectValue(clientConnection.automatic_agent_audit),
+        required: requireAgentAudit
       },
       semantic_memory_proof: semanticProof,
       client_connection: clientConnection,
@@ -5333,6 +5420,12 @@ async function runDoctor(argv: readonly string[]) {
       format === "json" ? `${JSON.stringify(result, null, 2)}\n` : doctorHumanReport(result)
     );
     if (requireCapture && !captureReadiness.ready) {
+      process.exitCode = 2;
+    }
+    if (
+      requireAgentAudit &&
+      objectValue(clientConnection.automatic_agent_audit).capture_active !== true
+    ) {
       process.exitCode = 2;
     }
   } finally {
@@ -8222,6 +8315,8 @@ function connectHumanReport(result: Record<string, unknown>) {
       : null;
   const writesGlobalConfig = result.writes_global_config === true;
   const clientConnection = objectValue(result.client_connection);
+  const automaticAgentAudit = objectValue(clientConnection.automatic_agent_audit);
+  const nativeHookConfig = objectValue(result.native_hook_config);
   const nativeHooks = Array.isArray(clientConnection.native_hooks)
     ? clientConnection.native_hooks
         .map((entry) =>
@@ -8257,14 +8352,15 @@ function connectHumanReport(result: Record<string, unknown>) {
       `recallant doctor --project-dir ${projectDir} --require-capture`
   );
   const captureState = String(
-    String(objectValue(result.mandatory_startup_layer).status ?? "unknown") ===
-      "mcp_and_hooks_ready"
-      ? "configured_and_ready_for_capture"
-      : String(objectValue(result.client_connection).status ?? "unknown").includes("mcp")
-        ? "configured_without_local_hooks"
-        : connectionStatus === "hooks_without_mcp"
-          ? "hooks_without_client_config"
-          : "not_configured"
+    automaticAgentAudit.capture_active === true
+      ? "automatic_agent_audit_observed"
+      : nativeHookConfig.configured_or_planned === true
+        ? "automatic_agent_audit_configured_unobserved"
+        : String(objectValue(result.client_connection).status ?? "unknown").includes("mcp")
+          ? "configured_without_local_hooks"
+          : connectionStatus === "hooks_without_mcp"
+            ? "hooks_without_client_config"
+            : "not_configured"
   );
   const installCommand = dryRun
     ? `recallant connect ${client} --project-dir ${projectDir}${hookStatus === "local_hook_kit_planned" ? " --install-local-hooks" : ""}`
@@ -8278,7 +8374,16 @@ function connectHumanReport(result: Record<string, unknown>) {
       `Project id: ${projectId}`,
       `Client config: ${configFile || "not reported"}`,
       `Local hooks: ${hooksText}`,
-      `Native hooks: ${String(nativeHookForClient?.status ?? "not reported")}`,
+      `Native hooks: ${String(
+        nativeHookConfig.status ?? nativeHookForClient?.status ?? "not reported"
+      )}`,
+      client === "codex"
+        ? `Codex hook review: ${String(
+            nativeHookConfig.trust_action ??
+              automaticAgentAudit.trust_action ??
+              "Open /hooks in Codex."
+          )}`
+        : null,
       "",
       "Files:",
       ...changedLines,
@@ -9767,7 +9872,13 @@ async function runConnect(argv: readonly string[]) {
   if (dryRun && (confirmGlobalWrite || restoreGlobalBackup)) {
     throw new Error("VALIDATION_ERROR: dry-run cannot be combined with global write or restore");
   }
-  const installLocalHooks = argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
+  const installHooksRequested =
+    argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
+  const installHooksDisabled =
+    argv.includes("--no-install-local-hooks") || argv.includes("--no-local-hooks");
+  if (installHooksRequested && installHooksDisabled) {
+    throw new Error("Use either --install-local-hooks or --no-local-hooks, not both.");
+  }
   const config = await readProjectConfig(dir);
   if (!config?.project_id) {
     throw new Error(
@@ -9778,6 +9889,8 @@ async function runConnect(argv: readonly string[]) {
     projectId: config.project_id
   });
   const targetConfig = connectClientTargetConfig(target, config.project_id, developerId, dir);
+  const installLocalHooks =
+    !installHooksDisabled && (targetConfig.target === "codex" || installHooksRequested);
   if (
     globalConfigRequested &&
     (confirmGlobalWrite || restoreGlobalBackup) &&
@@ -9802,17 +9915,34 @@ async function runConnect(argv: readonly string[]) {
       same: current === hookFile.content
     });
   }
+  const installCodexNativeHooks = installLocalHooks && targetConfig.target === "codex";
+  const codexHookConfigPath = ".codex/hooks.json";
+  const codexHookAbsolutePath = join(dir, codexHookConfigPath);
+  const existingCodexHookConfig = installCodexNativeHooks
+    ? await readOptional(codexHookAbsolutePath)
+    : null;
+  const codexHookRender = installCodexNativeHooks
+    ? renderCodexHookConfig(existingCodexHookConfig)
+    : null;
+  if (codexHookRender && !codexHookRender.ok) {
+    throw new Error(`VALIDATION_ERROR: ${codexHookRender.message}`);
+  }
+  const desiredCodexHookConfig = codexHookRender?.ok ? codexHookRender.content : null;
+  const codexHookConfigSame =
+    desiredCodexHookConfig !== null && existingCodexHookConfig === desiredCodexHookConfig;
   const localHookKitPresent =
     (await readOptional(join(dir, ".recallant", "hooks", "capture-event.sh"))) !== null;
   const state = await readAgentSessionState(dir);
+  const backupRoot = join(
+    recallantDir(dir),
+    "backups",
+    `connect-${new Date().toISOString().replace(/[:.]/g, "-")}`
+  );
   const backupPath =
-    existing && !same
-      ? join(
-          recallantDir(dir),
-          "backups",
-          `connect-${new Date().toISOString().replace(/[:.]/g, "-")}`,
-          targetConfig.config_file.replace(/[\\/]/g, "__")
-        )
+    existing && !same ? join(backupRoot, targetConfig.config_file.replace(/[\\/]/g, "__")) : null;
+  const codexHookBackupPath =
+    existingCodexHookConfig !== null && !codexHookConfigSame
+      ? join(backupRoot, codexHookConfigPath.replace(/[\\/]/g, "__"))
       : null;
   const plannedChanges = same
     ? [{ action: "no_change", path: targetConfig.config_file }]
@@ -9923,6 +10053,17 @@ async function runConnect(argv: readonly string[]) {
       ? { action: "no_change", path: hookFile.path }
       : { action: "write_file", path: hookFile.path }
   );
+  const codexNativeHookChanges = !installCodexNativeHooks
+    ? []
+    : codexHookConfigSame
+      ? [{ action: "no_change", path: codexHookConfigPath }]
+      : [
+          ...(codexHookBackupPath ? [{ action: "backup_file", path: codexHookBackupPath }] : []),
+          {
+            action: existingCodexHookConfig === null ? "write_file" : "merge_file",
+            path: codexHookConfigPath
+          }
+        ];
   const hookFilesNeedWrite = hookFilePlans.some((hookFile) => !hookFile.same);
   if (!dryRun && !same) {
     if (backupPath && existing !== null) {
@@ -9955,6 +10096,16 @@ async function runConnect(argv: readonly string[]) {
       if (hookFile.executable) await chmod(hookFile.absolute_path, 0o755);
     }
   }
+  if (!dryRun && installCodexNativeHooks && desiredCodexHookConfig !== null) {
+    if (codexHookBackupPath && existingCodexHookConfig !== null) {
+      await mkdir(dirname(codexHookBackupPath), { recursive: true });
+      await writeFile(codexHookBackupPath, existingCodexHookConfig);
+    }
+    if (!codexHookConfigSame) {
+      await mkdir(dirname(codexHookAbsolutePath), { recursive: true });
+      await writeFile(codexHookAbsolutePath, desiredCodexHookConfig);
+    }
+  }
   const clientConnection = await clientConnectionReadiness(dir);
   const hookKitReady = clientConnection.hook_kit.ready;
   const hookKitPlanned = installLocalHooks && dryRun && (hookFilesNeedWrite || !hookKitReady);
@@ -9967,15 +10118,23 @@ async function runConnect(argv: readonly string[]) {
       : "not_installed";
   const mcpConfigWillExist = clientConnection.mcp_configured || !same;
   const hookKitWillExist = hookStatus !== "not_installed";
-  const startupLayerPlanned = installLocalHooks && dryRun && (!same || hookKitPlanned);
+  const automaticAgentAudit = objectValue(clientConnection.automatic_agent_audit);
+  const nativeHookConfiguredNow = automaticAgentAudit.configured === true;
+  const nativeHookWillExist =
+    nativeHookConfiguredNow || (installCodexNativeHooks && desiredCodexHookConfig !== null);
+  const effectiveHookWillExist =
+    targetConfig.target === "codex" ? nativeHookWillExist : hookKitWillExist;
+  const nativeHookPlanned = installCodexNativeHooks && dryRun && !codexHookConfigSame;
+  const startupLayerPlanned =
+    installLocalHooks && dryRun && (!same || hookKitPlanned || nativeHookPlanned);
   const mandatoryStartupLayerStatus =
-    startupLayerPlanned && mcpConfigWillExist && hookKitWillExist
+    startupLayerPlanned && mcpConfigWillExist && effectiveHookWillExist
       ? "mcp_and_hooks_planned"
-      : mcpConfigWillExist && hookKitWillExist
+      : mcpConfigWillExist && effectiveHookWillExist
         ? "mcp_and_hooks_ready"
         : mcpConfigWillExist
           ? "mcp_only"
-          : hookKitWillExist
+          : effectiveHookWillExist
             ? "hooks_without_mcp"
             : "not_configured";
   const result = {
@@ -9993,15 +10152,26 @@ async function runConnect(argv: readonly string[]) {
       status: mandatoryStartupLayerStatus,
       mcp_configured_or_planned: mcpConfigWillExist,
       hook_kit_status: hookStatus,
+      native_hook_status: nativeHookPlanned
+        ? "configured_planned"
+        : String(automaticAgentAudit.status ?? "not_configured"),
+      native_hook_configured_or_planned: nativeHookWillExist,
+      automatic_agent_audit_active: automaticAgentAudit.capture_active === true,
+      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
       fail_soft: true,
       writes_global_config: false,
       capture_targets: captureTargetNames,
-      proof_command: `recallant doctor --project-dir ${dir} --require-capture`,
+      automatic_capture_events: codexHookEventNames,
+      proof_command: `recallant doctor --project-dir ${dir} --require-agent-audit --format json`,
       ready_definition:
-        "MCP config plus hook targets are installed/planned; capture-active still requires context read, memory write, and checkpoint evidence."
+        "MCP and native Codex hooks can be configured before capture is active; active automatic audit requires an observed codex-hook invocation."
     },
     client_connection: clientConnection,
-    writes_files: !dryRun && (!same || hookFilePlans.some((hookFile) => !hookFile.same)),
+    writes_files:
+      !dryRun &&
+      (!same ||
+        hookFilePlans.some((hookFile) => !hookFile.same) ||
+        (installCodexNativeHooks && !codexHookConfigSame)),
     writes_global_config: globalConfigWritten || globalConfigRestored,
     config_scope: globalConfigRequested ? "project_local_and_global_dry_run" : "project_local",
     project_local_config: {
@@ -10011,20 +10181,47 @@ async function runConnect(argv: readonly string[]) {
       writes_files: !dryRun && !same
     },
     global_config: globalConfigPlan,
-    planned_changes: [...plannedChanges, ...globalChanges, ...hookChanges],
+    planned_changes: [
+      ...plannedChanges,
+      ...globalChanges,
+      ...hookChanges,
+      ...codexNativeHookChanges
+    ],
     config_file: targetConfig.config_file,
     config_format: targetConfig.format,
     client_specific: targetConfig.client_specific,
     merge_mcp_servers: targetConfig.merge_mcp_servers,
     setup_hint: targetConfig.setup_hint,
     hook_integration: {
-      mode: installLocalHooks || localHookKitPresent ? "local_hook_kit" : "none",
+      mode: installCodexNativeHooks
+        ? "codex_native_hooks_with_helper_kit"
+        : installLocalHooks || localHookKitPresent
+          ? "local_hook_kit"
+          : "none",
       fail_soft: true,
       writes_global_config: false,
-      installed_files: hookFilePlans.map((hookFile) => hookFile.path),
+      installed_files: [
+        ...hookFilePlans.map((hookFile) => hookFile.path),
+        ...(installCodexNativeHooks ? [codexHookConfigPath] : [])
+      ],
       native_hooks: clientConnection.native_hooks,
       timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
       project_dir_env: "RECALLANT_PROJECT_DIR"
+    },
+    native_hook_config: {
+      path: codexHookConfigPath,
+      requested: installCodexNativeHooks,
+      status: nativeHookPlanned
+        ? "configured_planned"
+        : String(automaticAgentAudit.status ?? "not_configured"),
+      configured_or_planned: nativeHookWillExist,
+      changed_or_planned: installCodexNativeHooks && !codexHookConfigSame,
+      backup_path: codexHookBackupPath,
+      command: recallantCodexHookCommand,
+      events: codexHookEventNames,
+      preserved_handler_count: codexHookRender?.ok ? codexHookRender.preserved_handler_count : 0,
+      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+      writes_global_config: false
     },
     mcp_config: targetConfig.mcp_config,
     rendered_config: desired
@@ -10611,7 +10808,11 @@ async function runOnboard(argv: readonly string[]) {
       (entry) => entry.client === targetClient && entry.present
     );
     const hooksReady = clientConnection.hook_kit.ready;
-    alreadyConnected = clientHasConfig && (options.installLocalHooks ? hooksReady : true);
+    const nativeHookReady =
+      targetClient !== "codex" ||
+      objectValue(clientConnection.automatic_agent_audit).configured === true;
+    alreadyConnected =
+      clientHasConfig && (options.installLocalHooks ? hooksReady && nativeHookReady : true);
     if (!alreadyConnected) {
       const connectCommand = [
         "connect",
@@ -10640,7 +10841,9 @@ async function runOnboard(argv: readonly string[]) {
           "not_configured"
       );
       steps.connected.status =
-        connectionStatus === "mcp_only" || connectionStatus === "mcp_and_hooks_ready"
+        connectionStatus === "mcp_only" ||
+        connectionStatus === "mcp_and_hooks_ready" ||
+        (options.dryRun && connectionStatus === "mcp_and_hooks_planned")
           ? "connected"
           : "needed";
       steps.connected.details = `connection_status=${connectionStatus}`;
@@ -11956,11 +12159,11 @@ function usageText(command?: string) {
   if (command === "connect") {
     return [
       "Usage: recallant connect <project-dir> [--server-url <https-url>] [--client codex|cursor|claude-code|generic] [--yes] [--format json]",
-      "       recallant connect <client> --project-dir <project-dir> [--install-local-hooks] [--dry-run] [--global] [--format json]",
+      "       recallant connect <client> --project-dir <project-dir> [--install-local-hooks|--no-local-hooks] [--dry-run] [--global] [--format json]",
       "",
       "Beginner universal flow. With reachable local storage, runs local onboarding for the project. Without local storage, asks for an existing central server URL or local storage choice before changing project files. Automation can pass --server-url to choose the remote path up front.",
       "",
-      "Advanced local client flow: configure a supported agent client to call `recallant mcp-server` for an attached project.",
+      "Advanced local client flow: configure a supported agent client to call `recallant mcp-server` for an attached project. Codex also receives automatic project hooks by default; pass --no-local-hooks to configure MCP only.",
       ""
     ].join("\n");
   }
@@ -12039,7 +12242,7 @@ function usageText(command?: string) {
   }
   if (command === "doctor") {
     return [
-      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--semantic-proof] [--format json|text]",
+      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--require-agent-audit] [--semantic-proof] [--format json|text]",
       "",
       "Diagnose local Recallant setup. --require-capture gates on context read + memory write + checkpoint evidence. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
       "",

@@ -108,18 +108,51 @@ assert(
   `Legacy Codex JSON should be reported as reference-only, not configured: ${legacyOnlyDoctor.stdout} ${legacyOnlyDoctor.stderr}`
 );
 
+const invalidHooksDir = `${projectDir}-invalid-hooks`;
+await mkdir(`${invalidHooksDir}/.recallant`, { recursive: true });
+await mkdir(`${invalidHooksDir}/.codex`, { recursive: true });
+await writeFile(
+  `${invalidHooksDir}/.recallant/config`,
+  `${JSON.stringify(
+    { project_id: attached.project_id, recallant_server_url: "http://127.0.0.1:3005" },
+    null,
+    2
+  )}\n`
+);
+await writeFile(`${invalidHooksDir}/.codex/hooks.json`, "{ user-owned invalid json\n");
+const invalidHooksConnect = runCliRaw([
+  "connect",
+  "codex",
+  "--project-dir",
+  invalidHooksDir,
+  "--install-local-hooks",
+  "--format",
+  "json"
+]);
+assert(
+  invalidHooksConnect.status !== 0 &&
+    invalidHooksConnect.stderr.includes("did not overwrite") &&
+    (await readFile(`${invalidHooksDir}/.codex/hooks.json`, "utf8")) ===
+      "{ user-owned invalid json\n",
+  `Invalid user hook config must be preserved: ${invalidHooksConnect.stdout} ${invalidHooksConnect.stderr}`
+);
+
 const dryRun = runCli([
   "connect",
   "codex",
   "--project-dir",
   projectDir,
+  "--no-local-hooks",
   "--dry-run",
   "--format",
   "json"
 ]);
-const dryRunText = runCliRaw(["connect", "codex", "--project-dir", projectDir, "--dry-run"], {
-  parseJson: false
-});
+const dryRunText = runCliRaw(
+  ["connect", "codex", "--project-dir", projectDir, "--no-local-hooks", "--dry-run"],
+  {
+    parseJson: false
+  }
+);
 assert(
   dryRunText.status === 0 &&
     dryRunText.stdout.includes("Recallant connect") &&
@@ -143,12 +176,12 @@ assert(
 );
 assert(
   dryRun.hook_integration?.native_hooks?.some(
-    (entry) => entry.client === "codex" && entry.status === "local_hook_kit_supported"
+    (entry) => entry.client === "codex" && entry.status === "not_configured"
   ) &&
     dryRun.hook_integration?.native_hooks?.some(
       (entry) => entry.client === "cursor" && entry.status === "unsupported_native_hooks"
     ) &&
-    dryRun.client_connection?.hook_installation_status === "mcp_only_or_manual_hooks",
+    dryRun.client_connection?.hook_installation_status === "not_configured",
   `Connect dry-run should expose native hook installer status matrix: ${JSON.stringify(dryRun)}`
 );
 assert(
@@ -158,7 +191,7 @@ assert(
 assert(
   dryRun.mandatory_startup_layer?.status === "mcp_only" &&
     dryRun.mandatory_startup_layer?.capture_targets?.includes("user_prompt") &&
-    dryRun.mandatory_startup_layer?.proof_command?.includes("--require-capture"),
+    dryRun.mandatory_startup_layer?.proof_command?.includes("--require-agent-audit"),
   `Connect dry-run missing mandatory startup diagnostics: ${JSON.stringify(dryRun)}`
 );
 assert(dryRun.writes_files === false, `Dry-run should not write files: ${JSON.stringify(dryRun)}`);
@@ -235,7 +268,15 @@ assert(
   `Global dry-run must not create ${globalConfigPath}`
 );
 
-const connected = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
+const connected = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--no-local-hooks",
+  "--format",
+  "json"
+]);
 assert(
   connected.writes_files === false,
   `Codex connect should be idempotent after attach: ${JSON.stringify(connected)}`
@@ -248,7 +289,15 @@ assert(
   `Codex config missing Recallant MCP server: ${writtenConfig}`
 );
 
-const idempotent = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
+const idempotent = runCli([
+  "connect",
+  "codex",
+  "--project-dir",
+  projectDir,
+  "--no-local-hooks",
+  "--format",
+  "json"
+]);
 assert(
   idempotent.writes_files === false,
   `Second connect should be idempotent: ${JSON.stringify(idempotent)}`
@@ -566,12 +615,33 @@ assert(
   `Cursor global restore did not restore the original config: ${JSON.stringify(cursorGlobalRestored)}`
 );
 
+const userCodexHookConfig = {
+  description: "User-owned Codex hooks.",
+  custom_setting: { preserve_me: true },
+  hooks: {
+    PreToolUse: [
+      {
+        matcher: "Bash",
+        hooks: [{ type: "command", command: "user-owned-pre-tool-hook", timeout: 17 }]
+      }
+    ],
+    UserPromptSubmit: [
+      {
+        hooks: [{ type: "command", command: "user-owned-prompt-hook" }]
+      }
+    ]
+  }
+};
+await writeFile(
+  `${projectDir}/.codex/hooks.json`,
+  `${JSON.stringify(userCodexHookConfig, null, 2)}\n`
+);
+
 const hookDryRun = runCli([
   "connect",
   "codex",
   "--project-dir",
   projectDir,
-  "--install-local-hooks",
   "--dry-run",
   "--format",
   "json"
@@ -585,42 +655,107 @@ assert(
   `Hook dry-run should plan only local fail-soft hook files: ${JSON.stringify(hookDryRun)}`
 );
 assert(
-  hookDryRun.planned_changes.some((change) => change.path === ".recallant/hooks/capture-event.sh"),
-  `Hook dry-run missing capture-event script: ${JSON.stringify(hookDryRun)}`
+  hookDryRun.planned_changes.some(
+    (change) => change.path === ".recallant/hooks/capture-event.sh"
+  ) &&
+    hookDryRun.planned_changes.some(
+      (change) => change.action === "merge_file" && change.path === ".codex/hooks.json"
+    ) &&
+    hookDryRun.planned_changes.some(
+      (change) =>
+        change.action === "backup_file" && String(change.path).endsWith(".codex__hooks.json")
+    ),
+  `Hook dry-run missing helper/native hook plans: ${JSON.stringify(hookDryRun)}`
 );
 assert(
   hookDryRun.hook_integration?.fail_soft === true &&
-    hookDryRun.hook_integration?.mode === "local_hook_kit" &&
+    hookDryRun.hook_integration?.mode === "codex_native_hooks_with_helper_kit" &&
+    hookDryRun.native_hook_config?.status === "configured_planned" &&
+    hookDryRun.native_hook_config?.preserved_handler_count === 2 &&
+    hookDryRun.native_hook_config?.trust_action?.includes("/hooks") &&
     hookDryRun.hook_integration?.native_hooks?.some(
       (entry) => entry.client === "claude_code" && entry.ready === false
     ),
   `Hook dry-run missing fail-soft integration summary: ${JSON.stringify(hookDryRun)}`
 );
 
-const hookConnect = runCli([
-  "connect",
-  "codex",
-  "--project-dir",
-  projectDir,
-  "--install-local-hooks",
-  "--format",
-  "json"
-]);
+const hookConnect = runCli(["connect", "codex", "--project-dir", projectDir, "--format", "json"]);
 assert(
   hookConnect.hook_status === "local_hook_kit_installed" &&
     hookConnect.connection_status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.status === "mcp_and_hooks_ready" &&
     hookConnect.mandatory_startup_layer?.capture_targets?.includes("pre_compaction_checkpoint") &&
-    hookConnect.client_connection?.hook_installation_status === "local_hook_kit_ready" &&
+    hookConnect.mandatory_startup_layer?.automatic_capture_events?.includes("Stop") &&
+    hookConnect.client_connection?.hook_installation_status === "configured_unobserved" &&
+    hookConnect.client_connection?.automatic_agent_audit?.configured === true &&
+    hookConnect.client_connection?.automatic_agent_audit?.capture_active === false &&
+    hookConnect.native_hook_config?.backup_path &&
     hookConnect.writes_global_config === false,
-  `Hook connect should install local hook kit only: ${JSON.stringify(hookConnect)}`
+  `Hook connect should install helper and native project hooks: ${JSON.stringify(hookConnect)}`
+);
+const mergedCodexHooks = JSON.parse(await readFile(`${projectDir}/.codex/hooks.json`, "utf8"));
+assert(
+  mergedCodexHooks.description === "User-owned Codex hooks." &&
+    mergedCodexHooks.custom_setting?.preserve_me === true &&
+    mergedCodexHooks.hooks?.PreToolUse?.some((group) =>
+      group.hooks?.some((handler) => handler.command === "user-owned-pre-tool-hook")
+    ) &&
+    mergedCodexHooks.hooks?.UserPromptSubmit?.some((group) =>
+      group.hooks?.some((handler) => handler.command === "user-owned-prompt-hook")
+    ),
+  `Native hook merge did not preserve user configuration: ${JSON.stringify(mergedCodexHooks)}`
+);
+for (const eventName of [
+  "SessionStart",
+  "UserPromptSubmit",
+  "PreToolUse",
+  "PostToolUse",
+  "PreCompact",
+  "PostCompact",
+  "SubagentStart",
+  "SubagentStop",
+  "Stop"
+]) {
+  assert(
+    mergedCodexHooks.hooks?.[eventName]?.some((group) =>
+      group.hooks?.some(
+        (handler) =>
+          handler.type === "command" &&
+          handler.command === "recallant codex-hook" &&
+          handler.timeout === 5
+      )
+    ),
+    `Native hook event ${eventName} is not configured: ${JSON.stringify(mergedCodexHooks)}`
+  );
+}
+const backedUpCodexHooks = JSON.parse(
+  await readFile(hookConnect.native_hook_config.backup_path, "utf8")
+);
+assert(
+  backedUpCodexHooks.custom_setting?.preserve_me === true && !backedUpCodexHooks.hooks?.Stop,
+  `Native hook backup does not contain the original file: ${JSON.stringify(backedUpCodexHooks)}`
+);
+const requireAgentAuditBefore = runCliRaw([
+  "doctor",
+  "--project-dir",
+  projectDir,
+  "--require-agent-audit",
+  "--format",
+  "json"
+]);
+assert(
+  requireAgentAuditBefore.status === 2 &&
+    requireAgentAuditBefore.json?.agent_audit?.status === "configured_unobserved" &&
+    requireAgentAuditBefore.json?.agent_audit?.configured === true &&
+    requireAgentAuditBefore.json?.agent_audit?.capture_active === false &&
+    requireAgentAuditBefore.json?.agent_audit?.trust_action?.includes("/hooks"),
+  `Agent audit must remain unobserved until codex-hook runs: ${requireAgentAuditBefore.stdout} ${requireAgentAuditBefore.stderr}`
 );
 const hookIdempotentDryRun = runCli([
   "connect",
   "codex",
   "--project-dir",
   projectDir,
-  "--install-local-hooks",
   "--dry-run",
   "--format",
   "json"
@@ -721,10 +856,11 @@ const invalidManifestDoctor = runCliRaw([
 ]);
 assert(
   invalidManifestDoctor.status === 0 &&
-    invalidManifestDoctor.json?.client_connection?.status === "mcp_only" &&
+    invalidManifestDoctor.json?.client_connection?.status === "mcp_and_hooks_ready" &&
     invalidManifestDoctor.json?.client_connection?.hook_kit?.status === "invalid_manifest" &&
-    invalidManifestDoctor.json?.client_connection?.hook_kit?.ready === false,
-  `Invalid hook manifest should not be hook-ready: ${JSON.stringify(
+    invalidManifestDoctor.json?.client_connection?.hook_kit?.ready === false &&
+    invalidManifestDoctor.json?.client_connection?.automatic_agent_audit?.configured === true,
+  `Invalid helper manifest should not disable native hook readiness: ${JSON.stringify(
     invalidManifestDoctor.json?.client_connection
   )}`
 );
@@ -743,10 +879,11 @@ const invalidPermissionDoctor = runCliRaw([
 ]);
 assert(
   invalidPermissionDoctor.status === 0 &&
-    invalidPermissionDoctor.json?.client_connection?.status === "mcp_only" &&
+    invalidPermissionDoctor.json?.client_connection?.status === "mcp_and_hooks_ready" &&
     invalidPermissionDoctor.json?.client_connection?.hook_kit?.status === "invalid_permissions" &&
-    invalidPermissionDoctor.json?.client_connection?.hook_kit?.ready === false,
-  `Non-executable hook script should not be hook-ready: ${JSON.stringify(
+    invalidPermissionDoctor.json?.client_connection?.hook_kit?.ready === false &&
+    invalidPermissionDoctor.json?.client_connection?.automatic_agent_audit?.configured === true,
+  `Non-executable helper should not disable native hook readiness: ${JSON.stringify(
     invalidPermissionDoctor.json?.client_connection
   )}`
 );
@@ -870,10 +1007,51 @@ assert(
     requireCaptureAfter.json?.owner_summary?.actually_recording === true &&
     requireCaptureAfter.json?.owner_summary?.client_configured === true &&
     requireCaptureAfter.json?.owner_summary?.hook_capture_ready === true &&
-    requireCaptureAfter.json?.owner_summary?.proof.includes("Recording means"),
+    requireCaptureAfter.json?.owner_summary?.automatic_agent_audit_configured === true &&
+    requireCaptureAfter.json?.owner_summary?.automatic_agent_audit_active === false &&
+    requireCaptureAfter.json?.owner_summary?.proof.includes("Automatic agent audit separately"),
   `doctor owner summary should prove active recording after capture: ${JSON.stringify(requireCaptureAfter.json?.owner_summary)}`
 );
 runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
+
+const nativeHookCanary = spawnSync(
+  "node",
+  [`${process.cwd()}/apps/cli/dist/index.js`, "codex-hook"],
+  {
+    cwd: projectDir,
+    env,
+    input: JSON.stringify({
+      session_id: "connect-smoke-native-session",
+      cwd: projectDir,
+      hook_event_name: "UserPromptSubmit",
+      turn_id: "connect-smoke-native-turn",
+      model: "gpt-5",
+      transcript_path: "/tmp/ignored-connect-smoke-transcript.jsonl",
+      prompt: "Native Codex hook smoke."
+    }),
+    encoding: "utf8"
+  }
+);
+assert(
+  nativeHookCanary.status === 0 && nativeHookCanary.stdout === "" && nativeHookCanary.stderr === "",
+  `Native codex-hook canary must be silent and successful: ${nativeHookCanary.stdout} ${nativeHookCanary.stderr}`
+);
+const requireAgentAuditAfter = runCliRaw([
+  "doctor",
+  "--project-dir",
+  projectDir,
+  "--require-agent-audit",
+  "--format",
+  "json"
+]);
+assert(
+  requireAgentAuditAfter.status === 0 &&
+    requireAgentAuditAfter.json?.agent_audit?.status === "observed_server" &&
+    requireAgentAuditAfter.json?.agent_audit?.capture_active === true &&
+    requireAgentAuditAfter.json?.agent_audit?.last_event_name === "UserPromptSubmit" &&
+    requireAgentAuditAfter.json?.owner_summary?.automatic_agent_audit_active === true,
+  `Agent audit should become observed after the native path runs: ${requireAgentAuditAfter.stdout} ${requireAgentAuditAfter.stderr}`
+);
 
 const client = new pg.Client({ connectionString: databaseUrl });
 await client.connect();
