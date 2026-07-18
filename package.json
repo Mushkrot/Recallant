@@ -75,6 +75,8 @@
     "agent-lifecycle-gate:smoke": "node scripts/smoke-agent-lifecycle-gate-cli.mjs",
     "agent-capture:smoke": "node scripts/smoke-agent-capture.mjs",
     "agent-observability:smoke": "node scripts/smoke-agent-observability.mjs",
+    "codex-hook-adapter:smoke": "npm run build --workspace @recallant/adapters && node scripts/smoke-codex-hook-adapter.mjs",
+    "codex-hook-runtime:smoke": "npm run build && node scripts/smoke-codex-hook-runtime.mjs",
     "demo-capture:smoke": "node scripts/smoke-demo-capture.mjs",
     "product-acceptance:smoke": "node scripts/smoke-agent-capture.mjs",
     "pilot-report:smoke": "node scripts/smoke-pilot-report.mjs",

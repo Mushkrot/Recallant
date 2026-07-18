@@ -4,6 +4,27 @@ import {
   type ClientKind
 } from "@recallant/contracts";
 
+export {
+  codexHookEventNames,
+  deterministicCodexHookUuid,
+  mapCodexHookEvent,
+  parseCodexHookPayload,
+  type CodexCompactHook,
+  type CodexHookCaptureAction,
+  type CodexHookCheckpointAction,
+  type CodexHookEvent,
+  type CodexHookEventName,
+  type CodexHookMappedObservation,
+  type CodexHookParseResult,
+  type CodexPostToolUseHook,
+  type CodexPreToolUseHook,
+  type CodexSessionStartHook,
+  type CodexStopHook,
+  type CodexSubagentStartHook,
+  type CodexSubagentStopHook,
+  type CodexUserPromptSubmitHook
+} from "./codex-hooks.js";
+
 export const supportedClientKinds: readonly ClientKind[] = [
   "codex",
   "cursor",

@@ -9,11 +9,27 @@ import {
   sign as signPayload
 } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { appendFile, chmod, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { supportedClientKinds } from "@recallant/adapters";
+import {
+  mapCodexHookEvent,
+  parseCodexHookPayload,
+  supportedClientKinds,
+  type CodexHookCaptureAction,
+  type CodexHookEvent,
+  type CodexHookMappedObservation
+} from "@recallant/adapters";
 import {
   buildMemoryKeeperPlan,
   getRecallantCoreInfo,
@@ -634,6 +650,16 @@ type AgentSessionState = {
   last_checkpoint_at?: string | null;
   last_event_id?: string | null;
   last_memory_id?: string | null;
+  native_hook?: {
+    client: "codex";
+    external_session_id: string;
+    first_observed_at: string;
+    last_observed_at: string;
+    last_event_name: string;
+    last_turn_id?: string | null;
+    last_mode: "server" | "offline_spool";
+    observation_count: number;
+  };
 };
 
 const remoteAgentSecretClasses = [
@@ -1177,7 +1203,10 @@ async function readAgentSessionState(projectDir: string): Promise<AgentSessionSt
 
 async function writeAgentSessionState(projectDir: string, state: AgentSessionState) {
   await mkdir(recallantDir(projectDir), { recursive: true });
-  await writeFile(currentSessionPathFor(projectDir), `${JSON.stringify(state, null, 2)}\n`);
+  const target = currentSessionPathFor(projectDir);
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
+  await rename(temporary, target);
 }
 
 function summarizeText(text: string, max = 88) {
@@ -6424,6 +6453,362 @@ async function runAgentObserve(argv: readonly string[]) {
       2
     )}\n`
   );
+}
+
+const codexHookStdinLimitBytes = 1_048_576;
+const codexHookConnectionTimeoutMs = 1_500;
+
+async function readCodexHookStdin() {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    totalBytes += buffer.byteLength;
+    if (totalBytes > codexHookStdinLimitBytes) {
+      throw new Error("CODEX_HOOK_PAYLOAD_TOO_LARGE");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function findRecallantProjectRoot(startPath: string) {
+  let current = resolve(startPath);
+  const currentStat = await stat(current).catch(() => null);
+  if (currentStat && !currentStat.isDirectory()) current = dirname(current);
+  while (true) {
+    if (await readOptional(join(current, ".recallant", "config"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function codexHookArgv(argv: readonly string[]) {
+  const explicitProjectDir = parseFlag(argv, "--project-dir");
+  const root = await findRecallantProjectRoot(explicitProjectDir ?? process.cwd());
+  if (!root) return null;
+  const next = [...argv];
+  const projectDirFlag = next.indexOf("--project-dir");
+  if (projectDirFlag >= 0) {
+    next[projectDirFlag + 1] = root;
+  } else {
+    next.push("--project-dir", root);
+  }
+  if (!parseFlag(next, "--client-kind")) next.push("--client-kind", "codex");
+  return next;
+}
+
+function createCodexHookDatabase() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH,
+    connectionTimeoutMillis: codexHookConnectionTimeoutMs
+  });
+}
+
+function nativeHookState(
+  prior: AgentSessionState["native_hook"],
+  event: CodexHookEvent,
+  mode: "server" | "offline_spool",
+  observationCount: number
+): NonNullable<AgentSessionState["native_hook"]> {
+  const now = new Date().toISOString();
+  return {
+    client: "codex",
+    external_session_id: event.session_id,
+    first_observed_at:
+      prior?.external_session_id === event.session_id ? prior.first_observed_at : now,
+    last_observed_at: now,
+    last_event_name: event.hook_event_name,
+    last_turn_id: event.turn_id,
+    last_mode: mode,
+    observation_count:
+      (prior?.external_session_id === event.session_id ? prior.observation_count : 0) +
+      observationCount
+  };
+}
+
+async function startCodexHookSession(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent
+) {
+  const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
+  const started = await database.startSession({
+    client_kind: "codex",
+    project_id: config?.project_id ?? null,
+    project_path: dir,
+    session_label: "codex-native-hook",
+    resume_policy: "normal"
+  });
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "active",
+    session_id: String(started.session_id),
+    project_id: String(started.project_id),
+    project_dir: dir,
+    client_kind: "codex",
+    client_version: null,
+    task_hint: "Automatic Codex audit capture",
+    started_at: now,
+    updated_at: now,
+    native_hook: nativeHookState(undefined, event, "server", 0)
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function ensureCodexHookServerState(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent
+) {
+  const dir = projectDir(argv);
+  const state = await readAgentSessionState(dir);
+  if (
+    state?.status === "active" &&
+    state.native_hook?.client === "codex" &&
+    state.native_hook.external_session_id === event.session_id
+  ) {
+    await assertAgentStateProjectBinding(database, state, dir);
+    return state;
+  }
+  return startCodexHookSession(database, argv, event);
+}
+
+function codexHookObservationInput(
+  action: CodexHookMappedObservation,
+  state: AgentSessionState
+): AppendAgentObservationInput {
+  return {
+    session_id: state.session_id,
+    run_id: action.run_id,
+    turn_id: action.turn_id,
+    trace_id: action.trace_id,
+    source_event_id: null,
+    dedup_key: action.dedup_key,
+    kind: action.kind,
+    status: action.status,
+    title: action.title,
+    body: action.body,
+    tool_name: action.tool_name,
+    error_code: action.error_code,
+    resolution_status: action.resolution_status,
+    metadata: {
+      ...action.metadata,
+      external_source_event_id: action.source_event_id
+    },
+    client_kind: "codex",
+    client_version: state.client_version ?? null
+  };
+}
+
+async function persistCodexHookCheckpoint(
+  database: RecallantDb,
+  state: AgentSessionState,
+  action: Extract<CodexHookCaptureAction, { type: "checkpoint" }>
+) {
+  const payload = {
+    schema_version: 1,
+    status: "in_progress",
+    current_focus: action.summary,
+    next_step: action.next_step,
+    summary: action.summary,
+    updated_at: new Date().toISOString(),
+    source: "codex-native-hook",
+    external_session_id: action.external_session_id,
+    external_turn_id: action.turn_id
+  };
+  return database.setCheckpoint(state.project_id, payload);
+}
+
+async function persistCodexHookServerActions(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  const dir = projectDir(argv);
+  let state = await ensureCodexHookServerState(database, argv, event);
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    if (action.type === "observation") {
+      const observation = await database.appendAgentObservation(
+        codexHookObservationInput(action, state)
+      );
+      lastEventId = observation.source_event_id ?? lastEventId;
+      observationCount += 1;
+    } else {
+      const checkpoint = await persistCodexHookCheckpoint(database, state, action);
+      checkpointAt = new Date(checkpoint.updated_at).toISOString();
+    }
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "active",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(state.native_hook, event, "server", observationCount)
+  };
+  await writeAgentSessionState(dir, state);
+}
+
+function codexHookOfflineObservationPayload(
+  action: CodexHookMappedObservation,
+  state: AgentSessionState
+) {
+  const payload: Partial<AppendAgentObservationInput> = codexHookObservationInput(action, state);
+  delete payload.session_id;
+  return payload as Omit<AppendAgentObservationInput, "session_id">;
+}
+
+async function ensureCodexHookOfflineState(argv: readonly string[], event: CodexHookEvent) {
+  const dir = projectDir(argv);
+  const existing = await readAgentSessionState(dir);
+  const now = new Date().toISOString();
+  const matching =
+    existing?.native_hook?.external_session_id === event.session_id ? existing : null;
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "offline",
+    session_id: matching?.session_id ?? `local-${randomUUID()}`,
+    project_id: matching?.project_id ?? null,
+    project_dir: dir,
+    client_kind: "codex",
+    client_version: matching?.client_version ?? null,
+    task_hint: matching?.task_hint ?? "Automatic Codex audit capture",
+    started_at: matching?.started_at ?? now,
+    updated_at: now,
+    last_checkpoint_at: matching?.last_checkpoint_at ?? null,
+    last_event_id: matching?.last_event_id ?? null,
+    native_hook: nativeHookState(matching?.native_hook, event, "offline_spool", 0)
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function spoolCodexHookActions(
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  let state = await ensureCodexHookOfflineState(argv, event);
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    const record =
+      action.type === "observation"
+        ? await appendSpoolRecord(
+            argv,
+            "observation",
+            codexHookOfflineObservationPayload(action, state),
+            action.dedup_key
+          )
+        : await appendSpoolRecord(
+            argv,
+            "event",
+            {
+              client_kind: "codex",
+              event_kind: "checkpoint",
+              text: `Checkpoint: ${action.summary} Next: ${action.next_step}`,
+              metadata: {
+                capture_kind: "codex_native_hook_checkpoint",
+                hook_event_name: action.event_name,
+                external_session_id: action.external_session_id,
+                external_turn_id: action.turn_id,
+                trace_id: action.trace_id
+              },
+              raw_artifacts: []
+            },
+            action.dedup_key
+          );
+    lastEventId = String(record.local_id);
+    if (action.type === "observation") observationCount += 1;
+    else checkpointAt = new Date().toISOString();
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(state.native_hook, event, "offline_spool", observationCount)
+  };
+  await writeAgentSessionState(projectDir(argv), state);
+}
+
+function debugCodexHook(argv: readonly string[], value: Record<string, unknown>) {
+  if (!argv.includes("--debug")) return;
+  process.stderr.write(`${JSON.stringify(value)}\n`);
+}
+
+async function runCodexHook(argv: readonly string[]) {
+  let event: CodexHookEvent | null = null;
+  let hookArgv: readonly string[] | null = null;
+  try {
+    const raw = await readCodexHookStdin();
+    const parsed = parseCodexHookPayload(raw);
+    if (!parsed.ok) {
+      debugCodexHook(argv, { ok: false, ignored: true, code: parsed.code });
+      return;
+    }
+    event = parsed.event;
+    hookArgv = await codexHookArgv(argv);
+    if (!hookArgv) {
+      debugCodexHook(argv, { ok: false, ignored: true, code: "project_not_connected" });
+      return;
+    }
+    const actions = mapCodexHookEvent(event);
+    const database = createCodexHookDatabase();
+    if (database) {
+      try {
+        await persistCodexHookServerActions(database, hookArgv, event, actions);
+        debugCodexHook(argv, {
+          ok: true,
+          mode: "server",
+          event: event.hook_event_name,
+          actions: actions.length
+        });
+        return;
+      } catch (error) {
+        debugCodexHook(argv, {
+          ok: false,
+          code: "server_capture_failed",
+          error: redactSystemActivityValue(error instanceof Error ? error.message : String(error))
+        });
+        // The native hook must not block Codex. The same deduplicated actions continue to spool.
+      } finally {
+        await database.close().catch(() => undefined);
+      }
+    }
+    await spoolCodexHookActions(hookArgv, event, actions);
+    debugCodexHook(argv, {
+      ok: true,
+      mode: "offline_spool",
+      event: event.hook_event_name,
+      actions: actions.length
+    });
+  } catch {
+    if (event && hookArgv) {
+      await spoolCodexHookActions(hookArgv, event, mapCodexHookEvent(event)).catch(() => undefined);
+    }
+    debugCodexHook(argv, { ok: false, ignored: true, code: "capture_failed_soft" });
+  }
 }
 
 async function runAgentCheckpoint(argv: readonly string[]) {
@@ -11749,7 +12134,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|codex-hook|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -11825,6 +12210,7 @@ async function main(argv: readonly string[]) {
   if (command === "agent-observe") return runAgentObserve(argv);
   if (command === "agent-checkpoint") return runAgentCheckpoint(argv);
   if (command === "agent-closeout") return runAgentCloseout(argv);
+  if (command === "codex-hook") return runCodexHook(argv);
   if (command === "demo-capture") return runDemoCapture(argv);
   if (command === "ask") return runAsk(argv);
   if (command === "spool-append") return runSpoolAppend(argv);

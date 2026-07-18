@@ -142,6 +142,7 @@ export type RecallantDbConfig = {
   developerId?: string;
   projectId?: string;
   projectPath?: string;
+  connectionTimeoutMillis?: number;
 };
 
 export type JsonObject = Record<string, unknown>;
@@ -2762,7 +2763,10 @@ export class RecallantDb {
   private agentObservationSchemaReady?: Promise<void>;
 
   constructor(private readonly config: RecallantDbConfig) {
-    this.pool = new Pool({ connectionString: config.databaseUrl });
+    this.pool = new Pool({
+      connectionString: config.databaseUrl,
+      connectionTimeoutMillis: config.connectionTimeoutMillis
+    });
   }
 
   async close() {
