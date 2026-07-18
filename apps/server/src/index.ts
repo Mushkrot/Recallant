@@ -903,8 +903,18 @@ async function readOtelJsonWithLimit(request: IncomingMessage, limitBytes: numbe
       `Unsupported OTLP content encoding: ${encoding}.`
     );
   }
-  const payload =
-    encoding === "gzip" ? gunzipSync(compressed, { maxOutputLength: limitBytes }) : compressed;
+  let payload = compressed;
+  if (encoding === "gzip") {
+    try {
+      payload = gunzipSync(compressed, { maxOutputLength: limitBytes });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("larger than") || message.includes("maxOutputLength")) {
+        throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "Decoded OTLP body is too large.");
+      }
+      throw new RemoteMcpRequestError("VALIDATION_ERROR", "OTLP gzip body is invalid.");
+    }
+  }
   if (payload.byteLength > limitBytes) {
     throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "Decoded OTLP body is too large.");
   }

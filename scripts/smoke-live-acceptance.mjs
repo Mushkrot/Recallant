@@ -116,7 +116,7 @@ for (const expectedFailure of [
   "public_route_auth_ready",
   "private_origin_auth_ready",
   "service_env_aligned",
-  "capture_recall_proof",
+  "memory_loop_recall_proof",
   "workbench_project_visible",
   "pending_embeddings_recovered"
 ]) {
@@ -134,7 +134,10 @@ assert(
   "fail fixture missed anonymous origin"
 );
 assert(failEvidence.service_env_aligned === "mismatch", "fail fixture missed env mismatch");
-assert(failEvidence.capture_recall_proof === "missing_capture", "fail fixture missed capture gap");
+assert(
+  failEvidence.memory_loop_recall_proof === "missing_memory_loop",
+  "fail fixture missed memory-loop gap"
+);
 assert(
   failEvidence.pending_embeddings_recovered === "unrecovered_pending_embeddings",
   "fail fixture missed pending embeddings gap"

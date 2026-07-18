@@ -395,11 +395,16 @@ async function runConnectHookEvidence(projectDir, marker, label) {
     `${label}: hook-captured decision was not recalled in a later context pack`
   );
 
-  const doctor = await cli(projectDir, ["doctor", "--require-capture", "--format", "json"]);
+  const doctor = await cli(projectDir, [
+    "doctor",
+    "--require-memory-loop",
+    "--format",
+    "json"
+  ]);
   assert(
     doctor.capture_readiness?.ready === true &&
       doctor.client_connection?.status === "mcp_and_hooks_ready",
-    `${label}: doctor did not prove MCP+hooks capture active: ${JSON.stringify(doctor)}`
+    `${label}: doctor did not prove the memory loop with MCP+hooks: ${JSON.stringify(doctor)}`
   );
 
   return {
@@ -446,14 +451,14 @@ async function runPublicProofFlow(projectDir, marker, label) {
     "doctor",
     "--project-dir",
     projectDir,
-    "--require-capture",
+    "--require-memory-loop",
     "--format",
     "json"
   ]);
   assert(
     doctor.capture_readiness?.ready === true &&
-      doctor.capture_readiness?.status === "capture_active",
-    `${label}: doctor --require-capture did not pass after demo-capture: ${JSON.stringify(doctor)}`
+      doctor.capture_readiness?.status === "memory_loop_ready",
+    `${label}: doctor --require-memory-loop did not pass after demo-capture: ${JSON.stringify(doctor)}`
   );
   const ask = await cli(projectDir, [
     "ask",
@@ -471,7 +476,7 @@ async function runPublicProofFlow(projectDir, marker, label) {
   return {
     command_sequence: [
       "recallant demo-capture --project-dir .",
-      "recallant doctor --project-dir . --require-capture",
+      "recallant doctor --project-dir . --require-memory-loop",
       'recallant ask "what did the agent remember?" --project-dir .'
     ],
     marker,
@@ -572,8 +577,13 @@ async function runCapturedSession(projectDir, projectId, marker, label) {
     `Verified recall ${marker}`
   ]);
 
-  const doctor = await cli(projectDir, ["doctor", "--require-capture", "--format", "json"]);
-  assert(doctor.capture_readiness?.ready === true, `${label}: doctor did not prove capture active`);
+  const doctor = await cli(projectDir, [
+    "doctor",
+    "--require-memory-loop",
+    "--format",
+    "json"
+  ]);
+  assert(doctor.capture_readiness?.ready === true, `${label}: doctor did not prove memory loop`);
 
   const dashboard = await dashboardFor(projectId, projectDir);
   assert(

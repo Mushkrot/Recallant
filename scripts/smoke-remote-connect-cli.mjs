@@ -92,19 +92,25 @@ function readinessContract(state = {}) {
   const lastContextReadAt = state.lastContextReadAt ?? null;
   const lastMemoryWriteAt = state.lastMemoryWriteAt ?? null;
   const lastCheckpointAt = state.lastCheckpointAt ?? CHECKPOINT_ONLY_AT;
+  const memoryLoopReady = Boolean(lastContextReadAt && lastMemoryWriteAt && lastCheckpointAt);
   return {
-    version: 1,
+    version: 2,
     invariant:
-      "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
-    primary_state: semanticProofAt
-      ? "semantic_memory_ready"
+      "Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow. Capture-active proves fresh automatic agent telemetry.",
+    primary_state: memoryLoopReady
+      ? "memory_loop_ready"
+      : semanticProofAt
+        ? "semantic_memory_ready"
       : lastContextReadAt
         ? "context_ready"
         : "configured",
     configured: true,
     context_ready: Boolean(lastContextReadAt),
     semantic_memory_ready: Boolean(semanticProofAt),
+    memory_loop_ready: memoryLoopReady,
     capture_active: false,
+    capture_fresh: false,
+    capture_freshness_hours: 24,
     ingestion_approved: false,
     remote_mcp_ready: true,
     evidence: {
@@ -112,6 +118,8 @@ function readinessContract(state = {}) {
       last_memory_write_at: lastMemoryWriteAt,
       last_checkpoint_at: lastCheckpointAt,
       last_semantic_recall_proof_at: semanticProofAt,
+      last_automatic_capture_at: null,
+      automatic_capture_source: null,
       ingestion_approval_ref: null
     },
     notes: {
@@ -892,10 +900,11 @@ try {
   );
   const semanticAgentStartJson = JSON.parse(semanticAgentStart.stdout);
   assert(
-    semanticAgentStartJson.readiness_state === "semantic_memory_ready" &&
+    semanticAgentStartJson.readiness_state === "memory_loop_ready" &&
+      semanticAgentStartJson.proof_status?.memory_loop_ready === true &&
       semanticAgentStartJson.proof_status?.semantic_memory_ready === true &&
       semanticAgentStartJson.proof_status?.capture_active === false,
-    `agent-start after semantic proof did not expose semantic_memory_ready: ${semanticAgentStart.stdout}`
+    `agent-start after semantic proof did not expose memory_loop_ready: ${semanticAgentStart.stdout}`
   );
 
   const approved = await runCli(
@@ -1199,10 +1208,12 @@ try {
   const remoteStartAfterProofJson = JSON.parse(remoteStartAfterProof.stdout);
   assert(
     remoteStartAfterProofJson.mode === "remote_mcp_ready" &&
-      remoteStartAfterProofJson.readiness_state === "semantic_memory_ready" &&
+      remoteStartAfterProofJson.readiness_state === "memory_loop_ready" &&
+      remoteStartAfterProofJson.proof_status?.memory_loop_ready === true &&
       remoteStartAfterProofJson.proof_status?.semantic_memory_ready === true &&
       remoteStartAfterProofJson.proof_status?.capture_active === false &&
-      remoteStartAfterProofJson.readiness_contract?.primary_state === "semantic_memory_ready" &&
+      remoteStartAfterProofJson.readiness_contract?.primary_state === "memory_loop_ready" &&
+      remoteStartAfterProofJson.readiness_contract?.memory_loop_ready === true &&
       remoteStartAfterProofJson.readiness_contract?.semantic_memory_ready === true &&
       remoteStartAfterProofJson.readiness_contract?.capture_active === false &&
       remoteStartAfterProofJson.readiness_contract?.ingestion_approved === false &&
@@ -1580,8 +1591,8 @@ process.stdout.write(
         bootstrap_token: "headless_redeem_without_browser_or_trusted_device",
         credential_store: "project_config_ref_local_store_secret",
         consent_receipt: "project_local_non_secret_remote_boundary",
-        agent_start_readiness:
-          "configured_checkpoint_only_then_capture_proof_non_semantic_then_semantic_memory_ready_without_capture_active",
+      agent_start_readiness:
+        "configured_checkpoint_only_then_capture_proof_non_semantic_then_memory_loop_ready_without_capture_active",
         regression_matrix: {
           old_mac_test_failure_mode:
             "remote connect must produce agent-ready thin files, not only MCP config",

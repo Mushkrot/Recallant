@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import pg from "pg";
 
 import { codexOtelLogsEndpointPath } from "../packages/contracts/dist/index.js";
@@ -156,6 +157,24 @@ try {
     body: JSON.stringify(matchedBody)
   });
   assert(duplicate.status === 200, `duplicate status was ${duplicate.status}`);
+  const compressed = await fetch(endpoint, {
+    method: "POST",
+    headers: { ...headers, "content-encoding": "gzip" },
+    body: gzipSync(JSON.stringify(matchedBody))
+  });
+  assert(compressed.status === 200, `gzip status was ${compressed.status}`);
+  const malformedGzip = await fetch(endpoint, {
+    method: "POST",
+    headers: { ...headers, "content-encoding": "gzip" },
+    body: "not-gzip"
+  });
+  assert(malformedGzip.status === 400, `malformed gzip status was ${malformedGzip.status}`);
+  const compressedBomb = await fetch(endpoint, {
+    method: "POST",
+    headers: { ...headers, "content-encoding": "gzip" },
+    body: gzipSync("x".repeat(1_048_577))
+  });
+  assert(compressedBomb.status === 413, `compressed bomb status was ${compressedBomb.status}`);
 
   const missingHook = await fetch(endpoint, {
     method: "POST",
@@ -189,6 +208,26 @@ try {
   assert(coverage.configured === true, "real receipt did not mark OTel configured");
   assert(coverage.matched_count === 1, `matched count was ${coverage.matched_count}`);
   assert(coverage.missing_hook_count === 1, `missing-hook count was ${coverage.missing_hook_count}`);
+  const freshReadiness = await db.getProjectReadiness({ project_id: projectId });
+  assert(
+    freshReadiness.readiness_contract.capture_active === true &&
+      freshReadiness.readiness_contract.evidence.automatic_capture_source ===
+        "codex_native_hook",
+    `fresh native capture was not active: ${JSON.stringify(freshReadiness.readiness_contract)}`
+  );
+  await sql.query(
+    `UPDATE agent_observations
+     SET occurred_at = now() - interval '25 hours'
+     WHERE project_id = $1 AND redacted_metadata->>'adapter' = 'codex_native_hook'`,
+    [projectId]
+  );
+  const staleReadiness = await db.getProjectReadiness({ project_id: projectId });
+  assert(
+    staleReadiness.readiness_contract.capture_active === false &&
+      staleReadiness.readiness_contract.capture_fresh === false &&
+      staleReadiness.readiness_contract.evidence.last_automatic_capture_at !== null,
+    `stale native capture remained active: ${JSON.stringify(staleReadiness.readiness_contract)}`
+  );
 
   process.stdout.write(
     `${JSON.stringify(
@@ -198,9 +237,14 @@ try {
         unauthorized: unauthorized.status,
         unsupported_binary: binary.status,
         accepted: accepted.status,
+        gzip_accepted: compressed.status,
+        malformed_gzip: malformedGzip.status,
+        compressed_bomb: compressedBomb.status,
         deduplicated_events: rows.rows.length,
         matched: coverage.matched_count,
         missing_hook: coverage.missing_hook_count,
+        fresh_capture_active: freshReadiness.readiness_contract.capture_active,
+        stale_capture_active: staleReadiness.readiness_contract.capture_active,
         raw_content_stored: false
       },
       null,

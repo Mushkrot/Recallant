@@ -102,7 +102,7 @@ function fixtureReport(mode) {
         check("service_env_aligned", true, "aligned"),
         check("service_runtime_ready", true, "ready"),
         check("one_command_onboard", true, "completed"),
-        check("capture_recall_proof", true, "capture_active"),
+        check("memory_loop_recall_proof", true, "memory_loop_ready"),
         check("workbench_project_visible", true, true),
         check("pending_embeddings_recovered", true, "no_pending"),
         check("optional_cleanup_preview", true, "skipped")
@@ -118,7 +118,7 @@ function fixtureReport(mode) {
         check("service_env_aligned", true, "aligned"),
         check("service_runtime_ready", true, "ready"),
         check("one_command_onboard", true, "completed"),
-        check("capture_recall_proof", true, "capture_active"),
+        check("memory_loop_recall_proof", true, "memory_loop_ready"),
         check("workbench_project_visible", true, true),
         check("pending_embeddings_recovered", true, "recovered"),
         check("optional_cleanup_preview", true, "skipped")
@@ -134,7 +134,7 @@ function fixtureReport(mode) {
       check("service_env_aligned", false, "mismatch"),
       check("service_runtime_ready", false, "service_inactive"),
       check("one_command_onboard", true, "completed"),
-      check("capture_recall_proof", false, "missing_capture"),
+      check("memory_loop_recall_proof", false, "missing_memory_loop"),
       check("workbench_project_visible", false, false),
       check("pending_embeddings_recovered", false, "unrecovered_pending_embeddings"),
       check("optional_cleanup_preview", true, "skipped")
@@ -191,7 +191,14 @@ function runRealAcceptance(projectDir) {
     "onboard"
   );
   const doctor = parseJsonResult(
-    runCli(["doctor", "--project-dir", projectDir, "--require-capture", "--format", "json"]),
+    runCli([
+      "doctor",
+      "--project-dir",
+      projectDir,
+      "--require-memory-loop",
+      "--format",
+      "json"
+    ]),
     "doctor"
   );
   const cleanupMode = process.env.RECALLANT_LIVE_CLEANUP_MODE ?? "none";
@@ -240,7 +247,7 @@ function runRealAcceptance(projectDir) {
     ),
     check("one_command_onboard", onboardJson?.status === "completed", onboardJson?.status ?? onboard.status),
     check(
-      "capture_recall_proof",
+      "memory_loop_recall_proof",
       doctorJson?.capture_readiness?.ready === true,
       doctorJson?.capture_readiness?.status ?? "not_checked"
     ),

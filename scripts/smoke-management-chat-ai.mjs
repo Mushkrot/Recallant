@@ -108,19 +108,25 @@ const baseDashboard = {
     last_memory_write_at: "2026-06-01T00:01:00Z",
     checkpoint_updated_at: "2026-06-01T00:02:00Z",
     last_semantic_recall_proof_at: "2026-06-01T00:03:00Z",
+    last_automatic_capture_at: "2026-06-01T00:04:00Z",
+    capture_fresh_until: "2026-06-02T00:04:00Z",
+    memory_loop_ready: true,
     semantic_memory_ready: true,
     readiness_status: "capture_active",
     readiness_contract: {
       primary_state: "capture_active",
       configured: true,
       context_ready: true,
+      memory_loop_ready: true,
       semantic_memory_ready: true,
       capture_active: true,
       evidence: {
         last_context_read_at: "2026-06-01T00:00:00Z",
         last_memory_write_at: "2026-06-01T00:01:00Z",
         last_checkpoint_at: "2026-06-01T00:02:00Z",
-        last_semantic_recall_proof_at: "2026-06-01T00:03:00Z"
+        last_semantic_recall_proof_at: "2026-06-01T00:03:00Z",
+        last_automatic_capture_at: "2026-06-01T00:04:00Z",
+        capture_fresh_until: "2026-06-02T00:04:00Z"
       }
     },
     review_state_counts: {
@@ -611,7 +617,7 @@ try {
         "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
       ) &&
       String(concreteOnboarding.proposed_actions[2]?.command).includes(
-        "recallant doctor --project-dir /ai/new_project --require-capture --semantic-proof"
+        "recallant doctor --project-dir /ai/new_project --require-capture --require-memory-loop --semantic-proof"
       ),
     `Concrete onboarding did not produce attach/connect/doctor plan: ${JSON.stringify(concreteOnboarding)}`
   );
@@ -750,9 +756,11 @@ try {
       connectionCheck.intent === "connection_check" &&
       connectionCheck.result_type === "read_only_answer" &&
       connectionCheck.facts.capture_ready === true &&
+      connectionCheck.facts.memory_loop_ready === true &&
       connectionCheck.facts.semantic_memory_ready === true &&
       connectionCheck.facts.readiness_status === "capture_active" &&
-      String(connectionCheck.answer).includes("capture-active evidence") &&
+      String(connectionCheck.answer).includes("capture_active=true") &&
+      String(connectionCheck.answer).includes("Последний автоматический захват") &&
       String(connectionCheck.answer).includes("Последний context read") &&
       String(connectionCheck.answer).includes("Последняя запись памяти") &&
       String(connectionCheck.answer).includes("Последний semantic proof"),
@@ -772,12 +780,14 @@ try {
   configuredOnlyDashboard.project_readiness = {
     project_registered: true,
     readiness_status: "configured",
+    memory_loop_ready: false,
     semantic_memory_ready: false,
     configured_but_not_capture_active: true,
     readiness_contract: {
       primary_state: "configured",
       configured: true,
       context_ready: false,
+      memory_loop_ready: false,
       semantic_memory_ready: false,
       capture_active: false,
       evidence: {}
@@ -800,9 +810,12 @@ try {
     configuredOnly.intent === "connection_check" &&
       configuredOnly.result_type === "read_only_answer" &&
       configuredOnly.facts.capture_ready === false &&
+      configuredOnly.facts.memory_loop_ready === false &&
       configuredOnly.facts.semantic_memory_ready === false &&
       configuredOnly.facts.readiness_status === "configured" &&
-      String(configuredOnly.answer).includes("configured is not capture active"),
+      String(configuredOnly.answer).includes(
+        "configured, but automatic capture and the memory loop are not proven yet"
+      ),
     `Configured-only connection check overclaimed readiness: ${JSON.stringify(configuredOnly)}`
   );
 

@@ -674,6 +674,50 @@ async function run() {
     session_label: "review-ui-playwright",
     resume_policy: "normal"
   });
+  const externalCodexSessionId = `review-ui-playwright-native-${randomUUID()}`;
+  await db.appendAgentObservation({
+    session_id: session.session_id,
+    kind: "system",
+    title: "Automatic Codex hook observed",
+    client_kind: "codex",
+    metadata: {
+      adapter: "codex_native_hook",
+      hook_event_name: "SessionStart",
+      external_session_id: externalCodexSessionId
+    }
+  });
+  await db.configureProjectOtelControl({
+    project_id: projectId,
+    developer_id: developerId,
+    client_id: "review-ui-playwright-otel"
+  });
+  await db.ingestCodexOtelControlEvents({
+    project_id: projectId,
+    developer_id: developerId,
+    events: [
+      {
+        event_name: "codex.conversation_starts",
+        conversation_id: externalCodexSessionId,
+        call_id: null,
+        trace_id: null,
+        span_id: null,
+        occurred_at: new Date().toISOString(),
+        observed_at: new Date().toISOString(),
+        severity_number: 9,
+        success: true,
+        duration_ms: null,
+        attempt_number: null,
+        tool_name: null,
+        error_type: null,
+        error_fingerprint: null,
+        payload_hash: `sha256:${randomUUID().replaceAll("-", "")}`,
+        dedup_key: `review-ui-playwright-otel-${randomUUID()}`,
+        safe_attributes: { fixture: true },
+        dropped_attribute_count: 0,
+        content_discarded: false
+      }
+    ]
+  });
   const userEvent = await db.appendTurn({
     session_id: session.session_id,
     client_kind: "codex",
@@ -715,21 +759,23 @@ async function run() {
     parent_observation_id: toolObservation.id,
     client_kind: "codex",
     kind: "error",
+    tool_name: "browser_check",
     error_code: "LAYOUT_OVERFLOW",
     title: "Mobile layout overflowed the viewport",
     body: "The activity timeline extended beyond the mobile viewport during verification.",
     resolution_status: "unresolved"
   });
-  await db.appendAgentObservation({
+  const recoveryRetry = await db.appendAgentObservation({
     session_id: session.session_id,
     run_id: observabilityRunId,
     turn_id: observabilityTurnId,
     trace_id: observabilityTraceId,
     parent_observation_id: errorObservation.id,
     client_kind: "codex",
-    kind: "retry",
-    title: "Retry after narrowing the timeline",
-    body: "Re-ran the same mobile browser check after the layout change.",
+    kind: "tool_call",
+    tool_name: "browser_check",
+    title: "Constrain the activity timeline",
+    body: "Re-ran the same mobile browser check after narrowing the layout.",
     attempt_number: 2,
     resolution_status: "retrying"
   });
@@ -738,38 +784,14 @@ async function run() {
     run_id: observabilityRunId,
     turn_id: observabilityTurnId,
     trace_id: observabilityTraceId,
-    parent_observation_id: errorObservation.id,
+    parent_observation_id: recoveryRetry.id,
     client_kind: "codex",
-    kind: "remediation",
-    title: "Constrain the activity timeline",
-    body: "Changed the mobile activity layout to a single readable column.",
-    rationale: "The overflow came from a desktop grid that did not collapse on narrow screens.",
-    resolution_status: "retrying"
-  });
-  await db.appendAgentObservation({
-    session_id: session.session_id,
-    run_id: observabilityRunId,
-    turn_id: observabilityTurnId,
-    trace_id: observabilityTraceId,
-    parent_observation_id: errorObservation.id,
-    client_kind: "codex",
-    kind: "verification",
+    kind: "tool_result",
+    tool_name: "browser_check",
+    status: "success",
     title: "Mobile verification passed",
     body: "The repaired activity timeline stayed inside the viewport and all controls remained usable.",
     resolution_status: "resolved"
-  });
-  await db.appendAgentObservation({
-    session_id: session.session_id,
-    run_id: observabilityRunId,
-    turn_id: observabilityTurnId,
-    trace_id: observabilityTraceId,
-    parent_observation_id: toolObservation.id,
-    client_kind: "codex",
-    kind: "tool_result",
-    status: "success",
-    tool_name: "browser_check",
-    title: "Browser check passed",
-    body: "The repeated desktop and mobile checks completed successfully."
   });
   await db.appendAgentObservation({
     session_id: session.session_id,
@@ -793,6 +815,30 @@ async function run() {
     title: "Run completed",
     body: "The request, repair, and verification are complete."
   });
+  const observabilityFixture = await db.getAgentObservabilityWorkbench({
+    project_id: projectId,
+    active_tab: "errors"
+  });
+  const automaticRecoveryChain = observabilityFixture.recovery_chains.find(
+    (chain) => chain.error_observation_id === errorObservation.id
+  );
+  assert(
+    automaticRecoveryChain?.status === "verified" &&
+      automaticRecoveryChain.steps.some((step) => step.stage === "retry" && step.automatic) &&
+      automaticRecoveryChain.steps.some(
+        (step) => step.stage === "verification" && step.automatic
+      ),
+    `Playwright fixture did not derive automatic recovery: ${JSON.stringify(automaticRecoveryChain)}`
+  );
+  assert(
+    observabilityFixture.coverage.otel_control.status === "healthy",
+    `Playwright fixture OTel control is not healthy: ${JSON.stringify(observabilityFixture.coverage.otel_control)}`
+  );
+  const readinessFixture = await db.getProjectReadiness({ project_id: projectId });
+  assert(
+    readinessFixture.readiness_contract?.capture_active === true,
+    `Playwright fixture did not produce fresh automatic capture: ${JSON.stringify(readinessFixture.readiness_contract)}`
+  );
   await db.appendEvent({
     session_id: session.session_id,
     client_kind: "codex",
@@ -1452,7 +1498,9 @@ async function run() {
       .locator('.observability-tabs a[aria-current="page"]', { hasText: "Errors" })
       .waitFor();
     await desktop.getByText("Resolved and verified").waitFor();
-    await desktop.getByText("Recovery trail:").waitFor();
+    await desktop.locator('ol[aria-label="Observed recovery chain"]').waitFor();
+    await desktop.getByText("Linked automatically").first().waitFor();
+    await desktop.getByText("high confidence", { exact: false }).first().waitFor();
     await noHorizontalScroll(desktop, "desktop Agent errors");
     await desktop.screenshot({
       path: join(reportDir, "recallant-workbench-desktop-agent-errors.png"),
@@ -1464,6 +1512,8 @@ async function run() {
       .locator('.observability-tabs a[aria-current="page"]', { hasText: "Coverage" })
       .waitFor();
     await desktop.getByText("Overall coverage").waitFor();
+    await desktop.getByRole("heading", { name: "Independent control" }).waitFor();
+    await desktop.getByText("Two sources agree").waitFor();
     await desktop.getByRole("heading", { name: "Capture adapters" }).waitFor();
     await desktop.getByRole("heading", { name: "What to do next" }).waitFor();
     await noHorizontalScroll(desktop, "desktop Agent coverage");

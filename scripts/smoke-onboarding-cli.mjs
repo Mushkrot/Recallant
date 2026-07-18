@@ -784,10 +784,11 @@ assert(
   `one-command legacy proof statuses incomplete: ${JSON.stringify(oneCommand.verify)}`
 );
 assert(
-  oneCommand.verify?.stages?.capture?.status === "done" &&
+    oneCommand.verify?.stages?.capture?.status === "done" &&
     oneCommand.verify?.stages?.readiness?.status === "done" &&
     oneCommand.verify?.stages?.recall?.status === "done" &&
-    oneCommand.verify?.capture_active === true,
+    oneCommand.verify?.memory_loop_ready === true &&
+    oneCommand.verify?.capture_active === false,
   `one-command structured proof stages incomplete: ${JSON.stringify(oneCommand.verify)}`
 );
 
@@ -860,9 +861,10 @@ assert(
   `human success failed: ${humanSuccess.stderr}\n${humanSuccess.stdout}`
 );
 assert(
-  humanSuccess.stdout.includes("Capture active: yes") &&
+  humanSuccess.stdout.includes("Automatic capture: awaiting the first native agent event") &&
+    humanSuccess.stdout.includes("Memory loop ready: yes") &&
     humanSuccess.stdout.includes("context read, memory write, checkpoint, and recall proof"),
-  `human success output did not explain capture-active proof: ${humanSuccess.stdout}`
+  `human success output did not separate automatic capture and memory-loop proof: ${humanSuccess.stdout}`
 );
 assert(
   humanSuccess.stdout.includes("Embedding recovery:"),

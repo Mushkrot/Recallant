@@ -399,7 +399,7 @@ const fakeDb = {
       readiness_contract: contract,
       readiness_status: contract.primary_state,
       readiness_warning:
-        "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active.",
+        "Configured, but no automatic agent event has been observed. Manual workflow evidence does not make capture active.",
       review_state_counts: {
         pending_review: 0,
         accepted: agentMemories.length,

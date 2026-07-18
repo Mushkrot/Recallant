@@ -11,6 +11,7 @@ const expectedTools = [
   "memory_get_context_pack",
   "memory_append_turn",
   "memory_append_event",
+  "memory_append_observation",
   "memory_search",
   "memory_fetch_chunk",
   "memory_link",

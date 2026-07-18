@@ -356,14 +356,15 @@ try {
 
   const semanticDoctor = await cli(onlineProject, [
     "doctor",
-    "--require-capture",
+    "--require-memory-loop",
     "--semantic-proof",
     "--format",
     "json"
   ]);
   assert(
     semanticDoctor.readiness_contract?.semantic_memory_ready === true &&
-      semanticDoctor.readiness_contract?.capture_active === true &&
+      semanticDoctor.readiness_contract?.memory_loop_ready === true &&
+      semanticDoctor.readiness_contract?.capture_active === false &&
       semanticDoctor.semantic_memory_proof?.semantic_memory_proof?.marker_found === true,
     `semantic doctor did not prove semantic/capture readiness: ${JSON.stringify(semanticDoctor)}`
   );
@@ -371,7 +372,8 @@ try {
   const defaultDoctor = await cli(onlineProject, ["doctor", "--format", "json"]);
   assert(
     defaultDoctor.readiness_contract?.semantic_memory_ready === true &&
-      defaultDoctor.readiness_contract?.capture_active === true,
+      defaultDoctor.readiness_contract?.memory_loop_ready === true &&
+      defaultDoctor.readiness_contract?.capture_active === false,
     `default doctor did not read persisted semantic/capture readiness: ${JSON.stringify(defaultDoctor)}`
   );
   assert(

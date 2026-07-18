@@ -65,10 +65,17 @@ try {
     `demo-capture human output did not prove the flow: ${demoText}`
   );
 
-  const doctor = runJson(["doctor", "--project-dir", ".", "--require-capture", "--format", "json"]);
+  const doctor = runJson([
+    "doctor",
+    "--project-dir",
+    ".",
+    "--require-memory-loop",
+    "--format",
+    "json"
+  ]);
   assert(
     doctor.capture_readiness?.ready === true &&
-      doctor.capture_readiness?.status === "capture_active" &&
+      doctor.capture_readiness?.status === "memory_loop_ready" &&
       doctor.capture_readiness?.database_readiness?.last_context_read_at &&
       doctor.capture_readiness?.database_readiness?.last_memory_write_at &&
       doctor.capture_readiness?.database_readiness?.checkpoint_updated_at,

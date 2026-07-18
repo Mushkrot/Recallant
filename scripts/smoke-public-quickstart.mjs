@@ -231,7 +231,8 @@ async function workbenchNavigationProof(projectId) {
     const selectedHtml = await selectedResponse.text();
     const rootHome =
       rootResponse.status === 200 &&
-      rootHtml.includes("Recallant is recording") &&
+      rootHtml.includes("Recallant needs a check") &&
+      !rootHtml.includes("Recallant is recording") &&
       !rootHtml.includes('id="project-chooser"');
     const rootChooser =
       chooserResponse.status === 200 &&
@@ -253,6 +254,7 @@ async function workbenchNavigationProof(projectId) {
     );
     return {
       root_home: rootHome,
+      manual_memory_loop_does_not_claim_capture_active: rootHome,
       root_chooser: rootChooser,
       view_preserved: viewPreserved,
       selected_project_context: selectedContext
@@ -332,10 +334,11 @@ assert(
   `Onboard proof steps incomplete: ${JSON.stringify(onboard.verify)}`
 );
 assert(
-  onboard.verify?.stages?.capture?.status === "done" &&
+    onboard.verify?.stages?.capture?.status === "done" &&
     onboard.verify?.stages?.readiness?.status === "done" &&
     onboard.verify?.stages?.recall?.status === "done" &&
-    onboard.verify?.capture_active === true,
+    onboard.verify?.memory_loop_ready === true &&
+    onboard.verify?.capture_active === false,
   `Onboard structured proof stages incomplete: ${JSON.stringify(onboard.verify)}`
 );
 assert(
@@ -383,15 +386,16 @@ assert(
 
 const doctorAfter = runJson(
   recallant,
-  ["doctor", "--project-dir", projectDir, "--require-capture", "--format", "json"],
+  ["doctor", "--project-dir", projectDir, "--require-memory-loop", "--format", "json"],
   { cwd: projectDir }
 );
 assert(
   doctorAfter.capture_readiness?.ready === true &&
-    doctorAfter.owner_summary?.actually_recording === true,
-  `doctor --require-capture did not prove capture active: ${JSON.stringify(doctorAfter)}`
+    doctorAfter.owner_summary?.memory_loop_ready === true &&
+    doctorAfter.owner_summary?.actually_recording === false,
+  `doctor --require-memory-loop did not prove the memory loop: ${JSON.stringify(doctorAfter)}`
 );
-assertNoPrivatePathLeak(doctorAfter, "capture-active doctor");
+assertNoPrivatePathLeak(doctorAfter, "memory-loop doctor");
 
 const ask = runJson(
   recallant,
@@ -495,7 +499,7 @@ const checks = [
     evidence: ".recallant/hooks/manifest.json"
   },
   {
-    name: "capture_active_doctor",
+    name: "memory_loop_ready_doctor",
     status: doctorAfter.capture_readiness?.ready === true ? "pass" : "fail",
     evidence: doctorAfter.capture_readiness?.status ?? "unknown"
   },
@@ -551,7 +555,7 @@ const examples = {
     [{ name: "all_required_checks", status: "pass" }],
     [{ code: "pending_embeddings", message: "2 chunks are waiting for local model recovery." }]
   ),
-  fail: acceptanceStatus([{ name: "capture_active_doctor", status: "fail" }], [])
+  fail: acceptanceStatus([{ name: "memory_loop_ready_doctor", status: "fail" }], [])
 };
 assert(
   examples.pass === "pass" &&
@@ -598,7 +602,8 @@ process.stdout.write(
       proof: onboard.verify?.proof,
       structured_proof: onboard.verify?.stages,
       workbench: onboard.workbench,
-      capture_ready: doctorAfter.capture_readiness?.ready === true,
+      memory_loop_ready: doctorAfter.memory_loop_readiness?.ready === true,
+      capture_active: doctorAfter.readiness_contract?.capture_active === true,
       recalled: ask.recalled === true,
       acceptance_report: acceptanceReport
     },

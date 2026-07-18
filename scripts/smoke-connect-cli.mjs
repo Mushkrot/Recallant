@@ -57,18 +57,18 @@ const requireCaptureBefore = runCliRaw([
   "doctor",
   "--project-dir",
   projectDir,
-  "--require-capture",
+  "--require-memory-loop",
   "--format",
   "json"
 ]);
 assert(
   requireCaptureBefore.status === 0,
-  `doctor --require-capture should pass after attach startup smoke: ${requireCaptureBefore.stdout} ${requireCaptureBefore.stderr}`
+  `doctor --require-memory-loop should pass after attach startup smoke: ${requireCaptureBefore.stdout} ${requireCaptureBefore.stderr}`
 );
 assert(
   requireCaptureBefore.json?.capture_readiness?.ready === true &&
     requireCaptureBefore.json?.capture_readiness?.required === true,
-  `doctor --require-capture missing attach startup proof: ${JSON.stringify(requireCaptureBefore.json)}`
+  `doctor --require-memory-loop missing attach startup proof: ${JSON.stringify(requireCaptureBefore.json)}`
 );
 assert(
   requireCaptureBefore.json?.client_connection?.status === "mcp_only" &&
@@ -77,12 +77,13 @@ assert(
   `doctor should report MCP-only before hook installation: ${JSON.stringify(requireCaptureBefore.json?.client_connection)}`
 );
 assert(
-  requireCaptureBefore.json?.owner_summary?.status === "recording" &&
-    requireCaptureBefore.json?.owner_summary?.actually_recording === true &&
+  requireCaptureBefore.json?.owner_summary?.status === "configured_not_recording" &&
+    requireCaptureBefore.json?.owner_summary?.actually_recording === false &&
+    requireCaptureBefore.json?.owner_summary?.memory_loop_ready === true &&
     requireCaptureBefore.json?.owner_summary?.client_configured === true &&
     requireCaptureBefore.json?.owner_summary?.hook_capture_ready === false &&
-    requireCaptureBefore.json?.owner_summary?.headline.includes("capture is active"),
-  `doctor owner summary should explain attach startup capture proof: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
+    requireCaptureBefore.json?.owner_summary?.headline.includes("active capture is not proven"),
+  `doctor owner summary should separate startup memory-loop proof: ${JSON.stringify(requireCaptureBefore.json?.owner_summary)}`
 );
 
 const legacyOnlyDir = `${projectDir}-legacy-only`;
@@ -185,8 +186,9 @@ assert(
   `Connect dry-run should expose native hook installer status matrix: ${JSON.stringify(dryRun)}`
 );
 assert(
-  dryRun.capture_status === "not_observed",
-  `Unexpected capture status: ${JSON.stringify(dryRun)}`
+  dryRun.memory_loop_status === "not_observed" &&
+    dryRun.mandatory_startup_layer?.automatic_agent_audit_active === false,
+  `Unexpected readiness status: ${JSON.stringify(dryRun)}`
 );
 assert(
   dryRun.mandatory_startup_layer?.status === "mcp_only" &&
@@ -841,7 +843,7 @@ assert(
     hookManifest.targets?.pre_compaction_checkpoint?.input?.includes("state-only") &&
     hookManifest.targets?.checkpoint?.input?.includes("not semantic closeout proof") &&
     hookManifest.targets?.stop_closeout?.input?.includes("normal closeout") &&
-    hookManifest.ready_proof?.includes("--require-capture"),
+    hookManifest.ready_proof?.includes("--require-memory-loop"),
   `Hook manifest should expose machine-readable startup targets: ${JSON.stringify(hookManifest)}`
 );
 
@@ -985,18 +987,18 @@ const requireCaptureAfter = runCliRaw([
   "doctor",
   "--project-dir",
   projectDir,
-  "--require-capture",
+  "--require-memory-loop",
   "--format",
   "json"
 ]);
 assert(
   requireCaptureAfter.status === 0,
-  `doctor --require-capture should pass after capture: ${requireCaptureAfter.stdout} ${requireCaptureAfter.stderr}`
+  `doctor --require-memory-loop should pass after memory-loop capture: ${requireCaptureAfter.stdout} ${requireCaptureAfter.stderr}`
 );
 assert(
   requireCaptureAfter.json?.capture_readiness?.ready === true &&
-    requireCaptureAfter.json?.capture_readiness?.status === "capture_active",
-  `doctor --require-capture missing active readiness: ${JSON.stringify(requireCaptureAfter.json)}`
+    requireCaptureAfter.json?.capture_readiness?.status === "memory_loop_ready",
+  `doctor --require-memory-loop missing readiness: ${JSON.stringify(requireCaptureAfter.json)}`
 );
 assert(
   requireCaptureAfter.json?.client_connection?.status === "mcp_and_hooks_ready" &&
@@ -1005,14 +1007,15 @@ assert(
   `doctor should report MCP+hooks after hook installation: ${JSON.stringify(requireCaptureAfter.json?.client_connection)}`
 );
 assert(
-  requireCaptureAfter.json?.owner_summary?.status === "recording" &&
-    requireCaptureAfter.json?.owner_summary?.actually_recording === true &&
+  requireCaptureAfter.json?.owner_summary?.status === "configured_not_recording" &&
+    requireCaptureAfter.json?.owner_summary?.actually_recording === false &&
+    requireCaptureAfter.json?.owner_summary?.memory_loop_ready === true &&
     requireCaptureAfter.json?.owner_summary?.client_configured === true &&
     requireCaptureAfter.json?.owner_summary?.hook_capture_ready === true &&
     requireCaptureAfter.json?.owner_summary?.automatic_agent_audit_configured === true &&
     requireCaptureAfter.json?.owner_summary?.automatic_agent_audit_active === false &&
-    requireCaptureAfter.json?.owner_summary?.proof.includes("Automatic agent audit separately"),
-  `doctor owner summary should prove active recording after capture: ${JSON.stringify(requireCaptureAfter.json?.owner_summary)}`
+    requireCaptureAfter.json?.owner_summary?.proof.includes("capture_active requires a fresh"),
+  `doctor owner summary should separate memory-loop and automatic capture: ${JSON.stringify(requireCaptureAfter.json?.owner_summary)}`
 );
 runHook("stop-session.sh", [], "Stop hook closeout captured through Recallant.");
 

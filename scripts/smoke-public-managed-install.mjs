@@ -142,7 +142,8 @@ try {
   );
   assert(
     onboard.verify?.status === "passed" &&
-      onboard.verify?.capture_active === true &&
+      onboard.verify?.memory_loop_ready === true &&
+      onboard.verify?.capture_active === false &&
       onboard.verify?.evidence?.context_read === true &&
       onboard.verify?.evidence?.memory_write === true &&
       onboard.verify?.evidence?.checkpoint === true &&
@@ -159,16 +160,17 @@ try {
   const ready = parseJson(
     run(
       recallant,
-      ["doctor", "--project-dir", projectDir, "--require-capture", "--format", "json"],
+      ["doctor", "--project-dir", projectDir, "--require-memory-loop", "--format", "json"],
       {
         env: baseEnv
       }
     ),
-    "managed install require-capture doctor"
+    "managed install require-memory-loop doctor"
   );
   assert(
-    ready.owner_summary?.actually_recording === true,
-    `Require-capture doctor did not prove recording: ${JSON.stringify(ready.owner_summary)}`
+    ready.owner_summary?.memory_loop_ready === true &&
+      ready.owner_summary?.actually_recording === false,
+    `Require-memory-loop doctor did not prove the governed loop: ${JSON.stringify(ready.owner_summary)}`
   );
   const config = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
 
@@ -182,7 +184,7 @@ try {
         postgres_port: port,
         container_name: containerName,
         compose_project: composeProject,
-        capture_active: ready.owner_summary?.actually_recording === true,
+        memory_loop_ready: ready.owner_summary?.memory_loop_ready === true,
         workbench_private: onboard.workbench?.private_by_default === true
       },
       null,
