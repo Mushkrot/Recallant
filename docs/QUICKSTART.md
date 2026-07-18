@@ -77,10 +77,11 @@ does not stage or commit project files, secrets, or data automatically.
 
 Expected success:
 
-- `Capture active: yes` after context read, memory write, checkpoint, and recall proof are present;
-- `Automatic Codex audit configured: yes`; it becomes active only after Codex invokes the trusted
-  native hook, which can be required with
-  `recallant doctor --project-dir . --require-agent-audit`;
+- `Memory loop ready: yes` after context read, memory write, checkpoint, and recall proof are
+  present;
+- `Automatic Codex audit configured: yes`; `capture_active` becomes true only after Codex invokes
+  the trusted native hook, which can be required with
+  `recallant doctor --project-dir . --require-capture`;
 - `Embedding recovery: current` or a bounded recovery/waiting status when local embeddings are
   catching up;
 - a concise documentation posture summary: `Documentation posture: empty | healthy |

@@ -23,8 +23,8 @@ readers should see the product, how to evaluate it, how it works, and how to con
   lifecycle states, Workbench graph review, and governance rules for relation-aware retrieval work.
 - [Self-hosting](SELF_HOSTING.md): install profiles, rollback, verification, and system activity
   audit reports.
-- [Agent observability](AGENT_OBSERVABILITY.md): run replay, errors, coverage, capture adapters,
-  retention, and removal semantics.
+- [Agent observability](AGENT_OBSERVABILITY.md): run replay, automatic recovery chains,
+  independent OpenTelemetry coverage, capture freshness, retention, and removal semantics.
 - [Client setup](CLIENT_SETUP.md): Codex, Cursor, Claude Code, Windsurf, and generic MCP clients.
 - [Security](SECURITY.md): threat model and safe defaults.
 - [Remote MCP contract](MCP_SPEC.md): authenticated remote client access contract (`/api/mcp`) and

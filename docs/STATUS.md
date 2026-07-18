@@ -21,8 +21,12 @@ smoke gates. It should not yet be treated as stable team-wide infrastructure.
 - Activity now provides run-oriented agent observability: bounded replay, grouped errors and
   recovery, completeness checks, and adapter coverage. Local Codex connection now installs a native
   project hook adapter by default, safely preserving user hooks and reporting configured versus
-  observed capture truthfully. MCP, CLI, helper-hook, retention, targeted forget, project purge, and
-  native backup/restore paths remain covered by focused smoke tests.
+  fresh observed capture truthfully. An optional, separately transported Codex OpenTelemetry lane
+  reconciles safe control facts with native hooks, exposes gaps without storing another transcript,
+  and retains/purges/restores its project-scoped evidence. Errors now show automatically correlated
+  error, retry, remediation, verification, and regression chains with confidence and reasons. MCP,
+  CLI, helper-hook, retention, targeted forget, project purge, and native backup/restore paths remain
+  covered by focused smoke tests.
 - Local Ollama embeddings are fail-soft; embedding requests ask the runtime to retain the embedding
   model, while bounded recovery handles temporary unavailability.
 

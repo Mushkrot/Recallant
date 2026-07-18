@@ -48,13 +48,12 @@ recallant onboard <project>
 ```
 
 Onboarding defaults to the Codex beginner flow: attach, client connection, automatic native Codex
-hooks plus compatibility helpers, capture proof, readiness proof, and recall proof. Memory capture
-is not active until context read, memory write, checkpoint, and recall evidence are present. The
-automatic agent audit is a separate gate and is not active until Recallant observes a native Codex
-hook invocation.
+hooks plus compatibility helpers, memory-loop proof, automatic-capture proof, and recall proof.
+`memory_loop_ready` requires context read, memory write, and checkpoint evidence. `capture_active`
+is a separate gate and requires a fresh native Codex hook invocation.
 
-Interrupted sessions are reported as recovery context for the next agent. They do not erase current
-capture-active evidence when the working loop has been proven again.
+Interrupted sessions are reported as recovery context for the next agent. They do not erase a
+completed memory loop or fresh automatic-capture evidence.
 
 Do not use the local self-host installer or lower-level `recallant onboard <project>` as the first
 step for an external workstation that should connect to an existing central Recallant server. That
@@ -127,7 +126,7 @@ control over each step:
 ```bash
 recallant attach .
 recallant connect codex --project-dir .
-recallant doctor --project-dir . --require-capture --require-agent-audit
+recallant doctor --project-dir . --require-capture --require-memory-loop
 ```
 
 Attach creates the memory space and small project-local pointers. Connect writes or prints the client
@@ -155,7 +154,7 @@ trust is deliberately user-controlled and Recallant cannot inspect or bypass it.
 normal Codex action and verify the automatic path:
 
 ```bash
-recallant doctor --project-dir . --require-agent-audit --format json
+recallant doctor --project-dir . --require-capture --format json
 ```
 
 After the MCP config and hook files already match, the same dry-run is a readiness check: JSON
@@ -193,6 +192,12 @@ timeout. The command is silent and fail-soft; when the database is unavailable i
 redacted local spool record. It ignores Codex transcripts and does not claim visibility into hosted
 tools that emit no supported command-hook event. `Stop` records a turn response, not session
 closeout.
+
+For an independent control lane, `recallant otel-config` prints a user-level Codex OTel fragment.
+Codex ignores project-local `otel` configuration, so Recallant never writes this setting silently.
+The fragment uses a scoped token from `RECALLANT_OTEL_TOKEN`, OTLP/HTTP JSON, and
+`log_user_prompt = false`. See [Agent observability](AGENT_OBSERVABILITY.md#independent-opentelemetry-control)
+for exact setup, privacy limits, coverage states, and verification.
 
 ## Cursor
 
@@ -317,7 +322,8 @@ access.
 
 ### Remote Readiness Versus Recall Proof
 
-Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow.
+Capture-active proves fresh automatic agent telemetry.
 
 Remote setup has several distinct readiness levels. Keep them separate when diagnosing a connected
 project:
@@ -328,7 +334,8 @@ Use these names consistently in client setup and diagnostics:
 - `context_ready`: the agent read `memory_get_context_pack`.
 - `semantic_memory_ready`: a safe synthetic or agent-authored governed memory was created and
   recalled.
-- `capture_active`: context read, memory write, and checkpoint evidence are present.
+- `memory_loop_ready`: context read, memory write, and checkpoint evidence are present.
+- `capture_active`: a fresh automatic agent event exists inside the configured freshness window.
 - `ingestion_approved`: the owner separately approved import/summarization of existing files or
   history.
 
@@ -337,7 +344,8 @@ Do not treat `remote_mcp_ready` as `capture_active`; it maps only to `configured
 remote consent/config. Before proof, the primary state remains `configured`; after
 `recallant remote-doctor --semantic-proof`, a repeated `agent-start` should report
 `readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` remains false
-until the normal context/memory/checkpoint capture loop has actually run.
+until fresh automatic agent telemetry arrives. Remote MCP proof alone does not claim automatic
+capture.
 
 Safe remote existing-project sequence:
 
@@ -724,7 +732,8 @@ The first agent session after connect should:
 6. close out with `memory_closeout`.
 
 That startup contract is what turns a registered project into an agent-ready project. If the loop is
-not visible in Recallant, the project is configured but not yet capture active.
+not visible in Recallant, the project is configured but `memory_loop_ready` is false. Automatic
+capture remains a separate, freshness-based signal.
 
 When the session start response includes `previous_session_recovery`, display that guidance in plain
 language. Avoid saying "old unclosed checkpoint": the checkpoint is the latest compact project state,

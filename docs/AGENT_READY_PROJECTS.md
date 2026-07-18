@@ -12,7 +12,8 @@ current task is blocked or that old context should override the user's request.
 
 ## Product Contract
 
-Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow.
+Capture-active proves fresh automatic agent telemetry.
 
 Recallant reports project readiness as separate states:
 
@@ -20,7 +21,10 @@ Recallant reports project readiness as separate states:
 - `context_ready`: an agent session read a context pack for the project.
 - `semantic_memory_ready`: Recallant created and recalled a safe governed memory marker or
   equivalent agent-authored memory.
-- `capture_active`: Recallant observed the working loop: context read, memory write, and checkpoint.
+- `memory_loop_ready`: Recallant observed the governed working loop: context read, memory write,
+  and checkpoint.
+- `capture_active`: Recallant observed a fresh automatic agent event inside the configured
+  freshness window. Manual workflow evidence cannot set it.
 - `ingestion_approved`: the owner separately approved import or summarization of existing project
   files/history.
 
@@ -30,19 +34,20 @@ default behavior inside the consent boundary, while project import remains appro
 
 Remote MCP readiness uses the same contract. `remote_mcp_ready` is a transport/config state, not a
 memory state. `memory_get_readiness_status` exposes the bounded readiness evidence that Workbench and
-`agent-start` use: checkpoint-only evidence stays non-semantic, semantic proof stays non-capture, and
-`capture_active` requires the real working loop.
+`agent-start` use: checkpoint-only evidence stays non-semantic, semantic proof stays non-capture,
+`memory_loop_ready` requires the governed working loop, and `capture_active` requires fresh
+automatic telemetry.
 
 For remote beginner setup, `recallant connect-cloud` runs session/context proof by default after
 approval and reports it as `remote_proof` in JSON and text output. `--proof semantic` or
-`--semantic-proof` adds one synthetic governed memory marker create/recall proof. `capture_active`
-remains false until a real working loop records context read, memory write, and checkpoint evidence.
+`--semantic-proof` adds one synthetic governed memory marker create/recall proof. Both semantic
+proof and `memory_loop_ready` remain separate from `capture_active`, which stays false until a fresh
+automatic event arrives.
 The same remote flow prepares agent-ready thin files by default so the next agent sees startup
 instructions and a compact fallback log, not just raw MCP config.
 
-Interrupted sessions remain visible as recovery context and should be reviewed by the next agent, but
-they are not a hard blocker for `capture_active` once fresh context-read, memory-write, and
-checkpoint evidence exists.
+Interrupted sessions remain visible as recovery context and should be reviewed by the next agent,
+but they are not a hard blocker for `memory_loop_ready` or fresh automatic capture.
 
 An agent-ready project has three layers:
 
@@ -72,7 +77,8 @@ That command should behave like a guided setup program, not a list of commands t
 - import old handoffs and project notes as review-only evidence;
 - analyze documentation posture and report whether docs are absent, thin, partial, need review, or
   Recallant-ready;
-- prove capture with a context read, memory write, checkpoint, and recall check;
+- prove the memory loop with a context read, memory write, checkpoint, and recall check, then report
+  automatic capture independently;
 - show the Workbench outcome or a single clear blocker.
 
 `Database not configured` is not a successful onboarding state. Offline spool can be a fail-soft
@@ -85,15 +91,17 @@ The lower-level commands remain advanced/debug APIs for automation and contribut
 recallant onboard .
 recallant attach .
 recallant connect codex --project-dir .
-recallant doctor --project-dir . --require-capture --require-agent-audit --semantic-proof
+recallant doctor --project-dir . --require-capture --require-memory-loop --semantic-proof
 recallant agent-start --task-hint "<task>"
 recallant agent-event --kind action --text "<what changed>"
 recallant agent-closeout --summary "<what changed and what is next>"
 ```
 
-They should not be the normal beginner quickstart. The important user-facing result is
-`capture active`: Recallant has observed a context read, meaningful memory write, checkpoint, and
-recall proof for the project.
+They should not be the normal beginner quickstart. The user-facing result has two independent
+parts: `memory_loop_ready` proves context read, meaningful memory write, and checkpoint evidence;
+`capture_active` proves a fresh automatic agent event. See
+[Agent observability](AGENT_OBSERVABILITY.md) for native hooks, independent OTel control, and
+recovery chains.
 
 ## Documentation Posture And Context Packs
 
@@ -223,7 +231,7 @@ For a remote existing project, prove the connection before importing history:
    with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`;
 8. rerun `recallant agent-start --format json` and verify
    `readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` is still false
-   unless a full capture loop has run;
+   unless fresh automatic telemetry has arrived;
 9. run a read-only inventory of candidate docs and risky paths;
 10. ask the owner to approve a migration plan before writing project memories or imports.
 

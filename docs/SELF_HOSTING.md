@@ -215,23 +215,24 @@ promtool test rules contrib/prometheus/recallant-backup.rules.test.yml
 After attaching and connecting a project:
 
 ```bash
-recallant doctor --project-dir /path/to/project --require-capture
+recallant doctor --project-dir /path/to/project --require-capture --require-memory-loop
 ```
 
 Recallant distinguishes:
 
 - **configured:** project files or client settings exist;
-- **capture active:** Recallant has observed real session/context/memory/checkpoint evidence.
+- **memory loop ready:** Recallant has context-read, memory-write, and checkpoint evidence;
+- **capture active:** Recallant has observed a fresh automatic agent event.
 
-For automatic Codex activity capture, use the separate native-adapter gate:
+To check only the governed memory loop:
 
 ```bash
-recallant doctor --project-dir /path/to/project --require-agent-audit
+recallant doctor --project-dir /path/to/project --require-memory-loop
 ```
 
-This exits non-zero while hooks are missing or only configured. After Codex invokes the trusted
-project hook, it reports observed server or offline-spool evidence. Review and trust the command hook
-through `/hooks`; Recallant does not inspect or bypass Codex trust.
+`--require-capture` exits non-zero while hooks are missing, only configured, or stale. After Codex
+invokes the trusted project hook, it reports observed server or offline-spool evidence. Review and
+trust the command hook through `/hooks`; Recallant does not inspect or bypass Codex trust.
 
 Maintainers can also run the public clean-host smoke before release work:
 
@@ -336,11 +337,15 @@ number of days in the service environment when required:
 
 ```bash
 RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS=30
+RECALLANT_AGENT_OTEL_RETENTION_DAYS=30
+RECALLANT_AGENT_CAPTURE_FRESHNESS_HOURS=24
+RECALLANT_AGENT_OTEL_FRESHNESS_HOURS=24
 ```
 
 Observation cleanup runs when new project observations are stored. Native backups include the
-`agent_observations` table and restore verification checks its semantic content. Confirmed targeted
-forget redacts selected observation content; confirmed project purge deletes project observations.
+`agent_observations`, `project_otel_control_settings`, and `agent_otel_control_events` tables and
+restore verification checks their semantic content. Confirmed targeted forget redacts selected
+observation content; confirmed project purge deletes project observations and OTel control data.
 Keep Workbench Activity private and authenticated, and do not use the observation body as a place
 for credentials, raw environment output, or hidden model reasoning. See
 [Agent observability](AGENT_OBSERVABILITY.md) for the complete capture contract.

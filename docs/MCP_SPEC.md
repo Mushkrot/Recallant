@@ -132,15 +132,15 @@ legacy-compatible `previous_unclosed_session` field contains diagnostic details,
 should review current-project checkpoint/events for continuity, check for fresh parallel work, and
 avoid presenting stale recovery context as an error.
 
-Interrupted session counts are recovery debt, not capture proof failure. If a later scoped cycle has
-fresh context-read, memory-write, and checkpoint evidence, readiness may still report
-`capture_active` while also surfacing the interrupted-session count.
+Interrupted session counts are recovery debt, not capture proof failure. A later scoped cycle can
+still report `memory_loop_ready`, while a fresh automatic agent event can independently report
+`capture_active`; the interrupted-session count remains visible.
 
 `memory_get_readiness_status` returns the bounded readiness contract used by Workbench and remote
-`agent-start`: configured, context, semantic proof, capture, ingestion, timestamps, and review-state
-counts. It must not return raw memories, raw project files, credentials, artifacts, backups, or bulk
-summaries. A checkpoint-only timestamp is not semantic memory proof, and a semantic proof timestamp is
-not `capture_active` unless the full capture loop has also been observed.
+`agent-start`: configured, context, semantic proof, memory loop, fresh automatic capture, ingestion,
+timestamps, and review-state counts. It must not return raw memories, raw project files,
+credentials, artifacts, backups, or bulk summaries. A checkpoint-only timestamp is not semantic
+memory proof; semantic or memory-loop proof is not `capture_active` without a fresh automatic event.
 
 A `memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic
 memory recall. The baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only by

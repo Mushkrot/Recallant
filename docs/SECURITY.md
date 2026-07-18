@@ -29,8 +29,9 @@ bounded by design, and conservative about secrets.
   Workbench, `/connect/approve`, credential-management, backup, provider, and raw-artifact routes.
   Agent runtime does not use a Cloudflare browser session; it uses scoped machine credentials.
 - Public agent routes are limited to the universal connect bootstrap/start/poll/cancel path,
-  bootstrap-token redemption through `/api/connect/start`, invite redemption, and `/api/mcp` with
-  scoped Bearer credentials. They must not expose Workbench/admin capabilities.
+  bootstrap-token redemption through `/api/connect/start`, invite redemption, `/api/mcp`, and the
+  content-free `/api/otel/v1/logs` control endpoint with scoped Bearer credentials. They must not
+  expose Workbench/admin capabilities.
 - Remote MCP/agent endpoints require explicit DB-backed scoped credentials plus
   project/developer/client scope before tool execution. Credentials are project/developer scoped,
   optionally client scoped, revocable, rotatable, hash-stored, and audited without raw credential
@@ -39,6 +40,11 @@ bounded by design, and conservative about secrets.
   writes generated project config with a local credential-store reference, and does not expose
   Postgres, Workbench/admin auth, raw artifacts, backups, provider secrets, or raw scoped
   credentials to the project.
+- The OTel control endpoint accepts only bounded OTLP/HTTP JSON, reuses exact
+  project/developer/client credential scope, and stores allowlisted correlation/status facts only.
+  Prompt, response, tool input/output, auth header, and error-message content is discarded. Keep the
+  raw scoped value in `RECALLANT_OTEL_TOKEN`; do not embed it in Codex configuration or project
+  files.
 - Public examples may name prohibited classes such as `.env` files, raw credentials, private keys,
   customer data, backups, raw artifacts, database URLs, and provider secrets, but they must not
   include concrete values for those classes. Use placeholders such as
@@ -101,10 +107,12 @@ pass through secret redaction before durable storage. The Workbench and its APIs
 private/authenticated management boundary as other project data.
 
 Observation retention defaults to 30 days and can be set with
-`RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS`. Native backups include observations. A confirmed
-targeted forget redacts selected observation content while keeping a content-free correlation
-envelope; a confirmed project purge removes all observation rows for that project. The system
-activity ledger remains separately de-identified governance evidence after purge.
+`RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS`; independent control retention uses
+`RECALLANT_AGENT_OTEL_RETENTION_DAYS`. Native backups include observations and content-free OTel
+control records. A confirmed targeted forget redacts selected observation content while keeping a
+content-free correlation envelope; a confirmed project purge removes all observation and control
+rows for that project. The system activity ledger remains separately de-identified governance
+evidence after purge.
 
 ## External Services And Deployment Profiles
 

@@ -74,9 +74,10 @@ run, then use:
 
 - **Replay** for the chronological prompt, visible response, tool, error, retry, remediation, and
   verification story;
-- **Errors** for grouped failure patterns, affected runs, and verified recovery state;
+- **Errors** for grouped failure patterns, affected runs, and the observed error → retry →
+  remediation → verification chain, including whether each link was automatic or explicit;
 - **Coverage** for missing prompt/response pairs, missing tool results, run sequence gaps,
-  unresolved errors, and adapter activity.
+  unresolved errors, adapter activity, and independent OpenTelemetry agreement/gaps.
 
 Technical identifiers and redacted metadata stay inside collapsed details. The older memory-write,
 checkpoint, and source-event stream remains available under **Memory recording history**, also

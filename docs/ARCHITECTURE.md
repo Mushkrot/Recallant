@@ -197,8 +197,15 @@ replay, grouped error fingerprints and recovery evidence, capture coverage, and 
 Completeness is evidence-based: sequence gaps, unmatched prompts, unmatched tool calls, and
 unresolved errors remain visible rather than being treated as success.
 
-Backups and verified restore include observations. Targeted forget redacts selected observation
-content, and project purge deletes project observation rows. See
+An independent Codex OpenTelemetry lane sends content-free control events to protected
+`POST /api/otel/v1/logs`. Recallant reconciles those events with native hook observations by safe
+conversation/tool identifiers and reports matched, missing, conflicting, or stale evidence. It does
+not store a duplicate transcript or replace the native observation lane. Error recovery chains are
+derived deterministically from retained observations, so lifecycle operations do not need a second
+copy of the chain.
+
+Backups and verified restore include observations and OTel control records. Targeted forget redacts
+selected observation content, and project purge deletes project observation and control rows. See
 [Agent observability](AGENT_OBSERVABILITY.md) for the user and integration contract.
 
 ## Deployment Shape
@@ -219,6 +226,10 @@ a first authenticated remote endpoint slice, where `POST /api/mcp` accepts scope
 `initialize`, `tools/list`, and `tools/call` requests through DB-backed remote MCP credentials
 without giving remote clients direct Postgres access and without exposing admin APIs, raw artifacts,
 backups, or provider settings anonymously.
+
+The separately transported `POST /api/otel/v1/logs` endpoint uses the same scoped credential model,
+accepts OTLP/HTTP JSON logs only, and is intended solely as an independent agent-activity integrity
+control.
 
 That remote path must preserve the same project/developer scope, context-pack, capture, review, and
 safety policies as local stdio MCP. Remote MCP credentials are project/developer scoped, optionally

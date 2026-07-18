@@ -77,7 +77,8 @@ files.
 The important state is not just "installed" or "configured". Recallant uses one public readiness
 contract:
 
-> Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.
+> Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed
+> workflow. Capture-active proves fresh automatic agent telemetry.
 
 Status is intentionally split:
 
@@ -85,8 +86,10 @@ Status is intentionally split:
 - `context_ready`: an agent read the startup Context Pack.
 - `semantic_memory_ready`: a safe governed memory marker or agent-authored memory was created and
   recalled.
-- `capture active`: Recallant has observed context reads, memory writes, checkpoints, and semantic
-  proof for the project.
+- `memory_loop_ready`: Recallant has context-read, memory-write, and checkpoint evidence for the
+  governed workflow.
+- `capture_active`: Recallant has received a fresh automatic agent event inside the configured
+  freshness window. Manual memory activity cannot set this state.
 - `ingestion_approved`: the owner separately approved import or summarization of existing project
   files/history.
 
@@ -105,8 +108,9 @@ stay untouched unless an owner explicitly opts into managed-block synchronizatio
 `recallant remote-doctor --semantic-proof` creates and recalls one safe governed marker; the server
 persists readiness evidence, and a later `recallant agent-start` reads that evidence through the
 bounded readiness status. Checkpoint-only readback and capture-proof do not imply
-`semantic_memory_ready`, and semantic proof does not imply `capture_active` without the full capture
-loop; see [Client setup](docs/CLIENT_SETUP.md#remote-project-access).
+`semantic_memory_ready`, and semantic proof or a completed memory loop does not imply
+`capture_active` without fresh automatic agent telemetry; see
+[Client setup](docs/CLIENT_SETUP.md#remote-project-access).
 
 ## Product Shape
 
@@ -118,6 +122,8 @@ Recallant runs as a local or self-hosted memory service:
 - Private Workbench UI for review, rules, source context, settings, and management chat.
 - Project-scoped agent activity replay for prompts, visible responses, meaningful tool work,
   failures, retries, remediation, verification, and capture completeness.
+- Optional independent Codex OpenTelemetry control that reconciles content-free OTel evidence with
+  native hook observations and exposes gaps without storing a second transcript.
 - System activity ledger for owner-readable audit reports across CLI, MCP, Workbench HTTP, capture,
   model, and cleanup paths.
 - Local-first model routing with explicit approval gates for paid APIs.
@@ -142,7 +148,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
 - [Self-hosting](docs/SELF_HOSTING.md): profiles, rollback, verification, and security defaults.
 - [Client setup](docs/CLIENT_SETUP.md): Codex and other MCP clients.
 - [Agent observability](docs/AGENT_OBSERVABILITY.md): automatic native Codex capture, run replay,
-  errors, retries, remediation, verification, completeness, retention, and privacy boundaries.
+  independent OpenTelemetry control, automatic recovery chains, completeness, retention, and
+  privacy boundaries.
 - [Security](docs/SECURITY.md): public threat model and safe defaults.
 - [Remote MCP contract](docs/MCP_SPEC.md): authenticated `POST /api/mcp` endpoint contract for
   scoped remote agent clients.
@@ -179,6 +186,8 @@ Current strengths:
 - private-by-default Workbench and server defaults;
 - redacted system activity audit reports in the CLI and Workbench;
 - run-oriented Agent activity with replay, grouped errors, recovery evidence, and capture coverage;
+- independent OTLP/HTTP JSON coverage, truthful capture freshness, and automatically correlated
+  error → retry → remediation → verification chains;
 - installed CLI version reporting with git build metadata and smoke coverage that rejects
   `recallant 0.0.0`;
 - explicit security and cost governance design;
