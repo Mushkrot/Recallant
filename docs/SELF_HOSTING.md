@@ -223,6 +223,16 @@ Recallant distinguishes:
 - **configured:** project files or client settings exist;
 - **capture active:** Recallant has observed real session/context/memory/checkpoint evidence.
 
+For automatic Codex activity capture, use the separate native-adapter gate:
+
+```bash
+recallant doctor --project-dir /path/to/project --require-agent-audit
+```
+
+This exits non-zero while hooks are missing or only configured. After Codex invokes the trusted
+project hook, it reports observed server or offline-spool evidence. Review and trust the command hook
+through `/hooks`; Recallant does not inspect or bypass Codex trust.
+
 Maintainers can also run the public clean-host smoke before release work:
 
 ```bash

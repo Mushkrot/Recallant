@@ -65,9 +65,10 @@ recallant onboard /path/to/project
 
 The one-command flow checks storage readiness, offers local single-user storage setup when needed,
 attaches the project, analyzes documentation posture, prepares thin local agent configuration for
-Codex, installs local hooks when supported, proves capture and recall, and prints the private
-Workbench outcome. Advanced flags can opt out of those defaults, but they are not part of the
-beginner path.
+Codex, installs automatic native Codex hooks plus compatibility helpers, proves capture and recall,
+and prints the private Workbench outcome. Codex still requires the owner to review and trust the
+project command hook in `/hooks`. Advanced flags can opt out of automatic hooks with
+`--no-local-hooks`, but that is not part of the beginner path.
 
 Before changing project files, onboarding also checks version-control safety. If Git is available
 but the project is not a usable Git work tree, onboarding offers to initialize Git first or continue
@@ -77,6 +78,9 @@ does not stage or commit project files, secrets, or data automatically.
 Expected success:
 
 - `Capture active: yes` after context read, memory write, checkpoint, and recall proof are present;
+- `Automatic Codex audit configured: yes`; it becomes active only after Codex invokes the trusted
+  native hook, which can be required with
+  `recallant doctor --project-dir . --require-agent-audit`;
 - `Embedding recovery: current` or a bounded recovery/waiting status when local embeddings are
   catching up;
 - a concise documentation posture summary: `Documentation posture: empty | healthy |
@@ -94,7 +98,7 @@ npm run public-quickstart:smoke
 
 That smoke prints an `acceptance_report` for the beginner path. A release-ready run means:
 
-- `status: "pass"`: onboarding, Codex MCP config, hook kit, capture-active doctor, context pack
+- `status: "pass"`: onboarding, Codex MCP config, native hooks, hook kit, capture-active doctor, context pack
   recall, checkpoint fallback, Workbench navigation, embedding baseline, and public UI readiness
   fixtures all passed;
 - `status: "pass_with_warnings"`: no blocking failure occurred, but a recoverable condition such as

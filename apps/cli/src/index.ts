@@ -2077,7 +2077,7 @@ async function clientConnectionReadiness(projectDir: string) {
       client: "codex",
       ...codexNativeHook,
       ready: codexNativeHook.configured,
-      install_command: `recallant connect codex --project-dir ${projectDir} --install-local-hooks`,
+      install_command: `recallant connect codex --project-dir ${projectDir}`,
       note: codexNativeHook.capture_active
         ? "Recallant has observed the installed native Codex hook command. Codex trust remains external and is not read from private client state."
         : codexNativeHook.configured
@@ -3190,7 +3190,7 @@ function doctorOwnerSummary(input: {
           : "Project is not attached to Recallant yet.";
   const nextStep = captureReady
     ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
-      ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks, then review the command hook in /hooks.`
+      ? `Run recallant connect codex --project-dir ${input.projectDir}, then review the command hook in /hooks.`
       : automaticAgentAuditConfigured && !automaticAgentAuditActive
         ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-agent-audit."
         : "No startup-layer action is required. Continue normal work and close out the session when done."
@@ -3199,7 +3199,7 @@ function doctorOwnerSummary(input: {
       : !attached
         ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
         : input.clientConnection.status !== "mcp_and_hooks_ready"
-          ? `Run recallant connect codex --project-dir ${input.projectDir} --install-local-hooks --dry-run, then install after review.`
+          ? `Run recallant connect codex --project-dir ${input.projectDir} --dry-run, then install after review.`
           : "Start an agent session through Recallant, read context, write memory, and checkpoint; then rerun doctor --require-capture.";
   return {
     status,
@@ -8005,6 +8005,11 @@ function localHookKitFiles() {
 
 These project-local hook scripts are optional client integration helpers.
 
+Codex projects connected by Recallant use the automatic command handlers in
+\`.codex/hooks.json\`. Those handlers call \`recallant codex-hook\` directly. Do not
+wire the helper scripts below to the same Codex events, because that would report the
+same activity twice. Use these scripts for other clients or custom integrations.
+
 They are fail-soft by design:
 
 - if \`recallant\` is unavailable, they exit 0;
@@ -8030,7 +8035,9 @@ Client integrations can call:
 - \`checkpoint.sh < summary.txt\` before pause or handoff; this is an advanced state helper,
   not semantic closeout proof.
 - \`stop-session.sh < summary.txt\` or \`closeout.sh < summary.txt\` when a session stops; this
-  is the normal hook closeout gate.
+  is the normal helper-script closeout gate. Native Codex \`Stop\` is turn-scoped and records an
+  assistant response instead, so the agent still closes a completed session through
+  \`memory_closeout\` or \`recallant agent-closeout\`.
 `;
   const manifest = `${JSON.stringify(
     {
@@ -8363,7 +8370,7 @@ function connectHumanReport(result: Record<string, unknown>) {
             : "not_configured"
   );
   const installCommand = dryRun
-    ? `recallant connect ${client} --project-dir ${projectDir}${hookStatus === "local_hook_kit_planned" ? " --install-local-hooks" : ""}`
+    ? `recallant connect ${client} --project-dir ${projectDir}`
     : proofCommand;
   return (
     [
@@ -12150,7 +12157,7 @@ async function runVaultCommand(argv: readonly string[]) {
 function usageText(command?: string) {
   if (command === "onboard") {
     return [
-      "Usage: recallant onboard <project-dir> [--client <codex|cursor|claude-code|generic>] [--install-local-hooks] [--verify] [--dry-run] [--yes] [--format json]",
+      "Usage: recallant onboard <project-dir> [--client <codex|cursor|claude-code|generic>] [--install-local-hooks|--no-local-hooks] [--verify] [--dry-run] [--yes] [--format json]",
       "",
       "Beginner flow: prepare private storage, attach the project, configure the agent client, install fail-soft local hooks when supported, prove capture/recall, and print the private Workbench outcome.",
       ""
@@ -12244,7 +12251,7 @@ function usageText(command?: string) {
     return [
       "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--require-agent-audit] [--semantic-proof] [--format json|text]",
       "",
-      "Diagnose local Recallant setup. --require-capture gates on context read + memory write + checkpoint evidence. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
+      "Diagnose local Recallant setup. --require-capture gates on context read + memory write + checkpoint evidence. --require-agent-audit separately requires an observed native Codex hook invocation. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
       "",
       "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
       "",

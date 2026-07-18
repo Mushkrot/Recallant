@@ -106,9 +106,11 @@ we call Recallant release-ready.
   confirmation, transactional dependent cleanup, content-free receipts, and an explicit boundary
   that leaves owner-controlled external files or objects untouched.
 - Project-scoped agent observability with a correlated observation envelope, MCP/CLI/fail-soft hook
-  capture paths, compatible lifecycle event derivation, Workbench **Runs**, **Replay**, **Errors**,
-  and **Coverage**, evidence-based completeness, bounded retention, targeted forget, project purge,
-  and native backup/restore verification.
+  capture paths, an automatic native Codex project adapter with safe config merge, deterministic
+  correlation, offline spool, and truthful configured/observed readiness, compatible lifecycle event
+  derivation, Workbench **Runs**, **Replay**, **Errors**, and **Coverage**, evidence-based
+  completeness, bounded retention, targeted forget, project purge, and native backup/restore
+  verification.
 
 ## Near Term
 

@@ -822,7 +822,9 @@ assert(
   hookReadme.includes("pre-compaction.sh") &&
     hookReadme.includes("records state only") &&
     hookReadme.includes("not semantic closeout proof") &&
-    hookReadme.includes("normal hook closeout gate"),
+    hookReadme.includes("normal helper-script closeout gate") &&
+    hookReadme.includes("Native Codex `Stop` is turn-scoped") &&
+    hookReadme.includes("`recallant codex-hook` directly"),
   `Hook README should label checkpoint versus closeout semantics: ${hookReadme}`
 );
 assert(

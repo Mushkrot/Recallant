@@ -19,9 +19,10 @@ smoke gates. It should not yet be treated as stable team-wide infrastructure.
   Search, list-first Review, health-first Sources, Activity, and secondary Project controls are
   covered by focused smoke and desktop/mobile browser checks.
 - Activity now provides run-oriented agent observability: bounded replay, grouped errors and
-  recovery, completeness checks, and adapter coverage. Capture is available through MCP, CLI,
-  optional fail-soft project hooks, and compatible lifecycle events; retention, targeted forget,
-  project purge, and native backup/restore are covered by focused smoke tests.
+  recovery, completeness checks, and adapter coverage. Local Codex connection now installs a native
+  project hook adapter by default, safely preserving user hooks and reporting configured versus
+  observed capture truthfully. MCP, CLI, helper-hook, retention, targeted forget, project purge, and
+  native backup/restore paths remain covered by focused smoke tests.
 - Local Ollama embeddings are fail-soft; embedding requests ask the runtime to retain the embedding
   model, while bounded recovery handles temporary unavailability.
 

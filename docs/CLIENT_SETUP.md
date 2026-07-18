@@ -47,9 +47,11 @@ The explicit local command is still available for contributors and diagnostics:
 recallant onboard <project>
 ```
 
-Onboarding defaults to the Codex beginner flow: attach, client connection, local hooks when
-supported, capture proof, readiness proof, and recall proof. The project is not capture active until
-context read, memory write, checkpoint, and recall evidence are present.
+Onboarding defaults to the Codex beginner flow: attach, client connection, automatic native Codex
+hooks plus compatibility helpers, capture proof, readiness proof, and recall proof. Memory capture
+is not active until context read, memory write, checkpoint, and recall evidence are present. The
+automatic agent audit is a separate gate and is not active until Recallant observes a native Codex
+hook invocation.
 
 Interrupted sessions are reported as recovery context for the next agent. They do not erase current
 capture-active evidence when the working loop has been proven again.
@@ -125,7 +127,7 @@ control over each step:
 ```bash
 recallant attach .
 recallant connect codex --project-dir .
-recallant doctor --project-dir . --require-capture
+recallant doctor --project-dir . --require-capture --require-agent-audit
 ```
 
 Attach creates the memory space and small project-local pointers. Connect writes or prints the client
@@ -143,17 +145,31 @@ recallant connect codex --project-dir . --dry-run
 recallant connect codex --project-dir .
 ```
 
-To install the project-local fail-soft hook kit for Codex capture targets, run:
+The command merges the project-local MCP entry and automatic command hooks. Existing Codex settings
+and unrelated hook handlers are preserved; changed files are backed up under `.recallant/backups/`.
+It also installs fail-soft helper scripts for compatibility. The dry-run previews every file without
+writing it.
+
+After connect, open `/hooks` in Codex, review the Recallant command hook, and trust it. Codex project
+trust is deliberately user-controlled and Recallant cannot inspect or bypass it. Then perform one
+normal Codex action and verify the automatic path:
 
 ```bash
-recallant connect codex --project-dir . --install-local-hooks --dry-run
-recallant connect codex --project-dir . --install-local-hooks
+recallant doctor --project-dir . --require-agent-audit --format json
 ```
 
 After the MCP config and hook files already match, the same dry-run is a readiness check: JSON
 output should report `connection_status: "mcp_and_hooks_ready"`,
-`hook_status: "local_hook_kit_installed"`, and `writes_files: false`. It reports
-`mcp_and_hooks_planned` only when the project-local config or hook kit would actually need changes.
+`hook_status: "local_hook_kit_installed"`, native status `configured_unobserved` or an observed
+status, and `writes_files: false`. It reports `mcp_and_hooks_planned` only when the project-local
+config or hooks actually need changes. `mcp_and_hooks_ready` means configuration is ready; it does
+not mean that Codex has invoked the hook yet.
+
+Advanced MCP-only setup can opt out explicitly:
+
+```bash
+recallant connect codex --project-dir . --no-local-hooks
+```
 
 Generated project-local Codex config:
 
@@ -169,6 +185,14 @@ Codex reads `.codex/config.toml` only for trusted projects, so onboarding writes
 config and then the next Codex session can launch the Recallant MCP server automatically. If your
 Codex build supports `codex mcp add`, global registration remains an advanced alternative rather
 than the beginner path.
+
+Recallant writes `.codex/hooks.json` project-locally with handlers for `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStart`,
+`SubagentStop`, and `Stop`. Every handler invokes `recallant codex-hook` with a five-second Codex
+timeout. The command is silent and fail-soft; when the database is unavailable it writes a bounded,
+redacted local spool record. It ignores Codex transcripts and does not claim visibility into hosted
+tools that emit no supported command-hook event. `Stop` records a turn response, not session
+closeout.
 
 ## Cursor
 
@@ -672,9 +696,13 @@ managed Recallant server remains the memory source of truth. That path should:
 Until broader remote-client polish and repeat release rehearsals are complete, use the local stdio
 setup above on the installed host for the default client path.
 
-## Optional Local Hooks
+## Local Hook Compatibility
 
-For clients that can call local hook scripts:
+Codex receives native project hooks by default. The generated `.recallant/hooks/` scripts remain
+available for other clients and custom integrations. Do not connect a helper script to a Codex event
+that already calls `recallant codex-hook`, or the same activity may be recorded twice.
+
+For an explicit refresh or for clients that can call only the helper scripts:
 
 ```bash
 recallant connect codex --project-dir . --install-local-hooks --dry-run

@@ -85,7 +85,7 @@ The lower-level commands remain advanced/debug APIs for automation and contribut
 recallant onboard .
 recallant attach .
 recallant connect codex --project-dir .
-recallant doctor --project-dir . --require-capture --semantic-proof
+recallant doctor --project-dir . --require-capture --require-agent-audit --semantic-proof
 recallant agent-start --task-hint "<task>"
 recallant agent-event --kind action --text "<what changed>"
 recallant agent-closeout --summary "<what changed and what is next>"

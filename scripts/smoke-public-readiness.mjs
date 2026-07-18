@@ -324,7 +324,13 @@ mustInclude(
     "release-pass live canary requires explicit server-local inputs",
     "Operator Server-Side CLI Update",
     "systemctl restart <recallant-service>",
-    "restart alone is not a"
+    "restart alone is not a",
+    "recallant connect codex --project-dir . --dry-run",
+    "recallant doctor --project-dir . --require-agent-audit --format json",
+    "configured_unobserved",
+    "After connect, open `/hooks` in Codex",
+    "recallant codex-hook",
+    "--no-local-hooks"
   ],
   "docs/CLIENT_SETUP.md"
 );
@@ -338,6 +344,22 @@ mustAppearBefore(
   "curl -fsSL https://memory.example.com/connect | bash",
   "recallant invite /path/to/project --server-url https://memory.example.com",
   "docs/CLIENT_SETUP.md"
+);
+
+const agentObservability = await read("docs/AGENT_OBSERVABILITY.md");
+mustInclude(
+  agentObservability,
+  [
+    "Automatic Codex Capture",
+    "recallant connect codex --project-dir .",
+    "recallant doctor --project-dir . --require-agent-audit --format json",
+    "configured_unobserved",
+    "observed_server",
+    "observed_offline_spool",
+    "The native adapter intentionally ignores `transcript_path`",
+    "Codex `Stop` is turn-scoped"
+  ],
+  "docs/AGENT_OBSERVABILITY.md"
 );
 
 const remoteConnectPlan = await read("docs/REMOTE_CONNECT_PLAN.md");
@@ -492,7 +514,7 @@ mustInclude(
     "advanced/debug APIs",
     "recallant attach .",
     "recallant connect codex --project-dir .",
-    "recallant doctor --project-dir . --require-capture --semantic-proof",
+    "recallant doctor --project-dir . --require-capture --require-agent-audit --semantic-proof",
     "recallant agent-start",
     "Documentation Posture And Context Packs",
     "`documentation_posture`",

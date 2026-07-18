@@ -26,9 +26,53 @@ optional parent observation. Session and run sequence numbers make gaps visible.
 resolution state, attempt number, occurrence time, duration, client identity, and capture profile
 make the replay understandable without exposing raw credentials or unrestricted payloads.
 
-## Capture Paths
+## Automatic Codex Capture
 
-Connected agents can use the MCP tool `memory_append_observation`. Local automation can use the
+For a locally attached Codex project, the normal connection command installs the automatic adapter:
+
+```bash
+recallant connect codex --project-dir .
+```
+
+Recallant safely merges its command handlers into `.codex/hooks.json`, preserves unrelated hooks,
+and backs up an existing file before changing it. The same command is idempotent. It never writes
+global Codex configuration and it does not bypass Codex trust: open `/hooks`, review the Recallant
+command hook, and trust it before expecting the first native invocation.
+
+All installed handlers call one silent, fail-soft command: `recallant codex-hook`. Recallant maps
+the native Codex events as follows:
+
+| Codex event | Recallant evidence |
+| --- | --- |
+| `SessionStart` | session/system start |
+| `UserPromptSubmit` | visible user prompt |
+| `PreToolUse` | correlated tool call |
+| `PostToolUse` | correlated tool result and an error fact when the result failed |
+| `PreCompact` | system event plus durable checkpoint state |
+| `PostCompact` | system event after compaction |
+| `SubagentStart` | child run start |
+| `SubagentStop` | child run response/stop |
+| `Stop` | visible assistant response for that turn |
+
+Codex `Stop` is turn-scoped, so the adapter never treats it as session closeout. Agents should still
+use `memory_closeout` (or the advanced `recallant agent-closeout` fallback) when a session actually
+ends.
+
+Check the automatic adapter independently from memory-readiness proof:
+
+```bash
+recallant doctor --project-dir . --require-agent-audit --format json
+```
+
+`configured_unobserved` means the file is correct but Recallant has not received a native hook event.
+After Codex invokes the trusted hook, the status becomes `observed_server` or
+`observed_offline_spool`, and `capture_active` becomes `true`. Generated files alone are never
+reported as active capture. Use `--no-local-hooks` only when an advanced setup intentionally wants
+Codex MCP without automatic audit capture.
+
+## Other Capture Paths
+
+Connected agents can also use the MCP tool `memory_append_observation`. Local automation can use the
 advanced CLI command:
 
 ```bash
@@ -45,10 +89,11 @@ verification, checkpoints, closeout, and lifecycle/system observations. Use the 
 tool call and result or for an error and its recovery chain. Use `--parent-observation-id` when the
 client knows the exact preceding observation.
 
-`recallant connect <project>` can install the optional project-local hook kit. The generated hooks
-are fail-soft, use a short timeout, and fall back to the local Recallant spool when the service is
-temporarily unavailable. They do not change global client configuration. A client still has to
-wire the hooks it supports; generated files alone are not proof that every activity is captured.
+Recallant also installs a project-local helper hook kit for compatibility with clients and custom
+integrations. Those scripts are fail-soft, use a short timeout, and fall back to the local Recallant
+spool when the service is temporarily unavailable. Do not wire both a native Codex event and its
+equivalent helper script, because that would report the same activity twice. For clients without a
+native adapter, generated helper files alone are not proof that every activity is captured.
 
 Existing `memory_append_event` and agent lifecycle calls remain compatible. When an event maps to
 an observable agent action, Recallant derives an observation so older clients appear in the same
@@ -85,6 +130,12 @@ means the session is still active. **Needs attention** means an unresolved failu
 describes the observations Recallant received; it cannot prove that an external client reported
 every action it performed.
 
+The native adapter intentionally ignores `transcript_path`: Codex documents the transcript format as
+unstable, and reading it would expand the privacy boundary. Hook payload fields are allowlisted,
+bounded, and secret-redacted. Native command hooks also cannot see Codex hosted-tool activity that
+does not emit one of the events above, so Recallant does not claim exhaustive coverage of those
+tools.
+
 ## Privacy, Retention, And Removal
 
 The Workbench and its APIs use the same private/authenticated project boundary as the rest of
@@ -108,6 +159,9 @@ The focused product gates are:
 
 ```bash
 npm run agent-observability:smoke
+npm run codex-hook-adapter:smoke
+npm run codex-hook-runtime:smoke
+npm run connect:smoke
 npm run review-ui:smoke
 npm run review-ui:playwright
 npm run project-sanitize:smoke

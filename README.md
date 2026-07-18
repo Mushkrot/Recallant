@@ -141,8 +141,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the public system overview.
   borrow, and what not to copy.
 - [Self-hosting](docs/SELF_HOSTING.md): profiles, rollback, verification, and security defaults.
 - [Client setup](docs/CLIENT_SETUP.md): Codex and other MCP clients.
-- [Agent observability](docs/AGENT_OBSERVABILITY.md): run replay, errors, capture completeness,
-  retention, and privacy boundaries.
+- [Agent observability](docs/AGENT_OBSERVABILITY.md): automatic native Codex capture, run replay,
+  errors, retries, remediation, verification, completeness, retention, and privacy boundaries.
 - [Security](docs/SECURITY.md): public threat model and safe defaults.
 - [Remote MCP contract](docs/MCP_SPEC.md): authenticated `POST /api/mcp` endpoint contract for
   scoped remote agent clients.
