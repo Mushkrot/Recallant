@@ -62,7 +62,11 @@ import type {
   AppendAgentObservationInput
 } from "@recallant/contracts";
 import { agentObservationKindValues } from "@recallant/contracts";
-import { analyzeAgentObservationCompleteness, normalizeAgentObservation } from "@recallant/core";
+import {
+  analyzeAgentObservationCompleteness,
+  deriveAgentRecoveryChains,
+  normalizeAgentObservation
+} from "@recallant/core";
 import { Pool, type PoolClient } from "pg";
 import {
   ensureAgentObservationSchema,
@@ -2955,6 +2959,10 @@ export class RecallantDb {
       runSummaries.find((run) => run.run_id === selectedRunId) ?? visibleRuns[0] ?? null;
     const replay = selectedRun ? (byRun.get(selectedRun.run_id) ?? []).slice(0, 2_000) : [];
 
+    const recoveryChains = deriveAgentRecoveryChains(recent);
+    const recoveryChainByErrorId = new Map(
+      recoveryChains.map((chain) => [chain.error_observation_id, chain])
+    );
     const errorGroups = new Map<string, AgentErrorGroup>();
     const errors = recent.filter((item) => item.kind === "error");
     const recoveryByTrace = new Map<string, AgentObservationRecord[]>();
@@ -2978,13 +2986,18 @@ export class RecallantDb {
     }
     for (const error of errors) {
       const recovery = error.trace_id ? (recoveryByTrace.get(error.trace_id) ?? []) : [];
-      const resolutionStatus: AgentErrorGroup["resolution_status"] = recovery.some(
-        (item) => item.resolution_status === "resolved"
-      )
-        ? "resolved"
-        : recovery.length > 0
-          ? "retrying"
-          : "unresolved";
+      const recoveryChain = recoveryChainByErrorId.get(error.id);
+      const resolutionStatus: AgentErrorGroup["resolution_status"] = recoveryChain
+        ? recoveryChain.status === "verified"
+          ? "resolved"
+          : recoveryChain.status === "unresolved" || recoveryChain.status === "regressed"
+            ? "unresolved"
+            : "retrying"
+        : recovery.some((item) => item.resolution_status === "resolved")
+          ? "resolved"
+          : recovery.length > 0
+            ? "retrying"
+            : "unresolved";
       const fingerprint =
         error.error_fingerprint ?? `unfingerprinted:${error.error_code ?? error.id}`;
       const existing = errorGroups.get(fingerprint);
@@ -3008,6 +3021,10 @@ export class RecallantDb {
           !existing || error.occurred_at > existing.latest_at
             ? error.run_id
             : existing.latest_run_id,
+        latest_recovery_chain_id:
+          !existing || error.occurred_at > existing.latest_at
+            ? (recoveryChain?.id ?? null)
+            : existing.latest_recovery_chain_id,
         recovery_kinds: Array.from(
           new Set([...(existing?.recovery_kinds ?? []), ...recovery.map((item) => item.kind)])
         )
@@ -3081,6 +3098,7 @@ export class RecallantDb {
       selected_run: selectedRun,
       replay,
       errors: groupedErrors,
+      recovery_chains: recoveryChains.slice(0, 500),
       coverage: {
         observation_count: recent.length,
         run_count: runSummaries.length,

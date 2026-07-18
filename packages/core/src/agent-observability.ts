@@ -6,6 +6,11 @@ import type {
   AgentObservationRecord,
   AgentObservationResolutionStatus,
   AgentObservationStatus,
+  AgentRecoveryChain,
+  AgentRecoveryChainStatus,
+  AgentRecoveryChainStep,
+  AgentRecoveryCorrelationConfidence,
+  AgentRecoveryStepStage,
   AppendAgentObservationInput
 } from "@recallant/contracts";
 
@@ -325,4 +330,285 @@ export function analyzeAgentObservationCompleteness(
     client_coverage: clientCoverage,
     unknown_client_observations: clientCoverage.unknown ?? 0
   };
+}
+
+const recoveryCorrelationWindowMs = 6 * 60 * 60 * 1_000;
+
+function recoveryStep(
+  observation: AgentObservationRecord,
+  stage: AgentRecoveryStepStage,
+  automatic: boolean,
+  confidence: AgentRecoveryCorrelationConfidence,
+  reason: string
+): AgentRecoveryChainStep {
+  return {
+    observation_id: observation.id,
+    stage,
+    automatic,
+    confidence,
+    reason,
+    occurred_at: observation.occurred_at,
+    kind: observation.kind,
+    title: observation.title,
+    tool_name: observation.tool_name,
+    status: observation.status
+  };
+}
+
+function addRecoveryStep(
+  chain: AgentRecoveryChain,
+  observation: AgentObservationRecord,
+  stage: AgentRecoveryStepStage,
+  automatic: boolean,
+  confidence: AgentRecoveryCorrelationConfidence,
+  reason: string
+) {
+  if (chain.steps.some((step) => step.observation_id === observation.id && step.stage === stage)) {
+    return;
+  }
+  chain.steps.push(recoveryStep(observation, stage, automatic, confidence, reason));
+  chain.updated_at = observation.occurred_at;
+  chain.attempt_count = Math.max(
+    1,
+    1 + chain.steps.filter((step) => step.stage === "retry").length
+  );
+}
+
+function recoveryStatusRank(status: AgentRecoveryChainStatus) {
+  return { unresolved: 0, regressed: 0, retrying: 1, remediating: 2, verified: 3 }[status];
+}
+
+function advanceRecoveryStatus(chain: AgentRecoveryChain, status: AgentRecoveryChainStatus) {
+  if (status === "regressed" || recoveryStatusRank(status) >= recoveryStatusRank(chain.status)) {
+    chain.status = status;
+  }
+}
+
+function chainCorrelation(
+  chain: AgentRecoveryChain,
+  error: AgentObservationRecord,
+  observation: AgentObservationRecord
+): { confidence: AgentRecoveryCorrelationConfidence; reason: string } | null {
+  if (
+    observation.occurred_at.getTime() - chain.updated_at.getTime() >
+    recoveryCorrelationWindowMs
+  ) {
+    return null;
+  }
+  if (observation.trace_id === error.trace_id) {
+    return { confidence: "high", reason: "same trace identifier" };
+  }
+  if (
+    observation.parent_observation_id === error.id ||
+    chain.steps.some((step) => step.observation_id === observation.parent_observation_id)
+  ) {
+    return { confidence: "high", reason: "explicit parent observation link" };
+  }
+  if (error.tool_name && observation.tool_name === error.tool_name) {
+    return { confidence: "medium", reason: "same tool in the same run" };
+  }
+  if (error.turn_id && observation.turn_id === error.turn_id) {
+    return { confidence: "low", reason: "same turn in the same run" };
+  }
+  if (
+    (observation.kind === "test" || observation.kind === "verification") &&
+    chain.steps.some((step) => step.stage === "retry" || step.stage === "remediation")
+  ) {
+    return { confidence: "low", reason: "later verification evidence in the same run" };
+  }
+  return null;
+}
+
+/**
+ * Builds a user-visible repair story from machine-observed facts. It deliberately ignores
+ * assistant prose and never attempts to infer hidden reasoning.
+ */
+export function deriveAgentRecoveryChains(
+  observations: readonly AgentObservationRecord[]
+): AgentRecoveryChain[] {
+  const sorted = [...observations].sort(
+    (left, right) =>
+      left.occurred_at.getTime() - right.occurred_at.getTime() ||
+      left.run_sequence_number - right.run_sequence_number
+  );
+  const chains: AgentRecoveryChain[] = [];
+  const errors = new Map<string, AgentObservationRecord>();
+  const verifiedByFingerprint = new Map<string, AgentRecoveryChain>();
+
+  for (const observation of sorted) {
+    if (observation.kind === "error") {
+      const fingerprint =
+        observation.error_fingerprint ??
+        `unfingerprinted:${observation.error_code ?? observation.id}`;
+      const previousVerified = verifiedByFingerprint.get(fingerprint) ?? null;
+      const chain: AgentRecoveryChain = {
+        id: observation.id,
+        project_id: observation.project_id,
+        session_id: observation.session_id,
+        run_id: observation.run_id,
+        error_observation_id: observation.id,
+        error_fingerprint: fingerprint,
+        error_code: observation.error_code,
+        title: observation.title ?? observation.error_code ?? "Agent error",
+        status: previousVerified ? "regressed" : "unresolved",
+        attempt_count: 1,
+        started_at: observation.occurred_at,
+        updated_at: observation.occurred_at,
+        previous_verified_chain_id: previousVerified?.id ?? null,
+        steps: [recoveryStep(observation, "error", false, "high", "observed error")]
+      };
+      if (previousVerified) {
+        chain.steps.push(
+          recoveryStep(
+            observation,
+            "regression",
+            true,
+            "high",
+            "same error fingerprint recurred after a verified repair"
+          )
+        );
+      }
+      chains.push(chain);
+      errors.set(chain.id, observation);
+      continue;
+    }
+
+    if (observation.kind === "assistant_response" || observation.kind === "user_prompt") continue;
+
+    const candidates = chains
+      .filter(
+        (chain) =>
+          chain.run_id === observation.run_id &&
+          chain.status !== "verified" &&
+          observation.occurred_at >= chain.started_at
+      )
+      .map((chain) => ({
+        chain,
+        error: errors.get(chain.id) as AgentObservationRecord,
+        correlation: chainCorrelation(
+          chain,
+          errors.get(chain.id) as AgentObservationRecord,
+          observation
+        )
+      }))
+      .filter(
+        (
+          candidate
+        ): candidate is typeof candidate & {
+          correlation: NonNullable<typeof candidate.correlation>;
+        } => Boolean(candidate.correlation)
+      )
+      .sort((left, right) => right.chain.started_at.getTime() - left.chain.started_at.getTime());
+    const candidate = candidates[0];
+    if (!candidate) continue;
+    const { chain, error, correlation } = candidate;
+
+    if (observation.kind === "retry") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "retry",
+        false,
+        correlation.confidence,
+        correlation.reason
+      );
+      advanceRecoveryStatus(chain, "retrying");
+      continue;
+    }
+    if (observation.kind === "remediation") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "remediation",
+        false,
+        correlation.confidence,
+        correlation.reason
+      );
+      advanceRecoveryStatus(chain, "remediating");
+      continue;
+    }
+    if (observation.kind === "verification" && observation.status === "success") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "verification",
+        false,
+        correlation.confidence,
+        correlation.reason
+      );
+      advanceRecoveryStatus(chain, "verified");
+      verifiedByFingerprint.set(chain.error_fingerprint, chain);
+      continue;
+    }
+    if (
+      (observation.kind === "tool_call" || observation.kind === "terminal_command") &&
+      error.tool_name &&
+      observation.tool_name === error.tool_name
+    ) {
+      addRecoveryStep(
+        chain,
+        observation,
+        "retry",
+        true,
+        correlation.confidence,
+        `automatically linked: ${correlation.reason}`
+      );
+      advanceRecoveryStatus(chain, "retrying");
+      continue;
+    }
+    if (observation.kind === "file_change") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "remediation",
+        true,
+        correlation.confidence,
+        `automatically linked: ${correlation.reason}`
+      );
+      advanceRecoveryStatus(chain, "remediating");
+      continue;
+    }
+    if (observation.kind === "tool_result" && observation.status === "success") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "remediation",
+        true,
+        correlation.confidence,
+        `successful corrective result: ${correlation.reason}`
+      );
+      const matchingRetry = chain.steps.some(
+        (step) => step.stage === "retry" && step.tool_name === observation.tool_name
+      );
+      if (matchingRetry) {
+        addRecoveryStep(
+          chain,
+          observation,
+          "verification",
+          true,
+          correlation.confidence,
+          "the retried operation completed successfully"
+        );
+        advanceRecoveryStatus(chain, "verified");
+        verifiedByFingerprint.set(chain.error_fingerprint, chain);
+      } else {
+        advanceRecoveryStatus(chain, "remediating");
+      }
+      continue;
+    }
+    if (observation.kind === "test" && observation.status === "success") {
+      addRecoveryStep(
+        chain,
+        observation,
+        "verification",
+        true,
+        correlation.confidence,
+        "a later observed test passed in the same recovery sequence"
+      );
+      advanceRecoveryStatus(chain, "verified");
+      verifiedByFingerprint.set(chain.error_fingerprint, chain);
+    }
+  }
+
+  return chains.sort((left, right) => right.updated_at.getTime() - left.updated_at.getTime());
 }

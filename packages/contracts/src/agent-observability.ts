@@ -156,6 +156,59 @@ export type AgentErrorGroup = {
   resolution_status: "unresolved" | "retrying" | "resolved";
   latest_run_id: string;
   recovery_kinds: AgentObservationKind[];
+  latest_recovery_chain_id: string | null;
+};
+
+export const agentRecoveryChainStatusValues = [
+  "unresolved",
+  "retrying",
+  "remediating",
+  "verified",
+  "regressed"
+] as const;
+
+export type AgentRecoveryChainStatus = (typeof agentRecoveryChainStatusValues)[number];
+
+export const agentRecoveryStepStageValues = [
+  "error",
+  "retry",
+  "remediation",
+  "verification",
+  "regression"
+] as const;
+
+export type AgentRecoveryStepStage = (typeof agentRecoveryStepStageValues)[number];
+
+export type AgentRecoveryCorrelationConfidence = "high" | "medium" | "low";
+
+export type AgentRecoveryChainStep = {
+  observation_id: string;
+  stage: AgentRecoveryStepStage;
+  automatic: boolean;
+  confidence: AgentRecoveryCorrelationConfidence;
+  reason: string;
+  occurred_at: Date;
+  kind: AgentObservationKind;
+  title: string | null;
+  tool_name: string | null;
+  status: AgentObservationStatus;
+};
+
+export type AgentRecoveryChain = {
+  id: string;
+  project_id: string;
+  session_id: string;
+  run_id: string;
+  error_observation_id: string;
+  error_fingerprint: string;
+  error_code: string | null;
+  title: string;
+  status: AgentRecoveryChainStatus;
+  attempt_count: number;
+  started_at: Date;
+  updated_at: Date;
+  previous_verified_chain_id: string | null;
+  steps: AgentRecoveryChainStep[];
 };
 
 export type AgentObservabilityCoverage = {
@@ -187,6 +240,7 @@ export type AgentObservabilityWorkbench = {
   selected_run: AgentRunSummary | null;
   replay: AgentObservationRecord[];
   errors: AgentErrorGroup[];
+  recovery_chains: AgentRecoveryChain[];
   coverage: AgentObservabilityCoverage;
   retention_days: number;
   bounded: true;
