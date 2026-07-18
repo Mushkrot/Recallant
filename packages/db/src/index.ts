@@ -59,7 +59,8 @@ import type {
   AgentObservabilityWorkbench,
   AgentErrorGroup,
   AgentRunSummary,
-  AppendAgentObservationInput
+  AppendAgentObservationInput,
+  CodexOtelControlEventInput
 } from "@recallant/contracts";
 import { agentObservationKindValues } from "@recallant/contracts";
 import {
@@ -73,6 +74,13 @@ import {
   listStoredAgentObservations,
   storeAgentObservation
 } from "./agent-observability.js";
+import {
+  configureProjectOtelControl,
+  ensureAgentTelemetrySchema,
+  readOtelControlCoverage,
+  reconcileControlEventsForObservation,
+  storeCodexOtelControlEvents
+} from "./agent-telemetry.js";
 import { deriveCanonCapabilityContext } from "./canon-capability-context.js";
 import {
   ensureSystemActivitySchema,
@@ -89,6 +97,7 @@ export {
   agentObservationSchemaStatements,
   ensureAgentObservationSchema
 } from "./agent-observability.js";
+export { agentTelemetrySchemaStatements, ensureAgentTelemetrySchema } from "./agent-telemetry.js";
 export {
   buildCanonCapabilityContext,
   canonCapabilityContextContainsRawSecret,
@@ -2765,6 +2774,7 @@ export class RecallantDb {
   private readonly fallbackDeveloperId = randomUUID();
   private projectContext?: ProjectContext;
   private agentObservationSchemaReady?: Promise<void>;
+  private agentTelemetrySchemaReady?: Promise<void>;
 
   constructor(private readonly config: RecallantDbConfig) {
     this.pool = new Pool({
@@ -2789,10 +2799,19 @@ export class RecallantDb {
     await this.agentObservationSchemaReady;
   }
 
+  async ensureAgentTelemetrySchema() {
+    this.agentTelemetrySchemaReady ??= ensureAgentTelemetrySchema(this.pool).catch((error) => {
+      this.agentTelemetrySchemaReady = undefined;
+      throw error;
+    });
+    await this.agentTelemetrySchemaReady;
+  }
+
   async appendAgentObservation(
     input: AppendAgentObservationInput
   ): Promise<AgentObservationRecord> {
     await this.ensureAgentObservationSchema();
+    await this.ensureAgentTelemetrySchema();
     const context = await this.contextForSession(input.session_id);
     return withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
@@ -2809,7 +2828,7 @@ export class RecallantDb {
             ? capturePolicy.turnTextMaxChars
             : capturePolicy.workflowTextMaxChars
       });
-      return storeAgentObservation(
+      const observation = await storeAgentObservation(
         client,
         {
           ...normalized,
@@ -2818,7 +2837,63 @@ export class RecallantDb {
         },
         readPositiveIntEnv("RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS", 30)
       );
+      await reconcileControlEventsForObservation(client, observation);
+      return observation;
     });
+  }
+
+  async ingestCodexOtelControlEvents(input: {
+    project_id: string;
+    developer_id: string;
+    events: readonly CodexOtelControlEventInput[];
+  }) {
+    await this.ensureAgentObservationSchema();
+    await this.ensureAgentTelemetrySchema();
+    const context = await this.contextForProject(input.project_id);
+    if (context.developerId !== input.developer_id) {
+      throw new Error("OTel developer scope does not match the project binding");
+    }
+    return withTransaction(this.pool, (client) =>
+      storeCodexOtelControlEvents(client, {
+        project_id: context.projectId,
+        developer_id: context.developerId,
+        events: input.events,
+        retention_days: readPositiveIntEnv("RECALLANT_AGENT_OTEL_RETENTION_DAYS", 30)
+      })
+    );
+  }
+
+  async configureProjectOtelControl(input: {
+    project_id: string;
+    developer_id: string;
+    client_id: string;
+  }) {
+    await this.ensureAgentTelemetrySchema();
+    const context = await this.contextForProject(input.project_id);
+    if (context.developerId !== input.developer_id) {
+      throw new Error("OTel developer scope does not match the project binding");
+    }
+    return withTransaction(this.pool, (client) =>
+      configureProjectOtelControl(client, {
+        project_id: context.projectId,
+        developer_id: context.developerId,
+        client_id: input.client_id
+      })
+    );
+  }
+
+  async getOtelControlCoverage(projectId?: string | null) {
+    await this.ensureAgentObservationSchema();
+    await this.ensureAgentTelemetrySchema();
+    const context = projectId
+      ? await this.contextForProject(projectId)
+      : await this.ensureProject();
+    return withTransaction(this.pool, (client) =>
+      readOtelControlCoverage(client, {
+        project_id: context.projectId,
+        freshness_hours: readPositiveIntEnv("RECALLANT_AGENT_OTEL_FRESHNESS_HOURS", 24)
+      })
+    );
   }
 
   async listAgentObservations(input: {
@@ -3068,6 +3143,7 @@ export class RecallantDb {
       (sum, run) => sum + run.completeness.unresolved_errors,
       0
     );
+    const otelControl = await this.getOtelControlCoverage(context.projectId);
     const nextActions: string[] = [];
     if (recent.length === 0) {
       nextActions.push("Start an agent session and record a prompt to create the first run.");
@@ -3087,6 +3163,7 @@ export class RecallantDb {
     if (clientStats.has("unknown")) {
       nextActions.push("Set client_kind in the capture adapter so ownership is visible.");
     }
+    nextActions.push(...otelControl.next_actions);
     if (nextActions.length === 0) {
       nextActions.push("No capture gaps need attention in the retained runs.");
     }
@@ -3118,6 +3195,7 @@ export class RecallantDb {
           last_seen_at: clientStats.get(clientKind)?.lastSeen ?? null,
           status: clientStats.has(clientKind) ? "observed" : "not_observed"
         })),
+        otel_control: otelControl,
         next_actions: nextActions
       },
       retention_days: readPositiveIntEnv("RECALLANT_AGENT_OBSERVATION_RETENTION_DAYS", 30),
@@ -10110,6 +10188,7 @@ export class RecallantDb {
   }
 
   async sanitizeProject(input: ProjectSanitizeInput) {
+    await this.ensureAgentTelemetrySchema();
     const mode = input.mode ?? "purge";
     if (mode === "detach") {
       return this.detachProject({
@@ -10165,6 +10244,8 @@ export class RecallantDb {
       "edges",
       "checkpoints",
       "agent_observations",
+      "agent_otel_control_events",
+      "project_otel_control_settings",
       "agent_memories",
       "agent_memory_source_refs",
       "agent_memory_review_actions",
@@ -10831,6 +10912,12 @@ export class RecallantDb {
             WHERE project_id = $1
               AND metadata->>'created_from' = 'recallant_agent_event'
           ) AS captured_decision_count,
+          (
+            SELECT max(occurred_at)
+            FROM agent_observations
+            WHERE project_id = $1
+              AND redacted_metadata->>'adapter' = 'codex_native_hook'
+          ) AS last_automatic_capture_at,
           (SELECT max(last_seen_at) FROM sessions WHERE project_id = $1) AS last_session_at
       `,
       [projectId]
@@ -10840,22 +10927,21 @@ export class RecallantDb {
     const lastMemoryWriteAt = nullableIso(readinessRow.last_memory_write_at);
     const checkpointUpdatedAt = nullableIso(readinessRow.checkpoint_updated_at);
     const lastSemanticRecallProofAt = nullableIso(readinessRow.last_semantic_recall_proof_at);
-    const operationalCaptureActive =
-      Boolean(readinessRow.project_registered) &&
-      Boolean(lastContextReadAt) &&
-      Boolean(lastMemoryWriteAt) &&
-      Boolean(checkpointUpdatedAt);
+    const lastAutomaticCaptureAt = nullableIso(readinessRow.last_automatic_capture_at);
+    const captureFreshnessHours = Number(process.env.RECALLANT_AGENT_CAPTURE_FRESHNESS_HOURS ?? 24);
     const readinessContract = buildRecallantReadinessContract({
       configured: Boolean(readinessRow.project_registered),
       context_ready: Boolean(lastContextReadAt),
       semantic_memory_ready: Boolean(lastSemanticRecallProofAt),
-      capture_active: operationalCaptureActive,
       ingestion_approved: input?.ingestion_approved === true,
       remote_mcp_ready: input?.remote_mcp_ready === true,
       last_context_read_at: lastContextReadAt,
       last_memory_write_at: lastMemoryWriteAt,
       last_checkpoint_at: checkpointUpdatedAt,
       last_semantic_recall_proof_at: lastSemanticRecallProofAt,
+      last_automatic_capture_at: lastAutomaticCaptureAt,
+      automatic_capture_source: lastAutomaticCaptureAt ? "codex_native_hook" : null,
+      capture_freshness_hours: captureFreshnessHours,
       ingestion_approval_ref: input?.ingestion_approval_ref ?? null
     });
     const reviewStateCounts = {
@@ -10871,6 +10957,8 @@ export class RecallantDb {
       last_memory_write_at: readinessRow.last_memory_write_at,
       checkpoint_updated_at: readinessRow.checkpoint_updated_at,
       last_semantic_recall_proof_at: readinessRow.last_semantic_recall_proof_at,
+      last_automatic_capture_at: readinessRow.last_automatic_capture_at,
+      memory_loop_ready: readinessContract.memory_loop_ready,
       semantic_memory_ready: readinessContract.semantic_memory_ready,
       configured_but_not_capture_active:
         readinessContract.configured && !readinessContract.capture_active,
@@ -10878,7 +10966,9 @@ export class RecallantDb {
       readiness_status: readinessContract.primary_state,
       readiness_warning:
         readinessContract.configured && !readinessContract.capture_active
-          ? "Configured but not capture active. Read context, create+recall governed memory, and checkpoint before calling this active."
+          ? readinessContract.evidence.last_automatic_capture_at
+            ? `Automatic capture was observed, but is older than the ${readinessContract.capture_freshness_hours}-hour freshness window.`
+            : "Configured, but no automatic agent event has been observed. Manual context, memory, or checkpoint activity does not make capture active."
           : null,
       session_recovery_warning:
         Number(readinessRow.interrupted_sessions ?? 0) > 0
@@ -12477,6 +12567,8 @@ export class RecallantDb {
           (SELECT count(*)::int FROM edges WHERE project_id = $1) AS edges,
           (SELECT count(*)::int FROM checkpoints WHERE project_id = $1) AS checkpoints,
           (SELECT count(*)::int FROM agent_observations WHERE project_id = $1) AS agent_observations,
+          (SELECT count(*)::int FROM agent_otel_control_events WHERE project_id = $1) AS agent_otel_control_events,
+          (SELECT count(*)::int FROM project_otel_control_settings WHERE project_id = $1) AS project_otel_control_settings,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status NOT IN ('archived', 'rejected', 'superseded')) AS active_agent_memories,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND status IN ('candidate', 'needs_review')) AS review_needed_memories,

@@ -279,6 +279,9 @@ export function analyzeAgentObservationCompleteness(
       .filter((item) => item.resolution_status === "resolved" && item.parent_observation_id)
       .map((item) => item.parent_observation_id)
   );
+  for (const chain of deriveAgentRecoveryChains(observations)) {
+    if (chain.status === "verified") resolvedErrorIds.add(chain.error_observation_id);
+  }
   const resolvedTraceIds = new Set(
     observations
       .filter((item) => item.resolution_status === "resolved")

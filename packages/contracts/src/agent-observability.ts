@@ -1,3 +1,5 @@
+import type { OtelControlCoverage } from "./agent-telemetry.js";
+
 export const agentObservationContractVersion = 1 as const;
 
 export const agentObservationKindValues = [
@@ -230,6 +232,7 @@ export type AgentObservabilityCoverage = {
     last_seen_at: Date | null;
     status: "observed" | "not_observed";
   }>;
+  otel_control: OtelControlCoverage;
   next_actions: string[];
 };
 

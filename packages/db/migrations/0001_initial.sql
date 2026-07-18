@@ -710,6 +710,49 @@ CREATE TABLE agent_observations (
   UNIQUE (session_id, sequence_number)
 );
 
+CREATE TABLE project_otel_control_settings (
+  project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  protocol TEXT NOT NULL DEFAULT 'otlp_http_json' CHECK (protocol = 'otlp_http_json'),
+  client_id TEXT NOT NULL,
+  endpoint_path TEXT NOT NULL DEFAULT '/api/otel/v1/logs',
+  configured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE agent_otel_control_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  developer_id UUID NOT NULL REFERENCES developers(id) ON DELETE CASCADE,
+  event_name TEXT NOT NULL,
+  conversation_id TEXT,
+  call_id TEXT,
+  trace_id TEXT,
+  span_id TEXT,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  observed_at TIMESTAMPTZ NOT NULL,
+  severity_number INT,
+  success BOOLEAN,
+  duration_ms INT CHECK (duration_ms IS NULL OR duration_ms >= 0),
+  attempt_number INT CHECK (attempt_number IS NULL OR attempt_number >= 1),
+  tool_name TEXT,
+  error_type TEXT,
+  error_fingerprint TEXT,
+  payload_hash TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  safe_attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+  dropped_attribute_count INT NOT NULL DEFAULT 0,
+  content_discarded BOOLEAN NOT NULL DEFAULT false,
+  matched_observation_id UUID REFERENCES agent_observations(id) ON DELETE SET NULL,
+  match_status TEXT NOT NULL DEFAULT 'pending' CHECK (
+    match_status IN ('pending', 'matched', 'missing_hook', 'conflict', 'ignored')
+  ),
+  match_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, dedup_key)
+);
+
 CREATE INDEX idx_projects_developer_parent ON projects (developer_id, parent_project_id);
 CREATE INDEX idx_projects_developer_domain_kind ON projects (developer_id, memory_domain, project_kind);
 CREATE INDEX idx_project_sources_project_status ON project_sources (project_id, status, is_primary DESC);
@@ -737,6 +780,17 @@ CREATE INDEX idx_agent_observations_errors
 CREATE INDEX idx_agent_observations_error_fingerprint
   ON agent_observations (project_id, error_fingerprint, occurred_at DESC)
   WHERE error_fingerprint IS NOT NULL;
+
+CREATE INDEX idx_agent_otel_control_project_time
+  ON agent_otel_control_events (project_id, occurred_at DESC);
+CREATE INDEX idx_agent_otel_control_conversation
+  ON agent_otel_control_events (project_id, conversation_id, occurred_at DESC)
+  WHERE conversation_id IS NOT NULL;
+CREATE INDEX idx_agent_otel_control_call
+  ON agent_otel_control_events (project_id, call_id, occurred_at DESC)
+  WHERE call_id IS NOT NULL;
+CREATE INDEX idx_agent_otel_control_match
+  ON agent_otel_control_events (project_id, match_status, occurred_at DESC);
 
 CREATE INDEX idx_events_project_occurred ON events (project_id, occurred_at DESC);
 CREATE INDEX idx_events_payload_hash ON events (project_id, payload_hash) WHERE payload_hash IS NOT NULL;

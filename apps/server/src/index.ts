@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { getRecallantCoreInfo } from "@recallant/core";
+import { gunzipSync } from "node:zlib";
+import { getRecallantCoreInfo, parseCodexOtelLogs } from "@recallant/core";
 import {
   remoteConnectApprovalUrl,
   remoteConnectApprovePath,
@@ -23,6 +24,7 @@ import {
   remoteMcpProvisioningOutput,
   remoteMcpPayloadLimits,
   remoteMcpRequiredHeaders,
+  codexOtelLogsEndpointPath,
   type GraphCandidateMaintenanceApplyInput,
   type ReviewGraphCandidateInput,
   type RemoteMcpProvisioningAction,
@@ -880,6 +882,33 @@ async function readJsonWithLimit(request: IncomingMessage, limitBytes: number) {
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+async function readOtelJsonWithLimit(request: IncomingMessage, limitBytes: number) {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > limitBytes) {
+      throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "OTLP request body is too large.");
+    }
+    chunks.push(buffer);
+  }
+  const compressed = Buffer.concat(chunks);
+  const encoding = optionalInput(getHeaderValue(request, "content-encoding"))?.toLowerCase();
+  if (encoding && encoding !== "identity" && encoding !== "gzip") {
+    throw new RemoteMcpRequestError(
+      "VALIDATION_ERROR",
+      `Unsupported OTLP content encoding: ${encoding}.`
+    );
+  }
+  const payload =
+    encoding === "gzip" ? gunzipSync(compressed, { maxOutputLength: limitBytes }) : compressed;
+  if (payload.byteLength > limitBytes) {
+    throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "Decoded OTLP body is too large.");
+  }
+  return payload.toString("utf8");
 }
 
 async function readForm(request: IncomingMessage) {
@@ -2207,6 +2236,71 @@ async function handleRemoteMcpRequest(
   }
 }
 
+const codexOtelPayloadLimitBytes = 1_048_576;
+
+function writeOtelJson(response: ServerResponse, statusCode: number, payload: unknown) {
+  write(response, statusCode, JSON.stringify(payload), "application/json");
+}
+
+export async function handleCodexOtelLogsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  databaseOverride?: RecallantDb
+) {
+  const database = databaseOverride ?? createRecallantDbFromEnv();
+  if (!database) {
+    writeOtelJson(response, 503, { code: 14, message: "OTel control database is unavailable." });
+    return;
+  }
+  const contentType = optionalInput(getHeaderValue(request, "content-type"))
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== "application/json") {
+    writeOtelJson(response, 415, {
+      code: 3,
+      message: 'Recallant accepts the explicit Codex OTLP/HTTP JSON profile; set protocol = "json".'
+    });
+    return;
+  }
+  try {
+    const auth = await authorizeRemoteMcpRequest(request, database);
+    if (!auth.ok) {
+      writeOtelJson(response, auth.httpStatus, { code: 16, message: auth.message });
+      return;
+    }
+    const binding = await database.getProjectBinding(auth.scope.projectId);
+    assertRemoteMcpProjectScope(auth.scope, binding);
+    const text = await readOtelJsonWithLimit(request, codexOtelPayloadLimitBytes);
+    const parsed = parseCodexOtelLogs(text);
+    if (!parsed.ok) {
+      const statusCode = parsed.code === "payload_too_large" ? 413 : 400;
+      writeOtelJson(response, statusCode, { code: 3, message: parsed.message });
+      return;
+    }
+    await database.configureProjectOtelControl({
+      project_id: auth.scope.projectId,
+      developer_id: auth.scope.developerId,
+      client_id: auth.scope.clientId
+    });
+    await database.ingestCodexOtelControlEvents({
+      project_id: auth.scope.projectId,
+      developer_id: auth.scope.developerId,
+      events: parsed.events
+    });
+    writeOtelJson(response, 200, {});
+  } catch (error) {
+    if (error instanceof RemoteMcpRequestError) {
+      writeOtelJson(response, remoteMcpErrorStatus(error.contractCode), {
+        code: 3,
+        message: error.message
+      });
+      return;
+    }
+    writeOtelJson(response, 500, { code: 13, message: "OTel control ingestion failed." });
+  }
+}
+
 function buildForgetInput(body: Record<string, unknown>): ForgetInput {
   const target = asRecord(body.target);
   const confirmation = asRecord(body.confirmation);
@@ -3310,7 +3404,7 @@ function captureState(row: Record<string, unknown>) {
   const interrupted = Number(row.interrupted_sessions ?? 0);
   if (interrupted > 0) return { label: "Interrupted", className: "interrupted" };
   if (row.last_context_read_at && row.last_memory_write_at && row.checkpoint_updated_at) {
-    return { label: "Capture active", className: "active" };
+    return { label: "Memory loop ready", className: "active" };
   }
   if (Number(row.session_count ?? 0) > 0 || row.last_context_read_at) {
     return { label: "Started, not complete", className: "started" };
@@ -3320,7 +3414,7 @@ function captureState(row: Record<string, unknown>) {
 
 function projectChooserState(row: Record<string, unknown>) {
   if (row.last_context_read_at && row.last_memory_write_at && row.checkpoint_updated_at) {
-    return { label: "Recording", className: "active" };
+    return { label: "Memory ready", className: "active" };
   }
   if (Number(row.session_count ?? 0) > 0 || row.last_context_read_at) {
     return { label: "Setup incomplete", className: "started" };
@@ -4224,17 +4318,13 @@ function attentionSnapshot(data: ReviewDashboardData) {
 }
 
 function renderFirstScreenSnapshot(data: ReviewDashboardData) {
-  const project = currentProject(data);
-  const capture = captureState(project);
   const readiness = asRecord(data.project_readiness);
   const contract = asRecord(readiness.readiness_contract);
   const sources = currentProjectSources(data);
   const sourceCounts = sourceHealthCounts(sources);
   const attention = attentionSnapshot(data);
   const captureReady =
-    typeof contract.capture_active === "boolean"
-      ? contract.capture_active
-      : capture.className === "active";
+    typeof contract.capture_active === "boolean" ? contract.capture_active : false;
   const semanticMemoryReady =
     readiness.semantic_memory_ready === true || contract.semantic_memory_ready === true;
   const readinessStatus = String(
@@ -4265,9 +4355,9 @@ function renderFirstScreenSnapshot(data: ReviewDashboardData) {
       <p>${escapeHtml(attention.note)}</p>
     </article>
     <article class="${captureReady ? "ready" : "needs-work"}">
-      <span>Memory capture</span>
+      <span>Automatic capture</span>
       <strong>${escapeHtml(readinessStatus.replaceAll("_", " "))}</strong>
-      <p>${escapeHtml(captureReady ? "Capture-active evidence is present." : readinessWarning)}</p>
+      <p>${escapeHtml(captureReady ? "A fresh automatic agent event is present." : readinessWarning)}</p>
     </article>
     <article class="${semanticMemoryReady ? "ready" : "needs-work"}">
       <span>Semantic proof</span>
@@ -5182,8 +5272,9 @@ function renderReadiness(data: ReviewDashboardData) {
   const lastMemoryWriteAt = readiness.last_memory_write_at ?? evidence.last_memory_write_at;
   const lastSemanticRecallProofAt =
     readiness.last_semantic_recall_proof_at ?? evidence.last_semantic_recall_proof_at;
+  const lastAutomaticCaptureAt =
+    readiness.last_automatic_capture_at ?? evidence.last_automatic_capture_at;
   const activeSessions = Number(readiness.active_sessions ?? 0);
-  const interruptedSessions = Number(readiness.interrupted_sessions ?? 0);
   const captureEvents = Number(readiness.capture_event_count ?? 0);
   const capturedDecisions = Number(readiness.captured_decision_count ?? 0);
   const reviewMemories = Number(reviewCounts.pending_review ?? readiness.review_memory_count ?? 0);
@@ -5192,16 +5283,9 @@ function renderReadiness(data: ReviewDashboardData) {
   const staleMemories = Number(reviewCounts.stale ?? readiness.stale_memory_count ?? 0);
   const conflictMemories = Number(reviewCounts.conflict ?? readiness.conflict_memory_count ?? 0);
   const captureActive =
-    typeof contract.capture_active === "boolean"
-      ? contract.capture_active
-      : registered &&
-        interruptedSessions === 0 &&
-        lastContextReadAt !== null &&
-        lastContextReadAt !== undefined &&
-        lastMemoryWriteAt !== null &&
-        lastMemoryWriteAt !== undefined &&
-        checkpointUpdatedAt !== null &&
-        checkpointUpdatedAt !== undefined;
+    typeof contract.capture_active === "boolean" ? contract.capture_active : false;
+  const memoryLoopReady =
+    contract.memory_loop_ready === true || readiness.memory_loop_ready === true;
   const readinessStatus = String(readiness.readiness_status ?? contract.primary_state ?? "");
   const warning = String(readiness.readiness_warning ?? "");
   const statusText = warning
@@ -5209,14 +5293,10 @@ function renderReadiness(data: ReviewDashboardData) {
     : !registered
       ? "Project is not registered."
       : captureActive
-        ? "Agent capture active."
-        : !lastContextReadAt
-          ? "Registered only. Agent context has not been read yet."
-          : !lastMemoryWriteAt
-            ? "Capture started. No memory write has been recorded yet."
-            : !checkpointUpdatedAt
-              ? "Capture active. Checkpoint is still missing."
-              : "Capture needs attention.";
+        ? "Automatic agent capture is active and fresh."
+        : lastAutomaticCaptureAt
+          ? `Automatic capture is stale; no fresh event was seen inside the ${String(contract.capture_freshness_hours ?? 24)}-hour window.`
+          : "No automatic agent event has been observed yet.";
   const note =
     activeSessions > 0
       ? `${activeSessions} active session${activeSessions === 1 ? "" : "s"} still open.`
@@ -5233,6 +5313,8 @@ function renderReadiness(data: ReviewDashboardData) {
       <span><strong>${escapeHtml(readinessDate(lastMemoryWriteAt))}</strong> last memory write</span>
       <span><strong>${escapeHtml(readinessDate(checkpointUpdatedAt))}</strong> last checkpoint</span>
       <span><strong>${escapeHtml(readinessDate(lastSemanticRecallProofAt))}</strong> last semantic proof</span>
+      <span><strong>${escapeHtml(readinessDate(lastAutomaticCaptureAt))}</strong> last automatic capture</span>
+      <span><strong>${escapeHtml(memoryLoopReady ? "Ready" : "Not complete")}</strong> memory loop</span>
       <span><strong>${escapeHtml(captureEvents)}</strong> capture events</span>
       <span><strong>${escapeHtml(capturedDecisions)}</strong> captured decisions</span>
       <span><strong>${escapeHtml(reviewMemories)}</strong> pending review</span>
@@ -6716,6 +6798,11 @@ function renderAgentReplay(data: ReviewDashboardData) {
 function renderAgentErrors(data: ReviewDashboardData) {
   const observability = observabilityData(data);
   const errors = asArray(observability.errors).map(asRecord);
+  const recoveryChains = new Map(
+    asArray(observability.recovery_chains)
+      .map(asRecord)
+      .map((chain) => [String(chain.id ?? ""), chain])
+  );
   if (errors.length === 0) {
     return `<div class="observability-empty"><h3>No recorded errors</h3><p>No error remains visible in the retained runs. Coverage still shows whether any clients or steps are missing.</p></div>`;
   }
@@ -6730,12 +6817,29 @@ function renderAgentErrors(data: ReviewDashboardData) {
               ? "Recovery recorded"
               : "Unresolved";
         const recoveryKinds = asArray(error.recovery_kinds).map(agentObservationLabel).join(", ");
+        const chain = recoveryChains.get(String(error.latest_recovery_chain_id ?? ""));
+        const chainSteps = chain ? asArray(chain.steps).map(asRecord) : [];
         return `<article class="agent-error-row">
           <div class="agent-error-main">
             <span class="agent-error-state ${escapeHtml(resolution)}">${escapeHtml(resolutionLabel)}</span>
             <h3>${escapeHtml(error.title ?? "Agent error")}</h3>
             <p>${escapeHtml(error.sample ?? "No safe error summary was captured.")}</p>
             ${recoveryKinds ? `<p class="agent-error-recovery"><strong>Recovery trail:</strong> ${escapeHtml(recoveryKinds)}</p>` : ""}
+            ${
+              chain
+                ? `<ol class="recovery-chain" aria-label="Observed recovery chain">
+                    ${chainSteps
+                      .map(
+                        (step) => `<li>
+                          <span>${escapeHtml(String(step.stage ?? "step"))}</span>
+                          <strong>${escapeHtml(step.title ?? agentObservationLabel(String(step.kind ?? "system")))}</strong>
+                          <small>${step.automatic === true ? "Linked automatically" : "Reported explicitly"} · ${escapeHtml(step.confidence ?? "unknown")} confidence · ${escapeHtml(step.reason ?? "observed sequence")}</small>
+                        </li>`
+                      )
+                      .join("")}
+                  </ol>`
+                : '<p class="agent-error-recovery">No recovery evidence has been linked yet.</p>'
+            }
           </div>
           <div class="agent-error-facts">
             <span><strong>${escapeHtml(error.occurrence_count ?? 0)}</strong> occurrences</span>
@@ -6760,7 +6864,16 @@ function renderAgentCoverage(data: ReviewDashboardData) {
   const coverage = asRecord(observability.coverage);
   const adapters = asArray(coverage.adapters).map(asRecord);
   const actions = asArray(coverage.next_actions);
+  const otel = asRecord(coverage.otel_control);
   const runCount = Number(coverage.run_count ?? 0);
+  const otelStatus = String(otel.status ?? "not_configured");
+  const otelLabels: Record<string, string> = {
+    not_configured: "Not configured",
+    unobserved: "Configured, waiting for data",
+    healthy: "Two sources agree",
+    gaps: "Coverage gaps found",
+    stale: "Control data is stale"
+  };
   return `<section class="agent-coverage" aria-label="Agent recording coverage">
     <div class="coverage-intro">
       <div><span>Overall coverage</span><strong>${escapeHtml(coverage.average_score ?? 0)}%</strong></div>
@@ -6776,6 +6889,21 @@ function renderAgentCoverage(data: ReviewDashboardData) {
       <div><dt>Redacted records</dt><dd>${escapeHtml(coverage.redacted_observations ?? 0)}</dd></div>
       <div><dt>Shortened records</dt><dd>${escapeHtml(coverage.truncated_observations ?? 0)}</dd></div>
     </dl>
+    <section class="otel-control-summary" aria-label="Independent OpenTelemetry control">
+      <div>
+        <span class="agent-error-state ${escapeHtml(otelStatus)}">${escapeHtml(otelLabels[otelStatus] ?? "Unknown")}</span>
+        <h3>Independent control</h3>
+        <p>OpenTelemetry records only safe control metadata and checks whether native Codex hooks missed activity. It is not a second transcript.</p>
+      </div>
+      <dl class="coverage-facts">
+        <div><dt>OTel events</dt><dd>${escapeHtml(otel.event_count ?? 0)}</dd></div>
+        <div><dt>Matched</dt><dd>${escapeHtml(otel.matched_count ?? 0)}</dd></div>
+        <div><dt>Missing hook</dt><dd>${escapeHtml(otel.missing_hook_count ?? 0)}</dd></div>
+        <div><dt>Missing OTel</dt><dd>${escapeHtml(otel.missing_otel_count ?? 0)}</dd></div>
+        <div><dt>Disagreements</dt><dd>${escapeHtml(otel.conflict_count ?? 0)}</dd></div>
+        <div><dt>Last control event</dt><dd>${otel.last_event_at ? escapeHtml(formatDate(otel.last_event_at)) : "Never"}</dd></div>
+      </dl>
+    </section>
     <div class="coverage-columns">
       <section>
         <h3>Capture adapters</h3>
@@ -6854,13 +6982,12 @@ function renderHomeRecentActivity(data: ReviewDashboardData) {
 
 function renderHome(data: ReviewDashboardData) {
   const project = currentProject(data);
-  const state = captureState(project);
   const readiness = asRecord(data.project_readiness);
   const readinessContract = asRecord(readiness.readiness_contract);
   const captureActive =
     typeof readinessContract.capture_active === "boolean"
       ? readinessContract.capture_active
-      : state.className === "active";
+      : false;
   const pendingReview = criticalCount(data, "pending_review");
   const sourceAttention = currentProjectSources(data).filter(
     (source) => sourceHealth(source).status !== "ready"
@@ -9267,12 +9394,15 @@ function renderDashboard(
       font-weight: 750;
     }
     .agent-run-state.complete,
-    .agent-error-state.resolved { border-color: var(--success); color: var(--success); }
+    .agent-error-state.resolved,
+    .agent-error-state.healthy { border-color: var(--success); color: var(--success); }
     .agent-run-state.running,
     .agent-error-state.retrying { border-color: var(--info); color: var(--info); }
     .agent-run-state.incomplete { border-color: var(--warning); color: var(--warning); }
     .agent-run-state.needs_attention,
-    .agent-error-state.unresolved { border-color: var(--danger); color: var(--danger); }
+    .agent-error-state.unresolved,
+    .agent-error-state.gaps,
+    .agent-error-state.stale { border-color: var(--danger); color: var(--danger); }
     .agent-run-score { text-align: right; }
     .agent-run-score strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
     .agent-replay-head {
@@ -9346,6 +9476,11 @@ function renderDashboard(
     .agent-error-main h3 { margin: 9px 0 5px; font-size: 15px; }
     .agent-error-main > p { max-width: 900px; margin: 0; color: var(--text-muted); line-height: 1.45; white-space: pre-wrap; }
     .agent-error-recovery { margin-top: 8px !important; font-size: 12px; }
+    .recovery-chain { list-style: none; max-width: 900px; margin: 13px 0 0; padding: 0; border-top: 1px solid var(--line); }
+    .recovery-chain li { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 3px 12px; border-bottom: 1px solid var(--line); padding: 9px 0; }
+    .recovery-chain li > span { grid-row: 1 / 3; color: var(--accent-strong); font-size: 10px; font-weight: 750; text-transform: uppercase; }
+    .recovery-chain li > strong { font-size: 12px; }
+    .recovery-chain li > small { color: var(--text-muted); font-size: 10.5px; }
     .agent-error-facts { display: grid; gap: 6px; align-content: start; color: var(--text-muted); font-size: 11px; }
     .agent-error-facts span strong { color: var(--text); }
     .agent-error-facts a { margin-top: 4px; font-weight: 700; }
@@ -9355,6 +9490,9 @@ function renderDashboard(
     .coverage-intro p { max-width: 720px; margin: 0; color: var(--text-muted); line-height: 1.5; }
     .coverage-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 16px; }
     .coverage-facts dd { margin: 4px 0 0; font-size: 17px; font-weight: 750; }
+    .otel-control-summary { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; }
+    .otel-control-summary > div > h3 { margin: 8px 0 4px; font-size: 15px; }
+    .otel-control-summary > div > p { max-width: 760px; margin: 0; color: var(--text-muted); line-height: 1.45; }
     .coverage-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 24px; }
     .coverage-columns h3 { margin: 0 0 10px; font-size: 14px; }
     .adapter-list { border-top: 1px solid var(--line); }
@@ -9560,6 +9698,10 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         JSON.stringify({ ok: true, ...describeServerBoundary() }),
         "application/json"
       );
+      return;
+    }
+    if (request.method === "POST" && requestUrl.pathname === codexOtelLogsEndpointPath) {
+      await handleCodexOtelLogsRequest(request, response, options.remoteMcpDatabase);
       return;
     }
     if (request.method === "POST" && requestUrl.pathname === remoteMcpEndpointPath) {

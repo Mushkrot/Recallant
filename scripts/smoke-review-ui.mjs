@@ -422,6 +422,76 @@ const session = await db.startSession({
   session_label: "review-ui-smoke",
   resume_policy: "normal"
 });
+const externalCodexSessionId = `review-ui-native-${randomUUID()}`;
+await db.appendAgentObservation({
+  session_id: session.session_id,
+  kind: "system",
+  title: "Automatic Codex hook observed",
+  client_kind: "codex",
+  metadata: {
+    adapter: "codex_native_hook",
+    hook_event_name: "SessionStart",
+    external_session_id: externalCodexSessionId
+  }
+});
+await db.configureProjectOtelControl({
+  project_id: projectId,
+  developer_id: developerId,
+  client_id: "review-ui-otel"
+});
+await db.ingestCodexOtelControlEvents({
+  project_id: projectId,
+  developer_id: developerId,
+  events: [
+    {
+      event_name: "codex.conversation_starts",
+      conversation_id: externalCodexSessionId,
+      call_id: null,
+      trace_id: null,
+      span_id: null,
+      occurred_at: new Date().toISOString(),
+      observed_at: new Date().toISOString(),
+      severity_number: 9,
+      success: true,
+      duration_ms: null,
+      attempt_number: null,
+      tool_name: null,
+      error_type: null,
+      error_fingerprint: null,
+      payload_hash: `sha256:${randomUUID().replaceAll("-", "")}`,
+      dedup_key: `review-ui-otel-${randomUUID()}`,
+      safe_attributes: { fixture: true },
+      dropped_attribute_count: 0,
+      content_discarded: false
+    }
+  ]
+});
+const recoveryTrace = randomUUID();
+const recoveryError = await db.appendAgentObservation({
+  session_id: session.session_id,
+  trace_id: recoveryTrace,
+  kind: "error",
+  tool_name: "review_ui_fixture",
+  error_code: "FIXTURE_FAILED",
+  title: "Fixture operation failed"
+});
+const recoveryRetry = await db.appendAgentObservation({
+  session_id: session.session_id,
+  trace_id: recoveryTrace,
+  parent_observation_id: recoveryError.id,
+  kind: "tool_call",
+  tool_name: "review_ui_fixture",
+  title: "Retry fixture operation"
+});
+await db.appendAgentObservation({
+  session_id: session.session_id,
+  trace_id: recoveryTrace,
+  parent_observation_id: recoveryRetry.id,
+  kind: "tool_result",
+  tool_name: "review_ui_fixture",
+  status: "success",
+  title: "Fixture operation passed"
+});
 const event = await db.appendTurn({
   session_id: session.session_id,
   client_kind: "codex",
@@ -1460,10 +1530,30 @@ try {
     !activityCoverageText.includes('aria-current="page">Coverage</a>') ||
     !activityCoverageText.includes("Overall coverage") ||
     !activityCoverageText.includes("Capture adapters") ||
+    !activityCoverageText.includes("Independent control") ||
+    !activityCoverageText.includes("OTel events") ||
     !activityCoverageText.includes("What to do next")
   ) {
     throw new Error(
       `Agent activity Coverage view failed: ${activityCoverageView.status}; ${activityCoverageText.slice(0, 700)}`
+    );
+  }
+
+  const activityErrorsView = await fetch(
+    `${baseUrl}/review?project_id=${projectId}&view=activity&activity_tab=errors`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  const activityErrorsText = await activityErrorsView.text();
+  if (
+    activityErrorsView.status !== 200 ||
+    !activityErrorsText.includes('aria-current="page">Errors</a>') ||
+    !activityErrorsText.includes("Fixture operation failed") ||
+    !activityErrorsText.includes('aria-label="Observed recovery chain"') ||
+    !activityErrorsText.includes("Linked automatically") ||
+    !activityErrorsText.includes("Resolved and verified")
+  ) {
+    throw new Error(
+      `Agent activity Errors view failed: ${activityErrorsView.status}; ${activityErrorsText.slice(0, 900)}`
     );
   }
 
@@ -1675,9 +1765,17 @@ try {
     json.agent_observability?.runs.length < 1 ||
     !Array.isArray(json.agent_observability?.replay) ||
     !Array.isArray(json.agent_observability?.errors) ||
+    !json.agent_observability?.recovery_chains?.some(
+      (chain) =>
+        chain.error_observation_id === recoveryError.id &&
+        chain.status === "verified" &&
+        chain.steps.some((step) => step.stage === "verification" && step.automatic === true)
+    ) ||
     !Array.isArray(json.agent_observability?.coverage?.adapters) ||
     !Array.isArray(json.agent_observability?.coverage?.next_actions) ||
     Number(json.agent_observability?.coverage?.observation_count ?? 0) < 1 ||
+    json.agent_observability?.coverage?.otel_control?.status !== "healthy" ||
+    Number(json.agent_observability?.coverage?.otel_control?.matched_count ?? 0) < 1 ||
     !json.settings.some(
       (setting) =>
         setting.key === "provider_api_key" &&
@@ -3223,7 +3321,7 @@ try {
       "recallant connect cursor --project-dir /ai/new_project --install-local-hooks --dry-run"
     ) ||
     !String(onboardingConcreteJson.proposed_actions[2]?.command).includes(
-      "recallant doctor --project-dir /ai/new_project --require-capture --semantic-proof"
+      "recallant doctor --project-dir /ai/new_project --require-capture --require-memory-loop --semantic-proof"
     )
   ) {
     throw new Error(`Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`);

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 
 import {
   deriveAgentRecoveryChains,
-  parseCodexOtelLogs
+  parseCodexOtelLogs,
+  renderCodexOtelConfig
 } from "../packages/core/dist/index.js";
 
 const otlp = {
@@ -63,9 +64,20 @@ assert.equal(event.content_discarded, true);
 assert.equal(JSON.stringify(event).includes("secret output"), false);
 assert.equal(JSON.stringify(event).includes("private failure detail"), false);
 assert.equal(JSON.stringify(event).includes("must-not-survive"), false);
-assert.equal(parseCodexOtelLogs("{" ).ok, false);
+assert.equal(parseCodexOtelLogs("{").ok, false);
 assert.equal(parseCodexOtelLogs({}).ok, false);
 assert.equal(parseCodexOtelLogs("x".repeat(1_048_577)).ok, false);
+
+const configFragment = renderCodexOtelConfig({
+  server_url: "https://recallant.example.com/",
+  project_id: "11111111-1111-4111-8111-111111111111",
+  developer_id: "22222222-2222-4222-8222-222222222222",
+  client_id: "codex-otel"
+});
+assert(configFragment.includes('protocol = "json"'));
+assert(configFragment.includes("/api/otel/v1/logs"));
+assert(configFragment.includes("${RECALLANT_OTEL_TOKEN}"));
+assert(configFragment.includes("log_user_prompt = false"));
 
 const ids = {
   project: "11111111-1111-4111-8111-111111111111",
@@ -158,6 +170,7 @@ process.stdout.write(
       supported_event: event.event_name,
       content_discarded: event.content_discarded,
       ignored_records: parsed.ignored_log_records,
+      user_config_fragment: "pass",
       recovery_status: verified?.status,
       recovery_steps: verified?.steps.map((step) => step.stage),
       regression_link: regressed?.previous_verified_chain_id,

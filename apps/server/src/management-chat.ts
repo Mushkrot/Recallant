@@ -117,12 +117,14 @@ export type ManagementChatResponse = {
     pending_paid_approvals: number;
     interrupted_sessions: number;
     capture_ready: boolean;
+    memory_loop_ready: boolean;
     semantic_memory_ready: boolean;
     readiness_status: string;
     last_context_read_at: string;
     last_memory_write_at: string;
     last_checkpoint_at: string;
     last_semantic_recall_proof_at: string;
+    last_automatic_capture_at: string;
     capture_events: number;
     captured_decisions: number;
     accepted_memories: number;
@@ -1221,10 +1223,11 @@ function dashboardFacts(
   const lastMemoryWrite = stringValue(readiness.last_memory_write_at);
   const lastCheckpoint = stringValue(readiness.checkpoint_updated_at);
   const lastSemanticRecallProof = stringValue(readiness.last_semantic_recall_proof_at);
+  const lastAutomaticCapture = stringValue(readiness.last_automatic_capture_at);
   const captureReady =
-    typeof contract.capture_active === "boolean"
-      ? contract.capture_active
-      : Boolean(lastContextRead && lastMemoryWrite && lastCheckpoint);
+    typeof contract.capture_active === "boolean" ? contract.capture_active : false;
+  const memoryLoopReady =
+    contract.memory_loop_ready === true || readiness.memory_loop_ready === true;
   const semanticMemoryReady =
     readiness.semantic_memory_ready === true || contract.semantic_memory_ready === true;
   const readinessStatus = String(
@@ -1262,6 +1265,7 @@ function dashboardFacts(
     pending_paid_approvals: asNumber(critical.pending_paid_approvals),
     interrupted_sessions: asNumber(critical.interrupted_sessions),
     capture_ready: captureReady,
+    memory_loop_ready: memoryLoopReady,
     semantic_memory_ready: semanticMemoryReady,
     readiness_status: readinessStatus,
     last_context_read_at:
@@ -1271,6 +1275,8 @@ function dashboardFacts(
     last_checkpoint_at: lastCheckpoint || stringValue(evidence.last_checkpoint_at) || "not yet",
     last_semantic_recall_proof_at:
       lastSemanticRecallProof || stringValue(evidence.last_semantic_recall_proof_at) || "not yet",
+    last_automatic_capture_at:
+      lastAutomaticCapture || stringValue(evidence.last_automatic_capture_at) || "not yet",
     capture_events: asNumber(readiness.capture_event_count),
     captured_decisions: asNumber(readiness.captured_decision_count),
     accepted_memories: asNumber(
@@ -1450,11 +1456,11 @@ function analyzeWorkflowRequest(
     ? [
         `recallant attach ${projectDir} --sandbox --dry-run`,
         `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture --semantic-proof`
+        `recallant doctor --project-dir ${projectDir} --require-capture --require-memory-loop --semantic-proof`
       ]
     : [
         `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture --semantic-proof`
+        `recallant doctor --project-dir ${projectDir} --require-capture --require-memory-loop --semantic-proof`
       ];
   return {
     operation: wantsAttach ? "attach_project" : "connect_capture",
@@ -2154,17 +2160,17 @@ function answerRu(
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nЯ понял это как подключение проекта или обязательного startup/capture слоя, но не хватает данных: ${workflowRequest.missing.join(", ")}. Уточни путь к папке проекта. Я не буду угадывать путь, потому что attach/connect меняет локальные файлы проекта.`;
       }
-      return `${baseline}\n\nЯ понял это как подключение Recallant к проекту и агентскому клиенту. Безопасная цепочка: сначала attach/connect dry-run, затем установка project-local hook targets, затем doctor --require-capture --semantic-proof. Полная готовность считается доказанной только после context read, create+recall semantic memory proof, memory write и checkpoint.`;
+      return `${baseline}\n\nЯ понял это как подключение Recallant к проекту и агентскому клиенту. Безопасная цепочка: сначала attach/connect dry-run, затем установка project-local hook targets, затем doctor --require-capture --require-memory-loop --semantic-proof. capture_active доказывает свежее автоматическое событие агента; context read, memory write и checkpoint отдельно доказывают memory_loop_ready.`;
     case "pilot_qa":
       return `${baseline}\n\nЯ понял это как QA/pilot запрос. Безопасный порядок: product acceptance smoke, pilot report smoke, затем browser QA для Workbench. Эти проверки должны дать отчет: что подключено, что запомнилось, что вспомнилось позже, что было отцеплено, и какие оригиналы не были тронуты.`;
     case "connection_check":
       return `${baseline}\n\nПроверка подключения: ${
         facts.capture_ready
-          ? "проект не просто зарегистрирован, а имеет capture-active evidence через Recallant."
-          : facts.semantic_memory_ready
-            ? "semantic memory proof есть, но полный capture loop еще не доказан."
-            : "проект зарегистрирован, но configured is not capture active: semantic proof и полный capture loop еще не доказаны."
-      }\n\nПоследний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
+          ? "проект имеет свежее автоматическое событие агента: capture_active=true."
+          : facts.memory_loop_ready
+            ? "memory loop завершен, но свежего автоматического события нет: capture_active=false."
+            : "проект зарегистрирован, но автоматический захват и memory loop еще не доказаны."
+      }\n\nПоследний автоматический захват: ${facts.last_automatic_capture_at}. Последний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nВот что Recallant нашел в governed memory по запросу “${memoryLookupResult.query}”:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
@@ -2281,17 +2287,17 @@ function answerEn(
       if (workflowRequest?.missing.length) {
         return `${baseline}\n\nI understood this as project onboarding or mandatory startup/capture setup, but I need more detail: ${workflowRequest.missing.join(", ")}. Provide the project folder path. I will not guess the path because attach/connect changes local project files.`;
       }
-      return `${baseline}\n\nI understood this as connecting Recallant to a project and agent client. Safe sequence: attach/connect dry-run first, then project-local hook targets, then doctor --require-capture --semantic-proof. Full readiness is proven only after context read, create+recall semantic memory proof, memory write, and checkpoint evidence exist.`;
+      return `${baseline}\n\nI understood this as connecting Recallant to a project and agent client. Safe sequence: attach/connect dry-run first, then project-local hook targets, then doctor --require-capture --require-memory-loop --semantic-proof. capture_active proves a fresh automatic agent event; context read, memory write, and checkpoint separately prove memory_loop_ready.`;
     case "pilot_qa":
       return `${baseline}\n\nI understood this as a QA/pilot request. Safe order: product acceptance smoke, pilot report smoke, then Workbench browser QA. These checks should report what was attached, what was remembered, what was recalled later, what was detached, and which originals stayed untouched.`;
     case "connection_check":
       return `${baseline}\n\nConnection check: ${
         facts.capture_ready
-          ? "this project is not merely configured; it has capture-active evidence through Recallant."
-          : facts.semantic_memory_ready
-            ? "semantic memory proof exists, but the full capture loop is not proven yet."
-            : "this project is configured/registered, but configured is not capture active; semantic proof and the full capture loop are not proven yet."
-      }\n\nLast context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
+          ? "this project has a fresh automatic agent event: capture_active=true."
+          : facts.memory_loop_ready
+            ? "the memory loop is complete, but no fresh automatic event exists: capture_active=false."
+            : "this project is configured, but automatic capture and the memory loop are not proven yet."
+      }\n\nLast automatic capture: ${facts.last_automatic_capture_at}. Last context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nHere is what Recallant found in governed memory for “${memoryLookupResult.query}”:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;

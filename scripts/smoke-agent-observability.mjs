@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { analyzeAgentObservationCompleteness } from "../packages/core/dist/index.js";
+import {
+  analyzeAgentObservationCompleteness,
+  deriveAgentRecoveryChains
+} from "../packages/core/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 
 const databaseUrl =
@@ -119,6 +122,33 @@ try {
     metadata: { remediation_observation_id: remediation.id }
   });
 
+  const automaticTrace = randomUUID();
+  const automaticError = await db.appendAgentObservation({
+    session_id: sessionId,
+    trace_id: automaticTrace,
+    kind: "error",
+    tool_name: "exec_command",
+    error_code: "COMMAND_FAILED",
+    body: "The observed command failed."
+  });
+  const automaticRetry = await db.appendAgentObservation({
+    session_id: sessionId,
+    trace_id: automaticTrace,
+    parent_observation_id: automaticError.id,
+    kind: "tool_call",
+    tool_name: "exec_command",
+    title: "Retry the corrected command"
+  });
+  await db.appendAgentObservation({
+    session_id: sessionId,
+    trace_id: automaticTrace,
+    parent_observation_id: automaticRetry.id,
+    kind: "tool_result",
+    tool_name: "exec_command",
+    status: "success",
+    body: "The corrected command completed."
+  });
+
   const observations = await db.listAgentObservations({ session_id: sessionId, limit: 100 });
   const serialized = JSON.stringify(observations);
   assert(!forbidden.some((value) => serialized.includes(value)), "stored data leaked a secret");
@@ -132,6 +162,16 @@ try {
   assert(!observations.some((item) => item.id === expired.id), "retention did not prune old data");
 
   const completeness = analyzeAgentObservationCompleteness(observations);
+  const recoveryChains = deriveAgentRecoveryChains(observations);
+  const automaticChain = recoveryChains.find(
+    (chain) => chain.error_observation_id === automaticError.id
+  );
+  assert(automaticChain?.status === "verified", "automatic recovery was not verified");
+  assert(
+    automaticChain.steps.some((step) => step.stage === "retry" && step.automatic) &&
+      automaticChain.steps.some((step) => step.stage === "verification" && step.automatic),
+    `automatic recovery steps were not linked: ${JSON.stringify(automaticChain)}`
+  );
   assert(
     completeness.state === "complete",
     `unexpected completeness: ${JSON.stringify(completeness)}`
@@ -187,6 +227,7 @@ try {
         retention: "pass",
         confirmed_forget: "pass",
         error_chain: "resolved",
+        automatic_recovery_chain: automaticChain,
         completeness
       },
       null,

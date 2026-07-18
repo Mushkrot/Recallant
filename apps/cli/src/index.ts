@@ -35,6 +35,7 @@ import {
   buildMemoryKeeperPlan,
   getRecallantCoreInfo,
   prepareProjectLogSync,
+  renderCodexOtelConfig,
   validateProjectIdentity,
   type MemoryKeeperPlan,
   type MemoryKeeperSourceInput,
@@ -78,6 +79,7 @@ import {
 import {
   buildAgentLifecycleCloseoutResult,
   buildRecallantReadinessContract,
+  isAutomaticCaptureFresh,
   agentObservationKindValues,
   agentObservationResolutionStatusValues,
   agentObservationStatusValues,
@@ -445,6 +447,7 @@ type OnboardVerifyPayload = {
   failed_stage: "capture" | "readiness" | "recall" | null;
   message: string | null;
   capture_active: boolean;
+  memory_loop_ready: boolean;
   evidence: OnboardVerifyEvidence;
   proof: {
     demo: "done" | "skipped" | "failed";
@@ -860,6 +863,7 @@ function remoteAgentConsentOutput(
       remote_mcp_ready: readinessContract.remote_mcp_ready,
       context_ready: readinessContract.context_ready,
       semantic_memory_ready: readinessContract.semantic_memory_ready,
+      memory_loop_ready: readinessContract.memory_loop_ready,
       capture_active: readinessContract.capture_active,
       ingestion_approved: readinessContract.ingestion_approved,
       readiness_state: readinessContract.primary_state,
@@ -888,6 +892,7 @@ function remoteAgentStartReadyHumanReport(
     `remote_mcp_ready: ${readinessContract.remote_mcp_ready ? "yes" : "no"}`,
     `context_ready: ${readinessContract.context_ready ? "yes" : "no"}`,
     `semantic_memory_ready: ${readinessContract.semantic_memory_ready ? "yes" : "no"}`,
+    `memory_loop_ready: ${readinessContract.memory_loop_ready ? "yes" : "no"}`,
     `capture_active: ${readinessContract.capture_active ? "yes" : "no"}`,
     `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
     `Project scope: ${credentialScope.project_id ?? "unknown"}`,
@@ -916,7 +921,7 @@ function remoteAgentStartReadyHumanReport(
       ? `Proof: semantic governed-memory marker evidence was last seen at ${semanticProofAt}.`
       : "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
     readiness?.warning ? `Readiness warning: ${readiness.warning}` : null,
-    "Do not call this capture-active until context read, memory write/recall, and checkpoint evidence exist.",
+    "Do not call this capture-active until a fresh automatic agent event is observed; context, memory, and checkpoint evidence only establish memory_loop_ready.",
     "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
   ]
     .filter((line): line is string => line !== null)
@@ -1895,13 +1900,13 @@ async function readProjectConfig(projectDir: string) {
   }
 }
 
-function captureStatusFromState(state: AgentSessionState | null) {
+function memoryLoopStatusFromState(state: AgentSessionState | null) {
   if (!state) return "not_observed";
   if (state.last_context_read_at && state.last_memory_write_at && state.last_checkpoint_at) {
-    return "capture_active";
+    return "memory_loop_ready";
   }
   if (state.last_context_read_at || state.last_memory_write_at || state.last_checkpoint_at) {
-    return "capture_partial";
+    return "memory_loop_partial";
   }
   return state.status === "active" ? "session_started" : "not_observed";
 }
@@ -1959,7 +1964,7 @@ async function hookKitReadiness(projectDir: string) {
         parsed.fail_soft === true &&
         parsed.writes_global_config === false &&
         typeof parsed.ready_proof === "string" &&
-        parsed.ready_proof.includes("--require-capture") &&
+        parsed.ready_proof.includes("--require-memory-loop") &&
         captureTargetNames.every((target) => objectValue(targets[target]).script);
       manifest = {
         path: manifestPath,
@@ -2001,7 +2006,12 @@ async function codexNativeHookReadiness(projectDir: string) {
   const state = await readAgentSessionState(projectDir).catch(() => null);
   const observed =
     state?.native_hook?.client === "codex" && Boolean(state.native_hook.last_observed_at);
-  const captureActive = config.configured && observed;
+  const captureFreshnessHours = Number(process.env.RECALLANT_AGENT_CAPTURE_FRESHNESS_HOURS ?? 24);
+  const fresh = isAutomaticCaptureFresh({
+    last_automatic_capture_at: state?.native_hook?.last_observed_at ?? null,
+    capture_freshness_hours: captureFreshnessHours
+  });
+  const captureActive = config.configured && fresh;
   const status =
     config.status === "invalid_json" || config.status === "invalid_shape"
       ? config.status
@@ -2011,15 +2021,19 @@ async function codexNativeHookReadiness(projectDir: string) {
           : "not_configured"
         : !observed
           ? "configured_unobserved"
-          : state.native_hook?.last_mode === "offline_spool"
-            ? "observed_offline_spool"
-            : "observed_server";
+          : !fresh
+            ? "observed_stale"
+            : state.native_hook?.last_mode === "offline_spool"
+              ? "observed_offline_spool"
+              : "observed_server";
   return {
     path,
     status,
     configured: config.configured,
     observed,
+    fresh,
     capture_active: captureActive,
+    capture_freshness_hours: captureFreshnessHours,
     configured_events: config.configured_events,
     missing_events: config.missing_events,
     command: config.command,
@@ -2766,13 +2780,13 @@ function documentationPostureHumanLines(posture: DocumentationPosture | null | u
   ];
 }
 
-async function checkCaptureReadiness(input: {
+async function checkMemoryLoopReadiness(input: {
   projectDir: string;
   database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>> | null;
 }) {
   const config = await readProjectConfig(input.projectDir);
   const localState = await readAgentSessionState(input.projectDir).catch(() => null);
-  const localStatus = captureStatusFromState(localState);
+  const localStatus = memoryLoopStatusFromState(localState);
   let databaseReadiness: Record<string, unknown> | null = null;
   let databaseError: string | null = null;
   if (config?.project_id && input.database) {
@@ -2799,7 +2813,7 @@ async function checkCaptureReadiness(input: {
       databaseError = error instanceof Error ? error.message : String(error);
     }
   }
-  const localReady = localStatus === "capture_active";
+  const localReady = localStatus === "memory_loop_ready";
   const databaseReady = databaseReadiness?.ready === true;
   const ready = localReady || databaseReady;
   const missing: string[] = [];
@@ -2810,9 +2824,9 @@ async function checkCaptureReadiness(input: {
     required: false,
     ready,
     status: ready
-      ? "capture_active"
-      : localStatus === "capture_partial" || localStatus === "session_started"
-        ? "capture_partial"
+      ? "memory_loop_ready"
+      : localStatus === "memory_loop_partial" || localStatus === "session_started"
+        ? "memory_loop_partial"
         : config?.project_id
           ? "registered_only"
           : "not_attached",
@@ -2839,7 +2853,7 @@ async function checkCaptureReadiness(input: {
 }
 
 function readinessContractForDoctor(input: {
-  captureReadiness: Awaited<ReturnType<typeof checkCaptureReadiness>>;
+  captureReadiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>>;
   clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
   remoteConsentScope: RemoteAgentConsentScope | null;
   semanticProof: LocalDoctorSemanticProofResult;
@@ -2848,6 +2862,7 @@ function readinessContractForDoctor(input: {
   const localState = objectValue(input.captureReadiness.local_state);
   const databaseReadiness = objectValue(input.captureReadiness.database_readiness);
   const hookKit = objectValue(input.clientConnection.hook_kit);
+  const automaticAgentAudit = objectValue(input.clientConnection.automatic_agent_audit);
   const configured = Boolean(
     remoteConfigured ||
     input.captureReadiness.project_config.present ||
@@ -2872,12 +2887,15 @@ function readinessContractForDoctor(input: {
     remote_mcp_ready: remoteConfigured,
     context_ready: Boolean(lastContextReadAt),
     semantic_memory_ready: input.semanticProof.ok === true,
-    capture_active: input.captureReadiness.ready === true,
+    memory_loop_ready: input.captureReadiness.ready === true,
     ingestion_approved: false,
     last_context_read_at: lastContextReadAt,
     last_memory_write_at: lastMemoryWriteAt,
     last_checkpoint_at: lastCheckpointAt,
     last_semantic_recall_proof_at: input.semanticProof.completed_at,
+    last_automatic_capture_at: stringValue(automaticAgentAudit.last_observed_at) ?? null,
+    automatic_capture_source: automaticAgentAudit.observed === true ? "codex_native_hook" : null,
+    capture_freshness_hours: Number(automaticAgentAudit.capture_freshness_hours ?? 24),
     ingestion_approval_ref: null
   });
 }
@@ -2902,7 +2920,7 @@ function mergeDoctorReadinessContract(
     remote_mcp_ready: persistent.remote_mcp_ready || fallback.remote_mcp_ready,
     context_ready: persistent.context_ready || fallback.context_ready,
     semantic_memory_ready: persistent.semantic_memory_ready || fallback.semantic_memory_ready,
-    capture_active: persistent.capture_active || fallback.capture_active,
+    memory_loop_ready: persistent.memory_loop_ready || fallback.memory_loop_ready,
     ingestion_approved: persistent.ingestion_approved || fallback.ingestion_approved,
     last_context_read_at:
       persistent.evidence.last_context_read_at ?? fallback.evidence.last_context_read_at,
@@ -2913,6 +2931,14 @@ function mergeDoctorReadinessContract(
     last_semantic_recall_proof_at:
       persistent.evidence.last_semantic_recall_proof_at ??
       fallback.evidence.last_semantic_recall_proof_at,
+    last_automatic_capture_at:
+      persistent.evidence.last_automatic_capture_at ?? fallback.evidence.last_automatic_capture_at,
+    automatic_capture_source:
+      persistent.evidence.automatic_capture_source ?? fallback.evidence.automatic_capture_source,
+    capture_freshness_hours: Math.max(
+      persistent.capture_freshness_hours,
+      fallback.capture_freshness_hours
+    ),
     ingestion_approval_ref:
       persistent.evidence.ingestion_approval_ref ?? fallback.evidence.ingestion_approval_ref
   });
@@ -3144,15 +3170,16 @@ async function runLocalDoctorSemanticProof(input: {
 function doctorOwnerSummary(input: {
   projectDir: string;
   postgres: { configured: boolean; reachable: boolean };
-  captureReadiness: Awaited<ReturnType<typeof checkCaptureReadiness>>;
+  captureReadiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>>;
   clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
   remoteConsentScope: RemoteAgentConsentScope | null;
   requireCapture: boolean;
+  requireMemoryLoop: boolean;
 }) {
   const attached = Boolean(input.captureReadiness.project_config.present);
   const remoteReady = input.remoteConsentScope !== null;
   const remoteOnly = remoteReady && !attached;
-  const captureReady = input.captureReadiness.ready === true;
+  const memoryLoopReady = input.captureReadiness.ready === true;
   const hookKit = objectValue(input.clientConnection.hook_kit);
   const automaticAgentAudit = objectValue(input.clientConnection.automatic_agent_audit);
   const automaticAgentAuditConfigured = automaticAgentAudit.configured === true;
@@ -3172,14 +3199,14 @@ function doctorOwnerSummary(input: {
       : "not_configured";
   const status = remoteOnly
     ? "remote_ready_local_storage_not_attached"
-    : captureReady
+    : automaticAgentAuditActive
       ? "recording"
       : attached
         ? configured
           ? "configured_not_recording"
           : "not_configured"
         : "not_attached";
-  const headline = captureReady
+  const headline = automaticAgentAuditActive
     ? "Recallant capture is active for this project."
     : status === "remote_ready_local_storage_not_attached"
       ? "remote-ready, local storage not attached."
@@ -3188,7 +3215,7 @@ function doctorOwnerSummary(input: {
         : status === "not_configured"
           ? "Project is attached, but the agent client is not fully connected yet."
           : "Project is not attached to Recallant yet.";
-  const nextStep = captureReady
+  const nextStep = automaticAgentAuditActive
     ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
       ? `Run recallant connect codex --project-dir ${input.projectDir}, then review the command hook in /hooks.`
       : automaticAgentAuditConfigured && !automaticAgentAuditActive
@@ -3200,7 +3227,9 @@ function doctorOwnerSummary(input: {
         ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
         : input.clientConnection.status !== "mcp_and_hooks_ready"
           ? `Run recallant connect codex --project-dir ${input.projectDir} --dry-run, then install after review.`
-          : "Start an agent session through Recallant, read context, write memory, and checkpoint; then rerun doctor --require-capture.";
+          : automaticAgentAuditConfigured
+            ? "Perform one normal Codex action, then rerun doctor --require-capture."
+            : `Run recallant connect codex --project-dir ${input.projectDir}, review the command hook in /hooks, then perform one normal Codex action.`;
   return {
     status,
     headline,
@@ -3223,11 +3252,13 @@ function doctorOwnerSummary(input: {
       "Open /hooks in Codex, review the Recallant command hook, and trust it.",
     connection_status: connectionStatus,
     configured,
-    actually_recording: captureReady,
+    actually_recording: automaticAgentAuditActive,
+    memory_loop_ready: memoryLoopReady,
     require_capture_gate: input.requireCapture,
+    require_memory_loop_gate: input.requireMemoryLoop,
     next_step: nextStep,
     proof:
-      "Memory capture means Recallant observed context read, memory write, and checkpoint evidence. Automatic agent audit separately requires configured native Codex hooks plus an observed codex-hook invocation.",
+      "capture_active requires a fresh automatic Codex hook event. memory_loop_ready separately means context-read, memory-write, and checkpoint evidence exist.",
     postgres_ready: input.postgres.reachable
   };
 }
@@ -3241,7 +3272,9 @@ function doctorHumanReport(result: {
   readiness_contract: ReturnType<typeof readinessContractForDoctor>;
   postgres: { configured: boolean; reachable: boolean };
   project_config: { path: string; present: boolean };
-  capture_readiness: Awaited<ReturnType<typeof checkCaptureReadiness>> & { required: boolean };
+  capture_readiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>> & {
+    required: boolean;
+  };
   semantic_memory_proof: LocalDoctorSemanticProofResult;
   client_connection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
   local_spool_status: Awaited<ReturnType<typeof getLocalSpoolStatus>>;
@@ -3296,6 +3329,7 @@ function doctorHumanReport(result: {
     `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
     `- Agent capture active: ${okNo(summary.actually_recording)}`,
+    `- Memory loop ready: ${okNo(summary.memory_loop_ready)}`,
     `- Automatic Codex audit configured: ${okNo(summary.automatic_agent_audit_configured)}`,
     `- Automatic Codex audit active: ${okNo(summary.automatic_agent_audit_active)}`,
     `- Semantic memory proof: ${
@@ -3316,7 +3350,7 @@ function doctorHumanReport(result: {
     `- Automatic Codex audit: ${String(summary.automatic_agent_audit_status)}`,
     `- Automatic audit last seen: ${String(summary.automatic_agent_audit_last_seen_at ?? "never")}`,
     `- Codex hook review: ${String(summary.codex_hook_trust_action)}`,
-    `- Capture status: ${result.capture_readiness.status}`,
+    `- Memory loop status: ${result.capture_readiness.status}`,
     `- Embedding recovery: ${result.pending_embeddings.recommendation}`,
     `- Spool path: ${spool.spool_path}`,
     `- Spool replay dry-run: ${spool.replay_command}`,
@@ -3400,7 +3434,8 @@ function onboardHumanReport(result: {
     lines.push(`Verify: ${result.verify.status}`);
     if (result.verify.status === "passed") {
       lines.push(
-        "Capture active: yes — context read, memory write, checkpoint, and recall proof are present."
+        `Automatic capture: ${result.verify.capture_active ? "active" : "awaiting the first native agent event"}.`,
+        "Memory loop ready: yes — context read, memory write, checkpoint, and recall proof are present."
       );
     }
     if (result.verify.status === "failed") {
@@ -5247,6 +5282,7 @@ async function runDoctor(argv: readonly string[]) {
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const projectConfig = await readProjectConfig(projectDir);
   const requireCapture = argv.includes("--require-capture");
+  const requireMemoryLoop = argv.includes("--require-memory-loop");
   const requireAgentAudit = argv.includes("--require-agent-audit");
   const semanticProofRequested = argv.includes("--semantic-proof");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
@@ -5276,7 +5312,7 @@ async function runDoctor(argv: readonly string[]) {
               : "Local semantic proof requires RECALLANT_DATABASE_URL or an attached Recallant project."
           )
       : semanticProofNotRequested();
-    const captureReadiness = await checkCaptureReadiness({ projectDir, database });
+    const captureReadiness = await checkMemoryLoopReadiness({ projectDir, database });
     const localSpoolStatus = await getLocalSpoolStatus(argv);
     const serviceEnvProfile = await checkServiceEnvProfile();
     const productionEnv = await productionReadinessEnvSnapshot();
@@ -5313,7 +5349,8 @@ async function runDoctor(argv: readonly string[]) {
         captureReadiness,
         clientConnection,
         remoteConsentScope,
-        requireCapture
+        requireCapture,
+        requireMemoryLoop
       }),
       readiness_contract: readinessContract,
       postgres,
@@ -5323,7 +5360,13 @@ async function runDoctor(argv: readonly string[]) {
       },
       capture_readiness: {
         ...captureReadiness,
-        required: requireCapture
+        required: requireMemoryLoop,
+        deprecated_name: true,
+        preferred_name: "memory_loop_readiness"
+      },
+      memory_loop_readiness: {
+        ...captureReadiness,
+        required: requireMemoryLoop
       },
       agent_audit: {
         ...objectValue(clientConnection.automatic_agent_audit),
@@ -5419,11 +5462,11 @@ async function runDoctor(argv: readonly string[]) {
     process.stdout.write(
       format === "json" ? `${JSON.stringify(result, null, 2)}\n` : doctorHumanReport(result)
     );
-    if (requireCapture && !captureReadiness.ready) {
+    if (requireMemoryLoop && !captureReadiness.ready) {
       process.exitCode = 2;
     }
     if (
-      requireAgentAudit &&
+      (requireCapture || requireAgentAudit) &&
       objectValue(clientConnection.automatic_agent_audit).capture_active !== true
     ) {
       process.exitCode = 2;
@@ -6850,6 +6893,80 @@ function debugCodexHook(argv: readonly string[], value: Record<string, unknown>)
   process.stderr.write(`${JSON.stringify(value)}\n`);
 }
 
+async function runOtelConfig(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
+  const projectId = parseFlag(argv, "--project-id") ?? config?.project_id ?? null;
+  const developerId =
+    parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID ?? null;
+  const clientId = parseFlag(argv, "--client-id") ?? "codex-otel";
+  const serverUrl =
+    parseFlag(argv, "--server-url") ??
+    config?.recallant_server_url ??
+    process.env.RECALLANT_SERVER_URL ??
+    null;
+  if (!projectId) throw new Error("VALIDATION_ERROR: --project-id or attached project is required");
+  if (!developerId) throw new Error("VALIDATION_ERROR: --developer-id is required");
+  if (!serverUrl) throw new Error("VALIDATION_ERROR: --server-url is required");
+  const parsedServerUrl = new URL(serverUrl);
+  if (parsedServerUrl.protocol !== "https:" && parsedServerUrl.hostname !== "127.0.0.1") {
+    throw new Error("VALIDATION_ERROR: --server-url must use HTTPS or loopback HTTP");
+  }
+  const fragment = renderCodexOtelConfig({
+    server_url: parsedServerUrl.toString().replace(/\/$/, ""),
+    project_id: projectId,
+    developer_id: developerId,
+    client_id: clientId,
+    environment: parseFlag(argv, "--environment")
+  });
+  let markedConfigured = false;
+  let coverage = null;
+  const database = createRecallantDbFromEnv();
+  if (database) {
+    try {
+      if (argv.includes("--confirm-configured")) {
+        await database.configureProjectOtelControl({
+          project_id: projectId,
+          developer_id: developerId,
+          client_id: clientId
+        });
+        markedConfigured = true;
+      }
+      coverage = await database.getOtelControlCoverage(projectId);
+    } finally {
+      await database.close();
+    }
+  } else if (argv.includes("--confirm-configured")) {
+    throw new Error("RECALLANT_DATABASE_URL is required for --confirm-configured");
+  }
+  const result = {
+    ok: true,
+    action: "otel_config",
+    writes_global_config: false,
+    target: "user-level Codex config (~/.codex/config.toml or a named user profile)",
+    token_environment_variable: "RECALLANT_OTEL_TOKEN",
+    prompt_content_enabled: false,
+    protocol: "otlp_http_json",
+    project_id: projectId,
+    developer_id: developerId,
+    client_id: clientId,
+    fragment,
+    marked_configured: markedConfigured,
+    coverage,
+    next_steps: [
+      "Create or reuse a scoped Recallant credential whose client ID matches this fragment.",
+      "Expose that credential to Codex as RECALLANT_OTEL_TOKEN.",
+      "Merge the fragment into user-level Codex config; project-local telemetry is ignored by Codex.",
+      "Start a new Codex run, then check Workbench Activity > Coverage."
+    ]
+  };
+  process.stdout.write(
+    cliOutputFormat(argv) === "text"
+      ? `${fragment}\nRecallant did not edit global Codex configuration.\n`
+      : `${JSON.stringify(result, null, 2)}\n`
+  );
+}
+
 async function runCodexHook(argv: readonly string[]) {
   let event: CodexHookEvent | null = null;
   let hookArgv: readonly string[] | null = null;
@@ -7564,7 +7681,7 @@ async function runDemoCapture(argv: readonly string[]) {
         later_recall_works: recalled
       },
       next_commands: [
-        `recallant doctor --project-dir ${dir} --require-capture`,
+        `recallant doctor --project-dir ${dir} --require-memory-loop`,
         `recallant ask "what did the agent remember?" --project-dir ${dir}`
       ]
     };
@@ -8048,7 +8165,7 @@ Client integrations can call:
       project_dir_env: "RECALLANT_PROJECT_DIR",
       timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
       spool_dir: ".recallant/spool",
-      ready_proof: "recallant doctor --project-dir <project> --require-capture",
+      ready_proof: "recallant doctor --project-dir <project> --require-memory-loop",
       targets: {
         session_start: {
           script: ".recallant/hooks/start-session.sh",
@@ -8602,7 +8719,7 @@ function remoteConnectProofNextAction(input: {
     );
   }
   if (input.semanticMemoryReady) {
-    return "Run `recallant agent-start --format json`; semantic proof is present, while capture_active remains false until a real working loop is recorded.";
+    return "Semantic proof is present. capture_active remains false until a fresh automatic agent event is observed; remote MCP activity alone does not claim automatic capture.";
   }
   if (input.contextReady) {
     return "Run `recallant remote-doctor --project-dir . --semantic-proof` when you want a safe governed semantic marker create/recall proof.";
@@ -10154,7 +10271,7 @@ async function runConnect(argv: readonly string[]) {
     developer_id: developerId,
     connection_status: mandatoryStartupLayerStatus,
     hook_status: hookStatus,
-    capture_status: captureStatusFromState(state),
+    memory_loop_status: memoryLoopStatusFromState(state),
     mandatory_startup_layer: {
       status: mandatoryStartupLayerStatus,
       mcp_configured_or_planned: mcpConfigWillExist,
@@ -10576,6 +10693,7 @@ async function runOnboard(argv: readonly string[]) {
     failed_stage: null,
     message: null,
     capture_active: false,
+    memory_loop_ready: false,
     evidence: emptyOnboardVerifyEvidence(),
     proof: { demo: "skipped", doctor: "skipped", ask: "skipped" },
     stages: {
@@ -10897,7 +11015,7 @@ async function runOnboard(argv: readonly string[]) {
       "doctor",
       "--project-dir",
       options.projectDir,
-      "--require-capture",
+      "--require-memory-loop",
       "--format",
       "json"
     ];
@@ -10907,22 +11025,25 @@ async function runOnboard(argv: readonly string[]) {
     if (doctorResult.status !== 0) {
       verifyResult.proof.doctor = "failed";
       verifyResult.stages.readiness.status = "failed";
-      verifyResult.stages.readiness.detail = "capture readiness proof did not complete";
-      emitVerifyFailure("readiness", "capture readiness proof did not complete");
+      verifyResult.stages.readiness.detail = "memory-loop readiness proof did not complete";
+      emitVerifyFailure("readiness", "memory-loop readiness proof did not complete");
       return;
     }
-    const captureReady = Boolean(objectValue(doctorResult.json?.capture_readiness).ready);
-    if (!captureReady) {
+    const memoryLoopReady = Boolean(objectValue(doctorResult.json?.memory_loop_readiness).ready);
+    if (!memoryLoopReady) {
       verifyResult.proof.doctor = "failed";
       verifyResult.stages.readiness.status = "failed";
-      verifyResult.stages.readiness.detail = "capture is not active yet; onboarding is incomplete";
-      emitVerifyFailure("readiness", "capture is not active yet; onboarding is incomplete");
+      verifyResult.stages.readiness.detail =
+        "the governed memory loop is not complete; onboarding is incomplete";
+      emitVerifyFailure("readiness", "the governed memory loop is not complete");
       return;
     }
     verifyResult.proof.doctor = "done";
     verifyResult.stages.readiness.status = "done";
-    verifyResult.stages.readiness.detail = "capture readiness is active";
-    verifyResult.capture_active = true;
+    verifyResult.stages.readiness.detail = "memory-loop readiness is complete";
+    verifyResult.memory_loop_ready = true;
+    verifyResult.capture_active =
+      objectValue(doctorResult.json?.readiness_contract).capture_active === true;
     embeddingRecovery = await recoverOnboardPendingEmbeddings(
       options.projectDir,
       doctorResult.json
@@ -12249,14 +12370,24 @@ function usageText(command?: string) {
   }
   if (command === "doctor") {
     return [
-      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--require-agent-audit] [--semantic-proof] [--format json|text]",
+      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--require-memory-loop] [--require-agent-audit] [--semantic-proof] [--format json|text]",
       "",
-      "Diagnose local Recallant setup. --require-capture gates on context read + memory write + checkpoint evidence. --require-agent-audit separately requires an observed native Codex hook invocation. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
+      "Diagnose local Recallant setup. --require-capture requires a fresh automatic native Codex hook event. --require-memory-loop separately requires context read + memory write + checkpoint evidence. --require-agent-audit is a compatibility alias for the automatic-capture gate. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
       "",
-      "Configuration proves access. Proof proves memory. Capture-active proves Recallant is doing its job.",
+      recallantReadinessInvariant,
       "",
       "Example:",
-      "  recallant doctor --project-dir . --require-capture --semantic-proof",
+      "  recallant doctor --project-dir . --require-capture --require-memory-loop --semantic-proof",
+      ""
+    ].join("\n");
+  }
+  if (command === "otel-config") {
+    return [
+      "Usage: recallant otel-config --server-url <https-url> [--project-dir <path>|--project-id <id>] --developer-id <id> [--client-id <id>] [--environment <name>] [--confirm-configured] [--format json|text]",
+      "",
+      "Print the exact user-level Codex OTLP/HTTP JSON fragment for Recallant's independent audit control lane. This command never edits global Codex configuration and never enables prompt content.",
+      "",
+      "After merging the fragment and exposing RECALLANT_OTEL_TOKEN, start a new Codex run. Use --confirm-configured only after the user-level config is actually in place; receipt of a real OTel event also marks the lane configured automatically.",
       ""
     ].join("\n");
   }
@@ -12344,7 +12475,7 @@ function usageText(command?: string) {
       ""
     ].join("\n");
   }
-  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|codex-hook|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|otel-config|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|codex-hook|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
 }
 
 function wantsHelp(argv: readonly string[]) {
@@ -12379,6 +12510,7 @@ async function main(argv: readonly string[]) {
   if (command === "remote-cleanup" || command === "disconnect-remote")
     return runRemoteCleanup(argv);
   if (command === "doctor") return runDoctor(argv);
+  if (command === "otel-config") return runOtelConfig(argv);
   if (command === "audit") return runAudit(argv);
   if (command === "attach") return runAttach(argv);
   if (command === "connect") return runConnect(argv);

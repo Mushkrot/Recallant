@@ -77,6 +77,8 @@
     "agent-observability:smoke": "node scripts/smoke-agent-observability.mjs",
     "codex-hook-adapter:smoke": "npm run build --workspace @recallant/adapters && node scripts/smoke-codex-hook-adapter.mjs",
     "codex-otel-contract:smoke": "npm run build --workspace @recallant/core && node scripts/smoke-codex-otel-contract.mjs",
+    "codex-otel-control:smoke": "npm run build && node scripts/smoke-codex-otel-control.mjs",
+    "capture-readiness:smoke": "npm run build --workspace @recallant/contracts && node scripts/smoke-capture-readiness.mjs",
     "codex-hook-runtime:smoke": "npm run build && node scripts/smoke-codex-hook-runtime.mjs",
     "demo-capture:smoke": "node scripts/smoke-demo-capture.mjs",
     "product-acceptance:smoke": "node scripts/smoke-agent-capture.mjs",

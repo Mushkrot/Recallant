@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  codexOtelLogsEndpointPath,
   codexOtelEventNameValues,
   type CodexOtelControlEventInput,
   type CodexOtelEventName,
@@ -272,4 +273,29 @@ export function parseCodexOtelLogs(input: string | unknown): CodexOtelParseResul
     accepted_log_records: events.length,
     ignored_log_records: seen - events.length
   };
+}
+
+function tomlString(value: string) {
+  return JSON.stringify(value);
+}
+
+export function renderCodexOtelConfig(input: {
+  server_url: string;
+  project_id: string;
+  developer_id: string;
+  client_id: string;
+  environment?: string | null;
+}) {
+  const serverUrl = input.server_url.replace(/\/$/, "");
+  const endpoint = `${serverUrl}${codexOtelLogsEndpointPath}`;
+  const tokenReference = "${RECALLANT_OTEL_TOKEN}";
+  return [
+    "[otel]",
+    `environment = ${tomlString(input.environment ?? "prod")}`,
+    "log_user_prompt = false",
+    'trace_exporter = "none"',
+    'metrics_exporter = "none"',
+    `exporter = { otlp-http = { endpoint = ${tomlString(endpoint)}, protocol = "json", headers = { Authorization = ${tomlString(`Bearer ${tokenReference}`)}, "X-Recallant-Project-Id" = ${tomlString(input.project_id)}, "X-Recallant-Developer-Id" = ${tomlString(input.developer_id)}, "X-Recallant-Client-Id" = ${tomlString(input.client_id)} } } }`,
+    ""
+  ].join("\n");
 }

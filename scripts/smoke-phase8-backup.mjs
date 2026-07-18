@@ -106,6 +106,31 @@ try {
       `,
       [projectId, developerId, sessionId, randomUUID(), randomUUID(), eventId, searchNeedle]
     );
+    await database.query(
+      `
+        INSERT INTO project_otel_control_settings (
+          project_id, developer_id, enabled, client_id, configured_at
+        )
+        VALUES ($1, $2, true, 'backup-smoke', now())
+      `,
+      [projectId, developerId]
+    );
+    await database.query(
+      `
+        INSERT INTO agent_otel_control_events (
+          project_id, developer_id, event_name, occurred_at, observed_at,
+          payload_hash, dedup_key, match_status, safe_attributes
+        )
+        VALUES ($1, $2, 'codex.conversation_starts', now(), now(),
+                $3, $4, 'missing_hook', '{"fixture":true}'::jsonb)
+      `,
+      [
+        projectId,
+        developerId,
+        `sha256:${randomUUID().replaceAll("-", "")}`,
+        `backup-otel-${randomUUID()}`
+      ]
+    );
   } finally {
     await database.end();
   }
@@ -177,7 +202,9 @@ try {
     "remote_connect_requests",
     "settings_audit_events",
     "system_activity_events",
-    "agent_observations"
+    "agent_observations",
+    "project_otel_control_settings",
+    "agent_otel_control_events"
   ]) {
     assert(coveredTables.includes(table), `Backup inventory omitted ${table}`);
   }

@@ -9,6 +9,8 @@ export const codexOtelEventNameValues = [
   "codex.tool_result"
 ] as const;
 
+export const codexOtelLogsEndpointPath = "/api/otel/v1/logs" as const;
+
 export type CodexOtelEventName = (typeof codexOtelEventNameValues)[number];
 
 export const otelControlMatchStatusValues = [

@@ -127,6 +127,8 @@ async function countProjectRows(projectId) {
           (SELECT count(*)::int FROM events WHERE project_id = $1) AS events,
           (SELECT count(*)::int FROM chunks WHERE project_id = $1) AS chunks,
           (SELECT count(*)::int FROM agent_observations WHERE project_id = $1) AS agent_observations,
+          (SELECT count(*)::int FROM agent_otel_control_events WHERE project_id = $1) AS agent_otel_control_events,
+          (SELECT count(*)::int FROM project_otel_control_settings WHERE project_id = $1) AS project_otel_control_settings,
           (SELECT count(*)::int FROM agent_memories WHERE project_id = $1) AS agent_memories,
           (SELECT count(*)::int FROM recall_traces WHERE project_id = $1) AS recall_traces,
           (SELECT count(*)::int FROM model_calls WHERE project_id = $1) AS model_calls,
@@ -171,6 +173,29 @@ async function addGovernanceRows(projectId) {
                 'not_applicable', 'standard', 'codex')
       `,
       [projectId, projectDeveloperId, sessionId, randomUUID(), randomUUID()]
+    );
+    await client.query(
+      `
+        INSERT INTO project_otel_control_settings (project_id, developer_id, client_id)
+        VALUES ($1, $2, 'sanitize-smoke')
+      `,
+      [projectId, projectDeveloperId]
+    );
+    await client.query(
+      `
+        INSERT INTO agent_otel_control_events (
+          project_id, developer_id, event_name, occurred_at, observed_at,
+          payload_hash, dedup_key, match_status, safe_attributes
+        )
+        VALUES ($1, $2, 'codex.conversation_starts', now(), now(),
+                $3, $4, 'missing_hook', '{"fixture":true}'::jsonb)
+      `,
+      [
+        projectId,
+        projectDeveloperId,
+        `sha256:${randomUUID().replaceAll("-", "")}`,
+        `sanitize-otel-${randomUUID()}`
+      ]
     );
     await client.query(
       `
@@ -297,6 +322,8 @@ if (
   !token ||
   dryRunCounts.events < 1 ||
   dryRunCounts.agent_observations < 1 ||
+  dryRunCounts.agent_otel_control_events < 1 ||
+  dryRunCounts.project_otel_control_settings < 1 ||
   dryRunCounts.agent_memory_source_refs < 1 ||
   dryRunCounts.settings_audit_events < 1 ||
   dryRunCounts.system_activity_events < 1 ||
@@ -383,6 +410,8 @@ if (
   remainingRows.events !== 0 ||
   remainingRows.chunks !== 0 ||
   remainingRows.agent_observations !== 0 ||
+  remainingRows.agent_otel_control_events !== 0 ||
+  remainingRows.project_otel_control_settings !== 0 ||
   remainingRows.agent_memories !== 0 ||
   remainingRows.recall_traces !== 0 ||
   remainingRows.model_calls !== 0 ||
