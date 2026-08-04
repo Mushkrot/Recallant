@@ -1,0 +1,68 @@
+# Local editor/agent state
+.upstream/
+.claude/settings.local.json
+.codex/
+.cursor/
+.vscode/
+
+# Recallant project-local pointers and spools
+.synthetic-boundary
+
+ planning/docs belong in the private example-service repo
+PROJECT_LOG.md
+stage_goals/
+docs/archive/
+docs/ADR-*.md
+docs/*HANDOFF*.md
+docs/WORKING_CONTEXT.md
+docs/IMPLEMENTATION_STATUS.md
+docs/TEST_CONTRACT.md
+docs/TASK_GRAPH.md
+docs/PRODUCT_ACCEPTANCE_TEST.md
+docs/PRE_PILOT_READINESS.md
+docs/PUBLIC_READINESS.md
+docs/PUBLIC_SCREENSHOTS.md
+docs/PUBLIC_SECURITY_REVIEW.md
+docs/OWNER_SERVER.md
+
+# Secrets and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+tsconfig.tsbuildinfo
+.turbo/
+.next/
+.vite/
+
+# Python worker/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Logs and runtime artifacts
+*.log
+logs/
+tmp/
+temp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
+
+# Local-only Codex owner/private context. Do not commit.
+.codex-local/

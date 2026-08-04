@@ -1,0 +1,17 @@
+{
+  "name": "@recallant/server",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@recallant/contracts": "file:../../packages/contracts",
+    "@recallant/core": "file:../../packages/core",
+    "@recallant/db": "file:../../packages/db",
+    "@recallant/mcp": "file:../../packages/mcp"
+  }
+}

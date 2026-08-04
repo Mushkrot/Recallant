@@ -1,0 +1,1619 @@
+import { spawn, spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
+import { once } from "node:events";
+import { existsSync, readFileSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { readdir, readFile, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+
+const repoRoot = process.cwd();
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function read(path) {
+  return readFile(join(repoRoot, path), "utf8");
+}
+
+function mustInclude(text, markers, label) {
+  for (const marker of markers) {
+    assert(text.includes(marker), `${label} is missing required marker: ${marker}`);
+  }
+}
+
+function mustNotInclude(text, markers, label) {
+  for (const marker of markers) {
+    assert(!text.includes(marker), `${label} contains retired marker: ${marker}`);
+  }
+}
+
+function mustNotMatch(text, patterns, label) {
+  for (const pattern of patterns) {
+    assert(!pattern.test(text), `${label} contains forbidden pattern: ${pattern}`);
+  }
+}
+
+function mustAppearBefore(text, first, second, label) {
+  const firstIndex = text.indexOf(first);
+  const secondIndex = text.indexOf(second);
+  assert(firstIndex >= 0, `${label} is missing required first marker: ${first}`);
+  assert(secondIndex >= 0, `${label} is missing required second marker: ${second}`);
+  assert(firstIndex < secondIndex, `${label} must lead with ${first} before ${second}`);
+}
+
+function mustLeadWithUniversalOnboard(text, label) {
+  const connectIndex = text.indexOf("recallant connect ");
+  const onboardIndex = text.indexOf("recallant onboard");
+  assert(
+    onboardIndex >= 0,
+    `${label} must include recallant onboard as the user-facing entry point`
+  );
+  if (connectIndex >= 0) {
+    assert(
+      onboardIndex < connectIndex,
+      `${label} must introduce recallant onboard before any lower-level recallant connect mention`
+    );
+  }
+}
+
+function fixtureStderrExcerpt(stderr) {
+  const trimmed = stderr.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 1000) : "<empty>";
+}
+
+function parseDoctorFixtureJson(stdout, stderr, code, label) {
+  const stdoutLength = stdout.length;
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      `${label} produced empty stdout; exit_code=${code}; stdout_length=${stdoutLength}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}`
+    );
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(
+      `${label} produced malformed JSON stdout; exit_code=${code}; stdout_length=${stdoutLength}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}; parse_error=${error instanceof Error ? error.message : String(error)}; stdout_excerpt=${trimmed.slice(
+        0,
+        1000
+      )}`
+    );
+  }
+}
+
+const publicDocs = [
+  "README.md",
+  "CONTEXT.md",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
+  "SECURITY.md",
+  "docs/README.md",
+  "docs/QUICKSTART.md",
+  "docs/AGENT_READY_PROJECTS.md",
+  "docs/AGENT_OBSERVABILITY.md",
+  "docs/CONTRACT_STATUS.md",
+  "docs/STATUS.md",
+  "docs/RUNBOOK.md",
+  "docs/WHY_RECALLANT.md",
+  "docs/COMPARISON.md",
+  "docs/assets/workbench/README.md",
+  "docs/research/README.md",
+  "docs/research/REFERENCE_PROJECTS.md",
+  "docs/research/JARVIS_OBSIDIAN_COMPARISON.md",
+  "docs/releases/v0.1.0-dev.0.md",
+  "docs/WORKBENCH_UI.md",
+  "docs/GRAPH_TREE_CONTRACT.md",
+  "docs/ARCHITECTURE.md",
+  "docs/SELF_HOSTING.md",
+  "docs/REMOTE_CONNECT_PLAN.md",
+  "docs/MCP_SPEC.md",
+  "docs/CLIENT_SETUP.md",
+  "docs/SECURITY.md",
+  "docs/ROADMAP.md"
+];
+
+for (const path of publicDocs) {
+  assert(existsSync(join(repoRoot, path)), `Missing public doc: ${path}`);
+}
+
+const docsEntries = await readdir(join(repoRoot, "docs"));
+const allowedDocs = new Set(
+  publicDocs
+    .filter((path) => path.startsWith("docs/"))
+    .map((path) => path.slice("docs/".length).split("/", 1)[0])
+);
+for (const entry of docsEntries) {
+  assert(allowedDocs.has(entry), `Unexpected public docs entry: docs/${entry}`);
+}
+
+assert(!existsSync(join(repoRoot, "stage_goals")), "stage_goals must not remain in public tree");
+assert(
+  !existsSync(join(repoRoot, "PROJECT_LOG.md")),
+  "PROJECT_LOG.md must not remain in public tree"
+);
+
+const readme = await read("README.md");
+mustInclude(
+  readme,
+  [
+    "Self-hosted governed project memory for coding agents",
+    "See It Working",
+    "docs/assets/workbench/home-readiness.png",
+    "docs/assets/workbench/review-provenance.png",
+    "docs/assets/workbench/activity-recovery.png",
+    "What Ships Today",
+    "The Memory Contract",
+    "PostgreSQL + pgvector",
+    "four ordered milestones",
+    "Human Document Memory",
+    "Task Handoff Record",
+    "recallant onboard /path/to/project",
+    "deployment environment",
+    "stops before changing project files",
+    "development prerelease",
+    "Native automatic capture is **Codex-first today**",
+    "configuration does not prove",
+    "bidirectional Codex to Claude Code to Codex continuity",
+    "does not yet provide a",
+    "general human document workspace",
+    "docs/AGENT_READY_PROJECTS.md",
+    "docs/CONTRACT_STATUS.md",
+    "docs/WHY_RECALLANT.md",
+    "docs/COMPARISON.md",
+    "docs/research/README.md",
+    "CONTRIBUTING.md"
+  ],
+  "README.md"
+);
+mustNotInclude(
+  readme,
+  [
+    "native Claude Code capture is available",
+    "stable production release",
+    "Human Document Memory is shipped"
+  ],
+  "README.md product boundary"
+);
+
+const portfolioImageNames = (await readdir(join(repoRoot, "docs/assets/workbench")))
+  .filter((name) => name.endsWith(".png"))
+  .sort();
+assert(
+  JSON.stringify(portfolioImageNames) ===
+    JSON.stringify(["activity-recovery.png", "home-readiness.png", "review-provenance.png"]),
+  `Portfolio screenshot set must contain exactly three PNG files: ${JSON.stringify(portfolioImageNames)}`
+);
+for (const imageName of portfolioImageNames) {
+  const png = await readFile(join(repoRoot, "docs/assets/workbench", imageName));
+  assert(
+    png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+    `${imageName} is not a PNG file`
+  );
+  assert(
+    png.readUInt32BE(16) === 1440 && png.readUInt32BE(20) === 900,
+    `${imageName} must use the 1440 x 900 portfolio viewport`
+  );
+}
+
+const agentsGuide = await read("AGENTS.md");
+mustInclude(
+  agentsGuide,
+  [
+    "lead with the universal `recallant onboard",
+    "`recallant onboard .` command",
+    "Treat `recallant connect`,",
+    "lower-level/debug paths"
+  ],
+  "AGENTS.md universal connect rule"
+);
+mustInclude(
+  agentsGuide,
+  ["deployment environment", "must not embed a maintainer deployment hostname as a public default"],
+  "AGENTS.md public server URL boundary"
+);
+
+const readinessContractSource = await read("packages/contracts/src/readiness-status.ts");
+mustInclude(
+  readinessContractSource,
+  [
+    "Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow.",
+    '"configured"',
+    '"context_ready"',
+    '"semantic_memory_ready"',
+    '"memory_loop_ready"',
+    '"capture_active"',
+    "last_automatic_capture_at",
+    '"ingestion_approved"',
+    "remote_mcp_ready means scoped remote MCP access is configured; it is not semantic memory proof"
+  ],
+  "packages/contracts/src/readiness-status.ts"
+);
+
+const quickstart = await read("docs/QUICKSTART.md");
+mustInclude(
+  quickstart,
+  [
+    "Install",
+    "Install Local Recallant",
+    "Remote Existing-Server Setup",
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "works even when `recallant` is missing or old",
+    "registers a local trusted-device key",
+    "credential reference, not the raw",
+    "thin agent-ready files",
+    "--bootstrap-token <one-time-token>",
+    "Advanced/admin fallback",
+    "recallant invite /path/to/project --server-url https://memory.example.com",
+    "curl -fsSL https://memory.example.com/j/<one-time-invite-token> | bash",
+    "It is not the primary beginner remote UX",
+    "short-lived and one-time",
+    "git clone https://github.com/Mushkrot/Recallant.git recallant",
+    "raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.0/scripts/install-recallant-bootstrap.sh",
+    "--ref v0.1.0-dev.0",
+    "stays pinned to the prerelease tag",
+    "explicitly reinstall with `--ref main`",
+    "recallant onboard /path/to/project",
+    "recallant onboard /path/to/project --server-url https://memory.example.com",
+    "recallant connect /path/to/project",
+    "Memory loop ready: yes",
+    "documentation posture summary",
+    "Documentation posture: empty | healthy |",
+    "needs_attention | risky",
+    "Found:",
+    "Workbench:",
+    "storage_blocked",
+    "production-sensitive",
+    "Workbench link",
+    "documentation strategy",
+    "surface with four choices",
+    "keep current docs and add a Recallant layer",
+    "canonicalize docs for a",
+    "Recallant-aware workflow",
+    "create starter docs",
+    "discuss first",
+    "Empty projects may receive starter docs during the confirmed",
+    "Existing-doc canonicalization and broader",
+    "doc rewriting remain confirmed Workbench workflows",
+    "Audit view",
+    "recallant audit --project-dir /path/to/project",
+    "bodies, auth headers, cookies",
+    "Project purge also accounts for the system activity ledger",
+    "Advanced / Debug CLI",
+    "Agent-ready projects"
+  ],
+  "docs/QUICKSTART.md"
+);
+mustNotInclude(
+  quickstart,
+  [
+    "then writes only remote\nMCP client config locally",
+    "then writes only remote MCP client config locally"
+  ],
+  "docs/QUICKSTART.md retired remote-only-config wording"
+);
+mustAppearBefore(
+  quickstart,
+  "curl -fsSL https://memory.example.com/connect | bash",
+  "recallant invite /path/to/project --server-url https://memory.example.com",
+  "docs/QUICKSTART.md"
+);
+
+const statusDoc = await read("docs/STATUS.md");
+mustInclude(
+  statusDoc,
+  [
+    "Recallant is pre-release",
+    "What Works Now",
+    "Release Position",
+    "v0.1.0-dev.0",
+    "production_readiness.ready: true",
+    "Required Verification",
+    "Documentation Authority",
+    "Operations Runbook",
+    "Product Contract Status"
+  ],
+  "docs/STATUS.md"
+);
+
+const runbook = await read("docs/RUNBOOK.md");
+mustInclude(
+  runbook,
+  [
+    "Routine Health Check",
+    "Deploy A Checkout Change",
+    "Backup And Restore Verification",
+    "Incident Triage",
+    "Rollback",
+    "Escalation And Records",
+    "production_readiness.ready",
+    "systemctl restart <recallant-service>",
+    "rollback-recallant-install.sh --dry-run",
+    "Never delete source"
+  ],
+  "docs/RUNBOOK.md"
+);
+
+const clientSetup = await read("docs/CLIENT_SETUP.md");
+mustInclude(
+  clientSetup,
+  [
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "recallant onboard <project>",
+    "recallant onboard <project> --server-url https://memory.example.com",
+    "recallant connect <project> --server-url https://memory.example.com",
+    "recallant connect .",
+    "official `Mushkrot/Recallant` `main` branch",
+    "tagged prerelease stays pinned",
+    "--ref main",
+    "--no-update-check",
+    "does not block onboarding",
+    "It works even when `recallant` is missing or old",
+    "compact agent-ready files",
+    "Advanced/admin fallback",
+    "not the universal first-run command",
+    "RECALLANT_REMOTE_MCP_CREDENTIAL_REF",
+    "does not require Cloudflare browser",
+    "The remote machine must not receive Postgres access, `RECALLANT_DATABASE_URL`, internal server paths,",
+    "Workbench/admin auth, raw artifacts, backups, or provider secrets",
+    "Remote Live External Canary",
+    "npm run remote-live-external-canary:smoke",
+    "remote-live-external-canary -- --live --json",
+    "server_trace_validation_skipped",
+    "not_release_pass",
+    "default autonomous regression net",
+    "fixture-backed proof",
+    "release-pass live canary requires explicit server-local inputs",
+    "Operator Server-Side CLI Update",
+    "systemctl restart <recallant-service>",
+    "restart alone is not a",
+    "recallant connect codex --project-dir . --dry-run",
+    "recallant doctor --project-dir . --require-capture --format json",
+    "configured_unobserved",
+    "After connect, open `/hooks` in Codex",
+    "recallant codex-hook",
+    "--no-local-hooks"
+  ],
+  "docs/CLIENT_SETUP.md"
+);
+mustNotInclude(
+  clientSetup,
+  ["writes only remote MCP config", "writes only remote client config"],
+  "docs/CLIENT_SETUP.md retired remote-only-config wording"
+);
+mustAppearBefore(
+  clientSetup,
+  "curl -fsSL https://memory.example.com/connect | bash",
+  "recallant invite /path/to/project --server-url https://memory.example.com",
+  "docs/CLIENT_SETUP.md"
+);
+
+const agentObservability = await read("docs/AGENT_OBSERVABILITY.md");
+mustInclude(
+  agentObservability,
+  [
+    "Automatic Codex Capture",
+    "recallant connect codex --project-dir .",
+    "recallant doctor --project-dir . --require-capture --format json",
+    "Independent OpenTelemetry Control",
+    "recallant otel-config",
+    "OTLP/HTTP JSON",
+    "RECALLANT_OTEL_TOKEN",
+    "A recovery chain is built automatically",
+    "configured_unobserved",
+    "observed_server",
+    "observed_offline_spool",
+    "The native adapter intentionally ignores `transcript_path`",
+    "Codex `Stop` is turn-scoped"
+  ],
+  "docs/AGENT_OBSERVABILITY.md"
+);
+
+const remoteConnectPlan = await read("docs/REMOTE_CONNECT_PLAN.md");
+mustInclude(
+  remoteConnectPlan,
+  [
+    "Status: the universal remote connect model is implemented",
+    "curl -fsSL https://memory.example.com/connect | bash",
+    "does not depend on an already installed or up-to-date local `recallant` CLI",
+    "prepares thin agent-ready files",
+    "`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`",
+    "credential reference, not the raw secret",
+    "Server-generated invites remain supported as an advanced/admin path",
+    "Workbench, admin, raw artifact, backup, provider, and credential-management routes remain protected"
+  ],
+  "docs/REMOTE_CONNECT_PLAN.md"
+);
+
+const mcpSpec = await read("docs/MCP_SPEC.md");
+mustInclude(
+  mcpSpec,
+  [
+    "session/context readiness evidence",
+    "`--semantic-proof`",
+    "governed semantic-memory proof",
+    "`memory_create_agent_memory` marker",
+    "`memory_recall_agent_memories`",
+    "`memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic",
+    "baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only",
+    "`memory_agent_checkpoint` tool",
+    "`memory_get_readiness_status` returns the bounded readiness contract",
+    "must not return raw memories, raw project files",
+    "semantic or memory-loop proof is not `capture_active`",
+    "`memory_keeper_candidates`",
+    "bounded project-source evidence",
+    "`from_source_id` resolves an active configured project source",
+    "Persistence requires `write_candidates:",
+    "It does not raw-read connector accounts",
+    "Stored source-selected keeper candidates remain staged",
+    "agents must use the MCP",
+    "memory lifecycle by default",
+    "Bulk project import, raw logs, customer data, raw artifacts",
+    "Governed Memory Tool UX",
+    '[{ "kind": "all_agents", "id": null }]',
+    "Synthetic non-secret marker recallant_safe_semantic_marker_example",
+    "Passing `audience` as a string",
+    "raw request bodies",
+    "Scoped Content Erasure",
+    "receipt is content-free",
+    "rejects a stale token",
+    "Owner-controlled external files or objects are not deleted",
+    "context-read audit events do not persist raw",
+    "remote-live-external-canary:smoke",
+    "RECALLANT_LIVE_EXTERNAL_CANARY_VALIDATE_LIVE=1",
+    "server_trace_validation_skipped",
+    "not_release_pass"
+  ],
+  "docs/MCP_SPEC.md proof taxonomy"
+);
+
+mustInclude(
+  quickstart,
+  [
+    '`recallant agent-start --format json` reports `mode: "remote_mcp_ready"`',
+    '`recommended_next_call: "memory_get_context_pack"`',
+    '`recommended_next_proof_call: "memory_create_agent_memory"`',
+    "`remote-ready, local storage not attached`",
+    "`startup_contract` with direct MCP calls and CLI fallback commands",
+    "session/context readiness is proven by `memory_start_session` plus `memory_get_context_pack`",
+    "bounded `readiness_contract`",
+    "a checkpoint can be written and read back with `memory_set_checkpoint`",
+    "governed semantic memory is proven separately",
+    "should read persisted remote readiness evidence",
+    "Do not treat a checkpoint-only readback as semantic recall proof",
+    "`memory_set_checkpoint` remains state-only",
+    "`memory_agent_checkpoint`"
+  ],
+  "docs/QUICKSTART.md remote proof taxonomy"
+);
+
+mustInclude(
+  clientSetup,
+  [
+    "Remote Readiness Versus Recall Proof",
+    "Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow.",
+    "Safe remote existing-project sequence",
+    "mandatory context-pack call",
+    "mandatory semantic proof call",
+    "behavior is mandatory by",
+    "`memory_get_readiness_status`",
+    "a repeated `agent-start` should report",
+    '`readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` remains false',
+    "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
+    "optionally prove checkpoint state",
+    "prove governed semantic recall",
+    "run read-only migration inventory",
+    "remote consent/config boundary",
+    "`memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint",
+    "`memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic",
+    "proof that semantic recall is populated",
+    "Use `recallant agent-checkpoint` only for explicit pause or compaction state.",
+    "baseline checkpoint parity contract is state-only",
+    "`memory_agent_checkpoint`"
+  ],
+  "docs/CLIENT_SETUP.md remote proof taxonomy"
+);
+
+const remoteBeginnerDocs = [
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/REMOTE_CONNECT_PLAN.md", remoteConnectPlan]
+];
+for (const [label, text] of remoteBeginnerDocs) {
+  mustNotInclude(
+    text,
+    [
+      "Until universal remote connect is implemented",
+      "Until universal connect ships",
+      "still needs implementation",
+      "the planned beginner remote",
+      "planned universal remote connect flow",
+      "invite command is the simple path for remote projects"
+    ],
+    label
+  );
+}
+
+const why = await read("docs/WHY_RECALLANT.md");
+mustInclude(
+  why,
+  [
+    "The Maintainer Pain",
+    "The Gap",
+    "Manual project bootstrap",
+    "Why Codex And OSS Maintainers Benefit"
+  ],
+  "WHY"
+);
+
+const agentReadyProjects = await read("docs/AGENT_READY_PROJECTS.md");
+mustInclude(
+  agentReadyProjects,
+  [
+    "Agent-Ready Projects",
+    "Product Contract",
+    "Configuration proves access. Recall proves memory. Memory-loop-ready proves the governed workflow.",
+    "`semantic_memory_ready`",
+    "automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the",
+    "Beginner Onboarding Contract",
+    "recallant onboard <project>",
+    "Database not configured",
+    "advanced/debug APIs",
+    "recallant attach .",
+    "recallant connect codex --project-dir .",
+    "recallant doctor --project-dir . --require-capture --require-memory-loop --semantic-proof",
+    "recallant agent-start",
+    "Documentation Posture And Context Packs",
+    "`documentation_posture`",
+    "`sections.documentation_posture`",
+    "`sections.canon_capability_context`",
+    "guidance, not a binding rule",
+    "environment facts from accepted project/developer memories or safe project metadata",
+    "secret references by name/reference only, without raw values",
+    "does not grant live access",
+    "full external resource registry",
+    "activation, remote resource ingestion",
+    "broader registry workflows remain governed future work",
+    "`empty`",
+    "`healthy`",
+    "`needs_attention`",
+    "`risky`",
+    "documentation strategy surface",
+    "Keep current docs, add Recallant layer",
+    "Canonicalize docs for Recallant-aware workflow",
+    "Create starter docs",
+    "Discuss first",
+    "`recallant onboard <project>` can now create starter docs",
+    "Starter docs always include the base `README.md`, `AGENTS.md`, and `PROJECT_LOG.md`",
+    "Automatic checkpoint mirroring is disabled by default",
+    "skipped: migration_required",
+    'project_log_sync: "managed_block"',
+    "must not overwrite existing project docs",
+    "New Project Bootstrap",
+    "Existing Project Migration",
+    "prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`",
+    "optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`",
+    "Safe Recallant semantic marker",
+    "recallant_safe_semantic_marker_example",
+    '"audience": [{ "kind": "all_agents", "id": null }]',
+    'Recall it with `query: "recallant_safe_semantic_marker_example"`',
+    "Agent Session Contract",
+    "Sources, Capabilities, And Secret References",
+    "Cross-Project Examples",
+    "Safety Gates",
+    "Public And Private Boundary",
+    "Capture-active proves fresh automatic agent telemetry."
+  ],
+  "AGENT_READY_PROJECTS"
+);
+
+const contractStatus = await read("docs/CONTRACT_STATUS.md");
+mustInclude(
+  contractStatus,
+  [
+    "Product Contract Status",
+    "Contract Coverage",
+    "Agent-ready project onboarding",
+    "universal CLI one-command MVP",
+    "Browser-first project attachment from the Workbench is future work",
+    "recallant onboard <project>",
+    "Database not configured",
+    "Existing-project migration",
+    "capture-active proof",
+    "Documentation posture + context routing",
+    "System activity ledger and audit reports",
+    "Redacted `system_activity_events` schema",
+    "recallant audit",
+    "Workbench Audit view",
+    "project-sanitize de-identification policy",
+    "backup inclusion",
+    "Working slice with Workbench strategy surface, empty-project starter docs, and minimal canon/capability context",
+    "compact `starter_docs` plan/outcome",
+    "`sections.canon_capability_context`",
+    "environment facts, capability references, secret reference names, server canon link status, and documentation authority labels",
+    "empty projects can receive base starter docs plus profile-specific service/product/library docs",
+    "`empty`, `healthy`, `needs_attention`, or `risky`",
+    "Workbench shows documentation strategy choices plus environment facts",
+    "full external resource registry",
+    "connector activation",
+    "Workbench-confirmed existing-doc rewriting",
+    "npm run documentation-posture:smoke",
+    "Source, capability, and secret references",
+    "Cross-project examples",
+    "Safety gates",
+    "npm run public-clean-host:smoke",
+    "npm run public-quickstart:smoke",
+    "npm run public-install-rollback:smoke",
+    "npm run security-review:smoke",
+    "npm run non-owner-migration:smoke",
+    "npm run real-project-pilots:smoke",
+    "npm run review-ui:playwright",
+    "npm run system-audit:schema-smoke",
+    "npm run system-audit:mcp-smoke",
+    "npm run system-audit:cli-smoke",
+    "npm run system-audit:http-smoke",
+    "npm run system-audit:report-smoke",
+    "npm run phase8:smoke:backup",
+    "Workbench migration review queue",
+    "Scoped content erasure",
+    "stale-token rejection",
+    "content-free selection digests and receipts",
+    "Current Remote Existing-Project Findings",
+    '`mode: "remote_mcp_ready"`',
+    "`remote-ready, local storage not attached`",
+    "session/context readiness",
+    "checkpoint readback and governed semantic recall are separate surfaces",
+    "baseline checkpoint parity contract is state-only",
+    "memory_agent_checkpoint",
+    "Remote Existing-Project Release Gate Matrix",
+    "Remote MCP ready",
+    "Session/context ready",
+    "Governed semantic recall",
+    "External-machine evidence",
+    "Remote live external canary",
+    "npm run remote-live-external-canary:smoke",
+    "manual remote-client checks",
+    "Local `attach --confirm`",
+    "Not a remote-next-step",
+    "Release-Candidate Bar"
+  ],
+  "CONTRACT_STATUS"
+);
+const graphTreeContract = await read("docs/GRAPH_TREE_CONTRACT.md");
+mustInclude(
+  graphTreeContract,
+  [
+    "Workbench Graph Review Surface",
+    "`graph_candidate_id`",
+    "`graph_lifecycle_state`",
+    "`graph_candidate_kind`",
+    "`graph_extraction_method`",
+    "`graph_source_kind`",
+    "`graph_node_kind`",
+    "`graph_relation_type`",
+    "`graph_candidates`",
+    "`selected_candidate`",
+    "`promotion_readiness`",
+    "`hygiene`",
+    "`topology`",
+    "`maintenance`",
+    "`available_actions`",
+    "`governance`",
+    "B9 review ergonomics",
+    "accepted chunk, event,",
+    "Only chunk-to-chunk active edges currently participate",
+    "The B10 source-selected path uses `--from-source` for source selection.",
+    "`memory_keeper_candidates`",
+    "requires `write_candidates: true` plus `confirm: true` before",
+    "database access even for dry-runs",
+    "bounded governed evidence that Recallant already stores",
+    "does not raw-read connector accounts",
+    "arbitrary URIs, server paths, local paths, raw artifacts, backups, passive vault sync",
+    "source-selected CLI and MCP leak scans",
+    "`Graph review workload`",
+    "`Graph review filters`",
+    "`Next graph action`",
+    "`Recommended graph decision`",
+    "`Open candidate detail`",
+    "does not add first-class graph storage",
+    "automatic promotion policies",
+    "conceptual endpoint storage",
+    "retrieval semantics changes",
+    "Workbench Graph Topology",
+    "Graph Maintenance",
+    "/review?view=review",
+    "/api/review-action",
+    "/review-action",
+    "`target_kind=graph_candidate`",
+    "`action=promote`",
+    "default retrieval input",
+    "`accept` does not promote them into `edges`",
+    "`Graph topology`",
+    "`Active promoted links`",
+    "`Candidate links`",
+    "`Blocked states`",
+    "`Source-backed evidence`",
+    "No graph topology is visible for this project yet.",
+    "`Graph maintenance`",
+    "No graph maintenance actions are recommended for this project.",
+    "does not create graph nodes",
+    "does not auto-promote candidates",
+    "does not change retrieval",
+    "`Promote candidate`",
+    "`memory_promote_graph_candidate`",
+    "`memory_graph_hygiene`",
+    "`memory_graph_maintenance`",
+    "`recallant graph hygiene`",
+    "`recallant graph maintenance`",
+    "`recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm`",
+    "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
+    "delete candidate rows",
+    "insert/update/delete `edges`",
+    "npm run graph-promotion:smoke",
+    "npm run graph-topology:smoke",
+    "npm run graph-candidates:smoke",
+    "npm run mcp:smoke",
+    "npm run review-ui:smoke"
+  ],
+  "GRAPH_TREE_CONTRACT graph review"
+);
+mustInclude(
+  contractStatus,
+  [
+    "Working B11 endpoint-kind slice",
+    "B11 endpoint-kind activation capabilities",
+    "B10 source-selected keeper source contract",
+    "B9 review workload and decision guidance",
+    "Workbench graph review fields/actions",
+    "read-only topology nodes/links/groups/summary",
+    "topology result types",
+    "graph maintenance plan/apply result types",
+    "`graph_candidates` payload",
+    "derived priority and next-action cues",
+    "hygiene counts",
+    "topology",
+    "maintenance counts/lanes/recommendations",
+    "promotion readiness",
+    "selected-candidate source refs, review history",
+    "/review?view=review",
+    "/api/review-action",
+    "/review-action",
+    "`action=promote`",
+    "`memory_keeper_candidates`",
+    "`memory_promote_graph_candidate`",
+    "`memory_graph_hygiene`",
+    "`recallant graph hygiene`",
+    "`recallant graph promote-candidate <graph-candidate-id> --confirm`",
+    "keeps unpromoted graph candidates out of retrieval",
+    "`Graph topology`",
+    "`Active promoted links`",
+    "`Candidate links`",
+    "`Blocked states`",
+    "`Source-backed evidence`",
+    "`Graph maintenance`",
+    "`Graph review workload`",
+    "`Graph review filters`",
+    "`Next graph action`",
+    "`Recommended graph decision`",
+    "`Open candidate detail`",
+    "No graph maintenance actions are recommended for this project.",
+    "does not create first-class graph nodes",
+    "auto-promote candidates",
+    "change retrieval semantics",
+    "`memory_graph_maintenance`",
+    "`recallant graph maintenance`",
+    "`recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm`",
+    "`recallant keeper candidates --from-source <project-source-id>`",
+    "text/file dry-runs remain database-free",
+    "source-selected dry-runs require database-backed project-source resolution",
+    "consume bounded governed Recallant source evidence without raw-reading connectors",
+    "passive vault sync, or raw media",
+    "do not delete candidates",
+    "do not mutate `edges`",
+    "do not change retrieval semantics",
+    "npm run graph-promotion:smoke",
+    "npm run graph-topology:smoke",
+    "npm run graph-candidates:smoke",
+    "npm run graph-retrieval-profiles:smoke",
+    "npm run review-ui:smoke",
+    "npm run review-ui:playwright",
+    "universal `curl .../connect \\| bash` beginner UX are present",
+    "trusted-device registration/reconnect",
+    "headless",
+    "bootstrap-token redemption",
+    "local credential-store references",
+    "GET /connect",
+    "/api/connect/start",
+    "/api/connect/poll",
+    "protected `/connect/approve`",
+    "`recallant invite` and `/j/<token>` remain the advanced/admin one-time onboarding fallback",
+    "remote live external canary"
+  ],
+  "CONTRACT_STATUS remote connect"
+);
+mustNotInclude(
+  contractStatus,
+  [
+    "universal `curl .../connect \\| bash` device-pairing is the planned beginner UX",
+    "which still needs implementation"
+  ],
+  "CONTRACT_STATUS"
+);
+
+const comparison = await read("docs/COMPARISON.md");
+mustInclude(
+  comparison,
+  [
+    "Related Approaches",
+    "Reference Projects",
+    "Open Brain / OB1",
+    "Open Engine",
+    "Open Engine-style task records",
+    "Linear/Plane-style task managers",
+    "MemPalace",
+    "AgentMemory",
+    "Journey / Journey Kits",
+    "OpenMemory variants",
+    "MF0.ai / MF0-1984",
+    "Odysseus",
+    "OpenHuman",
+    "Chase AI Jarvis / Karpathy LLM Wiki",
+    "LLM-maintained Markdown wiki",
+    "From AgentMemory,",
+    "From OB1,",
+    "From Open Engine,",
+    "From OpenHuman,",
+    "From Kortix/Suna,",
+    "travel as a task record",
+    "Recallant does not become a broad autonomous-agent",
+    "workspace: it stays focused on governed coding-agent memory",
+    "What Is Different",
+    "Honest Status"
+  ],
+  "COMPARISON"
+);
+
+const architecture = await read("docs/ARCHITECTURE.md");
+mustInclude(
+  architecture,
+  [
+    "Product Layers And Authority",
+    "Cross-Client Continuity between real Codex and Claude Code sessions",
+    "Planned Human Document Memory",
+    "Planned Task Handoff Layer",
+    "Linear is not a required component",
+    "optional External Task Adapter",
+    "further graph depth"
+  ],
+  "ARCHITECTURE product direction"
+);
+mustInclude(
+  architecture,
+  [
+    "System Activity Ledger",
+    "redacted operational record",
+    "recallant audit",
+    "Workbench Audit view",
+    "not a raw traffic log",
+    "Backups include it",
+    "de-identifies them during confirmed purge"
+  ],
+  "ARCHITECTURE"
+);
+mustInclude(
+  architecture,
+  [
+    "read-only Workbench topology view",
+    "B10 `--from-source <project-source-id>` source selection",
+    "bounded governed Recallant evidence",
+    "does not raw-read connector accounts",
+    "derived from graph candidates, source refs, promotion readiness",
+    "active `edges`",
+    "driven by unpromoted candidates"
+  ],
+  "ARCHITECTURE graph topology"
+);
+mustNotInclude(architecture, ["or a Workbench topology view"], "ARCHITECTURE");
+
+const selfHosting = await read("docs/SELF_HOSTING.md");
+mustInclude(
+  selfHosting,
+  [
+    "System Activity Audits",
+    "recallant audit --project-dir /path/to/project",
+    "--surface mcp --status error --format json",
+    "system_activity_events",
+    "backup-verify",
+    "confirmed purge de-identifies"
+  ],
+  "SELF_HOSTING"
+);
+
+const referenceProjects = await read("docs/research/REFERENCE_PROJECTS.md");
+mustInclude(
+  referenceProjects,
+  [
+    "Current Reference Roles",
+    "AgentMemory: primary native Codex/Claude Code adapter reference",
+    "MemPalace: primary document-ingestion",
+    "Open Brain / OB1",
+    "Open Engine",
+    "MemPalace",
+    "AgentMemory",
+    "Journey / Journey Kits",
+    "OpenMemory Variants",
+    "Odysseus",
+    "OpenHuman",
+    "Plane",
+    "Chase AI Jarvis / Karpathy LLM Wiki",
+    "immutable raw sources",
+    "stronger claim that every answer is automatically saved",
+    "Do not ship passive two-way sync",
+    "MF0.ai / MF0-1984",
+    "Kortix / Suna",
+    "Kortex / Eden",
+    "shared task list",
+    "seven-part task record",
+    "receipt vocabulary",
+    "Open Brain holds memory",
+    "Open Engine moves work",
+    "Do not blur Open Engine, Open Brain / OB1, and OpenClaw",
+    "Refresh Checklist"
+  ],
+  "REFERENCE_PROJECTS"
+);
+
+const domainLanguage = await read("CONTEXT.md");
+mustInclude(
+  domainLanguage,
+  [
+    "Project Memory",
+    "Agent Client",
+    "Cross-Client Continuity",
+    "Project Continuity Pack",
+    "Human Document Memory",
+    "Task Handoff Record",
+    "External Task Adapter"
+  ],
+  "CONTEXT domain language"
+);
+
+const roadmap = await read("docs/ROADMAP.md");
+mustInclude(
+  roadmap,
+  [
+    "Current Baseline",
+    "recallant onboard <project>",
+    "Sequencing Rule",
+    "Milestone 1: Cross-Client Continuity v1",
+    "native, fail-soft Claude Code adapter",
+    "Project Continuity Pack",
+    "Codex -> Claude Code -> Codex acceptance gate",
+    "Generic MCP subprocesses labeled as different clients",
+    "Milestone 2: Human Document Memory MVP",
+    "Markdown",
+    "PDF",
+    "DOCX",
+    "incremental add, update, rename, and delete behavior",
+    "source-cited answers",
+    "MemPalace is the primary implementation reference",
+    "Milestone 3: Task Handoff Record",
+    "Open Engine",
+    "will not depend on Linear",
+    "Plane or another self-hosted task manager",
+    "optional External Task Adapter",
+    "not building a full Jira/Linear replacement",
+    "Milestone 4: Broader Human Memory",
+    "Deprioritized Until Required",
+    "new graph databases",
+    "additional observability",
+    "Release-Candidate Bar",
+    "Codex For OSS Use"
+  ],
+  "ROADMAP"
+);
+mustNotInclude(
+  graphTreeContract,
+  ["richer graph review ergonomics", "richer review ergonomics", "keeper-source expansion"],
+  "GRAPH_TREE_CONTRACT stale graph wording"
+);
+mustNotInclude(
+  contractStatus,
+  [
+    "richer graph review ergonomics",
+    "richer review ergonomics",
+    "Broader keeper source integration"
+  ],
+  "CONTRACT_STATUS stale graph wording"
+);
+mustNotInclude(
+  roadmap,
+  [
+    "Workbench topology visualization, richer review ergonomics",
+    "richer graph review ergonomics",
+    "richer review ergonomics",
+    "broader keeper source integration"
+  ],
+  "ROADMAP stale graph wording"
+);
+
+const universalConnectSurfaces = [
+  ["README.md", readme],
+  ["AGENTS.md", agentsGuide],
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/AGENT_READY_PROJECTS.md", agentReadyProjects],
+  ["docs/ARCHITECTURE.md", await read("docs/ARCHITECTURE.md")],
+  ["docs/SELF_HOSTING.md", await read("docs/SELF_HOSTING.md")],
+  ["docs/CONTRACT_STATUS.md", contractStatus],
+  ["docs/ROADMAP.md", roadmap],
+  ["scripts/install-recallant.sh", await read("scripts/install-recallant.sh")],
+  ["scripts/install-recallant-cli.sh", await read("scripts/install-recallant-cli.sh")],
+  ["scripts/install-recallant-bootstrap.sh", await read("scripts/install-recallant-bootstrap.sh")]
+];
+for (const [label, text] of universalConnectSurfaces) {
+  mustLeadWithUniversalOnboard(text, label);
+}
+const remoteProofDocs = [
+  ["docs/QUICKSTART.md", quickstart],
+  ["docs/CLIENT_SETUP.md", clientSetup],
+  ["docs/AGENT_READY_PROJECTS.md", agentReadyProjects],
+  ["docs/MCP_SPEC.md", mcpSpec],
+  ["docs/CONTRACT_STATUS.md", contractStatus],
+  ["docs/ROADMAP.md", roadmap]
+];
+const checkpointSemanticCollapsePhrases = [
+  "checkpoint readback proves semantic recall",
+  "checkpoint-only readback proves semantic recall",
+  "memory_set_checkpoint proves semantic recall",
+  "memory_get_checkpoint proves semantic recall",
+  "checkpoint state proves semantic recall",
+  "checkpoint state proof is semantic recall proof"
+];
+const checkpointSemanticCollapsePatterns = [
+  /\bcheckpoint(?:-only)?\s+readback\s+proves\s+semantic\s+recall\b/i,
+  /\bcheckpoint\s+state\s+proves\s+semantic\s+recall\b/i,
+  /\bmemory_set_checkpoint\s+proves\s+semantic\s+recall\b/i,
+  /\bmemory_get_checkpoint\s+proves\s+semantic\s+recall\b/i
+];
+for (const [label, text] of remoteProofDocs) {
+  mustNotInclude(text, checkpointSemanticCollapsePhrases, label);
+  mustNotMatch(text, checkpointSemanticCollapsePatterns, label);
+}
+
+const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+assert(packageJson.version === "0.1.0-dev.0", "Root package must carry prerelease identity");
+assert(
+  packageJson.scripts?.["release-identity:smoke"] === "node scripts/smoke-release-identity.mjs",
+  "package.json must expose release-identity:smoke"
+);
+assert(
+  packageJson.scripts?.["release-install:smoke"] === "node scripts/smoke-release-install.mjs",
+  "package.json must expose release-install:smoke"
+);
+assert(
+  packageJson.scripts?.["non-owner-migration:smoke"] ===
+    "node scripts/smoke-non-owner-migration.mjs",
+  "package.json must expose non-owner-migration:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run non-owner-migration:smoke"),
+  "smoke:core must include non-owner-migration:smoke"
+);
+assert(
+  packageJson.scripts?.["public-quickstart:smoke"] === "node scripts/smoke-public-quickstart.mjs",
+  "package.json must expose public-quickstart:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run public-quickstart:smoke"),
+  "smoke:core must include public-quickstart:smoke"
+);
+assert(
+  packageJson.scripts?.["security-review:smoke"] === "node scripts/smoke-security-review.mjs",
+  "package.json must expose security-review:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run security-review:smoke"),
+  "smoke:core must include security-review:smoke"
+);
+assert(
+  packageJson.scripts?.["documentation-posture:smoke"] ===
+    "node scripts/smoke-documentation-posture.mjs",
+  "package.json must expose documentation-posture:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run documentation-posture:smoke"),
+  "smoke:core must include documentation-posture:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-connect-cli:smoke"] === "node scripts/smoke-remote-connect-cli.mjs",
+  "package.json must expose remote-connect-cli:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run remote-connect-cli:smoke"),
+  "smoke:core must include remote-connect-cli:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-client-cleanup:smoke"] ===
+    "node scripts/smoke-remote-client-cleanup.mjs",
+  "package.json must expose remote-client-cleanup:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes("npm run remote-client-cleanup:smoke"),
+  "smoke:core must include remote-client-cleanup:smoke"
+);
+assert(
+  packageJson.scripts?.["remote-live-external-canary"] ===
+    "node scripts/remote-live-external-canary.mjs",
+  "package.json must expose remote-live-external-canary"
+);
+assert(
+  packageJson.scripts?.["remote-live-external-canary:smoke"] ===
+    "node scripts/smoke-remote-live-external-canary.mjs",
+  "package.json must expose remote-live-external-canary:smoke"
+);
+assert(
+  String(packageJson.scripts?.["smoke:core"] ?? "").includes(
+    "npm run remote-live-external-canary:smoke"
+  ),
+  "smoke:core must include remote-live-external-canary:smoke"
+);
+
+const remoteMcpLiveReadiness = readFileSync(
+  join(repoRoot, "scripts", "smoke-remote-mcp-live-readiness.mjs"),
+  "utf8"
+);
+mustInclude(
+  remoteMcpLiveReadiness,
+  [
+    "skipped_live_remote_mcp_readiness",
+    "operator_live_remote_mcp_env_not_provided",
+    "failed_live_remote_mcp_readiness_input",
+    "required_env",
+    "coverage_model"
+  ],
+  "scripts/smoke-remote-mcp-live-readiness.mjs"
+);
+const remoteConnectLiveReadiness = readFileSync(
+  join(repoRoot, "scripts", "smoke-remote-connect-live-readiness.mjs"),
+  "utf8"
+);
+mustInclude(
+  remoteConnectLiveReadiness,
+  [
+    "skipped_live_remote_connect_readiness",
+    "blocked_live_remote_connect_readiness_input",
+    "RECALLANT_LIVE_REMOTE_CONNECT_SERVER_URL",
+    "coverage_model",
+    "deterministic_fixture"
+  ],
+  "scripts/smoke-remote-connect-live-readiness.mjs"
+);
+
+function runDoctorFixture(projectDir, doctorEnv, label) {
+  const token = Math.random().toString(36).slice(2);
+  const stdoutPath = join(projectDir, `.smoke-doctor-${token}-stdout.txt`);
+  const stderrPath = join(projectDir, `.smoke-doctor-${token}-stderr.txt`);
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
+
+  const result = spawnSync(
+    process.execPath,
+    ["apps/cli/dist/index.js", "doctor", "--project-dir", projectDir, "--format", "json"],
+    {
+      cwd: repoRoot,
+      env: doctorEnv,
+      stdio: ["ignore", stdoutFd, stderrFd]
+    }
+  );
+
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
+
+  let stdout = "";
+  let stderr = "";
+  try {
+    stdout = readFileSync(stdoutPath, "utf8");
+    stderr = readFileSync(stderrPath, "utf8");
+  } finally {
+    try {
+      unlinkSync(stdoutPath);
+    } catch {
+      // best effort cleanup
+    }
+    try {
+      unlinkSync(stderrPath);
+    } catch {
+      // best effort cleanup
+    }
+  }
+
+  if (result.error) throw result.error;
+  const code = result.status ?? 0;
+  if (code !== 0) {
+    throw new Error(
+      `${label} fixture failed; exit_code=${code}; stdout_length=${stdout.length}; stderr=${fixtureStderrExcerpt(
+        stderr
+      )}; stdout_excerpt=${stdout.slice(0, 1000)}`
+    );
+  }
+
+  const parsed = parseDoctorFixtureJson(stdout, stderr, code, label);
+  return parsed.production_readiness;
+}
+
+async function runDoctorWithOrigin(projectDir, originUrl, extraEnv = {}) {
+  const parsed = runDoctorFixture(
+    projectDir,
+    {
+      ...process.env,
+      RECALLANT_DATABASE_URL: "",
+      RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+      RECALLANT_PUBLIC_WORKBENCH_URL: "https://recallant.example.invalid/review",
+      RECALLANT_WORKBENCH_ORIGIN_URL: originUrl,
+      RECALLANT_CLOUDFLARE_MODE: "enabled",
+      RECALLANT_CLOUDFLARE_EDGE_AUTH: "required",
+      RECALLANT_ADMIN_EMAILS: "maintainer@example.com",
+      ...extraEnv
+    },
+    "doctor public readiness fixture"
+  );
+
+  return parsed?.public_workbench_readiness;
+}
+
+async function startDelayedAuthOrigin(delayMs) {
+  const child = spawn(
+    process.execPath,
+    [join(repoRoot, "scripts/fixtures/delayed-auth-origin.mjs"), String(delayMs)],
+    {
+      stdio: ["ignore", "pipe", "pipe"]
+    }
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const lines = createInterface({ input: child.stdout });
+  const lineResult = once(lines, "line");
+  const earlyExit = once(child, "exit").then(([code]) => {
+    throw new Error(`Delayed origin exited before ready; code=${code}; stderr=${stderr}`);
+  });
+  const [line] = await Promise.race([lineResult, earlyExit]);
+  lines.close();
+  const port = Number(line);
+  assert(Number.isInteger(port) && port > 0, `Delayed origin failed to start: ${stderr}`);
+  return {
+    url: `http://127.0.0.1:${port}/review`,
+    stop() {
+      if (child.exitCode !== null) return;
+      child.kill("SIGKILL");
+    }
+  };
+}
+
+async function runServiceRuntimeFixture(projectDir, extraEnv = {}) {
+  const parsed = runDoctorFixture(
+    projectDir,
+    {
+      ...process.env,
+      RECALLANT_DATABASE_URL: "",
+      RECALLANT_ENV_FILE: join(projectDir, "missing-recallant.env"),
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+      RECALLANT_SERVICE_ACTIVE_STATUS: "active",
+      RECALLANT_SERVICE_ENABLED_STATUS: "enabled",
+      RECALLANT_SERVICE_RESTART_POLICY: "on-failure",
+      RECALLANT_HOST: "127.0.0.1",
+      RECALLANT_SERVICE_HEALTH_STATUS: "200",
+      RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "302",
+      ...extraEnv
+    },
+    "doctor service runtime fixture"
+  );
+
+  return parsed?.service_runtime;
+}
+
+const publicUiFixtureDir = await mkdtemp(join(tmpdir(), "recallant-public-ui-readiness-"));
+const publicBindHost = ["0", "0", "0", "0"].join(".");
+const closedOriginUrl = "http://127.0.0.1:1/review";
+const notConfigured = await runDoctorWithOrigin(publicUiFixtureDir, "", {
+  RECALLANT_PUBLIC_WORKBENCH_URL: "",
+  RECALLANT_WORKBENCH_ORIGIN_URL: "",
+  RECALLANT_CLOUDFLARE_MODE: "disabled",
+  RECALLANT_CLOUDFLARE_EDGE_AUTH: "",
+  RECALLANT_ADMIN_EMAILS: ""
+});
+assert(
+  notConfigured?.status === "not_configured" &&
+    notConfigured?.configured === false &&
+    notConfigured?.ready === false,
+  `Unconfigured readiness did not report not_configured: ${JSON.stringify(notConfigured)}`
+);
+
+const downReadiness = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl);
+assert(
+  downReadiness?.status === "origin_unreachable" &&
+    downReadiness?.origin?.status === "down" &&
+    downReadiness?.ready === false,
+  `Down-origin readiness did not report origin_unreachable: ${JSON.stringify(downReadiness)}`
+);
+assert(
+  !String(downReadiness.operator_action ?? "").includes(publicBindHost),
+  `Down-origin action must not recommend public bind: ${downReadiness.operator_action}`
+);
+
+const authReady = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "401"
+});
+assert(
+  authReady?.status === "auth_ready" &&
+    authReady?.ready === true &&
+    authReady?.origin?.status === "auth_required" &&
+    authReady?.cloudflare_access?.edge_auth_required === true,
+  `Auth-ready readiness failed: ${JSON.stringify(authReady)}`
+);
+
+const delayedOrigin = await startDelayedAuthOrigin(1500);
+const delayedStartedAt = Date.now();
+let delayedAuthReady;
+try {
+  delayedAuthReady = await runDoctorWithOrigin(publicUiFixtureDir, delayedOrigin.url);
+} finally {
+  delayedOrigin.stop();
+}
+const delayedElapsedMs = Date.now() - delayedStartedAt;
+assert(
+  delayedElapsedMs >= 1200 &&
+    delayedAuthReady?.status === "auth_ready" &&
+    delayedAuthReady?.ready === true &&
+    delayedAuthReady?.origin?.status === "auth_required",
+  `Delayed auth origin should remain ready beyond 1200ms: elapsed=${delayedElapsedMs}, result=${JSON.stringify(delayedAuthReady)}`
+);
+assert(
+  String(authReady.operator_action ?? "").includes("protected public URL") &&
+    !String(authReady.operator_action ?? "").includes(publicBindHost),
+  `Auth-ready operator action is unsafe or unclear: ${authReady.operator_action}`
+);
+
+const missingEdgeAuth = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "401",
+  RECALLANT_CLOUDFLARE_EDGE_AUTH: "disabled"
+});
+assert(
+  missingEdgeAuth?.status === "cloudflare_access_not_required" && missingEdgeAuth?.ready === false,
+  `Missing edge auth should not be public-ready: ${JSON.stringify(missingEdgeAuth)}`
+);
+
+const anonymousOrigin = await runDoctorWithOrigin(publicUiFixtureDir, closedOriginUrl, {
+  RECALLANT_WORKBENCH_ORIGIN_STATUS: "200"
+});
+assert(
+  anonymousOrigin?.status === "origin_allows_anonymous_access" &&
+    anonymousOrigin?.origin?.status === "anonymous_access" &&
+    anonymousOrigin?.ready === false,
+  `Anonymous origin should not be public-ready: ${JSON.stringify(anonymousOrigin)}`
+);
+
+const runtimeReady = await runServiceRuntimeFixture(publicUiFixtureDir);
+assert(
+  runtimeReady?.status === "ready" &&
+    runtimeReady?.ok === true &&
+    runtimeReady?.health?.status === "healthy" &&
+    runtimeReady?.public_route?.status === "auth_required",
+  `Runtime ready fixture failed: ${JSON.stringify(runtimeReady)}`
+);
+const runtimeInactive = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ACTIVE_STATUS: "inactive"
+});
+assert(
+  runtimeInactive?.status === "service_inactive" && runtimeInactive?.ok === false,
+  `Runtime inactive fixture failed: ${JSON.stringify(runtimeInactive)}`
+);
+const runtimeDisabled = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ENABLED_STATUS: "disabled"
+});
+assert(
+  runtimeDisabled?.status === "service_disabled" && runtimeDisabled?.ok === false,
+  `Runtime disabled fixture failed: ${JSON.stringify(runtimeDisabled)}`
+);
+const runtimeWrongBind = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_HOST: publicBindHost
+});
+assert(
+  runtimeWrongBind?.status === "wrong_bind_host" && runtimeWrongBind?.bind?.private === false,
+  `Runtime wrong-bind fixture failed: ${JSON.stringify(runtimeWrongBind)}`
+);
+const runtimeMissingEnv = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_ENV_FILE: join(publicUiFixtureDir, "missing-service.env")
+});
+assert(
+  runtimeMissingEnv?.status === "service_env_missing" && runtimeMissingEnv?.ok === false,
+  `Runtime missing-env fixture failed: ${JSON.stringify(runtimeMissingEnv)}`
+);
+const runtimeHealthFailed = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_SERVICE_HEALTH_STATUS: "503"
+});
+assert(
+  runtimeHealthFailed?.status === "health_failed" &&
+    runtimeHealthFailed?.health?.status === "unhealthy",
+  `Runtime health-failed fixture failed: ${JSON.stringify(runtimeHealthFailed)}`
+);
+const runtimeBadGateway = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "502"
+});
+assert(
+  runtimeBadGateway?.status === "public_bad_gateway" &&
+    runtimeBadGateway?.public_route?.status === "bad_gateway",
+  `Runtime bad-gateway fixture failed: ${JSON.stringify(runtimeBadGateway)}`
+);
+const runtimeAnonymousPublic = await runServiceRuntimeFixture(publicUiFixtureDir, {
+  RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS: "200"
+});
+assert(
+  runtimeAnonymousPublic?.status === "public_anonymous_access" &&
+    runtimeAnonymousPublic?.public_route?.status === "anonymous_access",
+  `Runtime public-anonymous fixture failed: ${JSON.stringify(runtimeAnonymousPublic)}`
+);
+
+const remoteExistingProjectDocsSummary = {
+  "docs/QUICKSTART.md": [
+    "remote_mcp_ready",
+    "session_context_readiness",
+    "checkpoint_state_optional",
+    "governed_semantic_marker_proof",
+    "guided_migration_after_owner_approval"
+  ],
+  "docs/CLIENT_SETUP.md": [
+    "safe_remote_existing_project_sequence",
+    "capture_proof_is_session_context_only",
+    "checkpoint_state_is_not_semantic_recall",
+    "no_local_attach_confirm_as_remote_next_step"
+  ],
+  "docs/AGENT_READY_PROJECTS.md": [
+    "read_only_inventory",
+    "risk_classification",
+    "owner_approval",
+    "concise_governed_memories",
+    "recall_verification"
+  ],
+  "docs/MCP_SPEC.md": ["semantic_proof", "governed_memory_tool_ux", "checkpoint_parity_state_only"]
+};
+const publicReadinessMarkers = {
+  remote_sequence_guard: "pass",
+  checkpoint_semantic_collapse_guard: "pass",
+  live_readiness_gates_are_opt_in: "pass",
+  public_private_boundary_markers: "pass"
+};
+const releaseGateMatrix = {
+  mandatory: [
+    "remote_mcp_ready",
+    "session_context_ready",
+    "governed_semantic_marker_recall",
+    "read_only_inventory_owner_approval",
+    "redacted_external_machine_evidence",
+    "public_readiness_and_security_smokes"
+  ],
+  optional: [
+    "checkpoint_state_proof",
+    "searchable_checkpoint_memory",
+    "live_central_server_readiness_smokes",
+    "local_attach_confirm_for_server_local_projects"
+  ]
+};
+
+process.stdout.write(
+  `${JSON.stringify(
+    {
+      remote_existing_project_docs: remoteExistingProjectDocsSummary,
+      public_readiness_markers: publicReadinessMarkers,
+      release_gate_matrix: releaseGateMatrix,
+      public_workbench_readiness: {
+        not_configured: {
+          status: notConfigured.status,
+          ready: notConfigured.ready
+        },
+        down_origin: {
+          status: downReadiness.status,
+          ready: downReadiness.ready,
+          origin: downReadiness.origin.status
+        },
+        auth_ready: {
+          status: authReady.status,
+          ready: authReady.ready,
+          origin: authReady.origin.status,
+          edge_auth_required: authReady.cloudflare_access.edge_auth_required
+        },
+        delayed_auth_ready: {
+          status: delayedAuthReady.status,
+          ready: delayedAuthReady.ready,
+          origin: delayedAuthReady.origin.status,
+          elapsed_ms: delayedElapsedMs
+        },
+        missing_edge_auth: {
+          status: missingEdgeAuth.status,
+          ready: missingEdgeAuth.ready
+        },
+        anonymous_origin: {
+          status: anonymousOrigin.status,
+          ready: anonymousOrigin.ready,
+          origin: anonymousOrigin.origin.status
+        }
+      },
+      service_runtime: {
+        ready: {
+          status: runtimeReady.status,
+          health: runtimeReady.health.status,
+          public_route: runtimeReady.public_route.status
+        },
+        inactive: { status: runtimeInactive.status, ok: runtimeInactive.ok },
+        disabled: { status: runtimeDisabled.status, ok: runtimeDisabled.ok },
+        wrong_bind: { status: runtimeWrongBind.status, private: runtimeWrongBind.bind.private },
+        missing_env: { status: runtimeMissingEnv.status, ok: runtimeMissingEnv.ok },
+        health_503: {
+          status: runtimeHealthFailed.status,
+          health: runtimeHealthFailed.health.status
+        },
+        public_502: {
+          status: runtimeBadGateway.status,
+          public_route: runtimeBadGateway.public_route.status
+        },
+        public_anonymous: {
+          status: runtimeAnonymousPublic.status,
+          public_route: runtimeAnonymousPublic.public_route.status
+        }
+      }
+    },
+    null,
+    2
+  )}\n`
+);
+
+const forbiddenPrivateMarkers = [
+  ['synthetic', 'boundary', 'path'].join('/'),
+  ['synthetic', 'boundary', 'domain'].join('.'),
+  ['synthetic', 'boundary', 'service'].join('-'),
+  ['synthetic', 'boundary', 'identifier'].join(':'),
+  ['synthetic', 'boundary', 'fixture'].join('_')
+];
+for (const path of publicDocs) {
+  const content = await read(path);
+  for (const marker of forbiddenPrivateMarkers) {
+    assert(!content.includes(marker), `${path} must not contain private marker: ${marker}`);
+  }
+}
+
+const installer = readFileSync(join(repoRoot, "scripts", "install-recallant.sh"), "utf8");
+assert(
+  installer.includes('if [[ "$DRY_RUN" == "true" ]]'),
+  "Installer must keep a dry-run path for public evaluation"
+);
+
+const dryRun = spawnSync(
+  "/bin/bash",
+  ["scripts/install-recallant.sh", "--dry-run", "--profile", "single-user"],
+  {
+    cwd: repoRoot,
+    env: process.env,
+    encoding: "utf8"
+  }
+);
+if (dryRun.error?.code !== "EPERM") {
+  if (dryRun.error) throw dryRun.error;
+  assert(dryRun.status === 0, `single-user dry-run failed\n${dryRun.stderr}\n${dryRun.stdout}`);
+  mustInclude(
+    dryRun.stdout,
+    ["Recallant install plan", "profile: single-user", "dry_run: true"],
+    "installer dry-run"
+  );
+}
+
+process.stdout.write("Public readiness smoke passed\n");

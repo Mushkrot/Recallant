@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/core" },
+    { "path": "./packages/db" },
+    { "path": "./packages/mcp" },
+    { "path": "./packages/adapters" },
+    { "path": "./apps/server" },
+    { "path": "./apps/cli" },
+    { "path": "./apps/review-ui" }
+  ]
+}

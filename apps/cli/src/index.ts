@@ -1,0 +1,12819 @@
+#!/usr/bin/env node
+
+import { spawnSync } from "node:child_process";
+import {
+  createHash,
+  createPrivateKey,
+  generateKeyPairSync,
+  randomUUID,
+  sign as signPayload
+} from "node:crypto";
+import { readFileSync } from "node:fs";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  writeFile
+} from "node:fs/promises";
+import { homedir, hostname } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  codexHookEventNames,
+  mapCodexHookEvent,
+  parseCodexHookPayload,
+  supportedClientKinds,
+  type CodexHookCaptureAction,
+  type CodexHookEvent,
+  type CodexHookMappedObservation
+} from "@recallant/adapters";
+import {
+  buildMemoryKeeperPlan,
+  getRecallantCoreInfo,
+  prepareProjectLogSync,
+  renderCodexOtelConfig,
+  validateProjectIdentity,
+  type MemoryKeeperPlan,
+  type MemoryKeeperSourceInput,
+  type ProjectLogCheckpointPayload
+} from "@recallant/core";
+import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
+import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
+import { runRecallantRemoteBridge, runRecallantStdioServer } from "@recallant/mcp";
+import pg from "pg";
+import {
+  detectImportCandidates,
+  discoveryCandidateForImport,
+  discoveryResult,
+  formatDiscoveryText,
+  readImportTextForCandidate
+} from "./discovery.js";
+import { optionalProjectLogMirror } from "./project-log-mirror.js";
+import {
+  analyzeProjectDocumentationPosture,
+  summarizeDocumentationPostureForOnboard,
+  type DocumentationPosture,
+  type StarterDocsOutcome,
+  type StarterDocsPlan
+} from "./documentation-posture.js";
+import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
+import { runAttach } from "./attach.js";
+import {
+  inspectCodexHookConfig,
+  recallantCodexHookCommand,
+  renderCodexHookConfig
+} from "./codex-hook-config.js";
+import {
+  clientTargetConfig,
+  codexConfigHasRecallantMcp,
+  connectClientTargetConfig,
+  remoteClientTargetConfig,
+  remoteMcpProvisioningOutput,
+  renderClientTargetConfig,
+  renderRemoteClientTargetConfig
+} from "./client-targets.js";
+import {
+  buildAgentLifecycleCloseoutResult,
+  buildRecallantReadinessContract,
+  isAutomaticCaptureFresh,
+  agentObservationKindValues,
+  agentObservationResolutionStatusValues,
+  agentObservationStatusValues,
+  remoteMcpEndpointPath,
+  remoteMcpBridgeEndpointUrl,
+  remoteMcpBridgeHeaders,
+  recallantReadinessInvariant,
+  resolveRemoteMcpStoredCredential,
+  storeRemoteMcpCredential,
+  validateRemoteMcpBridgeConfig,
+  graphCandidateMaintenanceActionKindValues,
+  graphCandidateSourceRefKindValues,
+  recallantContractVersion,
+  type AgentLifecycleCloseoutProof,
+  type AgentLifecycleMemoryProofStatus,
+  type AppendAgentObservationInput,
+  type GraphCandidateMaintenanceActionKind,
+  type GraphCandidateSourceRefKind,
+  type RemoteMcpDoctorReport,
+  type RemoteAgentConsentScope
+} from "@recallant/contracts";
+import { runDetach } from "./detach.js";
+import { runLocalCleanup } from "./local-cleanup.js";
+import { runProjectSanitize } from "./project-sanitize.js";
+import { buildRemoteDoctorReport, runRemoteDoctor } from "./remote-doctor.js";
+import { runRemoteCleanup } from "./remote-cleanup.js";
+import {
+  buildVaultCandidatePlan,
+  buildVaultMarkdownExportPlan,
+  formatVaultCandidateText,
+  formatVaultInventoryText,
+  formatVaultMarkdownExportText,
+  inventoryVault,
+  writeVaultMarkdownExport
+} from "./vault-bridge.js";
+import {
+  applyRecallantCliUpdate,
+  checkRecallantCliUpdate,
+  renderRecallantCliUpdateAvailable
+} from "./cli-update.js";
+
+const fallbackRecallantCliVersion = recallantContractVersion;
+
+function repoRootFromCliModule() {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+function readRecallantCliPackageVersion() {
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(join(repoRootFromCliModule(), "apps", "cli", "package.json"), "utf8")
+    ) as Record<string, unknown>;
+    const version = typeof packageJson.version === "string" ? packageJson.version.trim() : "";
+    return version && version !== "0.0.0" ? version : fallbackRecallantCliVersion;
+  } catch {
+    return fallbackRecallantCliVersion;
+  }
+}
+
+function readGitShortRevision() {
+  const revision = readGitFullRevision();
+  if (!revision) return null;
+  const shortRevision = revision.slice(0, 8);
+  const dirty = spawnSync("git", ["-C", repoRootFromCliModule(), "diff", "--quiet"], {
+    stdio: "ignore"
+  });
+  return dirty.status === 1 ? `${shortRevision}.dirty` : shortRevision;
+}
+
+function readGitFullRevision() {
+  const result = spawnSync("git", ["-C", repoRootFromCliModule(), "rev-parse", "HEAD"], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) return null;
+  const revision = String(result.stdout ?? "")
+    .trim()
+    .toLowerCase();
+  return /^[0-9a-f]{40}$/.test(revision) ? revision : null;
+}
+
+function readGitBranch() {
+  const result = spawnSync(
+    "git",
+    ["-C", repoRootFromCliModule(), "symbolic-ref", "--short", "-q", "HEAD"],
+    {
+      encoding: "utf8"
+    }
+  );
+  if (result.status !== 0) return null;
+  const branch = String(result.stdout ?? "").trim();
+  return branch || null;
+}
+
+function readGitExactVersionTag() {
+  const result = spawnSync(
+    "git",
+    ["-C", repoRootFromCliModule(), "describe", "--tags", "--exact-match", "--match", "v[0-9]*"],
+    { encoding: "utf8" }
+  );
+  if (result.status !== 0) return null;
+  const tag = String(result.stdout ?? "").trim();
+  return /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag) ? tag : null;
+}
+
+function readGitRemoteUrl() {
+  const result = spawnSync("git", ["-C", repoRootFromCliModule(), "remote", "get-url", "origin"], {
+    encoding: "utf8"
+  });
+  if (result.status !== 0) return null;
+  const url = String(result.stdout ?? "").trim();
+  return url || null;
+}
+
+function isGitHeadAheadOfTrackedMain() {
+  const result = spawnSync(
+    "git",
+    ["-C", repoRootFromCliModule(), "rev-list", "--left-right", "--count", "origin/main...HEAD"],
+    { encoding: "utf8" }
+  );
+  if (result.status !== 0) return false;
+  const [behindText, aheadText] = String(result.stdout ?? "")
+    .trim()
+    .split(/\s+/);
+  const behind = Number.parseInt(behindText ?? "", 10);
+  const ahead = Number.parseInt(aheadText ?? "", 10);
+  return Number.isFinite(behind) && Number.isFinite(ahead) && behind === 0 && ahead > 0;
+}
+
+async function maybeUpdateRecallantBeforeOnboard(argv: readonly string[], options: OnboardOptions) {
+  if (
+    !canPromptForOnboarding(options) ||
+    argv.includes("--no-update-check") ||
+    process.env.RECALLANT_DISABLE_UPDATE_CHECK === "1" ||
+    process.env.RECALLANT_SKIP_UPDATE_CHECK === "1"
+  ) {
+    return false;
+  }
+
+  const check = await checkRecallantCliUpdate({
+    currentVersion: recallantCliVersion,
+    currentRevision: readGitFullRevision(),
+    currentBranch: readGitBranch(),
+    currentTag: readGitExactVersionTag(),
+    currentRepositoryUrl: readGitRemoteUrl(),
+    currentAheadOfTrackingBranch: isGitHeadAheadOfTrackedMain()
+  });
+  if (check.status === "unavailable") return false;
+  if (check.status === "current") {
+    process.stdout.write(`✓ Recallant ${recallantCliVersion} is up to date.\n\n`);
+    return false;
+  }
+  if (check.status === "pinned") {
+    process.stdout.write(
+      `✓ Recallant ${recallantCliVersion} is pinned to ${check.channel}. The main development channel was not selected.\n\n`
+    );
+    return false;
+  }
+  if (check.status === "custom_build") {
+    process.stdout.write(`Recallant update check: ${check.message} Automatic update skipped.\n\n`);
+    return false;
+  }
+
+  process.stdout.write(`${renderRecallantCliUpdateAvailable(check)}\n`);
+  if (options.dryRun) {
+    process.stdout.write("Dry run: the available CLI update was not installed.\n\n");
+    return false;
+  }
+  const accepted = await promptYesNo("Update Recallant now?", true);
+  if (!accepted) {
+    process.stdout.write(`Continuing with Recallant ${recallantCliVersion}.\n\n`);
+    return false;
+  }
+
+  process.stdout.write("Updating Recallant from the official repository…\n");
+  const updated = applyRecallantCliUpdate({
+    repoRoot: repoRootFromCliModule(),
+    currentRevision: check.current_revision,
+    expectedLatestRevision: check.latest_revision ?? ""
+  });
+  if (updated.status !== "updated" || !updated.executable) {
+    process.stdout.write(
+      `Update was not installed: ${updated.message}\nContinuing onboarding.\n\n`
+    );
+    return false;
+  }
+
+  process.stdout.write(`${updated.message} Restarting onboarding…\n\n`);
+  const rerun = spawnSync(updated.executable, argv.slice(2), {
+    stdio: "inherit",
+    env: { ...process.env, RECALLANT_SKIP_UPDATE_CHECK: "1" }
+  });
+  if (rerun.error) {
+    process.stderr.write(
+      `Updated Recallant could not restart onboarding: ${rerun.error.message}\n`
+    );
+    process.exitCode = 1;
+    return true;
+  }
+  process.exitCode = rerun.status ?? 1;
+  return true;
+}
+
+function resolveRecallantCliVersion() {
+  const packageVersion = readRecallantCliPackageVersion();
+  const gitRevision = readGitShortRevision();
+  return gitRevision ? `${packageVersion}+${gitRevision}` : packageVersion;
+}
+
+const recallantCliVersion = resolveRecallantCliVersion();
+
+const memorySection = `## Memory (Recallant)
+
+- If Recallant is configured and consent allows agent-authored memory, you must use Recallant by
+  default inside the allowed boundary. Configuration proves access; proof proves memory;
+  capture-active proves Recallant is doing its job.
+- At session start: call \`memory_start_session\`. If it reports \`previous_session_recovery\` or
+  \`previous_unclosed_session\`, treat that as recovery context for this project, not an alarm and
+  not a fresh instruction. Review checkpoint/captured events before asking the owner to repeat
+  context.
+- Before non-trivial work after session start: call \`memory_get_context_pack\` with the current task hint.
+- Use \`memory_search\` for raw evidence/chunks only when the context pack says more evidence is needed or the task changes.
+- Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
+- Automatic inside consent: session start, context read, concise decisions, actions, tests,
+  checkpoints, closeout, and one synthetic proof marker when running diagnostics.
+- After meaningful progress: write concise agent-authored events/memories through
+  \`memory_append_event\` or \`memory_create_agent_memory\`. Use \`memory_set_checkpoint\` only for
+  checkpoint state; it is not semantic recall proof.
+- On clear pause/exit/closeout intent, or when meaningful work is complete: call
+  \`memory_closeout\`. This is the normal MCP closeout path and includes checkpoint state,
+  searchable memory, recall verification, and next-session readiness semantics.
+- To reuse a pattern from another project: search explicitly for source-linked examples, adapt the pattern locally, and create current-project memory with source refs after applying it.
+- Approval required: attach/import/onboard existing project history, bulk file summaries, raw logs,
+  customer data, or artifacts. Do not import or summarize project files without owner approval.
+- Forbidden: secrets, \`.env\`, private keys, raw credentials, database URLs, provider tokens,
+  customer data, raw artifacts, backups, and private deployment notes. Never paste them into memory
+  tools.
+- If direct MCP use is unavailable, use the CLI capture fallback: \`recallant agent-start\`,
+  \`recallant agent-event\`, and \`recallant agent-closeout\`. Use \`recallant agent-checkpoint\`
+  only as an advanced pause/compaction state helper, not as closeout proof.
+  \`recallant agent-closeout\` is the CLI fallback closeout path.
+  If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
+`;
+
+function parseEnvValue(raw: string) {
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function envValueIsSet(value: string | undefined) {
+  return value !== undefined && value.trim() !== "";
+}
+
+type EnvLoadState = {
+  status:
+    | "not_checked"
+    | "explicit_database_url"
+    | "loaded_env_file"
+    | "env_file_missing"
+    | "env_file_unreadable";
+  source: "none" | "explicit_env" | "default_env_file" | "explicit_env_file";
+  env_file_loaded: boolean;
+  database_url_present_before: boolean;
+  database_url_present_after: boolean;
+};
+
+let envLoadState: EnvLoadState = {
+  status: "not_checked",
+  source: "none",
+  env_file_loaded: false,
+  database_url_present_before: false,
+  database_url_present_after: false
+};
+
+async function loadDefaultEnv() {
+  const envFile =
+    process.env.RECALLANT_ENV_FILE ?? join(homedir(), ".config", "recallant", "recallant.env");
+  const explicitEnvFile = envValueIsSet(process.env.RECALLANT_ENV_FILE);
+  const databaseUrlBefore = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+  if (!explicitEnvFile && databaseUrlBefore) {
+    envLoadState = {
+      status: "explicit_database_url",
+      source: "explicit_env",
+      env_file_loaded: false,
+      database_url_present_before: true,
+      database_url_present_after: true
+    };
+    return;
+  }
+  try {
+    const content = await readFile(envFile, "utf8");
+    const loadedKeys: string[] = [];
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+      const [rawKey, ...rawValueParts] = trimmed.split("=");
+      const key = rawKey?.trim();
+      if (!key || envValueIsSet(process.env[key])) continue;
+      process.env[key] = parseEnvValue(rawValueParts.join("="));
+      loadedKeys.push(key);
+    }
+    const databaseUrlAfter = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+    envLoadState = {
+      status: databaseUrlAfter && !databaseUrlBefore ? "loaded_env_file" : "explicit_database_url",
+      source: explicitEnvFile ? "explicit_env_file" : "default_env_file",
+      env_file_loaded: loadedKeys.length > 0,
+      database_url_present_before: databaseUrlBefore,
+      database_url_present_after: databaseUrlAfter
+    };
+  } catch {
+    envLoadState = {
+      status: "env_file_missing",
+      source: explicitEnvFile ? "explicit_env_file" : "default_env_file",
+      env_file_loaded: false,
+      database_url_present_before: databaseUrlBefore,
+      database_url_present_after: envValueIsSet(process.env.RECALLANT_DATABASE_URL)
+    };
+  }
+}
+
+type InitOptions = {
+  target: string;
+  dryRun: boolean;
+  captureProfile: "light" | "standard" | "detailed" | "custom";
+  projectDir: string;
+  serverUrl: string;
+};
+
+export function describeCliBoundary() {
+  return {
+    core: getRecallantCoreInfo(),
+    supportedClientKinds
+  };
+}
+
+function parseFlag(argv: readonly string[], name: string) {
+  const index = argv.indexOf(name);
+  return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function positionalArgs(argv: readonly string[]) {
+  const flagsWithValues = new Set([
+    "--project-dir",
+    "--server-url",
+    "--target",
+    "--capture-profile",
+    "--task-hint",
+    "--manifest",
+    "--remap",
+    "--target",
+    "--spool-dir",
+    "--kind",
+    "--role",
+    "--text",
+    "--event-kind",
+    "--raw-artifact-json",
+    "--dedup-key",
+    "--not-accessed",
+    "--older-than",
+    "--limit",
+    "--format",
+    "--client-kind",
+    "--client-version",
+    "--session-label",
+    "--session-id",
+    "--status",
+    "--focus",
+    "--next-step",
+    "--summary",
+    "--title",
+    "--text",
+    "--context-profile",
+    "--override-reason",
+    "--reason",
+    "--name",
+    "--project-kind",
+    "--memory-domain",
+    "--primary-path",
+    "--project-id",
+    "--developer-id",
+    "--client-id",
+    "--credential-id",
+    "--expires-at",
+    "--source-kind",
+    "--source-id",
+    "--graph-candidate-id",
+    "--target-graph-candidate-id",
+    "--target-id",
+    "--action-kind",
+    "--label",
+    "--uri",
+    "--query",
+    "--since",
+    "--until",
+    "--surface",
+    "--slow-ms",
+    "--top-k",
+    "--marker",
+    "--previewed-global-target",
+    "--expires-minutes",
+    "--invite-url",
+    "--invite-token",
+    "--connect-url",
+    "--poll-timeout-ms",
+    "--poll-interval-ms",
+    "--include",
+    "--exclude",
+    "--output",
+    "--from-file",
+    "--source-path"
+  ]);
+  const args: string[] = [];
+  for (let index = 3; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (flagsWithValues.has(arg)) index += 1;
+      continue;
+    }
+    args.push(arg);
+  }
+  return args;
+}
+
+function parseProjectArg(argv: readonly string[], start = 3) {
+  const flagsWithValues = new Set(["--project-dir", "--format", "--client"]);
+  for (let index = start; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (flagsWithValues.has(arg)) index += 1;
+      continue;
+    }
+    return arg;
+  }
+  return null;
+}
+
+type OnboardOptions = {
+  projectDir: string;
+  client: string | null;
+  clientExplicit: boolean;
+  installLocalHooks: boolean;
+  installLocalHooksExplicit: boolean;
+  verify: boolean;
+  verifyExplicit: boolean;
+  dryRun: boolean;
+  yes: boolean;
+  cancel: boolean;
+  initGit: boolean;
+  skipVcsSafety: boolean;
+  format: "text" | "json";
+};
+
+type OnboardStorageStep = {
+  status: "ready" | "missing" | "unreachable" | "storage_blocked";
+  configured: boolean;
+  reachable: boolean;
+  env_file_loaded: boolean;
+  env_source: EnvLoadState["source"];
+  setup_mode: "not_needed" | "guided" | "non_interactive";
+  message: string;
+  error_code: "storage_blocked" | null;
+  offline_spool: {
+    available: true;
+    role: "fail_soft_capture_fallback";
+    complete_onboarding: false;
+  };
+  setup_choices: Array<{
+    id:
+      | "connect_existing_server"
+      | "single_user_storage"
+      | "existing_private_profile"
+      | "stop_without_changes";
+    label: string;
+    description: string;
+  }>;
+  remote_connect: {
+    available: boolean;
+    server_url: string | null;
+    command: string | null;
+    description: string;
+  };
+};
+
+type OnboardVerifyEvidence = {
+  context_read: boolean;
+  memory_write: boolean;
+  checkpoint: boolean;
+  recall: boolean;
+};
+
+type OnboardVerifyPayload = {
+  status: "passed" | "skipped" | "failed";
+  ask_answer: string | null;
+  failed_stage: "capture" | "readiness" | "recall" | null;
+  message: string | null;
+  capture_active: boolean;
+  memory_loop_ready: boolean;
+  evidence: OnboardVerifyEvidence;
+  proof: {
+    demo: "done" | "skipped" | "failed";
+    doctor: "done" | "skipped" | "failed";
+    ask: "done" | "skipped" | "failed";
+  };
+  stages: {
+    capture: { status: "done" | "skipped" | "failed"; detail: string | null };
+    readiness: {
+      status: "done" | "skipped" | "failed";
+      detail: string | null;
+      evidence: OnboardVerifyEvidence;
+    };
+    recall: { status: "done" | "skipped" | "failed"; detail: string | null };
+  };
+};
+
+type OnboardEmbeddingRecoveryPayload = {
+  status:
+    "skipped" | "no_pending" | "recovered" | "still_pending" | "model_unavailable" | "unknown";
+  attempted: boolean;
+  project_id: string | null;
+  pending_before: number | null;
+  attempted_chunks: number;
+  recovered_chunks: number;
+  remaining_pending: number | null;
+  limit: number;
+  recovery_available: boolean;
+  latest_failure: unknown;
+  warning: string | null;
+  recommendation: string;
+  scope: {
+    project_scoped: true;
+    bounded: true;
+    limit: number;
+  };
+};
+
+type OnboardWorkbenchOutcome = {
+  available: boolean;
+  url: string | null;
+  auth_required: boolean;
+  private_by_default: boolean;
+  project_visible: boolean | null;
+  migration_review_queue: {
+    import_candidate_count: number | null;
+    pending_review: number | null;
+    review_needed: boolean | null;
+  };
+  message: string;
+};
+
+type OnboardVersionControlStep = {
+  status:
+    | "ready"
+    | "initialized"
+    | "needs_choice"
+    | "skipped"
+    | "git_missing"
+    | "dry_run_planned"
+    | "failed";
+  git_available: boolean;
+  repository_ready: boolean;
+  initialized: boolean;
+  writes_files: boolean;
+  message: string;
+  refusal_available: true;
+  choices: Array<{
+    id: "initialize_git" | "continue_without_git" | "install_git";
+    label: string;
+    description: string;
+  }>;
+  warnings: string[];
+};
+
+type OnboardAttachedStep = {
+  status: "attached" | "skipped" | "needs_confirmation" | "failed" | "unknown";
+  command: string | null;
+  details?: string;
+};
+
+type OnboardConnectedStep = {
+  status: "connected" | "skipped" | "failed" | "needed";
+  command: string | null;
+  details?: string;
+};
+
+function parseOnboardOptions(argv: readonly string[]): OnboardOptions {
+  const rawClient = parseFlag(argv, "--client");
+  const clientDisabled = argv.includes("--no-client");
+  const installHooksRequested =
+    argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
+  const installHooksDisabled =
+    argv.includes("--no-install-local-hooks") || argv.includes("--no-local-hooks");
+  const verifyRequested = argv.includes("--verify");
+  const verifyDisabled = argv.includes("--no-verify");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if (clientDisabled && rawClient) {
+    throw new Error("Use either --client <name> or --no-client, not both.");
+  }
+  if (installHooksRequested && installHooksDisabled) {
+    throw new Error("Use either --install-local-hooks or --no-local-hooks, not both.");
+  }
+  if (verifyRequested && verifyDisabled) {
+    throw new Error("Use either --verify or --no-verify, not both.");
+  }
+  if (clientDisabled && installHooksRequested) {
+    throw new Error("--install-local-hooks requires a client; remove --no-client first.");
+  }
+  if (clientDisabled && verifyRequested) {
+    throw new Error("--verify requires a client; remove --no-client first.");
+  }
+  const client = clientDisabled ? null : rawClient && rawClient.trim() ? rawClient.trim() : "codex";
+  const clientEnabled = client !== null;
+  return {
+    projectDir: resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd()),
+    client,
+    clientExplicit: Boolean(rawClient || clientDisabled),
+    installLocalHooks: clientEnabled && !installHooksDisabled,
+    installLocalHooksExplicit: installHooksRequested || installHooksDisabled,
+    verify: clientEnabled && !verifyDisabled,
+    verifyExplicit: verifyRequested || verifyDisabled,
+    dryRun: argv.includes("--dry-run"),
+    yes: argv.includes("--yes") || argv.includes("-y"),
+    cancel: argv.includes("--cancel"),
+    initGit: argv.includes("--init-git"),
+    skipVcsSafety: argv.includes("--skip-vcs-safety"),
+    format
+  };
+}
+
+function spoolDir(argv: readonly string[]) {
+  return resolve(
+    parseFlag(argv, "--spool-dir") ??
+      process.env.RECALLANT_SPOOL_DIR ??
+      join(projectDir(argv), ".recallant", "spool")
+  );
+}
+
+function spoolPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "spool.jsonl");
+}
+
+function spoolManifestPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "sync-manifest.json");
+}
+
+function auditSpoolPath(argv: readonly string[]) {
+  return join(spoolDir(argv), "audit.jsonl");
+}
+
+async function readJsonl(path: string) {
+  const content = await readOptional(path);
+  if (!content?.trim()) return [];
+  return content
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function readSpoolManifest(argv: readonly string[]) {
+  const content = await readOptional(spoolManifestPath(argv));
+  if (!content) return { synced: {} as Record<string, unknown> };
+  const parsed = JSON.parse(content) as { synced?: Record<string, unknown> };
+  return { synced: parsed.synced ?? {} };
+}
+
+async function getLocalSpoolStatus(argv: readonly string[]) {
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  const lastRecord = records.at(-1) ?? null;
+  const lastUnsynced = unsynced.at(-1) ?? null;
+  return {
+    status: unsynced.length > 0 ? "unsynced" : records.length > 0 ? "synced" : "empty",
+    spool_path: spoolPath(argv),
+    manifest_path: spoolManifestPath(argv),
+    record_count: records.length,
+    unsynced_count: unsynced.length,
+    last_write_at:
+      typeof lastRecord?.created_at === "string"
+        ? lastRecord.created_at
+        : typeof lastRecord?.createdAt === "string"
+          ? lastRecord.createdAt
+          : null,
+    last_unsynced_local_id: lastUnsynced ? String(lastUnsynced.local_id ?? "") : null,
+    replay_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)} --dry-run`,
+    sync_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)}`,
+    prune_command: `recallant prune-spool --spool-dir ${spoolDir(argv)} --synced`,
+    checked_at: new Date().toISOString()
+  };
+}
+
+type AgentSessionState = {
+  schema_version: 1;
+  status: "active" | "closed" | "offline";
+  session_id: string;
+  project_id?: string | null;
+  project_dir: string;
+  client_kind: string;
+  client_version?: string | null;
+  task_hint?: string | null;
+  started_at: string;
+  updated_at: string;
+  context_pack_id?: string | null;
+  last_context_read_at?: string | null;
+  last_memory_write_at?: string | null;
+  last_checkpoint_at?: string | null;
+  last_event_id?: string | null;
+  last_memory_id?: string | null;
+  native_hook?: {
+    client: "codex";
+    external_session_id: string;
+    first_observed_at: string;
+    last_observed_at: string;
+    last_event_name: string;
+    last_turn_id?: string | null;
+    last_mode: "server" | "offline_spool";
+    observation_count: number;
+  };
+};
+
+const remoteAgentSecretClasses = [
+  ".env",
+  "private keys",
+  "raw credentials",
+  "customer data",
+  "provider secrets",
+  "database URLs",
+  "raw artifacts",
+  "backups"
+] as const;
+
+const remoteAgentAllowedContext = [
+  "Project instructions and agent startup context explicitly read by the agent.",
+  "Redacted project metadata needed to request and retrieve Recallant context packs.",
+  "Agent-authored decisions, actions, test summaries, checkpoints, and closeouts.",
+  "User-provided task context after local review and redaction."
+] as const;
+
+type RemoteAgentConsentReceipt = {
+  schema_version: 1;
+  kind: "recallant_remote_agent_consent";
+  created_at: string;
+  approval_mode: string | null;
+  consent_scope: RemoteAgentConsentScope;
+  credential_ref: string | null;
+  credential_store_path: string | null;
+  no_raw_credentials_or_private_keys: true;
+};
+
+type RemoteAgentConnection = {
+  scope: RemoteAgentConsentScope;
+  credential_ref: string | null;
+  credential_store_path: string | null;
+  credential: string | null;
+};
+
+type RemoteAgentReadinessStatus = {
+  ok: boolean;
+  readiness_contract?: ReturnType<typeof buildRecallantReadinessContract> | null;
+  readiness_status?: string | null;
+  warning?: string | null;
+};
+
+function projectDir(argv: readonly string[]) {
+  return resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+}
+
+function recallantDir(projectDir: string) {
+  return join(projectDir, ".recallant");
+}
+
+function currentSessionPathFor(projectDir: string) {
+  return join(recallantDir(projectDir), "current-session.json");
+}
+
+function remoteAgentConsentReceiptPath(projectDir: string) {
+  return join(recallantDir(projectDir), "remote-consent.json");
+}
+
+function remoteAgentConsentScope(input: {
+  serverUrl: string;
+  projectId: string | null;
+  developerId: string | null;
+  clientId: string | null;
+  credentialPrefix?: string | null;
+}): RemoteAgentConsentScope {
+  return {
+    destination: {
+      server_url: input.serverUrl,
+      endpoint_path: remoteMcpEndpointPath
+    },
+    credential_scope: {
+      project_id: input.projectId,
+      developer_id: input.developerId,
+      client_id: input.clientId,
+      credential_prefix: input.credentialPrefix ?? null
+    },
+    allowed_context: [...remoteAgentAllowedContext],
+    redaction_boundary: [...remoteAgentSecretClasses],
+    not_sent: [...remoteAgentSecretClasses],
+    recommended_next_call: "memory_get_context_pack",
+    recommended_next_proof_call: "memory_create_agent_memory",
+    recommended_next_proof_followup_call: "memory_recall_agent_memories"
+  };
+}
+
+function defaultRemoteAgentReadinessContract() {
+  return buildRecallantReadinessContract({
+    configured: true,
+    remote_mcp_ready: true,
+    context_ready: false,
+    semantic_memory_ready: false,
+    capture_active: false,
+    ingestion_approved: false
+  });
+}
+
+function remoteAgentReadinessContract(readiness: RemoteAgentReadinessStatus | null) {
+  return readiness?.readiness_contract ?? defaultRemoteAgentReadinessContract();
+}
+
+function remoteAgentReadinessSummary(readiness: RemoteAgentReadinessStatus | null) {
+  const contract = remoteAgentReadinessContract(readiness);
+  const semanticProofAt = contract.evidence.last_semantic_recall_proof_at;
+  if (contract.capture_active) return "capture_active";
+  if (contract.semantic_memory_ready && semanticProofAt) {
+    return `semantic_memory_ready; semantic proof evidence at ${semanticProofAt}.`;
+  }
+  if (contract.context_ready) return "context_ready; semantic memory proof is not proven yet.";
+  return "configured/access-ready only; semantic memory is not proven yet.";
+}
+
+function remoteAgentStartupContract() {
+  return {
+    primary_path: "configured_remote_mcp",
+    direct_mcp_sequence: [
+      {
+        step: "start_session",
+        call: "memory_start_session",
+        note: "Start or recover the Recallant agent session for this project."
+      },
+      {
+        step: "read_context",
+        call: "memory_get_context_pack",
+        note: "Read bounded startup context with the current task hint before changing files."
+      },
+      {
+        step: "record_work",
+        call: "memory_append_event or memory_create_agent_memory",
+        note: "Write concise non-secret decisions, actions, tests, and governed memories when useful."
+      },
+      {
+        step: "checkpoint_state",
+        call: "memory_set_checkpoint",
+        note: "Checkpoint state is not semantic recall proof."
+      },
+      {
+        step: "closeout",
+        call: "memory_closeout",
+        note: "Normal closeout records checkpoint state, searchable memory, recall verification, and next-session readiness."
+      }
+    ],
+    cli_fallback_sequence: [
+      "recallant agent-start --format json",
+      'recallant agent-event --kind action --text "<what changed>"',
+      'recallant agent-closeout --summary "<what changed and what is next>"'
+    ],
+    advanced_pause_checkpoint:
+      "Use recallant agent-checkpoint only for pause/compaction state; it is not semantic memory proof or normal closeout.",
+    project_log_role:
+      "PROJECT_LOG.md is a compact current-state fallback. Durable session history belongs in Recallant memory.",
+    forbidden_client_setup: ["local Postgres", "Docker", "RECALLANT_DATABASE_URL"],
+    remote_doctor_role:
+      "remote-doctor is a diagnostic/proof shortcut, not the normal agent startup path."
+  };
+}
+
+function remoteAgentConsentOutput(
+  scope: RemoteAgentConsentScope | null,
+  readiness: RemoteAgentReadinessStatus | null = null
+) {
+  if (!scope) return {};
+  const recommendedNextProofCall =
+    scope.recommended_next_proof_call ?? "memory_create_agent_memory";
+  const recommendedNextProofFollowupCall =
+    scope.recommended_next_proof_followup_call ?? "memory_recall_agent_memories";
+  const readinessContract = remoteAgentReadinessContract(readiness);
+  const recommendedNextAction = readinessContract.semantic_memory_ready
+    ? "Semantic memory proof is present. Continue normal Recallant startup with memory_start_session, memory_get_context_pack, concise work memory, checkpoint state when needed, and memory_closeout. Agent runtime does not require Cloudflare browser auth."
+    : readinessContract.context_ready
+      ? "Prove semantic memory with one safe governed memory_create_agent_memory marker followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth."
+      : "Use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow; then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories. Agent runtime does not require Cloudflare browser auth.";
+  return {
+    destination: scope.destination,
+    credential_scope: scope.credential_scope,
+    consent_scope: {
+      allowed_context: scope.allowed_context,
+      cloudflare_browser_auth_required: false,
+      note: "Agent runtime uses scoped machine credentials; Cloudflare Access remains for human approval/admin surfaces."
+    },
+    redaction_boundary: scope.redaction_boundary,
+    not_sent: scope.not_sent,
+    recommended_next_call: scope.recommended_next_call,
+    recommended_next_proof_call: recommendedNextProofCall,
+    recommended_next_proof_followup_call: recommendedNextProofFollowupCall,
+    startup_contract: remoteAgentStartupContract(),
+    readiness_contract: readinessContract,
+    readiness_state: readinessContract.primary_state,
+    proof_status: {
+      remote_mcp_ready: readinessContract.remote_mcp_ready,
+      context_ready: readinessContract.context_ready,
+      semantic_memory_ready: readinessContract.semantic_memory_ready,
+      memory_loop_ready: readinessContract.memory_loop_ready,
+      capture_active: readinessContract.capture_active,
+      ingestion_approved: readinessContract.ingestion_approved,
+      readiness_state: readinessContract.primary_state,
+      next_action: recommendedNextAction
+    },
+    remote_readiness_status: readiness?.ok === true ? "read" : "not_read",
+    remote_readiness_warning: readiness?.warning ?? null,
+    recommended_next_action: recommendedNextAction
+  };
+}
+
+function remoteAgentStartReadyHumanReport(
+  scope: RemoteAgentConsentScope,
+  readiness: RemoteAgentReadinessStatus | null = null
+) {
+  const credentialScope = scope.credential_scope;
+  const readinessContract = remoteAgentReadinessContract(readiness);
+  const semanticProofAt = readinessContract.evidence.last_semantic_recall_proof_at;
+  return `${[
+    "Recallant agent-start",
+    "",
+    "Mode: remote_mcp_ready",
+    `Readiness: ${remoteAgentReadinessSummary(readiness)}`,
+    recallantReadinessInvariant,
+    `Readiness state: ${readinessContract.primary_state}`,
+    `remote_mcp_ready: ${readinessContract.remote_mcp_ready ? "yes" : "no"}`,
+    `context_ready: ${readinessContract.context_ready ? "yes" : "no"}`,
+    `semantic_memory_ready: ${readinessContract.semantic_memory_ready ? "yes" : "no"}`,
+    `memory_loop_ready: ${readinessContract.memory_loop_ready ? "yes" : "no"}`,
+    `capture_active: ${readinessContract.capture_active ? "yes" : "no"}`,
+    `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
+    `Project scope: ${credentialScope.project_id ?? "unknown"}`,
+    `Developer scope: ${credentialScope.developer_id ?? "unknown"}`,
+    `Client scope: ${credentialScope.client_id ?? "unknown"}`,
+    `Credential prefix: ${credentialScope.credential_prefix ?? "unknown"}`,
+    "",
+    "Remote Recallant consent boundary",
+    "Allowed context:",
+    ...scope.allowed_context.map((item) => `  - ${item}`),
+    "Do not send:",
+    ...scope.not_sent.map((item) => `  - ${item}`),
+    "",
+    "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
+    "",
+    "Agent startup contract:",
+    "  1. MCP: memory_start_session",
+    "  2. MCP: memory_get_context_pack with the current task hint",
+    "  3. MCP: memory_append_event or memory_create_agent_memory for concise non-secret work memory",
+    "  4. MCP: memory_set_checkpoint for state only; it is not semantic recall proof",
+    "  5. MCP: memory_closeout on pause or finish",
+    "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout.",
+    "Use recallant agent-checkpoint only for pause/compaction state, not normal closeout.",
+    "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory.",
+    semanticProofAt
+      ? `Proof: semantic governed-memory marker evidence was last seen at ${semanticProofAt}.`
+      : "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
+    readiness?.warning ? `Readiness warning: ${readiness.warning}` : null,
+    "Do not call this capture-active until a fresh automatic agent event is observed; context, memory, and checkpoint evidence only establish memory_loop_ready.",
+    "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n")}\n`;
+}
+
+function remoteAgentConfigValue(content: string, key: string) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const quoted = content.match(new RegExp(`${escaped}\\s*[:=]\\s*"([^"]+)"`));
+  if (quoted?.[1]) return quoted[1];
+  const bare = content.match(new RegExp(`${escaped}\\s*[:=]\\s*([^,}\\n\\r]+)`));
+  return bare?.[1]?.trim().replace(/^['"]|['"]$/g, "") ?? null;
+}
+
+function resolveRemoteAgentCredential(input: {
+  credential?: string | null;
+  credentialRef?: string | null;
+  credentialStorePath?: string | null;
+}) {
+  try {
+    return resolveRemoteMcpStoredCredential({
+      credential: input.credential,
+      credentialRef: input.credentialRef,
+      credentialStorePath: input.credentialStorePath
+    });
+  } catch {
+    return input.credential ?? null;
+  }
+}
+
+async function readRemoteAgentConnection(
+  projectDir: string
+): Promise<RemoteAgentConnection | null> {
+  const receipt = await readOptional(remoteAgentConsentReceiptPath(projectDir));
+  if (receipt) {
+    try {
+      const parsed = JSON.parse(receipt) as Partial<RemoteAgentConsentReceipt>;
+      if (parsed.kind === "recallant_remote_agent_consent" && parsed.consent_scope) {
+        return {
+          scope: parsed.consent_scope,
+          credential_ref: parsed.credential_ref ?? null,
+          credential_store_path: parsed.credential_store_path ?? null,
+          credential: resolveRemoteAgentCredential({
+            credentialRef: parsed.credential_ref,
+            credentialStorePath: parsed.credential_store_path
+          })
+        };
+      }
+    } catch {
+      // Ignore malformed local receipts and fall back to client config discovery.
+    }
+  }
+
+  const candidateFiles = [
+    ".codex/config.toml",
+    ".cursor/mcp.json",
+    ".mcp.json",
+    ".recallant/generic-remote-mcp.json"
+  ];
+  for (const candidate of candidateFiles) {
+    const content = await readOptional(join(projectDir, candidate));
+    if (!content?.includes("RECALLANT_REMOTE_MCP_URL") || !content.includes("remote-bridge")) {
+      continue;
+    }
+    const serverUrl = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_URL");
+    if (!serverUrl) continue;
+    const credentialRef = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL_REF");
+    const credentialStorePath = remoteAgentConfigValue(
+      content,
+      "RECALLANT_REMOTE_MCP_CREDENTIAL_STORE"
+    );
+    const credential = remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CREDENTIAL");
+    const scope = remoteAgentConsentScope({
+      serverUrl,
+      projectId: remoteAgentConfigValue(content, "RECALLANT_PROJECT_ID"),
+      developerId: remoteAgentConfigValue(content, "RECALLANT_DEVELOPER_ID"),
+      clientId: remoteAgentConfigValue(content, "RECALLANT_REMOTE_MCP_CLIENT_ID"),
+      credentialPrefix: credentialRef ?? (credential ? "inline-redacted" : null)
+    });
+    return {
+      scope,
+      credential_ref: credentialRef,
+      credential_store_path: credentialStorePath,
+      credential: resolveRemoteAgentCredential({
+        credential,
+        credentialRef,
+        credentialStorePath
+      })
+    };
+  }
+  return null;
+}
+
+async function readRemoteAgentConsentScope(projectDir: string) {
+  return (await readRemoteAgentConnection(projectDir))?.scope ?? null;
+}
+
+function remoteAgentReadinessUnavailable(reason: string): RemoteAgentReadinessStatus {
+  return {
+    ok: false,
+    readiness_contract: defaultRemoteAgentReadinessContract(),
+    readiness_status: "configured",
+    warning: reason
+  };
+}
+
+function readinessContractFromRemotePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const contract = record.readiness_contract;
+  if (!contract || typeof contract !== "object") return null;
+  return contract as ReturnType<typeof buildRecallantReadinessContract>;
+}
+
+async function readRemoteAgentReadinessStatus(
+  connection: RemoteAgentConnection | null
+): Promise<RemoteAgentReadinessStatus> {
+  if (!connection) {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read because remote consent is not configured."
+    );
+  }
+  const scope = connection.scope;
+  const projectId = scope.credential_scope.project_id;
+  const developerId = scope.credential_scope.developer_id;
+  const clientId = scope.credential_scope.client_id;
+  if (!connection.credential || !projectId || !developerId || !clientId) {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read because scoped credential or scope fields are unavailable; continuing with configured/access-ready state."
+    );
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const endpointUrl = remoteMcpBridgeEndpointUrl(scope.destination.server_url);
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: remoteMcpBridgeHeaders({
+        serverUrl: scope.destination.server_url,
+        credential: connection.credential,
+        projectId,
+        developerId,
+        clientId
+      }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `agent-start-readiness-${randomUUID()}`,
+        method: "tools/call",
+        params: {
+          name: "memory_get_readiness_status",
+          arguments: {}
+        }
+      }),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return remoteAgentReadinessUnavailable(
+        `Remote readiness status was not read (HTTP ${response.status}); continuing with configured/access-ready state.`
+      );
+    }
+    const json = JSON.parse(text) as Record<string, unknown>;
+    const result = json.result && typeof json.result === "object" ? json.result : null;
+    const structuredContent =
+      result && "structuredContent" in result
+        ? (result as Record<string, unknown>).structuredContent
+        : null;
+    const contract = readinessContractFromRemotePayload(structuredContent);
+    if (!contract) {
+      return remoteAgentReadinessUnavailable(
+        "Remote readiness status response did not include a readiness contract; continuing with configured/access-ready state."
+      );
+    }
+    const status =
+      structuredContent && typeof structuredContent === "object"
+        ? String(
+            (structuredContent as Record<string, unknown>).readiness_status ??
+              contract.primary_state
+          )
+        : contract.primary_state;
+    return {
+      ok: true,
+      readiness_contract: contract,
+      readiness_status: status,
+      warning: null
+    };
+  } catch {
+    return remoteAgentReadinessUnavailable(
+      "Remote readiness status was not read; continuing with configured/access-ready state."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function writeRemoteAgentConsentReceipt(input: {
+  projectDir: string;
+  serverUrl: string;
+  projectId: string | null;
+  developerId: string | null;
+  clientId: string | null;
+  credentialRef: string | null;
+  credentialPrefix: string | null;
+  credentialStorePath: string | null;
+  approvalMode: string | null;
+}) {
+  const scope = remoteAgentConsentScope({
+    serverUrl: input.serverUrl,
+    projectId: input.projectId,
+    developerId: input.developerId,
+    clientId: input.clientId,
+    credentialPrefix: input.credentialPrefix ?? input.credentialRef
+  });
+  const receipt: RemoteAgentConsentReceipt = {
+    schema_version: 1,
+    kind: "recallant_remote_agent_consent",
+    created_at: new Date().toISOString(),
+    approval_mode: input.approvalMode,
+    consent_scope: scope,
+    credential_ref: input.credentialRef,
+    credential_store_path: input.credentialStorePath,
+    no_raw_credentials_or_private_keys: true
+  };
+  await mkdir(recallantDir(input.projectDir), { recursive: true });
+  await writeFile(
+    remoteAgentConsentReceiptPath(input.projectDir),
+    `${JSON.stringify(receipt, null, 2)}\n`
+  );
+  return receipt;
+}
+
+function agentStartHumanReport(input: {
+  mode: string;
+  projectId?: string | null;
+  sessionId: string;
+  contextPackId?: string | null;
+  statePath: string;
+  spoolPath?: string | null;
+  warning?: string | null;
+  previousUnclosedSession?: unknown;
+  previousSessionRecovery?: unknown;
+  consentScope: RemoteAgentConsentScope | null;
+}) {
+  const lines = [
+    "Recallant agent-start",
+    "",
+    "Status: started",
+    `Mode: ${input.mode}`,
+    input.projectId ? `Project id: ${input.projectId}` : null,
+    `Session id: ${input.sessionId}`,
+    input.contextPackId ? `Context pack id: ${input.contextPackId}` : null,
+    `State file: ${input.statePath}`,
+    input.spoolPath ? `Spool file: ${input.spoolPath}` : null,
+    input.warning ? `Warning: ${input.warning}` : null,
+    input.previousSessionRecovery
+      ? `Previous session recovery: ${JSON.stringify(input.previousSessionRecovery)}`
+      : null,
+    input.previousUnclosedSession
+      ? `Previous unfinished session details: ${JSON.stringify(input.previousUnclosedSession)}`
+      : null
+  ];
+  if (input.consentScope) {
+    lines.push(
+      "",
+      "Remote Recallant consent boundary:",
+      `Destination: ${input.consentScope.destination.server_url}${input.consentScope.destination.endpoint_path}`,
+      `Credential scope: project=${input.consentScope.credential_scope.project_id ?? "unknown"}, developer=${input.consentScope.credential_scope.developer_id ?? "unknown"}, client=${input.consentScope.credential_scope.client_id ?? "unknown"}`,
+      `Allowed context: ${input.consentScope.allowed_context.join(" ")}`,
+      `Do not send: ${input.consentScope.not_sent.join(", ")}.`,
+      "Next: use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow. Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth.",
+      "Record concise non-secret work with memory_append_event or memory_create_agent_memory; close with memory_closeout.",
+      "Use memory_set_checkpoint only for checkpoint state; it is not semantic recall proof.",
+      "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout. Use recallant agent-checkpoint only for pause/compaction state.",
+      "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory."
+    );
+  } else {
+    lines.push(
+      "",
+      "Next: use memory_get_context_pack through MCP when available, or recallant context as the CLI fallback."
+    );
+  }
+  return `${lines.filter((line): line is string => line !== null).join("\n")}\n`;
+}
+
+async function readAgentSessionState(projectDir: string): Promise<AgentSessionState | null> {
+  const content = await readOptional(currentSessionPathFor(projectDir));
+  if (!content) return null;
+  return JSON.parse(content) as AgentSessionState;
+}
+
+async function writeAgentSessionState(projectDir: string, state: AgentSessionState) {
+  await mkdir(recallantDir(projectDir), { recursive: true });
+  const target = currentSessionPathFor(projectDir);
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
+  await rename(temporary, target);
+}
+
+function summarizeText(text: string, max = 88) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, max - 1)}...`;
+}
+
+function dedupHash(prefix: string, payload: Record<string, unknown>) {
+  return `${prefix}:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+}
+
+const closeoutTriggers = [
+  { phrase: "exit", intent: "manual_exit", language: "en", confidence: 0.98 },
+  { phrase: "quit", intent: "manual_exit", language: "en", confidence: 0.95 },
+  { phrase: "close out", intent: "task_complete", language: "en", confidence: 0.94 },
+  { phrase: "closeout", intent: "task_complete", language: "en", confidence: 0.94 },
+  { phrase: "wrap up", intent: "task_complete", language: "en", confidence: 0.9 },
+  { phrase: "end session", intent: "manual_exit", language: "en", confidence: 0.93 },
+  { phrase: "finish session", intent: "task_complete", language: "en", confidence: 0.9 },
+  { phrase: "pause here", intent: "pause", language: "en", confidence: 0.9 },
+  { phrase: "save and stop", intent: "pause", language: "en", confidence: 0.92 },
+  { phrase: "закрой сессию", intent: "manual_exit", language: "ru", confidence: 0.97 },
+  { phrase: "закрыть сессию", intent: "manual_exit", language: "ru", confidence: 0.95 },
+  { phrase: "заверши сессию", intent: "task_complete", language: "ru", confidence: 0.95 },
+  { phrase: "завершить сессию", intent: "task_complete", language: "ru", confidence: 0.95 },
+  { phrase: "закрой работу", intent: "task_complete", language: "ru", confidence: 0.9 },
+  { phrase: "заканчиваем", intent: "task_complete", language: "ru", confidence: 0.9 },
+  { phrase: "пауза", intent: "pause", language: "ru", confidence: 0.86 },
+  { phrase: "сохрани и закончи", intent: "pause", language: "ru", confidence: 0.92 }
+] as const;
+
+const ambiguousCloseoutPhrases = [
+  "later",
+  "tomorrow",
+  "next time",
+  "continue later",
+  "вернемся",
+  "потом",
+  "позже",
+  "завтра",
+  "в следующий раз"
+];
+
+const riskyCloseoutActionPhrases = [
+  "delete",
+  "erase",
+  "forget forever",
+  "deploy",
+  "restart",
+  "firewall",
+  "public",
+  "paid api",
+  "secret",
+  "удал",
+  "навсегда",
+  "деплой",
+  "перезапу",
+  "публич",
+  "секрет",
+  "платн"
+];
+
+function normalizeIntentMessage(message: string) {
+  return message.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function classifyCloseoutIntent(message: string, hasActiveSession: boolean) {
+  const normalized = normalizeIntentMessage(message);
+  const language = /[а-яё]/iu.test(message) ? "ru" : "en";
+  const risky = riskyCloseoutActionPhrases.some((phrase) => normalized.includes(phrase));
+  const trigger = closeoutTriggers.find((entry) => normalized.includes(entry.phrase));
+  const ambiguous = ambiguousCloseoutPhrases.some((phrase) => normalized.includes(phrase));
+  const modelRouting = {
+    default_order: [
+      "rules",
+      "local_model",
+      "active_agent",
+      "subscription_worker",
+      "paid_api_provider"
+    ],
+    paid_api_requires_confirmation: true,
+    paid_api_used: false
+  };
+  if (trigger) {
+    return {
+      ok: true,
+      action: "closeout_intent",
+      language: trigger.language,
+      closeout_trigger: hasActiveSession,
+      can_run_closeout: hasActiveSession,
+      closeout_intent: trigger.intent,
+      confidence: trigger.confidence,
+      confirmation_required: risky || !hasActiveSession,
+      destructive_or_sensitive: risky,
+      understanding_source: "rules",
+      reason: hasActiveSession
+        ? "Configured closeout phrase matched while a session is active."
+        : "Configured closeout phrase matched, but no active session context is available.",
+      model_routing: modelRouting
+    };
+  }
+  if (ambiguous) {
+    return {
+      ok: true,
+      action: "closeout_intent",
+      language,
+      closeout_trigger: false,
+      can_run_closeout: false,
+      closeout_intent: null,
+      confidence: 0.45,
+      confirmation_required: true,
+      destructive_or_sensitive: risky,
+      understanding_source: "confirmation_required",
+      reason:
+        "Wording may mean pause/closeout, but is ambiguous. Ask the owner to confirm before calling memory_closeout.",
+      model_routing: {
+        ...modelRouting,
+        next_route: "local_model_or_active_agent_if_available"
+      }
+    };
+  }
+  return {
+    ok: true,
+    action: "closeout_intent",
+    language,
+    closeout_trigger: false,
+    can_run_closeout: false,
+    closeout_intent: null,
+    confidence: message.trim() ? 0.3 : 0,
+    confirmation_required: risky,
+    destructive_or_sensitive: risky,
+    understanding_source: "rules",
+    reason: risky
+      ? "Risky/non-routine wording requires confirmation before any action."
+      : "No configured closeout phrase matched.",
+    model_routing: modelRouting
+  };
+}
+
+function eventKindForAgentKind(kind: string) {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized === "prompt" || normalized === "user_prompt") return "turn_user";
+  if (normalized === "assistant_response" || normalized === "assistant") return "turn_assistant";
+  if (normalized === "tool" || normalized === "tool_result" || normalized === "command_result") {
+    return "tool_result";
+  }
+  if (normalized === "test" || normalized === "verification") return "tool_result";
+  if (normalized === "file_change") return "file_change";
+  if (normalized === "checkpoint") return "checkpoint";
+  if (
+    normalized === "context_read" ||
+    normalized === "closeout" ||
+    normalized === "pre_compaction" ||
+    normalized === "stop"
+  ) {
+    return "system";
+  }
+  return "other";
+}
+
+function observationKindForAgentKind(kind: string) {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized === "prompt") return "user_prompt";
+  if (normalized === "assistant") return "assistant_response";
+  if (normalized === "tool" || normalized === "command") return "tool_call";
+  if (normalized === "command_result") return "tool_result";
+  if (normalized === "action" || normalized === "decision" || normalized === "checkpoint") {
+    return "system";
+  }
+  return agentObservationKindValues.includes(
+    normalized as (typeof agentObservationKindValues)[number]
+  )
+    ? (normalized as (typeof agentObservationKindValues)[number])
+    : "system";
+}
+
+function checkpointPayloadFromFlags(argv: readonly string[], fallbackSummary?: string): JsonObject {
+  return {
+    schema_version: 1,
+    status: parseFlag(argv, "--status") ?? "in_progress",
+    current_focus: parseFlag(argv, "--focus") ?? fallbackSummary ?? "Recallant-backed agent work",
+    next_step: parseFlag(argv, "--next-step") ?? "Continue from Recallant context.",
+    summary: parseFlag(argv, "--summary") ?? fallbackSummary ?? null,
+    updated_at: new Date().toISOString(),
+    source: "recallant-cli-agent-capture"
+  };
+}
+
+function offlineProjectLogUpdate() {
+  return {
+    status: "skipped" as const,
+    reason: "offline_spool_no_project_log_write",
+    project_log_sync: null
+  };
+}
+
+async function updateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
+  const projectLogPath = join(projectDir, "PROJECT_LOG.md");
+  const existing = await readOptional(projectLogPath);
+  const config = await readProjectConfig(projectDir);
+  const prepared = prepareProjectLogSync({
+    mode: config?.project_log_sync,
+    existingContent: existing ?? "",
+    payload: payload as ProjectLogCheckpointPayload
+  });
+  if (prepared.status !== "updated" || !prepared.next_content) {
+    return { ...prepared, path: projectLogPath };
+  }
+  await writeFile(projectLogPath, prepared.next_content);
+  return { ...prepared, path: projectLogPath };
+}
+
+async function safelyUpdateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
+  return optionalProjectLogMirror({
+    projectLogPath: join(projectDir, "PROJECT_LOG.md"),
+    write: () => updateProjectLogCheckpoint(projectDir, payload)
+  });
+}
+
+async function appendSpoolRecord(
+  argv: readonly string[],
+  recordKind: string,
+  payload: Record<string, unknown>,
+  dedupKey?: string
+) {
+  const finalDedupKey = dedupKey ?? dedupHash("spool", payload);
+  const record = {
+    local_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    record_kind: recordKind,
+    dedup_key: finalDedupKey,
+    payload: { ...payload, dedup_key: finalDedupKey }
+  };
+  await mkdir(spoolDir(argv), { recursive: true });
+  await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
+  return record;
+}
+
+const auditedCliCommands = new Set([
+  "agent-checkpoint",
+  "agent-event",
+  "agent-observe",
+  "agent-start",
+  "audit",
+  "ask",
+  "context",
+  "doctor",
+  "onboard",
+  "project-sanitize",
+  "sanitize",
+  "project-purge"
+]);
+
+type CliAuditStatus = {
+  durable: boolean;
+  surface: "cli";
+  operation: string;
+  status: "recorded" | "pending_durable_audit" | "failed";
+  activity_id?: string;
+  trace_id?: string;
+  spool_path?: string;
+  local_id?: string;
+  error_code?: string;
+  reason?: string;
+};
+
+type CliAuditContext = {
+  command: string;
+  database: RecallantDb | null;
+  activityId: string | null;
+  traceId: string | null;
+  startStatus: CliAuditStatus;
+};
+
+function shouldAuditCliCommand(command: string | undefined) {
+  return Boolean(command && auditedCliCommands.has(command));
+}
+
+function commandUsesRemoteOnlyBootstrap(command: string | undefined) {
+  return command === "remote-bridge" || command === "connect-remote" || command === "remote-doctor";
+}
+
+function createCliAuditDb() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH
+  });
+}
+
+function cliAuditCodeFromError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("VALIDATION_ERROR:")) return "VALIDATION_ERROR";
+  if (message.startsWith("POLICY_BLOCKED:")) return "POLICY_BLOCKED";
+  if (message.startsWith("RATE_LIMITED:")) return "RATE_LIMITED";
+  return "CLI_ERROR";
+}
+
+function safeCliErrorMessage(error: unknown) {
+  return String(redactSystemActivityValue(error instanceof Error ? error.message : String(error)));
+}
+
+function hashForAudit(value: string | null | undefined) {
+  if (!value) return null;
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function summarizeCliArg(value: string) {
+  if (/^(\/|~\/|[a-z]:\\)/i.test(value)) {
+    return { type: "path", hash: hashForAudit(resolve(value)) };
+  }
+  return redactSystemActivityValue(value);
+}
+
+function summarizeCliArgs(argv: readonly string[]) {
+  const command = argv[2] ?? "unknown";
+  const args = argv.slice(3).map((arg) => summarizeCliArg(arg));
+  const project = parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? null;
+  return {
+    command,
+    arg_count: Math.max(0, argv.length - 3),
+    args,
+    flags: argv
+      .slice(3)
+      .filter((arg) => arg.startsWith("--"))
+      .sort(),
+    project_dir_hash: hashForAudit(project ? resolve(project) : null),
+    project_dir_basename: project ? resolve(project).split("/").filter(Boolean).at(-1) : null,
+    dry_run: argv.includes("--dry-run"),
+    yes: argv.includes("--yes") || argv.includes("-y"),
+    confirm_token_present: Boolean(parseFlag(argv, "--confirm-token")),
+    dedup_key_present: Boolean(parseFlag(argv, "--dedup-key"))
+  };
+}
+
+function cliOutcomeKind(argv: readonly string[], exitCode: number, error?: unknown) {
+  if (error) return "thrown_error";
+  if (exitCode !== 0) return "blocked_or_failed";
+  if (argv.includes("--dry-run")) return "dry_run";
+  if (parseFlag(argv, "--confirm-token")) return "confirmed_write";
+  if (parseFlag(argv, "--dedup-key")) return "idempotent_keyed";
+  return "completed";
+}
+
+function currentCliExitCode(error?: unknown) {
+  if (typeof process.exitCode === "number") return process.exitCode;
+  if (typeof process.exitCode === "string") {
+    const parsed = Number.parseInt(process.exitCode, 10);
+    return Number.isFinite(parsed) ? parsed : 1;
+  }
+  return error ? 1 : 0;
+}
+
+async function cliAuditScopeInput(argv: readonly string[]) {
+  const dir = resolve(parseFlag(argv, "--project-dir") ?? parseProjectArg(argv) ?? process.cwd());
+  const [config, state] = await Promise.all([readProjectConfig(dir), readAgentSessionState(dir)]);
+  const auditUuid = (value: string | null | undefined) =>
+    value &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      ? value
+      : null;
+  return {
+    developer_id: auditUuid(process.env.RECALLANT_DEVELOPER_ID),
+    project_id: auditUuid(
+      parseFlag(argv, "--project-id") ??
+        state?.project_id ??
+        config?.project_id ??
+        process.env.RECALLANT_PROJECT_ID
+    ),
+    session_id: auditUuid(parseFlag(argv, "--session-id") ?? state?.session_id),
+    project_path: dir
+  };
+}
+
+async function appendCliAuditSpool(
+  argv: readonly string[],
+  payload: Record<string, unknown>
+): Promise<CliAuditStatus> {
+  const record = {
+    local_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    record_kind: "cli_audit",
+    payload: redactSystemActivityValue(payload)
+  };
+  await mkdir(spoolDir(argv), { recursive: true });
+  await appendFile(auditSpoolPath(argv), `${JSON.stringify(record)}\n`);
+  return {
+    durable: false,
+    surface: "cli",
+    operation: String(payload.operation ?? argv[2] ?? "unknown"),
+    status: "pending_durable_audit",
+    spool_path: auditSpoolPath(argv),
+    local_id: record.local_id
+  };
+}
+
+async function startCliAudit(argv: readonly string[]): Promise<CliAuditContext | null> {
+  const command = argv[2];
+  if (!shouldAuditCliCommand(command)) return null;
+  const operation = command ?? "unknown";
+  const database = createCliAuditDb();
+  if (!database) {
+    return {
+      command: operation,
+      database: null,
+      activityId: null,
+      traceId: null,
+      startStatus: {
+        durable: false,
+        surface: "cli",
+        operation,
+        status: "pending_durable_audit",
+        reason: "Recallant storage is not configured for this CLI process."
+      }
+    };
+  }
+  try {
+    const scopeInput = await cliAuditScopeInput(argv);
+    const scope = await database.resolveSystemActivityScope(scopeInput);
+    const activity = await database.startSystemActivity({
+      surface: "cli",
+      operation,
+      actor_kind: "user",
+      actor_id: "recallant-cli",
+      client_kind: "recallant-cli",
+      client_version: recallantCliVersion,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
+      related_ids: {
+        project_id: scope.project_id,
+        session_id: scope.session_id
+      },
+      metadata: {
+        env_source: envLoadState.source,
+        env_status: envLoadState.status,
+        argv: summarizeCliArgs(argv),
+        scope_resolution: scope.resolved_by
+      }
+    });
+    return {
+      command: operation,
+      database,
+      activityId: activity.id,
+      traceId: activity.trace_id,
+      startStatus: {
+        durable: true,
+        surface: "cli",
+        operation,
+        status: "recorded",
+        activity_id: activity.id,
+        trace_id: activity.trace_id
+      }
+    };
+  } catch (error) {
+    await database.close().catch(() => undefined);
+    return {
+      command: operation,
+      database: null,
+      activityId: null,
+      traceId: null,
+      startStatus: {
+        durable: false,
+        surface: "cli",
+        operation,
+        status: "failed",
+        error_code: cliAuditCodeFromError(error),
+        reason: safeCliErrorMessage(error)
+      }
+    };
+  }
+}
+
+async function finishCliAudit(
+  argv: readonly string[],
+  audit: CliAuditContext | null,
+  error?: unknown
+) {
+  if (!audit) return null;
+  const exitCode = currentCliExitCode(error);
+  const status = error ? "error" : exitCode === 0 ? "success" : "skipped";
+  const metadata = {
+    exit_code: exitCode,
+    outcome_kind: cliOutcomeKind(argv, exitCode, error),
+    argv: summarizeCliArgs(argv)
+  };
+  if (!audit.database || !audit.activityId) {
+    return appendCliAuditSpool(argv, {
+      surface: "cli",
+      operation: audit.command,
+      status,
+      error_code: error
+        ? cliAuditCodeFromError(error)
+        : exitCode === 0
+          ? null
+          : `CLI_EXIT_${exitCode}`,
+      error_message: error ? safeCliErrorMessage(error) : null,
+      durable_status: audit.startStatus,
+      metadata
+    });
+  }
+  try {
+    const scope = await audit.database.resolveSystemActivityScope(await cliAuditScopeInput(argv));
+    const finished = await audit.database.finishSystemActivity({
+      id: audit.activityId,
+      status,
+      developer_id: scope.developer_id,
+      project_id: scope.project_id,
+      session_id: scope.session_id,
+      error_code: error
+        ? cliAuditCodeFromError(error)
+        : exitCode === 0
+          ? null
+          : `CLI_EXIT_${exitCode}`,
+      error_message: error ? safeCliErrorMessage(error) : null,
+      metadata: { ...metadata, scope_resolution: scope.resolved_by }
+    });
+    return {
+      durable: true,
+      surface: "cli" as const,
+      operation: audit.command,
+      status: "recorded" as const,
+      activity_id: finished?.id ?? audit.activityId,
+      trace_id: finished?.trace_id ?? audit.traceId ?? undefined
+    };
+  } catch (finishError) {
+    return appendCliAuditSpool(argv, {
+      surface: "cli",
+      operation: audit.command,
+      status,
+      durable_status: {
+        ...audit.startStatus,
+        status: "failed",
+        error_code: cliAuditCodeFromError(finishError),
+        reason: safeCliErrorMessage(finishError)
+      },
+      metadata
+    });
+  } finally {
+    await audit.database.close().catch(() => undefined);
+  }
+}
+
+function parseInitOptions(argv: readonly string[]): InitOptions {
+  const captureProfile = parseFlag(argv, "--capture-profile") ?? "standard";
+  if (!["light", "standard", "detailed", "custom"].includes(captureProfile)) {
+    throw new Error(`Invalid --capture-profile: ${captureProfile}`);
+  }
+  return {
+    target: parseFlag(argv, "--target") ?? "codex",
+    dryRun: argv.includes("--dry-run"),
+    captureProfile: captureProfile as InitOptions["captureProfile"],
+    projectDir: resolve(parseFlag(argv, "--project-dir") ?? process.cwd()),
+    serverUrl:
+      parseFlag(argv, "--server-url") ?? process.env.RECALLANT_SERVER_URL ?? "http://127.0.0.1:3005"
+  };
+}
+
+function configJson(projectId: string, serverUrl: string) {
+  return `${JSON.stringify({ project_id: projectId, recallant_server_url: serverUrl }, null, 2)}\n`;
+}
+
+async function readOptional(path: string) {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function pathPresent(path: string) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function upsertMemorySection(existing: string | null) {
+  if (!existing) return `# Agent Instructions\n\n${memorySection}`;
+  const pattern = /## Memory \(Recallant\)[\s\S]*?(?=\n## |\n# |$)/;
+  if (pattern.test(existing)) return existing.replace(pattern, memorySection.trimEnd());
+  return `${existing.trimEnd()}\n\n${memorySection}`;
+}
+
+async function upsertGitignore(projectDir: string) {
+  const path = join(projectDir, ".gitignore");
+  const existing = await readOptional(path);
+  if (existing === null) return ".recallant/\n";
+  const lines = existing.split("\n").map((line) => line.trim());
+  if (lines.includes(".recallant/") || lines.includes(".recallant")) return existing;
+  return `${existing.trimEnd()}\n.recallant/\n`;
+}
+
+function projectLog(projectName: string) {
+  return `# Project Log
+
+## Current Session
+
+Status: initialized with Recallant.
+Current focus: project onboarding.
+Next step: start a Recallant-backed agent session.
+
+## Open Questions
+
+- None recorded.
+
+## Notes
+
+- Long history belongs in Recallant memory, not this file.
+- Project: ${projectName}
+`;
+}
+
+type ContextPolicyProfile = "compact" | "standard" | "expanded" | "custom";
+
+type ContextLintPolicy = {
+  profile: ContextPolicyProfile;
+  source: "default" | "project_settings" | "cli";
+  override_reason: string | null;
+  limits: {
+    agents_max_chars: number;
+    project_log_max_chars: number;
+  };
+  size_excess: "error" | "warn";
+};
+
+const contextPolicyProfiles: Record<
+  ContextPolicyProfile,
+  Omit<ContextLintPolicy, "source" | "override_reason">
+> = {
+  compact: {
+    profile: "compact",
+    limits: { agents_max_chars: 12_000, project_log_max_chars: 16_000 },
+    size_excess: "error"
+  },
+  standard: {
+    profile: "standard",
+    limits: { agents_max_chars: 24_000, project_log_max_chars: 32_000 },
+    size_excess: "error"
+  },
+  expanded: {
+    profile: "expanded",
+    limits: { agents_max_chars: 48_000, project_log_max_chars: 64_000 },
+    size_excess: "warn"
+  },
+  custom: {
+    profile: "custom",
+    limits: { agents_max_chars: 48_000, project_log_max_chars: 64_000 },
+    size_excess: "warn"
+  }
+};
+
+function contextPolicyFromProfile(
+  profile: string | null | undefined,
+  source: ContextLintPolicy["source"],
+  overrideReason: string | null
+): ContextLintPolicy {
+  const selected = profile && profile in contextPolicyProfiles ? profile : "standard";
+  const base = contextPolicyProfiles[selected as ContextPolicyProfile];
+  return { ...base, source, override_reason: overrideReason };
+}
+
+async function readProjectConfig(projectDir: string) {
+  const content = await readOptional(join(projectDir, ".recallant", "config"));
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as {
+      project_id?: string;
+      recallant_server_url?: string;
+      project_log_sync?: unknown;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function memoryLoopStatusFromState(state: AgentSessionState | null) {
+  if (!state) return "not_observed";
+  if (state.last_context_read_at && state.last_memory_write_at && state.last_checkpoint_at) {
+    return "memory_loop_ready";
+  }
+  if (state.last_context_read_at || state.last_memory_write_at || state.last_checkpoint_at) {
+    return "memory_loop_partial";
+  }
+  return state.status === "active" ? "session_started" : "not_observed";
+}
+
+const captureTargetNames = [
+  "session_start",
+  "user_prompt",
+  "assistant_response",
+  "tool_call",
+  "tool_result",
+  "error",
+  "retry",
+  "remediation",
+  "verification",
+  "generic_event",
+  "pre_compaction_checkpoint",
+  "checkpoint",
+  "stop_closeout"
+] as const;
+
+async function hookKitReadiness(projectDir: string) {
+  const files = localHookKitFiles();
+  const checked = [];
+  for (const file of files) {
+    const filePath = join(projectDir, file.path);
+    const fileStat = await stat(filePath).catch(() => null);
+    const present = fileStat !== null;
+    const executableExpected = file.executable === true;
+    const executable = !executableExpected || Boolean(fileStat && (fileStat.mode & 0o111) !== 0);
+    checked.push({
+      path: file.path,
+      present,
+      executable_expected: executableExpected,
+      executable
+    });
+  }
+  const presentCount = checked.filter((file) => file.present).length;
+  const allFilesPresent = presentCount === files.length;
+  const executableReady = checked.every((file) => file.executable);
+  const manifestPath = ".recallant/hooks/manifest.json";
+  const manifestContent = await readOptional(join(projectDir, manifestPath));
+  let manifest = {
+    path: manifestPath,
+    status: "missing",
+    valid: false,
+    fail_soft: false,
+    writes_global_config: true,
+    ready_proof: ""
+  };
+  if (manifestContent) {
+    try {
+      const parsed = JSON.parse(manifestContent) as Record<string, unknown>;
+      const targets = objectValue(parsed.targets);
+      const valid =
+        parsed.fail_soft === true &&
+        parsed.writes_global_config === false &&
+        typeof parsed.ready_proof === "string" &&
+        parsed.ready_proof.includes("--require-memory-loop") &&
+        captureTargetNames.every((target) => objectValue(targets[target]).script);
+      manifest = {
+        path: manifestPath,
+        status: valid ? "valid" : "invalid",
+        valid,
+        fail_soft: parsed.fail_soft === true,
+        writes_global_config: parsed.writes_global_config === true,
+        ready_proof: typeof parsed.ready_proof === "string" ? parsed.ready_proof : ""
+      };
+    } catch {
+      manifest = { ...manifest, status: "invalid_json" };
+    }
+  }
+  const ready = allFilesPresent && executableReady && manifest.valid;
+  const status = ready
+    ? "installed"
+    : presentCount === 0
+      ? "not_installed"
+      : allFilesPresent && !executableReady
+        ? "invalid_permissions"
+        : allFilesPresent && !manifest.valid
+          ? "invalid_manifest"
+          : "partial";
+  return {
+    status,
+    ready,
+    installed_count: presentCount,
+    expected_count: files.length,
+    capture_targets: captureTargetNames,
+    manifest,
+    files: checked
+  };
+}
+
+async function codexNativeHookReadiness(projectDir: string) {
+  const path = ".codex/hooks.json";
+  const content = await readOptional(join(projectDir, path));
+  const config = inspectCodexHookConfig(content);
+  const state = await readAgentSessionState(projectDir).catch(() => null);
+  const observed =
+    state?.native_hook?.client === "codex" && Boolean(state.native_hook.last_observed_at);
+  const captureFreshnessHours = Number(process.env.RECALLANT_AGENT_CAPTURE_FRESHNESS_HOURS ?? 24);
+  const fresh = isAutomaticCaptureFresh({
+    last_automatic_capture_at: state?.native_hook?.last_observed_at ?? null,
+    capture_freshness_hours: captureFreshnessHours
+  });
+  const captureActive = config.configured && fresh;
+  const status =
+    config.status === "invalid_json" || config.status === "invalid_shape"
+      ? config.status
+      : !config.configured
+        ? config.status === "partial"
+          ? "partial"
+          : "not_configured"
+        : !observed
+          ? "configured_unobserved"
+          : !fresh
+            ? "observed_stale"
+            : state.native_hook?.last_mode === "offline_spool"
+              ? "observed_offline_spool"
+              : "observed_server";
+  return {
+    path,
+    status,
+    configured: config.configured,
+    observed,
+    fresh,
+    capture_active: captureActive,
+    capture_freshness_hours: captureFreshnessHours,
+    configured_events: config.configured_events,
+    missing_events: config.missing_events,
+    command: config.command,
+    timeout_seconds: config.timeout_seconds,
+    last_observed_at: state?.native_hook?.last_observed_at ?? null,
+    last_event_name: state?.native_hook?.last_event_name ?? null,
+    last_mode: state?.native_hook?.last_mode ?? null,
+    observation_count: state?.native_hook?.observation_count ?? 0,
+    trust_status: observed
+      ? "not_programmatically_verifiable"
+      : "review_required_before_first_native_run",
+    trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+    proof_command: `recallant doctor --project-dir ${projectDir} --require-agent-audit --format json`,
+    fail_soft: true,
+    writes_global_config: false
+  };
+}
+
+async function clientConnectionReadiness(projectDir: string) {
+  const candidates = [
+    { client: "codex", path: ".codex/config.toml", legacy_reference_only: false },
+    { client: "codex", path: ".recallant/codex-mcp.json", legacy_reference_only: true },
+    { client: "cursor", path: ".cursor/mcp.json", legacy_reference_only: false },
+    { client: "claude_code", path: ".mcp.json", legacy_reference_only: false },
+    { client: "generic", path: ".recallant/generic-mcp.json", legacy_reference_only: false }
+  ];
+  const configs = [];
+  for (const candidate of candidates) {
+    const content = await readOptional(join(projectDir, candidate.path));
+    const present = content !== null;
+    const configured =
+      present &&
+      !candidate.legacy_reference_only &&
+      (candidate.client === "codex" ? codexConfigHasRecallantMcp(content) : true);
+    configs.push({
+      ...candidate,
+      present,
+      configured,
+      note: candidate.legacy_reference_only
+        ? "Legacy generated reference only; Codex does not auto-load this path."
+        : candidate.client === "codex"
+          ? "Codex project config is ready only when it contains [mcp_servers.recallant]."
+          : null
+    });
+  }
+  const mcpConfigured = configs.some((config) => config.configured);
+  const codexMcpConfigured = configs.some(
+    (config) => config.client === "codex" && config.configured
+  );
+  const hookKit = await hookKitReadiness(projectDir);
+  const codexNativeHook = await codexNativeHookReadiness(projectDir);
+  const effectiveHookReady = codexMcpConfigured ? codexNativeHook.configured : hookKit.ready;
+  const nativeHooks = [
+    {
+      client: "codex",
+      ...codexNativeHook,
+      ready: codexNativeHook.configured,
+      install_command: `recallant connect codex --project-dir ${projectDir}`,
+      note: codexNativeHook.capture_active
+        ? "Recallant has observed the installed native Codex hook command. Codex trust remains external and is not read from private client state."
+        : codexNativeHook.configured
+          ? "Native project hooks are configured but no hook invocation has been observed yet. Review them in /hooks."
+          : "Native project hooks are not configured. The helper hook kit alone is not automatic Codex capture."
+    },
+    {
+      client: "cursor",
+      status: "unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Cursor MCP config is supported, but native hook capture is not installed by Recallant yet."
+    },
+    {
+      client: "claude_code",
+      status: "manual_or_unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Claude Code project MCP config is supported; native hook capture still needs a later dedicated installer."
+    },
+    {
+      client: "generic",
+      status: "unsupported_native_hooks",
+      ready: false,
+      install_command: null,
+      note: "Generic MCP clients can use MCP config plus the local hook kit manually if the client supports external hooks."
+    }
+  ];
+  return {
+    status:
+      mcpConfigured && effectiveHookReady
+        ? "mcp_and_hooks_ready"
+        : mcpConfigured
+          ? "mcp_only"
+          : effectiveHookReady
+            ? "hooks_without_mcp"
+            : "not_configured",
+    mcp_configured: mcpConfigured,
+    mcp_configs: configs,
+    hook_kit: hookKit,
+    native_hooks: nativeHooks,
+    automatic_agent_audit: codexNativeHook,
+    hook_installation_status: codexMcpConfigured
+      ? codexNativeHook.status
+      : hookKit.ready
+        ? "local_hook_kit_ready"
+        : hookKit.status === "not_installed"
+          ? "mcp_only_or_manual_hooks"
+          : hookKit.status,
+    fail_soft: true,
+    writes_global_config: false,
+    proof_command: codexNativeHook.proof_command,
+    note: "Automatic Codex audit is active only after native project hooks are configured and a codex-hook invocation is observed. MCP memory readiness remains a separate contract."
+  };
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown) {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (value instanceof Date) return value.toISOString();
+  return null;
+}
+
+function runLocalCliSubcommand(args: readonly string[], parseJson = true) {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) throw new Error("Internal error: CLI entrypoint path is not available.");
+  const result = spawnSync(process.execPath, [entrypoint, ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+  if (result.error) throw result.error;
+  const stdout = String(result.stdout ?? "");
+  const stderr = String(result.stderr ?? "");
+  let json: Record<string, unknown> | null = null;
+  if (parseJson && stdout.trim()) {
+    try {
+      json = JSON.parse(stdout) as Record<string, unknown>;
+    } catch {
+      json = null;
+    }
+  }
+  return {
+    status: result.status ?? 0,
+    stdout,
+    stderr,
+    json
+  };
+}
+
+function summarizeSubcommandFailure(result: ReturnType<typeof runLocalCliSubcommand>) {
+  const combined = `${result.stderr}\n${result.stdout}`;
+  const lines = combined
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter(
+      (line) =>
+        !line.startsWith("at ") &&
+        !line.startsWith("Node.js ") &&
+        !line.startsWith("(") &&
+        !line.includes("node:internal/")
+    );
+  const candidate =
+    lines.find((line) =>
+      /^(error:|Error:|VALIDATION_ERROR|POLICY_BLOCKED|REMOTE_|Failed\b)/i.test(line)
+    ) ??
+    lines.at(-1) ??
+    `exit status ${result.status}`;
+  const redacted = String(redactSystemActivityValue(candidate));
+  return redacted.length > 320 ? `${redacted.slice(0, 317)}...` : redacted;
+}
+
+function formatCommandHint(input: readonly string[]) {
+  return input.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
+}
+
+function formatOnboardRerunCommand(options: OnboardOptions, targetClient: string) {
+  const args = ["recallant", "onboard", options.projectDir];
+  if (!options.client) args.push("--no-client");
+  if (options.client && targetClient !== "codex") args.push("--client", targetClient);
+  if (options.client && !options.installLocalHooks) args.push("--no-local-hooks");
+  if (!options.verify) args.push("--no-verify");
+  if (options.yes) args.push("--yes");
+  if (options.dryRun) args.push("--dry-run");
+  if (options.cancel) args.push("--cancel");
+  if (options.initGit) args.push("--init-git");
+  if (options.skipVcsSafety) args.push("--skip-vcs-safety");
+  return formatCommandHint(args);
+}
+
+function gitSafetyChoices(): OnboardVersionControlStep["choices"] {
+  return [
+    {
+      id: "initialize_git",
+      label: "Initialize Git here",
+      description:
+        "Run git init before onboarding writes files. Recallant will not stage or commit project files."
+    },
+    {
+      id: "continue_without_git",
+      label: "Continue without Git",
+      description:
+        "Use Recallant local backups only. This is allowed, but rollback safety is weaker."
+    },
+    {
+      id: "install_git",
+      label: "Install Git first",
+      description: "Install Git with your operating system package manager, then rerun onboarding."
+    }
+  ];
+}
+
+function unavailableGitStep(): OnboardVersionControlStep {
+  return {
+    status: "git_missing",
+    git_available: false,
+    repository_ready: false,
+    initialized: false,
+    writes_files: false,
+    message:
+      "Git is not available in this environment. Install Git first or continue with Recallant local backups only.",
+    refusal_available: true,
+    choices: gitSafetyChoices(),
+    warnings: [
+      "Recallant does not install system packages automatically.",
+      "No project files were changed by the version-control preflight."
+    ]
+  };
+}
+
+function runGit(projectDir: string, args: readonly string[]) {
+  return spawnSync("git", ["-C", projectDir, ...args], {
+    cwd: projectDir,
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+}
+
+function canPromptForOnboarding(options: OnboardOptions) {
+  return options.format === "text" && process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+async function promptYesNo(question: string, defaultAnswer: boolean) {
+  const suffix = defaultAnswer ? " [Y/n] " : " [y/N] ";
+  process.stdout.write(`${question}${suffix}`);
+  return await new Promise<boolean>((resolvePrompt) => {
+    const wasRaw = process.stdin.isRaw;
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("data", (chunk) => {
+      if (wasRaw) process.stdin.setRawMode?.(true);
+      process.stdin.pause();
+      const answer = String(chunk).trim().toLowerCase();
+      if (!answer) {
+        resolvePrompt(defaultAnswer);
+        return;
+      }
+      resolvePrompt(answer === "y" || answer === "yes");
+    });
+  });
+}
+
+async function promptLine(question: string) {
+  process.stdout.write(question);
+  return await new Promise<string>((resolvePrompt) => {
+    const wasRaw = process.stdin.isRaw;
+    let settled = false;
+    const finish = (value: string) => {
+      if (settled) return;
+      settled = true;
+      process.stdin.off("end", onEnd);
+      if (wasRaw) process.stdin.setRawMode?.(true);
+      process.stdin.pause();
+      resolvePrompt(value);
+    };
+    const onEnd = () => finish("");
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("end", onEnd);
+    process.stdin.once("data", (chunk) => {
+      finish(String(chunk).trim());
+    });
+  });
+}
+
+function initializedGitStep(projectDir: string, choices: OnboardVersionControlStep["choices"]) {
+  const initialized = runGit(projectDir, ["init"]);
+  if (initialized.status !== 0) {
+    return {
+      status: "failed" as const,
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message: "Recallant tried to initialize Git before onboarding, but git init failed.",
+      refusal_available: true as const,
+      choices,
+      warnings: [initialized.stderr.trim() || "git init failed without stderr output."]
+    };
+  }
+  return {
+    status: "initialized" as const,
+    git_available: true,
+    repository_ready: true,
+    initialized: true,
+    writes_files: true,
+    message:
+      "Recallant initialized Git before onboarding. No files were staged or committed automatically.",
+    refusal_available: true as const,
+    choices,
+    warnings: [
+      "Git was initialized for rollback visibility, but Recallant did not stage secrets, data, or project files."
+    ]
+  };
+}
+
+async function resolveOnboardVersionControl(
+  options: OnboardOptions
+): Promise<OnboardVersionControlStep> {
+  const choices = gitSafetyChoices();
+  const version = spawnSync("git", ["--version"], {
+    cwd: options.projectDir,
+    env: { ...process.env },
+    encoding: "utf8"
+  });
+  if (version.error || version.status !== 0) {
+    if (options.skipVcsSafety) {
+      return {
+        ...unavailableGitStep(),
+        status: "skipped",
+        message:
+          "Git is not available; onboarding will continue with Recallant local backups only.",
+        warnings: ["Version-control safety was explicitly skipped."]
+      };
+    }
+    if (canPromptForOnboarding(options)) {
+      const continueWithoutGit = await promptYesNo(
+        "Git is not available. Continue with Recallant local backups only?",
+        false
+      );
+      if (continueWithoutGit) {
+        return {
+          ...unavailableGitStep(),
+          status: "skipped",
+          message:
+            "Git is not available; onboarding will continue with Recallant local backups only.",
+          warnings: ["Version-control safety was declined by the user."]
+        };
+      }
+    }
+    return unavailableGitStep();
+  }
+
+  const topLevel = runGit(options.projectDir, ["rev-parse", "--show-toplevel"]);
+  const targetPath = await realpath(options.projectDir).catch(() => resolve(options.projectDir));
+  const repositoryPath = topLevel.stdout.trim()
+    ? await realpath(topLevel.stdout.trim()).catch(() => resolve(topLevel.stdout.trim()))
+    : null;
+  if (topLevel.status === 0 && repositoryPath === targetPath) {
+    return {
+      status: "ready",
+      git_available: true,
+      repository_ready: true,
+      initialized: false,
+      writes_files: false,
+      message: "Project already has a usable Git work tree.",
+      refusal_available: true,
+      choices,
+      warnings: []
+    };
+  }
+
+  if (options.skipVcsSafety) {
+    return {
+      status: "skipped",
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message:
+        "No usable Git work tree was found; onboarding will continue with local backups only.",
+      refusal_available: true,
+      choices,
+      warnings: ["Version-control safety was explicitly skipped."]
+    };
+  }
+
+  if (options.dryRun) {
+    return {
+      status: "dry_run_planned",
+      git_available: true,
+      repository_ready: false,
+      initialized: false,
+      writes_files: false,
+      message: "No usable Git work tree was found. Dry-run would offer to initialize Git.",
+      refusal_available: true,
+      choices,
+      warnings: ["Dry-run did not run git init."]
+    };
+  }
+
+  if (options.yes || options.initGit) {
+    const initialized = initializedGitStep(options.projectDir, choices);
+    if (initialized.status === "failed") {
+      return {
+        ...initialized
+      };
+    }
+    return initialized;
+  }
+
+  if (canPromptForOnboarding(options)) {
+    const initialize = await promptYesNo(
+      "No usable Git work tree was found. Initialize Git before onboarding?",
+      true
+    );
+    if (initialize) return initializedGitStep(options.projectDir, choices);
+    const continueWithoutGit = await promptYesNo(
+      "Continue without Git using Recallant local backups only?",
+      false
+    );
+    if (continueWithoutGit) {
+      return {
+        status: "skipped",
+        git_available: true,
+        repository_ready: false,
+        initialized: false,
+        writes_files: false,
+        message:
+          "No usable Git work tree was found; onboarding will continue with local backups only.",
+        refusal_available: true,
+        choices,
+        warnings: ["Version-control safety was declined by the user."]
+      };
+    }
+  }
+
+  return {
+    status: "needs_choice",
+    git_available: true,
+    repository_ready: false,
+    initialized: false,
+    writes_files: false,
+    message:
+      "No usable Git work tree was found. Choose whether Recallant should initialize Git before changing project files.",
+    refusal_available: true,
+    choices,
+    warnings: ["No project files were changed by the version-control preflight."]
+  };
+}
+
+function offlineSpoolFallback() {
+  return {
+    available: true as const,
+    role: "fail_soft_capture_fallback" as const,
+    complete_onboarding: false as const
+  };
+}
+
+function storageSetupChoices(): OnboardStorageStep["setup_choices"] {
+  return [
+    {
+      id: "connect_existing_server",
+      label: "Connect to an existing Recallant server",
+      description:
+        "Use the remote client flow for a workstation or server that should write memory to a central Recallant instance."
+    },
+    {
+      id: "single_user_storage",
+      label: "Set up local single-user storage",
+      description:
+        "Create a private local Recallant storage profile for this user, then continue onboarding."
+    },
+    {
+      id: "existing_private_profile",
+      label: "Use an existing private profile",
+      description:
+        "Load a private environment profile that points Recallant at an existing database."
+    },
+    {
+      id: "stop_without_changes",
+      label: "Stop without changing the project",
+      description: "Leave project files untouched until storage is ready."
+    }
+  ];
+}
+
+function hasUrlScheme(value: string) {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+}
+
+function withDefaultServerUrlScheme(value: string) {
+  const raw = value.trim();
+  if (!raw || hasUrlScheme(raw)) return raw;
+  if (/^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i.test(raw)) return `http://${raw}`;
+  return `https://${raw}`;
+}
+
+function normalizeRemoteConnectServerUrl(value: string | undefined | null) {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const normalized = withDefaultServerUrlScheme(raw);
+  try {
+    const url = new URL(normalized);
+    url.pathname = url.pathname.replace(/\/(?:api\/mcp|review)\/?$/, "/");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return normalized.replace(/\/(?:api\/mcp|review)\/?$/, "").replace(/\/$/, "");
+  }
+}
+
+function remoteConnectServerUrlFromEnv() {
+  return (
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_CONNECT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_CONNECT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_MCP_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_PUBLIC_WORKBENCH_URL)
+  );
+}
+
+function isLoopbackServerUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      /^127(?:\.\d{1,3}){3}$/.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function universalOnboardServerUrl(input: {
+  explicit?: string | null;
+  projectConfig?: { recallant_server_url?: string } | null;
+}) {
+  const explicit = normalizeRemoteConnectServerUrl(input.explicit);
+  if (explicit) return explicit;
+  const explicitRemoteEnv =
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_CONNECT_SERVER_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_CONNECT_SERVER_URL);
+  if (explicitRemoteEnv) return explicitRemoteEnv;
+  const explicitDefaultEnv = normalizeRemoteConnectServerUrl(
+    process.env.RECALLANT_DEFAULT_SERVER_URL
+  );
+  if (explicitDefaultEnv) return explicitDefaultEnv;
+  const candidates = [
+    input.projectConfig?.recallant_server_url,
+    process.env.RECALLANT_REMOTE_MCP_URL,
+    process.env.RECALLANT_PUBLIC_WORKBENCH_URL,
+    process.env.RECALLANT_SERVER_URL
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeRemoteConnectServerUrl(candidate);
+    if (normalized && !isLoopbackServerUrl(normalized)) return normalized;
+  }
+  return null;
+}
+
+function remoteConnectHint(): OnboardStorageStep["remote_connect"] {
+  const serverUrl = universalOnboardServerUrl({});
+  return {
+    available: true,
+    server_url: serverUrl,
+    command: serverUrl ? `curl -fsSL ${serverUrl}/connect | bash` : null,
+    description:
+      "If this project should connect to an existing central Recallant server, use the remote client flow instead of creating local single-user storage."
+  };
+}
+
+function recallantHomeDir() {
+  return resolve(process.env.RECALLANT_HOME ?? process.cwd());
+}
+
+async function singleUserStorageInstallerPath() {
+  const candidate = join(recallantHomeDir(), "scripts", "install-recallant.sh");
+  try {
+    const file = await stat(candidate);
+    return file.isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function runSingleUserStorageInstaller(installerPath: string) {
+  return spawnSync("bash", [installerPath, "--profile", "single-user"], {
+    cwd: recallantHomeDir(),
+    env: { ...process.env },
+    stdio: "inherit"
+  });
+}
+
+function blockedStorageStep(input: {
+  status: "missing" | "unreachable" | "storage_blocked";
+  configured: boolean;
+  setupMode: "guided" | "non_interactive";
+  message: string;
+}): OnboardStorageStep {
+  return {
+    status: input.status,
+    configured: input.configured,
+    reachable: false,
+    env_file_loaded: envLoadState.env_file_loaded,
+    env_source: envLoadState.source,
+    setup_mode: input.setupMode,
+    message: input.message,
+    error_code: "storage_blocked",
+    offline_spool: offlineSpoolFallback(),
+    setup_choices: storageSetupChoices(),
+    remote_connect: remoteConnectHint()
+  };
+}
+
+async function readyStorageStep(): Promise<OnboardStorageStep | null> {
+  if (!envValueIsSet(process.env.RECALLANT_DATABASE_URL)) return null;
+  const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+  try {
+    await client.connect();
+    await client.query("SELECT 1");
+    return {
+      status: "ready",
+      configured: true,
+      reachable: true,
+      env_file_loaded: envLoadState.env_file_loaded,
+      env_source: envLoadState.source,
+      setup_mode: "not_needed",
+      message: envLoadState.env_file_loaded
+        ? "Recallant storage is ready from the loaded private environment profile."
+        : "Recallant storage is ready from the current environment.",
+      error_code: null,
+      offline_spool: offlineSpoolFallback(),
+      setup_choices: [],
+      remote_connect: remoteConnectHint()
+    };
+  } catch {
+    return null;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function maybeRunInteractiveStorageSetup(options: OnboardOptions) {
+  if (options.dryRun || options.yes || !canPromptForOnboarding(options)) return null;
+  if (envValueIsSet(process.env.RECALLANT_ENV_FILE)) return null;
+  const installerPath = await singleUserStorageInstallerPath();
+  if (!installerPath) return null;
+  const setupStorage = await promptYesNo(
+    [
+      "Recallant storage is not configured.",
+      "Use local single-user storage only when this machine should host its own private Recallant storage.",
+      "If this project should connect to an existing central Recallant server, stop here and run that server's remote connect command instead.",
+      "Set up local single-user storage now?"
+    ].join("\n"),
+    true
+  );
+  if (!setupStorage) return null;
+  const result = runSingleUserStorageInstaller(installerPath);
+  if (result.error || result.status !== 0) {
+    return blockedStorageStep({
+      status: "storage_blocked",
+      configured: false,
+      setupMode: "guided",
+      message:
+        "Recallant tried to set up local single-user storage, but the installer did not complete. No project files were changed."
+    });
+  }
+  await loadDefaultEnv();
+  const ready = await readyStorageStep();
+  if (ready) return ready;
+  return blockedStorageStep({
+    status: "storage_blocked",
+    configured: envValueIsSet(process.env.RECALLANT_DATABASE_URL),
+    setupMode: "guided",
+    message:
+      "Recallant set up local single-user storage, but the database is not reachable yet. No project files were changed."
+  });
+}
+
+async function resolveOnboardStorage(options: OnboardOptions): Promise<OnboardStorageStep> {
+  const configured = envValueIsSet(process.env.RECALLANT_DATABASE_URL);
+  const setupMode = options.yes ? "non_interactive" : "guided";
+  if (!configured) {
+    const interactiveSetup = await maybeRunInteractiveStorageSetup(options);
+    if (interactiveSetup) return interactiveSetup;
+    return blockedStorageStep({
+      status: options.yes ? "storage_blocked" : "missing",
+      configured: false,
+      setupMode,
+      message: options.yes
+        ? "Recallant needs private storage before onboarding can finish. Automatic setup was requested, but no reachable storage profile is available in this runtime. No project files were changed."
+        : "Recallant needs private storage before onboarding can finish. Choose a setup path, then rerun onboarding; no project files were changed."
+    });
+  }
+
+  const ready = await readyStorageStep();
+  if (ready) return ready;
+  return blockedStorageStep({
+    status: "unreachable",
+    configured: true,
+    setupMode,
+    message:
+      "Recallant found a private storage profile, but the database is not reachable. No project files were changed."
+  });
+}
+
+function safeAttachDetailsForOnboard(payload: Record<string, unknown> | null) {
+  if (!payload) return null;
+  const ownerReport = objectValue(payload.owner_report);
+  return {
+    status: payload.status ?? null,
+    requested_mode: payload.requested_mode ?? null,
+    effective_mode: payload.effective_mode ?? null,
+    dry_run: Boolean(payload.dry_run),
+    writes_files: payload.writes_files === true,
+    writes_database: payload.writes_database === true,
+    production_sensitive: payload.production_sensitive ?? null,
+    planned_changes: Array.isArray(payload.planned_changes) ? payload.planned_changes : [],
+    documentation_posture: (payload.documentation_posture ?? null) as DocumentationPosture | null,
+    starter_docs: payload.starter_docs ?? null,
+    discovery_summary: payload.discovery_summary ?? null,
+    migration_summary: ownerReport.migration_summary ?? null,
+    secret_findings: payload.secret_findings ?? null,
+    backup: payload.backup ?? null,
+    owner_report: {
+      ready_status: ownerReport.ready_status ?? null,
+      what_was_done: ownerReport.what_was_done ?? null,
+      what_needs_attention: ownerReport.what_needs_attention ?? null,
+      how_to_check: ownerReport.how_to_check ?? null
+    }
+  };
+}
+
+function attachDetailObject(value: unknown) {
+  return objectValue(value);
+}
+
+function attachRiskSignals(attachDetails: unknown) {
+  const production = attachDetailObject(attachDetailObject(attachDetails).production_sensitive);
+  const signals = production.signals;
+  return Array.isArray(signals) ? signals.map(String) : [];
+}
+
+function plannedWritePaths(attachDetails: unknown) {
+  const changes = attachDetailObject(attachDetails).planned_changes;
+  if (!Array.isArray(changes)) return [];
+  return changes
+    .filter((change) => String(objectValue(change).action ?? "").includes("write_file"))
+    .map((change) => objectValue(change).path)
+    .filter((path): path is string => typeof path === "string" && path.trim() !== "");
+}
+
+function migrationSummaryObject(attachDetails: unknown) {
+  return attachDetailObject(attachDetailObject(attachDetails).migration_summary);
+}
+
+function documentationPostureFromOnboard(result: {
+  documentation_posture?: DocumentationPosture | null;
+  attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
+}) {
+  return (
+    result.documentation_posture ??
+    (attachDetailObject(result.attach_details).documentation_posture as DocumentationPosture | null)
+  );
+}
+
+function documentationPostureHumanLines(posture: DocumentationPosture | null | undefined) {
+  if (!posture) return [];
+  const summary = summarizeDocumentationPostureForOnboard(posture);
+  return [
+    `Documentation posture: ${summary.status}`,
+    `Found: ${summary.found}.`,
+    `Workbench: ${summary.workbench}.`
+  ];
+}
+
+async function checkMemoryLoopReadiness(input: {
+  projectDir: string;
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>> | null;
+}) {
+  const config = await readProjectConfig(input.projectDir);
+  const localState = await readAgentSessionState(input.projectDir).catch(() => null);
+  const localStatus = memoryLoopStatusFromState(localState);
+  let databaseReadiness: Record<string, unknown> | null = null;
+  let databaseError: string | null = null;
+  if (config?.project_id && input.database) {
+    try {
+      const dashboard = await input.database.getReviewDashboard({ project_id: config.project_id });
+      const readiness = objectValue(dashboard.project_readiness);
+      const dbReady = Boolean(
+        readiness.last_context_read_at &&
+        readiness.last_memory_write_at &&
+        readiness.checkpoint_updated_at
+      );
+      databaseReadiness = {
+        ready: dbReady,
+        project_registered: Boolean(readiness.project_registered),
+        last_context_read_at: readiness.last_context_read_at ?? null,
+        last_memory_write_at: readiness.last_memory_write_at ?? null,
+        checkpoint_updated_at: readiness.checkpoint_updated_at ?? null,
+        capture_event_count: readiness.capture_event_count ?? 0,
+        captured_decision_count: readiness.captured_decision_count ?? 0,
+        active_sessions: readiness.active_sessions ?? 0,
+        interrupted_sessions: readiness.interrupted_sessions ?? 0
+      };
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const localReady = localStatus === "memory_loop_ready";
+  const databaseReady = databaseReadiness?.ready === true;
+  const ready = localReady || databaseReady;
+  const missing: string[] = [];
+  if (!config?.project_id) missing.push("project config");
+  if (!localReady && !databaseReady) missing.push("context read + memory write + checkpoint");
+  if (!input.database && !localReady) missing.push("database connection or local capture state");
+  return {
+    required: false,
+    ready,
+    status: ready
+      ? "memory_loop_ready"
+      : localStatus === "memory_loop_partial" || localStatus === "session_started"
+        ? "memory_loop_partial"
+        : config?.project_id
+          ? "registered_only"
+          : "not_attached",
+    missing,
+    project_config: {
+      present: Boolean(config?.project_id),
+      project_id: config?.project_id ?? null,
+      recallant_server_url: config?.recallant_server_url ?? null
+    },
+    local_state: localState
+      ? {
+          status: localState.status,
+          capture_status: localStatus,
+          session_id: localState.session_id,
+          last_context_read_at: localState.last_context_read_at ?? null,
+          last_memory_write_at: localState.last_memory_write_at ?? null,
+          last_checkpoint_at: localState.last_checkpoint_at ?? null,
+          updated_at: localState.updated_at
+        }
+      : { status: "missing", capture_status: "not_observed" },
+    database_readiness: databaseReadiness,
+    database_error: databaseError
+  };
+}
+
+function readinessContractForDoctor(input: {
+  captureReadiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>>;
+  clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  remoteConsentScope: RemoteAgentConsentScope | null;
+  semanticProof: LocalDoctorSemanticProofResult;
+}) {
+  const remoteConfigured = input.remoteConsentScope !== null;
+  const localState = objectValue(input.captureReadiness.local_state);
+  const databaseReadiness = objectValue(input.captureReadiness.database_readiness);
+  const hookKit = objectValue(input.clientConnection.hook_kit);
+  const automaticAgentAudit = objectValue(input.clientConnection.automatic_agent_audit);
+  const configured = Boolean(
+    remoteConfigured ||
+    input.captureReadiness.project_config.present ||
+    input.clientConnection.mcp_configured === true ||
+    hookKit.ready === true
+  );
+  const lastContextReadAt =
+    stringValue(databaseReadiness.last_context_read_at) ||
+    stringValue(localState.last_context_read_at) ||
+    null;
+  const lastMemoryWriteAt =
+    stringValue(databaseReadiness.last_memory_write_at) ||
+    stringValue(localState.last_memory_write_at) ||
+    null;
+  const lastCheckpointAt =
+    stringValue(databaseReadiness.checkpoint_updated_at) ||
+    stringValue(localState.last_checkpoint_at) ||
+    null;
+
+  return buildRecallantReadinessContract({
+    configured,
+    remote_mcp_ready: remoteConfigured,
+    context_ready: Boolean(lastContextReadAt),
+    semantic_memory_ready: input.semanticProof.ok === true,
+    memory_loop_ready: input.captureReadiness.ready === true,
+    ingestion_approved: false,
+    last_context_read_at: lastContextReadAt,
+    last_memory_write_at: lastMemoryWriteAt,
+    last_checkpoint_at: lastCheckpointAt,
+    last_semantic_recall_proof_at: input.semanticProof.completed_at,
+    last_automatic_capture_at: stringValue(automaticAgentAudit.last_observed_at) ?? null,
+    automatic_capture_source: automaticAgentAudit.observed === true ? "codex_native_hook" : null,
+    capture_freshness_hours: Number(automaticAgentAudit.capture_freshness_hours ?? 24),
+    ingestion_approval_ref: null
+  });
+}
+
+function readinessContractFromPersistentStatus(
+  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
+) {
+  const contract = readiness?.readiness_contract;
+  return contract && typeof contract === "object"
+    ? (contract as ReturnType<typeof buildRecallantReadinessContract>)
+    : null;
+}
+
+function mergeDoctorReadinessContract(
+  fallback: ReturnType<typeof buildRecallantReadinessContract>,
+  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
+) {
+  const persistent = readinessContractFromPersistentStatus(readiness);
+  if (!persistent) return fallback;
+  return buildRecallantReadinessContract({
+    configured: persistent.configured || fallback.configured,
+    remote_mcp_ready: persistent.remote_mcp_ready || fallback.remote_mcp_ready,
+    context_ready: persistent.context_ready || fallback.context_ready,
+    semantic_memory_ready: persistent.semantic_memory_ready || fallback.semantic_memory_ready,
+    memory_loop_ready: persistent.memory_loop_ready || fallback.memory_loop_ready,
+    ingestion_approved: persistent.ingestion_approved || fallback.ingestion_approved,
+    last_context_read_at:
+      persistent.evidence.last_context_read_at ?? fallback.evidence.last_context_read_at,
+    last_memory_write_at:
+      persistent.evidence.last_memory_write_at ?? fallback.evidence.last_memory_write_at,
+    last_checkpoint_at:
+      persistent.evidence.last_checkpoint_at ?? fallback.evidence.last_checkpoint_at,
+    last_semantic_recall_proof_at:
+      persistent.evidence.last_semantic_recall_proof_at ??
+      fallback.evidence.last_semantic_recall_proof_at,
+    last_automatic_capture_at:
+      persistent.evidence.last_automatic_capture_at ?? fallback.evidence.last_automatic_capture_at,
+    automatic_capture_source:
+      persistent.evidence.automatic_capture_source ?? fallback.evidence.automatic_capture_source,
+    capture_freshness_hours: Math.max(
+      persistent.capture_freshness_hours,
+      fallback.capture_freshness_hours
+    ),
+    ingestion_approval_ref:
+      persistent.evidence.ingestion_approval_ref ?? fallback.evidence.ingestion_approval_ref
+  });
+}
+
+type LocalDoctorSemanticProofResult = {
+  requested: boolean;
+  ok: boolean;
+  status: "not_requested" | "pass" | "fail";
+  code: string;
+  message: string;
+  marker: string | null;
+  session_id: string | null;
+  context_pack_id: string | null;
+  checkpoint_updated_at: string | null;
+  completed_at: string | null;
+  semantic_memory_proof: {
+    ok: boolean;
+    memory_id: string | null;
+    memory_status: string | null;
+    memory_type: "work_log" | null;
+    created_by: "agent" | null;
+    diagnostic_marker: boolean;
+    marker_found: boolean;
+    tool_names: ["memory_create_agent_memory", "memory_recall_agent_memories"] | [];
+  };
+  checkpoint_state_proof: {
+    ok: boolean;
+    checkpoint_state_only: boolean;
+    marker_found: boolean;
+  };
+};
+
+function semanticProofNotRequested(): LocalDoctorSemanticProofResult {
+  return {
+    requested: false,
+    ok: false,
+    status: "not_requested",
+    code: "not_requested",
+    message: "Local semantic memory proof was not requested.",
+    marker: null,
+    session_id: null,
+    context_pack_id: null,
+    checkpoint_updated_at: null,
+    completed_at: null,
+    semantic_memory_proof: {
+      ok: false,
+      memory_id: null,
+      memory_status: null,
+      memory_type: null,
+      created_by: null,
+      diagnostic_marker: false,
+      marker_found: false,
+      tool_names: []
+    },
+    checkpoint_state_proof: {
+      ok: false,
+      checkpoint_state_only: true,
+      marker_found: false
+    }
+  };
+}
+
+function semanticProofUnavailable(message: string): LocalDoctorSemanticProofResult {
+  return {
+    ...semanticProofNotRequested(),
+    requested: true,
+    status: "fail",
+    code: "semantic_proof_unavailable",
+    message
+  };
+}
+
+async function runLocalDoctorSemanticProof(input: {
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>;
+  argv: readonly string[];
+  projectDir: string;
+}): Promise<LocalDoctorSemanticProofResult> {
+  const marker = `local-doctor-semantic-proof:${randomUUID()}`;
+  const proofArgv = [
+    "node",
+    "recallant",
+    "agent-start",
+    "--project-dir",
+    input.projectDir,
+    "--task-hint",
+    `Recallant local doctor semantic proof ${marker}`,
+    "--session-label",
+    "recallant-local-doctor-semantic-proof"
+  ];
+  const started = await startAgentSession(input.database, proofArgv);
+  const checkpointPayload: JsonObject = {
+    schema_version: 1,
+    status: "semantic_proof_running",
+    current_focus: marker,
+    next_step: "Recall the synthetic semantic proof marker.",
+    open_questions: [],
+    updated_at: new Date().toISOString(),
+    source: "recallant-doctor-semantic-proof"
+  };
+  const checkpoint = await input.database.setCheckpoint(
+    started.state.project_id,
+    checkpointPayload
+  );
+  const checkpointReadback = await input.database.getCheckpoint(started.state.project_id);
+  const checkpointStateText = JSON.stringify(checkpointReadback?.payload ?? {});
+  const checkpointMarkerFound = checkpointStateText.includes(marker);
+  const event = await input.database.appendEvent({
+    session_id: started.state.session_id,
+    client_kind: started.state.client_kind,
+    event_kind: "other",
+    text: `Synthetic non-secret semantic proof marker: ${marker}`,
+    metadata: {
+      capture_kind: "doctor_semantic_proof",
+      diagnostic_marker: true,
+      contains_raw_secret: false,
+      project_dir: input.projectDir
+    },
+    raw_artifacts: [],
+    dedup_key: dedupHash("doctor-semantic-proof", {
+      project_id: started.state.project_id,
+      marker
+    })
+  });
+  const memory = await input.database.createAgentMemory({
+    project_id: started.state.project_id,
+    project_path: input.projectDir,
+    memory_type: "work_log",
+    scope: "project",
+    scope_kind: "project",
+    audience: [{ kind: "all_agents", id: null }],
+    title: "Local doctor semantic marker",
+    body: marker,
+    confidence: 1,
+    created_by: "agent",
+    source_refs: [
+      {
+        source_kind: "event",
+        source_id: String(event.event_id),
+        quote: marker,
+        metadata: {
+          capture_kind: "doctor_semantic_proof",
+          diagnostic_marker: true
+        }
+      }
+    ],
+    metadata: {
+      diagnostic_marker: true,
+      diagnostic_kind: "local_doctor_semantic_proof",
+      marker_id: marker,
+      contains_raw_secret: false
+    }
+  });
+  const recall = await input.database.recallAgentMemories({
+    project_id: started.state.project_id,
+    query: marker,
+    scope: "project",
+    memory_types: ["work_log"],
+    include_candidates: true,
+    include_needs_review: true,
+    top_k: 5,
+    max_chars_total: 4000
+  });
+  const markerFound = recall.memories.some(
+    (item: Record<string, unknown>) =>
+      String(item.body ?? "").includes(marker) || String(item.title ?? "").includes(marker)
+  );
+  const completedAt = new Date().toISOString();
+  const closeoutPayload: JsonObject = {
+    ...checkpointPayload,
+    status: markerFound ? "semantic_proof_complete" : "semantic_proof_failed",
+    summary: markerFound
+      ? "Local doctor created and recalled the synthetic semantic proof marker."
+      : "Local doctor created a synthetic marker but recall did not return it.",
+    updated_at: completedAt
+  };
+  const closeout = await input.database.closeout(
+    started.state.session_id,
+    closeoutPayload,
+    "closeout",
+    await getLocalSpoolStatus(input.argv),
+    {
+      diagnostic_marker: true,
+      marker_found: markerFound,
+      memory_id: memory.memory_id,
+      contains_raw_secret: false
+    }
+  );
+  await writeAgentSessionState(input.projectDir, {
+    ...started.state,
+    status: "closed",
+    updated_at: completedAt,
+    last_memory_write_at: completedAt,
+    last_checkpoint_at: completedAt,
+    last_event_id: String(event.event_id),
+    last_memory_id: String(memory.memory_id)
+  });
+  return {
+    requested: true,
+    ok: markerFound,
+    status: markerFound ? "pass" : "fail",
+    code: markerFound ? "semantic_memory_proof_ok" : "semantic_memory_proof_failed",
+    message: markerFound
+      ? "Local semantic governed-memory marker create/recall proof succeeded."
+      : "Local semantic governed-memory recall did not return the diagnostic marker.",
+    marker,
+    session_id: started.state.session_id,
+    context_pack_id: started.state.context_pack_id ?? null,
+    checkpoint_updated_at: stringValue(closeout.updated_at) ?? stringValue(checkpoint.updated_at),
+    completed_at: completedAt,
+    semantic_memory_proof: {
+      ok: markerFound,
+      memory_id: String(memory.memory_id),
+      memory_status: String(memory.status ?? ""),
+      memory_type: "work_log",
+      created_by: "agent",
+      diagnostic_marker: true,
+      marker_found: markerFound,
+      tool_names: ["memory_create_agent_memory", "memory_recall_agent_memories"]
+    },
+    checkpoint_state_proof: {
+      ok: checkpointMarkerFound,
+      checkpoint_state_only: true,
+      marker_found: checkpointMarkerFound
+    }
+  };
+}
+
+function doctorOwnerSummary(input: {
+  projectDir: string;
+  postgres: { configured: boolean; reachable: boolean };
+  captureReadiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>>;
+  clientConnection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  remoteConsentScope: RemoteAgentConsentScope | null;
+  requireCapture: boolean;
+  requireMemoryLoop: boolean;
+}) {
+  const attached = Boolean(input.captureReadiness.project_config.present);
+  const remoteReady = input.remoteConsentScope !== null;
+  const remoteOnly = remoteReady && !attached;
+  const memoryLoopReady = input.captureReadiness.ready === true;
+  const hookKit = objectValue(input.clientConnection.hook_kit);
+  const automaticAgentAudit = objectValue(input.clientConnection.automatic_agent_audit);
+  const automaticAgentAuditConfigured = automaticAgentAudit.configured === true;
+  const automaticAgentAuditActive = automaticAgentAudit.capture_active === true;
+  const localConfigured =
+    attached &&
+    (input.clientConnection.mcp_configured === true ||
+      automaticAgentAuditConfigured ||
+      hookKit.ready === true ||
+      input.clientConnection.status === "mcp_and_hooks_ready");
+  const configured = remoteOnly || localConfigured;
+  const hookCaptureReady = automaticAgentAuditConfigured;
+  const clientConfigured = input.clientConnection.mcp_configured === true;
+  const connectionStatus =
+    typeof input.clientConnection.status === "string"
+      ? input.clientConnection.status
+      : "not_configured";
+  const status = remoteOnly
+    ? "remote_ready_local_storage_not_attached"
+    : automaticAgentAuditActive
+      ? "recording"
+      : attached
+        ? configured
+          ? "configured_not_recording"
+          : "not_configured"
+        : "not_attached";
+  const headline = automaticAgentAuditActive
+    ? "Recallant capture is active for this project."
+    : status === "remote_ready_local_storage_not_attached"
+      ? "remote-ready, local storage not attached."
+      : status === "configured_not_recording"
+        ? "Recallant is configured, but active capture is not proven yet."
+        : status === "not_configured"
+          ? "Project is attached, but the agent client is not fully connected yet."
+          : "Project is not attached to Recallant yet.";
+  const nextStep = automaticAgentAuditActive
+    ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
+      ? `Run recallant connect codex --project-dir ${input.projectDir}, then review the command hook in /hooks.`
+      : automaticAgentAuditConfigured && !automaticAgentAuditActive
+        ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-agent-audit."
+        : "No startup-layer action is required. Continue normal work and close out the session when done."
+    : remoteOnly
+      ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
+      : !attached
+        ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
+        : input.clientConnection.status !== "mcp_and_hooks_ready"
+          ? `Run recallant connect codex --project-dir ${input.projectDir} --dry-run, then install after review.`
+          : automaticAgentAuditConfigured
+            ? "Perform one normal Codex action, then rerun doctor --require-capture."
+            : `Run recallant connect codex --project-dir ${input.projectDir}, review the command hook in /hooks, then perform one normal Codex action.`;
+  return {
+    status,
+    headline,
+    project_attached: attached,
+    remote_mcp_ready: remoteReady,
+    local_storage_status: remoteOnly
+      ? "remote-ready, local storage not attached"
+      : attached
+        ? "local storage attached"
+        : "not attached",
+    remote_destination: input.remoteConsentScope?.destination ?? null,
+    client_configured: clientConfigured,
+    hook_capture_ready: hookCaptureReady,
+    automatic_agent_audit_configured: automaticAgentAuditConfigured,
+    automatic_agent_audit_active: automaticAgentAuditActive,
+    automatic_agent_audit_status: automaticAgentAudit.status ?? "not_configured",
+    automatic_agent_audit_last_seen_at: automaticAgentAudit.last_observed_at ?? null,
+    codex_hook_trust_action:
+      automaticAgentAudit.trust_action ??
+      "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+    connection_status: connectionStatus,
+    configured,
+    actually_recording: automaticAgentAuditActive,
+    memory_loop_ready: memoryLoopReady,
+    require_capture_gate: input.requireCapture,
+    require_memory_loop_gate: input.requireMemoryLoop,
+    next_step: nextStep,
+    proof:
+      "capture_active requires a fresh automatic Codex hook event. memory_loop_ready separately means context-read, memory-write, and checkpoint evidence exist.",
+    postgres_ready: input.postgres.reachable
+  };
+}
+
+function okNo(value: boolean) {
+  return value ? "yes" : "no";
+}
+
+function doctorHumanReport(result: {
+  owner_summary: ReturnType<typeof doctorOwnerSummary>;
+  readiness_contract: ReturnType<typeof readinessContractForDoctor>;
+  postgres: { configured: boolean; reachable: boolean };
+  project_config: { path: string; present: boolean };
+  capture_readiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>> & {
+    required: boolean;
+  };
+  semantic_memory_proof: LocalDoctorSemanticProofResult;
+  client_connection: Awaited<ReturnType<typeof clientConnectionReadiness>>;
+  local_spool_status: Awaited<ReturnType<typeof getLocalSpoolStatus>>;
+  local_model: Awaited<ReturnType<typeof checkOllama>>;
+  service_env_profile: Awaited<ReturnType<typeof checkServiceEnvProfile>>;
+  pending_embeddings: Awaited<ReturnType<typeof checkPendingEmbeddingStatus>>;
+  production_readiness: Awaited<ReturnType<typeof checkProductionReadiness>>;
+}) {
+  const summary = result.owner_summary;
+  const localModelReady = result.local_model.reachable === true;
+  const localModelStatus = localModelReady
+    ? "available"
+    : result.local_model.error
+      ? `not available (${result.local_model.error})`
+      : "not available";
+  const databaseStatus = result.postgres.reachable
+    ? "available"
+    : result.postgres.configured
+      ? "configured but not reachable"
+      : "not configured";
+  const captureConfigured =
+    summary.configured ||
+    summary.client_configured ||
+    summary.hook_capture_ready ||
+    summary.actually_recording;
+  const spool = result.local_spool_status;
+  const pendingEmbeddingCount = finiteNumberValue(result.pending_embeddings.pending_chunks);
+  const semanticIndexingStatus =
+    pendingEmbeddingCount === null
+      ? "unknown"
+      : pendingEmbeddingCount > 0
+        ? `catching up (${pendingEmbeddingCount} pending); capture/recall remain available`
+        : "current";
+  const lines = [
+    "Recallant doctor",
+    "",
+    `Status: ${summary.headline}`,
+    `Readiness state: ${result.readiness_contract.primary_state}`,
+    recallantReadinessInvariant,
+    "",
+    "Checks:",
+    `- Recallant CLI: installed`,
+    `- Database: ${databaseStatus}`,
+    `- Local model: ${localModelStatus}`,
+    `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
+    `- Semantic indexing: ${semanticIndexingStatus}`,
+    `- Service env profile: ${result.service_env_profile.status}`,
+    `- Backup job: ${result.production_readiness.backup_job.ok ? "ready" : `not ready (${result.production_readiness.backup_job.reason})`}`,
+    `- Backup artifact: ${result.production_readiness.latest_backup_verification.backup.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.backup.reason})`}`,
+    `- Restore rehearsal: ${result.production_readiness.latest_backup_verification.restore.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.restore.reason})`}`,
+    `- Current project: ${summary.local_storage_status}`,
+    `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
+    `- Agent capture configured: ${okNo(captureConfigured)}`,
+    `- Agent capture active: ${okNo(summary.actually_recording)}`,
+    `- Memory loop ready: ${okNo(summary.memory_loop_ready)}`,
+    `- Automatic Codex audit configured: ${okNo(summary.automatic_agent_audit_configured)}`,
+    `- Automatic Codex audit active: ${okNo(summary.automatic_agent_audit_active)}`,
+    `- Semantic memory proof: ${
+      result.semantic_memory_proof.requested
+        ? `${result.semantic_memory_proof.status} (${result.semantic_memory_proof.code})`
+        : "not requested"
+    }`,
+    `- Local spool: ${spool.status}, ${spool.unsynced_count} pending`,
+    "",
+    `Next command: ${summary.next_step}`,
+    "",
+    "Details:",
+    `- Project config: ${result.project_config.present ? result.project_config.path : "not found"}`,
+    summary.remote_destination
+      ? `- Remote destination: ${summary.remote_destination.server_url}${summary.remote_destination.endpoint_path}`
+      : "- Remote destination: not configured",
+    `- Client connection: ${summary.connection_status}`,
+    `- Automatic Codex audit: ${String(summary.automatic_agent_audit_status)}`,
+    `- Automatic audit last seen: ${String(summary.automatic_agent_audit_last_seen_at ?? "never")}`,
+    `- Codex hook review: ${String(summary.codex_hook_trust_action)}`,
+    `- Memory loop status: ${result.capture_readiness.status}`,
+    `- Embedding recovery: ${result.pending_embeddings.recommendation}`,
+    `- Spool path: ${spool.spool_path}`,
+    `- Spool replay dry-run: ${spool.replay_command}`,
+    `- JSON output: recallant doctor --format json`
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function onboardHumanReport(result: {
+  status?: string;
+  project_dir: string;
+  storage: OnboardStorageStep;
+  version_control?: OnboardVersionControlStep | null;
+  documentation_posture?: DocumentationPosture | null;
+  project_already_attached: boolean;
+  attach_details?: ReturnType<typeof safeAttachDetailsForOnboard> | null;
+  embedding_recovery?: OnboardEmbeddingRecoveryPayload | null;
+  workbench?: OnboardWorkbenchOutcome | null;
+  attached: {
+    status: OnboardAttachedStep["status"];
+    command: string | null;
+    details?: string | null;
+  };
+  connected: {
+    status: OnboardConnectedStep["status"];
+    command: string | null;
+    details?: string | null;
+  };
+  verify: OnboardVerifyPayload | null;
+  next_command: string;
+}) {
+  const lines = [
+    "Recallant onboard",
+    "",
+    result.status ? `Status: ${result.status}` : null,
+    `Project: ${result.project_dir}`,
+    `Storage: ${result.storage.status}`,
+    `  - ${result.storage.message}`,
+    `  - Offline spool: fail-soft capture fallback, not completed onboarding`
+  ].filter((line) => line !== null) as string[];
+  if (result.version_control) {
+    lines.push(
+      `Version control: ${result.version_control.status}`,
+      `  - ${result.version_control.message}`
+    );
+    for (const warning of result.version_control.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push(...documentationPostureHumanLines(documentationPostureFromOnboard(result)));
+  lines.push(
+    `Project already attached: ${result.project_already_attached ? "yes" : "no"}`,
+    `Attach: ${result.attached.status}`
+  );
+  if (result.attached.details) lines.push(`  - ${result.attached.details}`);
+  lines.push(`Connect: ${result.connected.status}`);
+  if (result.connected.details) lines.push(`  - ${result.connected.details}`);
+  if (result.attach_details && result.attached.status === "needs_confirmation") {
+    const signals = attachRiskSignals(result.attach_details);
+    const writePaths = plannedWritePaths(result.attach_details);
+    const migrationSummary = migrationSummaryObject(result.attach_details);
+    lines.push(
+      "",
+      "Production-sensitive onboarding review",
+      `Project path: ${result.project_dir}`,
+      "Risk reason:",
+      ...(signals.length
+        ? signals.map((signal) => `  - ${signal}`)
+        : ["  - project requested review"]),
+      "Planned writes:",
+      ...(writePaths.length ? writePaths.map((path) => `  - ${path}`) : ["  - none"]),
+      "Backup behavior:",
+      "  - Existing agent files are backed up locally before overwrite; backup copies are redacted when needed.",
+      "Import/review behavior:",
+      `  - Selected imports: ${String(migrationSummary.selected_imports ?? 0)}`,
+      `  - Review needed: ${String(migrationSummary.review_needed ?? 0)}`,
+      `  - Raw secret findings: ${String(migrationSummary.raw_secret_findings ?? 0)}`,
+      "Continue/cancel prompt:",
+      "  - In an interactive terminal, answer the next question. In automation, use --yes only after approving this plan."
+    );
+  }
+  if (result.verify) {
+    lines.push(`Verify: ${result.verify.status}`);
+    if (result.verify.status === "passed") {
+      lines.push(
+        `Automatic capture: ${result.verify.capture_active ? "active" : "awaiting the first native agent event"}.`,
+        "Memory loop ready: yes — context read, memory write, checkpoint, and recall proof are present."
+      );
+    }
+    if (result.verify.status === "failed") {
+      lines.push(
+        `Onboarding incomplete: proof failed at ${result.verify.failed_stage ?? "unknown"} stage.`
+      );
+      if (result.verify.message) lines.push(`Proof issue: ${result.verify.message}`);
+    }
+    if (result.verify.ask_answer) {
+      lines.push(`Proof memory: ${result.verify.ask_answer}`);
+    }
+    lines.push(
+      `Proof stages: capture=${result.verify.stages.capture.status}, readiness=${result.verify.stages.readiness.status}, recall=${result.verify.stages.recall.status}`
+    );
+  } else {
+    lines.push("Verify: skipped");
+  }
+  if (result.embedding_recovery) {
+    const recovery = result.embedding_recovery;
+    const summary =
+      recovery.status === "no_pending"
+        ? "current"
+        : recovery.status === "recovered"
+          ? `recovered ${recovery.recovered_chunks} pending chunk(s)`
+          : recovery.status === "model_unavailable"
+            ? `${recovery.remaining_pending ?? "some"} pending chunk(s); local model unavailable`
+            : recovery.status === "still_pending"
+              ? `${recovery.remaining_pending ?? "some"} pending chunk(s); retry remains bounded`
+              : recovery.status;
+    lines.push(`Embedding recovery: ${summary}`);
+    if (
+      recovery.status === "model_unavailable" ||
+      recovery.status === "still_pending" ||
+      recovery.status === "unknown"
+    ) {
+      lines.push(`  - ${recovery.recommendation}`);
+    }
+  }
+  if (result.workbench) {
+    lines.push(
+      result.workbench.available && result.workbench.url
+        ? `Workbench: ${result.workbench.url} (${result.workbench.auth_required ? "auth required" : "private access depends on deployment profile"})`
+        : `Workbench: ${result.workbench.message}`
+    );
+    if (result.workbench.available) {
+      lines.push(
+        `Workbench project visible: ${result.workbench.project_visible ? "yes" : "no"}`,
+        `Workbench review queue: ${String(result.workbench.migration_review_queue.pending_review ?? 0)} pending review item(s)`
+      );
+    }
+  }
+  if (result.storage.error_code === "storage_blocked") {
+    lines.push("", "Setup choices:");
+    for (const choice of result.storage.setup_choices) {
+      lines.push(`- ${choice.label}: ${choice.description}`);
+    }
+    if (result.storage.remote_connect?.command) {
+      lines.push(
+        "",
+        "Remote server option:",
+        `- Existing central server: ${result.storage.remote_connect.command}`
+      );
+    } else if (result.storage.remote_connect?.available) {
+      lines.push(
+        "",
+        "Remote server option:",
+        "- If this project should use an existing central Recallant server, run that server's `curl -fsSL <server>/connect | bash` command from the project folder instead of setting up local storage."
+      );
+    }
+    lines.push(
+      "",
+      "Next action: choose local private storage or the remote central-server connect path, then rerun the appropriate command.",
+      `Rerun command: ${result.next_command}`
+    );
+  } else if (
+    result.version_control &&
+    ["needs_choice", "git_missing", "failed"].includes(result.version_control.status)
+  ) {
+    lines.push("", "Version-control safety choices:");
+    for (const choice of result.version_control.choices) {
+      lines.push(`- ${choice.label}: ${choice.description}`);
+    }
+    lines.push(
+      "",
+      "Next action: initialize Git before onboarding, or explicitly continue with Recallant local backups only.",
+      `Initialize Git: ${result.next_command} --init-git`,
+      `Continue without Git: ${result.next_command} --skip-vcs-safety`
+    );
+  } else {
+    lines.push("", `Next command: ${result.next_command}`);
+    lines.push("", `JSON output: recallant onboard ${result.project_dir} --format json`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function readProjectContextProfile(projectDir: string) {
+  if (!process.env.RECALLANT_DATABASE_URL) return null;
+  const config = await readProjectConfig(projectDir);
+  if (!config?.project_id) return null;
+  const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+  await client.connect();
+  try {
+    const result = await client.query<{ value: unknown }>(
+      "SELECT value FROM project_settings WHERE project_id = $1 AND key = 'context_budget_profile'",
+      [config.project_id]
+    );
+    const value = result.rows[0]?.value;
+    return typeof value === "string" ? value : null;
+  } finally {
+    await client.end();
+  }
+}
+
+async function resolveContextLintPolicy(
+  projectDir: string,
+  argv: readonly string[]
+): Promise<ContextLintPolicy> {
+  const cliProfile = parseFlag(argv, "--context-profile");
+  const overrideReason =
+    parseFlag(argv, "--override-reason") ?? parseFlag(argv, "--reason") ?? null;
+  if (cliProfile) return contextPolicyFromProfile(cliProfile, "cli", overrideReason);
+  const projectProfile = await readProjectContextProfile(projectDir).catch(() => null);
+  if (projectProfile) return contextPolicyFromProfile(projectProfile, "project_settings", null);
+  return contextPolicyFromProfile("standard", "default", null);
+}
+
+function containsSecretValue(content: string) {
+  return /^\s*[A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|DSN|DATABASE_URL)[A-Z0-9_]*\s*=\s*\S+/im.test(
+    content
+  );
+}
+
+function looksLikeHistoryDump(content: string) {
+  const signals = [
+    ...(content.match(/^#{2,4}\s+(Session|Current Session|History|Handoff)\b/gim) ?? []),
+    ...(content.match(/\b(Current focus|Next step|Last updated|Status):/gim) ?? [])
+  ];
+  return signals.length >= 8;
+}
+
+function adapterFiles(projectDir: string) {
+  return [
+    join(projectDir, "CLAUDE.md"),
+    join(projectDir, ".cursor", "SESSION_HANDOFF.md"),
+    join(projectDir, ".cursor", "rules", "memory.md")
+  ];
+}
+
+function audiencePreviewToJson(audience: string) {
+  if (audience.startsWith("specific_client:")) {
+    return [{ kind: "specific_client", id: audience.split(":")[1] ?? null }];
+  }
+  if (audience === "import_pipeline") {
+    return [
+      { kind: "import_pipeline", id: null },
+      { kind: "review_ui", id: null }
+    ];
+  }
+  return [{ kind: "all_agents", id: null }];
+}
+
+function contentTypeForPath(path: string) {
+  if (path.endsWith(".md")) return "text/markdown";
+  if (path.includes(".env") || path.endsWith(".example")) return "text/plain";
+  return "text/plain";
+}
+
+async function runInit(argv: readonly string[]) {
+  const options = parseInitOptions(argv);
+  const projectId = randomUUID();
+  const developerId = process.env.RECALLANT_DEVELOPER_ID ?? randomUUID();
+  const targetConfig = clientTargetConfig(
+    options.target,
+    projectId,
+    developerId,
+    options.projectDir
+  );
+  const plan = {
+    action: "init",
+    target: targetConfig.target,
+    dry_run: options.dryRun,
+    project_dir: options.projectDir,
+    project_id: projectId,
+    developer_id: developerId,
+    capture_profile: options.captureProfile,
+    files: [
+      ".recallant/config",
+      targetConfig.config_file,
+      ".gitignore",
+      "AGENTS.md",
+      "PROJECT_LOG.md"
+    ],
+    import_candidates: await detectImportCandidates(options.projectDir),
+    target_config: targetConfig,
+    mcp_config: targetConfig.mcp_config
+  };
+
+  if (options.dryRun) {
+    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    return;
+  }
+
+  await mkdir(join(options.projectDir, ".recallant"), { recursive: true });
+  await writeFile(
+    join(options.projectDir, ".recallant", "config"),
+    configJson(projectId, options.serverUrl)
+  );
+  await mkdir(
+    join(options.projectDir, targetConfig.config_file).split("/").slice(0, -1).join("/"),
+    {
+      recursive: true
+    }
+  );
+  await writeFile(
+    join(options.projectDir, targetConfig.config_file),
+    renderClientTargetConfig(
+      await readOptional(join(options.projectDir, targetConfig.config_file)),
+      targetConfig
+    )
+  );
+  await writeFile(
+    join(options.projectDir, ".gitignore"),
+    await upsertGitignore(options.projectDir)
+  );
+  const agentsPath = join(options.projectDir, "AGENTS.md");
+  await writeFile(agentsPath, upsertMemorySection(await readOptional(agentsPath)));
+  const projectLogPath = join(options.projectDir, "PROJECT_LOG.md");
+  if ((await readOptional(projectLogPath)) === null) {
+    await writeFile(
+      projectLogPath,
+      projectLog(options.projectDir.split("/").filter(Boolean).at(-1) ?? "project")
+    );
+  }
+
+  const database = createRecallantDbFromEnv();
+  if (database) {
+    try {
+      await database.registerProject({
+        projectId,
+        developerId,
+        projectPath: options.projectDir,
+        captureProfile: options.captureProfile
+      });
+    } finally {
+      await database.close();
+    }
+  }
+
+  process.stdout.write(
+    `${JSON.stringify({ ...plan, dry_run: false, status: "created" }, null, 2)}\n`
+  );
+}
+
+async function runDiscover(argv: readonly string[]) {
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const result = discoveryResult(projectDir, await detectImportCandidates(projectDir));
+  const format = parseFlag(argv, "--format") ?? (argv.includes("--text") ? "text" : "json");
+  process.stdout.write(
+    format === "text" ? formatDiscoveryText(result) : `${JSON.stringify(result, null, 2)}\n`
+  );
+}
+
+async function runImport(argv: readonly string[]) {
+  const target = positionalArgs(argv)[0];
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const candidate = target ? await discoveryCandidateForImport(projectDir, target) : null;
+  const dryRun = argv.includes("--dry-run");
+  let writeResult = null;
+  if (!dryRun) {
+    if (!target || !candidate) {
+      throw new Error("recallant import requires an existing source path");
+    }
+    const database = createRecallantDbFromEnv();
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for confirmed import");
+    try {
+      writeResult = await database.importSource({
+        project_path: projectDir,
+        client_kind: "recallant-cli",
+        source_path: candidate.path,
+        source_type: candidate.source_type,
+        source_sha256: candidate.source_ref.sha256,
+        source_size_bytes: candidate.source_ref.size_bytes,
+        content_type: contentTypeForPath(candidate.path),
+        import_text: await readImportTextForCandidate(projectDir, candidate),
+        bounded_excerpt: candidate.bounded_excerpt,
+        result_class: candidate.result_class,
+        result_classes: candidate.result_classes,
+        scope_kind: candidate.scope.scope_kind,
+        scope_id: candidate.scope.scope_id,
+        audience: audiencePreviewToJson(candidate.provisional_audience),
+        risk: candidate.risk,
+        risks: candidate.risks,
+        secret_references: candidate.secret_references,
+        metadata: {
+          import_command: "recallant import",
+          import_preview_version: 1,
+          promotes_instruction_grade: false
+        }
+      });
+    } finally {
+      await database.close();
+    }
+  }
+  const result = {
+    action: "import",
+    dry_run: dryRun,
+    target,
+    writes_memory: !dryRun,
+    result_class: candidate?.result_class ?? "import_source",
+    result_classes: candidate?.result_classes ?? ["import_source"],
+    migration_classes: candidate?.migration_classes ?? ["safe_source"],
+    migration_action: candidate?.migration_action ?? "summarize_to_memory",
+    migration_review_status: candidate?.migration_review_status ?? "owner_approval_required",
+    migration_memory_candidate: candidate?.migration_memory_candidate ?? null,
+    provisional_scope: candidate?.provisional_scope ?? "project",
+    scope: candidate?.scope ?? { scope_kind: "project", scope_id: null },
+    provisional_audience: candidate?.provisional_audience ?? "all_agents",
+    source_ref: candidate?.source_ref ?? null,
+    source_refs: candidate?.source_ref ? [candidate.source_ref] : [],
+    risks: candidate?.risks ?? [],
+    risk: candidate?.risk ?? "low",
+    bounded_excerpt: candidate?.bounded_excerpt ?? null,
+    secret_references: candidate?.secret_references ?? [],
+    planned_changes: dryRun
+      ? [
+          {
+            action: "none",
+            writes_database: false,
+            writes_memory: false,
+            promotes_instruction_grade: false,
+            reason: "Dry run only."
+          }
+        ]
+      : [
+          {
+            action: "confirmed_import",
+            writes_database: true,
+            writes_memory: true,
+            promotes_instruction_grade: false,
+            reason:
+              "Creates import_batch event, raw artifact pointer, chunks, and reviewable import candidate memory."
+          }
+        ],
+    write_result: writeResult,
+    warning: dryRun
+      ? "Preview only. No import_batch events, active memories, or instruction-grade records were created."
+      : "Confirmed import wrote reviewable source-linked records without instruction-grade promotion."
+  };
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function runLintContext(argv: readonly string[]) {
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const policy = await resolveContextLintPolicy(projectDir, argv);
+  const agents = await readOptional(join(projectDir, "AGENTS.md"));
+  const projectLog = await readOptional(join(projectDir, "PROJECT_LOG.md"));
+  const failures: Array<{ code: string; file: string; message: string }> = [];
+  const warnings: Array<{ code: string; file: string; message: string }> = [];
+  const noteSizeExcess = (file: string, length: number, limit: number) => {
+    const item = {
+      code: "context_budget_exceeded",
+      file,
+      message: `${file} has ${length} characters; policy ${policy.profile} allows ${limit}.`
+    };
+    if (policy.size_excess === "warn") warnings.push(item);
+    else failures.push(item);
+  };
+  if (
+    policy.source === "cli" &&
+    (policy.profile === "expanded" || policy.profile === "custom") &&
+    !policy.override_reason
+  ) {
+    failures.push({
+      code: "override_reason_required",
+      file: "context_policy",
+      message: "Expanded/custom context policy overrides require --override-reason."
+    });
+  }
+  if (agents && agents.length > policy.limits.agents_max_chars) {
+    noteSizeExcess("AGENTS.md", agents.length, policy.limits.agents_max_chars);
+  }
+  if (agents && (agents.match(/## Memory \(Recallant\)/g)?.length ?? 0) > 1) {
+    failures.push({
+      code: "duplicated_memory_section",
+      file: "AGENTS.md",
+      message: "AGENTS.md contains duplicated Memory (Recallant) sections."
+    });
+  }
+  if (agents && looksLikeHistoryDump(agents)) {
+    failures.push({
+      code: "history_dump",
+      file: "AGENTS.md",
+      message: "AGENTS.md appears to contain copied historical/session log material."
+    });
+  }
+  if (agents && containsSecretValue(agents)) {
+    failures.push({
+      code: "secret_value",
+      file: "AGENTS.md",
+      message: "AGENTS.md contains a secret-like environment value."
+    });
+  }
+  if (projectLog && projectLog.length > policy.limits.project_log_max_chars) {
+    noteSizeExcess("PROJECT_LOG.md", projectLog.length, policy.limits.project_log_max_chars);
+  }
+  if (projectLog && looksLikeHistoryDump(projectLog) && projectLog.length > 12_000) {
+    failures.push({
+      code: "project_log_archive",
+      file: "PROJECT_LOG.md",
+      message: "PROJECT_LOG.md appears to be an archive instead of a compact current checkpoint."
+    });
+  }
+  if (projectLog && containsSecretValue(projectLog)) {
+    failures.push({
+      code: "secret_value",
+      file: "PROJECT_LOG.md",
+      message: "PROJECT_LOG.md contains a secret-like environment value."
+    });
+  }
+  for (const adapterPath of adapterFiles(projectDir)) {
+    const adapterContent = await readOptional(adapterPath);
+    if (!adapterContent) continue;
+    if (adapterContent.includes("## Memory (Recallant)") || looksLikeHistoryDump(adapterContent)) {
+      failures.push({
+        code: "adapter_rule_duplication",
+        file: adapterPath.slice(projectDir.length + 1),
+        message: "Adapter file duplicates Recallant bootstrap/history instead of pointing to it."
+      });
+    }
+    if (containsSecretValue(adapterContent)) {
+      failures.push({
+        code: "secret_value",
+        file: adapterPath.slice(projectDir.length + 1),
+        message: "Adapter file contains a secret-like environment value."
+      });
+    }
+  }
+  const result = {
+    ok: failures.length === 0,
+    failures,
+    warnings,
+    policy,
+    project_dir: projectDir
+  };
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.ok) process.exitCode = 1;
+}
+
+async function runContext(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for context preview");
+  let sessionId: string | null = null;
+  let shouldCloseSession = false;
+  try {
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const explicitSessionId = parseFlag(argv, "--session-id");
+    if (explicitSessionId) {
+      sessionId = explicitSessionId;
+    } else {
+      const started = await database.startSession({
+        client_kind: "codex",
+        project_path: projectDir,
+        session_label: "context-preview",
+        resume_policy: "normal"
+      });
+      sessionId = started.session_id ? String(started.session_id) : null;
+      shouldCloseSession = true;
+    }
+    if (!sessionId) throw new Error("context preview did not start a session");
+    const pack = await database.getContextPack({
+      session_id: sessionId,
+      task_hint: parseFlag(argv, "--task-hint") ?? "context preview",
+      include_raw_evidence: "auto",
+      include_recovery: true,
+      local_spool_status: await getLocalSpoolStatus(argv)
+    });
+    process.stdout.write(`${JSON.stringify(pack, null, 2)}\n`);
+  } finally {
+    if (sessionId && shouldCloseSession) await database.closeSession(sessionId, "client_exit");
+    await database.close();
+  }
+}
+
+async function runCloseoutIntent(argv: readonly string[]) {
+  const text = parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ");
+  const dir = projectDir(argv);
+  const state = await readAgentSessionState(dir);
+  const hasActiveSession =
+    argv.includes("--has-active-session") ||
+    (state?.status === "active" && typeof state.session_id === "string");
+  const result = {
+    ...classifyCloseoutIntent(text, hasActiveSession),
+    project_dir: dir,
+    active_session_id:
+      state?.status === "active" && typeof state.session_id === "string" ? state.session_id : null
+  };
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (result.confirmation_required && result.closeout_trigger) {
+    process.exitCode = 2;
+  }
+}
+
+async function checkOllama() {
+  const url = process.env.RECALLANT_OLLAMA_URL ?? "http://localhost:11434";
+  const expectedModels = (
+    process.env.RECALLANT_EXPECTED_OLLAMA_MODELS ?? "nomic-embed-text,gpt-oss:20b"
+  )
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 500);
+  try {
+    const response = await fetch(new URL("/api/tags", url), { signal: controller.signal });
+    if (!response.ok) {
+      return {
+        provider: "ollama",
+        url,
+        reachable: false,
+        starts_service: false,
+        expected_models: expectedModels,
+        missing_models: expectedModels,
+        fallback_route: "active_agent_or_defer",
+        error: `HTTP ${response.status}`
+      };
+    }
+    const payload = (await response.json()) as { models?: Array<{ name?: string }> };
+    const available = new Set<string>();
+    for (const model of payload.models ?? []) {
+      if (!model.name) continue;
+      available.add(model.name);
+      if (model.name.endsWith(":latest")) available.add(model.name.slice(0, -":latest".length));
+      else available.add(`${model.name}:latest`);
+    }
+    return {
+      provider: "ollama",
+      url,
+      reachable: true,
+      starts_service: false,
+      expected_models: expectedModels,
+      missing_models: expectedModels.filter((model) => !available.has(model)),
+      fallback_route: "active_agent_or_defer"
+    };
+  } catch (error) {
+    return {
+      provider: "ollama",
+      url,
+      reachable: false,
+      starts_service: false,
+      expected_models: expectedModels,
+      missing_models: expectedModels,
+      fallback_route: "active_agent_or_defer",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function checkPendingEmbeddingStatus(
+  database: ReturnType<typeof createRecallantDbFromEnv>,
+  projectDir: string,
+  projectId?: string | null
+) {
+  if (!database) {
+    return {
+      status: "unavailable",
+      pending_chunks: null,
+      recovery_available: false,
+      recommendation: "Configure Recallant storage before checking embedding recovery."
+    };
+  }
+  try {
+    const status = await database.pendingEmbeddingStatus(
+      projectId ? { project_id: projectId } : { project_path: projectDir }
+    );
+    return {
+      status: "ok",
+      ...status
+    };
+  } catch (error) {
+    return {
+      status: "unknown",
+      pending_chunks: null,
+      recovery_available: false,
+      recommendation: "Run recallant doctor again after storage is reachable.",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function checkDeploymentProfile(env: ProductionReadinessEnvValues = process.env) {
+  const plannedPort = Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005");
+  const inventoryFile =
+    productionEnvValue(env, "RECALLANT_SERVER_INVENTORY_FILE") ??
+    productionEnvValue(env, "RECALLANT_PORTS_FILE") ??
+    null;
+  const securityPath =
+    productionEnvValue(env, "RECALLANT_SECURITY_BASELINE_PATH") ??
+    productionEnvValue(env, "RECALLANT_SECURITY_PATH") ??
+    null;
+  const inventoryContent = inventoryFile ? await readOptional(inventoryFile) : null;
+  const inventoryRegistered = Boolean(
+    inventoryContent &&
+    inventoryContent.toLowerCase().includes("recallant") &&
+    inventoryContent.includes(String(plannedPort))
+  );
+  const securityPresent = securityPath ? await pathPresent(securityPath) : false;
+  const warnings = [];
+  if (!inventoryFile) {
+    warnings.push(
+      "No server inventory file configured; set RECALLANT_SERVER_INVENTORY_FILE before service start."
+    );
+  } else if (!inventoryRegistered) {
+    warnings.push(
+      `Planned Recallant service port ${plannedPort} is not registered in the configured server inventory file.`
+    );
+  }
+  if (securityPath) {
+    warnings.push(
+      "Configured security baseline must be consulted before exposure, firewall, private access, service, or secret changes."
+    );
+  } else {
+    warnings.push(
+      "No security baseline path configured; set RECALLANT_SECURITY_BASELINE_PATH before public exposure."
+    );
+  }
+  return {
+    planned_service: {
+      name: "recallant",
+      port: plannedPort,
+      bind_host: productionEnvValue(env, "RECALLANT_HOST") ?? "127.0.0.1"
+    },
+    server_inventory: {
+      path_configured: Boolean(inventoryFile),
+      configured: Boolean(inventoryFile),
+      present: inventoryContent !== null,
+      registered: inventoryRegistered
+    },
+    security_baseline: {
+      path_configured: Boolean(securityPath),
+      configured: Boolean(securityPath),
+      present: securityPresent,
+      must_consult_before_exposure: true
+    },
+    warnings
+  };
+}
+
+function shortHash(value: unknown) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16)}`;
+}
+
+function defaultDatabasePort(protocol: string) {
+  return protocol === "postgres" || protocol === "postgresql" ? "5432" : null;
+}
+
+type DatabaseUrlProfile = {
+  configured: boolean;
+  status: "missing" | "parsed" | "invalid";
+  safe_fingerprint: string | null;
+  components: {
+    scheme: string;
+    host: string | null;
+    port: string | null;
+    database: string | null;
+    username_hash: string | null;
+  } | null;
+  credential: string | null;
+};
+
+const productionReadinessEnvKeys = [
+  "RECALLANT_PUBLIC_WORKBENCH_URL",
+  "RECALLANT_PUBLIC_URL",
+  "RECALLANT_WORKBENCH_ORIGIN_URL",
+  "RECALLANT_WORKBENCH_ORIGIN_STATUS",
+  "RECALLANT_CLOUDFLARE_MODE",
+  "RECALLANT_CLOUDFLARE_EDGE_AUTH",
+  "RECALLANT_ADMIN_EMAILS",
+  "RECALLANT_ADMIN_EMAIL",
+  "RECALLANT_BACKUP_TIMER_ENABLED",
+  "RECALLANT_BACKUP_TIMER_STATUS",
+  "RECALLANT_BACKUP_JOB_RESULT",
+  "RECALLANT_BACKUP_JOB_EXIT_STATUS",
+  "RECALLANT_BACKUP_JOB_COMPLETED_AT",
+  "RECALLANT_BACKUP_MAX_AGE_HOURS",
+  "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS",
+  "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS",
+  "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE",
+  "RECALLANT_LATEST_BACKUP_MANIFEST",
+  "RECALLANT_SERVER_INVENTORY_FILE",
+  "RECALLANT_PORTS_FILE",
+  "RECALLANT_SECURITY_BASELINE_PATH",
+  "RECALLANT_SECURITY_PATH",
+  "RECALLANT_PRODUCTION_PROJECT_PATH",
+  "RECALLANT_HOST",
+  "RECALLANT_PORT",
+  "RECALLANT_SYSTEMD_SERVICE_NAME",
+  "RECALLANT_SERVICE_ACTIVE_STATUS",
+  "RECALLANT_SERVICE_ENABLED_STATUS",
+  "RECALLANT_SERVICE_RESTART_POLICY",
+  "RECALLANT_SERVICE_HEALTH_URL",
+  "RECALLANT_SERVICE_HEALTH_STATUS",
+  "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL",
+  "RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS"
+] as const;
+
+type ProductionReadinessEnvKey = (typeof productionReadinessEnvKeys)[number];
+type ProductionReadinessEnvValues = Partial<Record<ProductionReadinessEnvKey, string | undefined>>;
+
+type ConfiguredServiceEnvFile = {
+  source_env_var: string | null;
+  path: string;
+  source: "explicit_env" | "systemd";
+};
+
+type LoadedServiceEnv = {
+  configured: boolean;
+  source_env_var: string | null;
+  source: "none" | "explicit_env" | "systemd";
+  present: boolean;
+  values: Record<string, string> | null;
+};
+
+function parseDatabaseUrlProfile(value: string | undefined): DatabaseUrlProfile {
+  if (!envValueIsSet(value)) {
+    return {
+      configured: false,
+      status: "missing",
+      safe_fingerprint: null,
+      components: null,
+      credential: null
+    };
+  }
+  try {
+    const parsed = new URL(String(value));
+    const scheme = parsed.protocol.replace(/:$/, "");
+    const username = parsed.username ? decodeURIComponent(parsed.username) : "";
+    const host = parsed.hostname || null;
+    const port = parsed.port || defaultDatabasePort(scheme);
+    const database = parsed.pathname
+      ? decodeURIComponent(parsed.pathname.replace(/^\/+/, "")) || null
+      : null;
+    const components = {
+      scheme,
+      host,
+      port,
+      database,
+      username_hash: username ? shortHash({ username }) : null
+    };
+    return {
+      configured: true,
+      status: "parsed",
+      safe_fingerprint: shortHash(components),
+      components,
+      credential: parsed.password ? decodeURIComponent(parsed.password) : null
+    };
+  } catch {
+    return {
+      configured: true,
+      status: "invalid",
+      safe_fingerprint: null,
+      components: null,
+      credential: null
+    };
+  }
+}
+
+function publicDatabaseProfile(profile: DatabaseUrlProfile) {
+  return {
+    configured: profile.configured,
+    status: profile.status,
+    safe_fingerprint: profile.safe_fingerprint,
+    components: profile.components
+  };
+}
+
+function parseEnvFileContent(content: string) {
+  const values: Record<string, string> = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+    const [rawKey, ...rawValueParts] = trimmed.split("=");
+    let key = rawKey?.trim() ?? "";
+    if (key.startsWith("export ")) key = key.slice("export ".length).trim();
+    if (!key) continue;
+    values[key] = parseEnvValue(rawValueParts.join("="));
+  }
+  return values;
+}
+
+function systemctlValue(args: readonly string[]) {
+  const result = spawnSync("systemctl", [...args], { encoding: "utf8" });
+  if (result.error) return null;
+  return result.stdout.trim() || null;
+}
+
+function parseSystemdEnvironmentFilePath(value: string | null) {
+  if (!value) return null;
+  for (const token of value.split(/\s+/)) {
+    const cleaned = token.trim();
+    if (!cleaned || cleaned.startsWith("(")) continue;
+    const path = cleaned.startsWith("-") ? cleaned.slice(1) : cleaned;
+    if (path.startsWith("/") || path.startsWith("./") || path.startsWith("../")) return path;
+  }
+  return null;
+}
+
+function configuredServiceEnvFile(): ConfiguredServiceEnvFile | null {
+  if (envValueIsSet(process.env.RECALLANT_SERVICE_ENV_FILE)) {
+    return {
+      source_env_var: "RECALLANT_SERVICE_ENV_FILE",
+      path: process.env.RECALLANT_SERVICE_ENV_FILE as string,
+      source: "explicit_env"
+    };
+  }
+  if (envValueIsSet(process.env.RECALLANT_SYSTEMD_ENV_FILE)) {
+    return {
+      source_env_var: "RECALLANT_SYSTEMD_ENV_FILE",
+      path: process.env.RECALLANT_SYSTEMD_ENV_FILE as string,
+      source: "explicit_env"
+    };
+  }
+  if (process.env.RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY === "true") return null;
+  const serviceName = process.env.RECALLANT_SYSTEMD_SERVICE_NAME ?? "recallant.service";
+  const environmentFiles = systemctlValue([
+    "show",
+    serviceName,
+    "-p",
+    "EnvironmentFiles",
+    "--value"
+  ]);
+  const discovered = parseSystemdEnvironmentFilePath(environmentFiles);
+  if (discovered) {
+    return {
+      source_env_var: null,
+      path: discovered,
+      source: "systemd"
+    };
+  }
+  return null;
+}
+
+async function loadConfiguredServiceEnv(): Promise<LoadedServiceEnv> {
+  const configured = configuredServiceEnvFile();
+  if (!configured) {
+    return {
+      configured: false,
+      source_env_var: null,
+      source: "none",
+      present: false,
+      values: null
+    };
+  }
+  const content = await readOptional(configured.path);
+  if (content === null) {
+    return {
+      configured: true,
+      source_env_var: configured.source_env_var,
+      source: configured.source,
+      present: false,
+      values: null
+    };
+  }
+  return {
+    configured: true,
+    source_env_var: configured.source_env_var,
+    source: configured.source,
+    present: true,
+    values: parseEnvFileContent(content)
+  };
+}
+
+function configuredProductionEnvKeys(values: Record<string, string> | null) {
+  if (!values) return [];
+  return productionReadinessEnvKeys.filter((key) => envValueIsSet(values[key])).sort();
+}
+
+async function productionReadinessEnvSnapshot() {
+  const serviceEnv = await loadConfiguredServiceEnv();
+  const values: ProductionReadinessEnvValues = {};
+  for (const key of productionReadinessEnvKeys) {
+    const current = process.env[key];
+    const fromService = serviceEnv.values?.[key];
+    if (envValueIsSet(current)) values[key] = current;
+    else if (envValueIsSet(fromService)) values[key] = fromService;
+  }
+  return {
+    values,
+    service_env: {
+      configured: serviceEnv.configured,
+      present: serviceEnv.present,
+      source: serviceEnv.source,
+      source_env_var: serviceEnv.source_env_var,
+      configured_keys: configuredProductionEnvKeys(serviceEnv.values)
+    }
+  };
+}
+
+function productionEnvValue(values: ProductionReadinessEnvValues, key: ProductionReadinessEnvKey) {
+  const value = values[key];
+  return envValueIsSet(value) ? value : undefined;
+}
+
+function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrlProfile) {
+  const differences: string[] = [];
+  if (!cli.components || !service.components) return differences;
+  if (cli.components.scheme !== service.components.scheme) differences.push("scheme");
+  if (cli.components.username_hash !== service.components.username_hash)
+    differences.push("username");
+  if (cli.components.host !== service.components.host) differences.push("host");
+  if (cli.components.port !== service.components.port) differences.push("port");
+  if (cli.components.database !== service.components.database) differences.push("database");
+  if (cli.credential !== service.credential) differences.push("credential");
+  return differences;
+}
+
+async function checkServiceEnvProfile() {
+  const loaded = await loadConfiguredServiceEnv();
+  const cliProfile = parseDatabaseUrlProfile(process.env.RECALLANT_DATABASE_URL);
+  if (!loaded.configured) {
+    return {
+      configured: false,
+      status: "not_configured",
+      source_env_var: null,
+      service_env_file: { configured: false, present: false, source: "none" },
+      production_env: { configured_keys: [] as string[] },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: null,
+      differences: [] as string[],
+      credential_match: null,
+      ok: true,
+      warnings: [] as string[]
+    };
+  }
+
+  if (!loaded.present || !loaded.values) {
+    return {
+      configured: true,
+      status: "service_env_file_unreadable_or_missing",
+      source_env_var: loaded.source_env_var,
+      service_env_file: { configured: true, present: false, source: loaded.source },
+      production_env: { configured_keys: [] as string[] },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: null,
+      differences: [] as string[],
+      credential_match: null,
+      ok: false,
+      warnings: ["Configured service env file is missing or unreadable."]
+    };
+  }
+
+  const serviceEnv = loaded.values;
+  const serviceProfile = parseDatabaseUrlProfile(serviceEnv.RECALLANT_DATABASE_URL);
+  if (cliProfile.status !== "parsed" || serviceProfile.status !== "parsed") {
+    const status =
+      cliProfile.status !== "parsed"
+        ? "cli_database_url_missing_or_invalid"
+        : "service_database_url_missing_or_invalid";
+    return {
+      configured: true,
+      status,
+      source_env_var: loaded.source_env_var,
+      service_env_file: { configured: true, present: true, source: loaded.source },
+      production_env: { configured_keys: configuredProductionEnvKeys(serviceEnv) },
+      cli_database: publicDatabaseProfile(cliProfile),
+      service_database: publicDatabaseProfile(serviceProfile),
+      differences: [] as string[],
+      credential_match: null,
+      ok: false,
+      warnings: [
+        cliProfile.status !== "parsed"
+          ? "CLI database profile is missing or invalid."
+          : "Service env database profile is missing or invalid."
+      ]
+    };
+  }
+
+  const differences = serviceProfileDifferences(cliProfile, serviceProfile);
+  const aligned = differences.length === 0;
+  return {
+    configured: true,
+    status: aligned ? "aligned" : "mismatch",
+    source_env_var: loaded.source_env_var,
+    service_env_file: { configured: true, present: true, source: loaded.source },
+    production_env: { configured_keys: configuredProductionEnvKeys(serviceEnv) },
+    cli_database: publicDatabaseProfile(cliProfile),
+    service_database: publicDatabaseProfile(serviceProfile),
+    differences,
+    credential_match: cliProfile.credential === serviceProfile.credential,
+    ok: aligned,
+    warnings: aligned
+      ? ([] as string[])
+      : [
+          "CLI and service env database profiles differ; align them before treating the public Workbench origin as production-ready."
+        ]
+  };
+}
+
+function systemdBackupTimerStatus() {
+  const active = systemctlValue(["is-active", "recallant-backup.timer"]);
+  const enabled = systemctlValue(["is-enabled", "recallant-backup.timer"]);
+  return {
+    enabled: active === "active" || enabled === "enabled",
+    status: [active, enabled].filter(Boolean).join("/") || "unknown",
+    source: "systemd"
+  };
+}
+
+function positiveHoursSetting(
+  env: ProductionReadinessEnvValues,
+  key: "RECALLANT_BACKUP_MAX_AGE_HOURS" | "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS",
+  fallback = 30
+) {
+  const raw = productionEnvValue(env, key);
+  if (!raw) return { hours: fallback, valid: true, source: "default" };
+  const hours = Number(raw);
+  const valid = Number.isFinite(hours) && hours > 0 && hours <= 8_760;
+  return {
+    hours: valid ? hours : null,
+    valid,
+    source: "env"
+  };
+}
+
+function timestampFreshness(
+  value: unknown,
+  maximum: ReturnType<typeof positiveHoursSetting>,
+  reasonPrefix: string
+) {
+  if (!maximum.valid || maximum.hours === null) {
+    return {
+      timestamp: typeof value === "string" ? value : null,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_max_age_invalid`
+    };
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return {
+      timestamp: null,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_missing`
+    };
+  }
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) {
+    return {
+      timestamp: value,
+      age_hours: null,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_invalid`
+    };
+  }
+  const ageHours = (Date.now() - timestampMs) / 3_600_000;
+  if (ageHours < -5 / 60) {
+    return {
+      timestamp: value,
+      age_hours: ageHours,
+      max_age_hours: maximum.hours,
+      fresh: false,
+      reason: `${reasonPrefix}_timestamp_future`
+    };
+  }
+  const fresh = ageHours <= maximum.hours;
+  return {
+    timestamp: value,
+    age_hours: Math.max(0, ageHours),
+    max_age_hours: maximum.hours,
+    fresh,
+    reason: fresh ? null : `${reasonPrefix}_stale`
+  };
+}
+
+function backupOperatorAction(reason: string | null) {
+  if (!reason) return "No backup remediation is required.";
+  if (reason.startsWith("backup_job_")) {
+    return "Inspect recallant-backup.service, repair the job, and run one successful backup before retrying doctor.";
+  }
+  if (reason.includes("stale") || reason.includes("timestamp")) {
+    return "Run a fresh native backup and disposable restore rehearsal, then retry doctor.";
+  }
+  if (reason.includes("max_age")) {
+    return "Set a positive backup freshness maximum no greater than 8760 hours.";
+  }
+  return "Create and verify a native PostgreSQL backup with a successful disposable restore rehearsal.";
+}
+
+function systemdBackupJobStatus() {
+  const result = systemctlValue(["show", "recallant-backup.service", "-p", "Result", "--value"]);
+  const exitStatus = systemctlValue([
+    "show",
+    "recallant-backup.service",
+    "-p",
+    "ExecMainStatus",
+    "--value"
+  ]);
+  const completedAt = systemctlValue([
+    "show",
+    "recallant-backup.service",
+    "-p",
+    "ExecMainExitTimestamp",
+    "--value"
+  ]);
+  return { result, exit_status: exitStatus, completed_at: completedAt, source: "systemd" };
+}
+
+function backupJobStatus(
+  env: ProductionReadinessEnvValues,
+  maximum: ReturnType<typeof positiveHoursSetting>
+) {
+  const hasOverride = [
+    "RECALLANT_BACKUP_JOB_RESULT",
+    "RECALLANT_BACKUP_JOB_EXIT_STATUS",
+    "RECALLANT_BACKUP_JOB_COMPLETED_AT"
+  ].some((key) => productionEnvValue(env, key as ProductionReadinessEnvKey) !== undefined);
+  const observed = hasOverride
+    ? {
+        result: productionEnvValue(env, "RECALLANT_BACKUP_JOB_RESULT") ?? null,
+        exit_status: productionEnvValue(env, "RECALLANT_BACKUP_JOB_EXIT_STATUS") ?? null,
+        completed_at: productionEnvValue(env, "RECALLANT_BACKUP_JOB_COMPLETED_AT") ?? null,
+        source: "env"
+      }
+    : systemdBackupJobStatus();
+  const completion = timestampFreshness(observed.completed_at, maximum, "backup_job_completion");
+  const parsedExit =
+    observed.exit_status !== null && observed.exit_status !== ""
+      ? Number(observed.exit_status)
+      : null;
+  let reason: string | null = null;
+  if (observed.result !== "success") reason = "backup_job_result_failed";
+  else if (parsedExit !== 0) reason = "backup_job_exit_nonzero";
+  else if (!completion.fresh) reason = completion.reason;
+  return {
+    result: observed.result ?? "unknown",
+    exit_status: Number.isFinite(parsedExit) ? parsedExit : null,
+    completed_at: observed.completed_at,
+    completion,
+    source: observed.source,
+    ok: reason === null,
+    reason,
+    operator_action: backupOperatorAction(reason)
+  };
+}
+
+function bindHostIsPrivate(bindHost: string) {
+  return bindHost === "127.0.0.1" || bindHost === "::1" || bindHost.endsWith(".tailnet");
+}
+
+function httpStatusReadiness(status: number | null) {
+  if (status === null) return { status: "not_checked", ok: null };
+  if (status === 401 || status === 403 || (status >= 300 && status < 400)) {
+    return { status: "auth_required", ok: true };
+  }
+  if (status === 502) return { status: "bad_gateway", ok: false };
+  if (status >= 200 && status < 300) return { status: "anonymous_access", ok: false };
+  if (status >= 500) return { status: "server_error", ok: false };
+  return { status: "unexpected_status", ok: false };
+}
+
+const HTTP_READINESS_TIMEOUT_MS = 5000;
+
+function httpReadinessSignal() {
+  return AbortSignal.timeout(HTTP_READINESS_TIMEOUT_MS);
+}
+
+async function checkHttpStatus(url: string) {
+  try {
+    const response = await fetch(url, { redirect: "manual", signal: httpReadinessSignal() });
+    return { http_status: response.status, error: null };
+  } catch (error) {
+    return {
+      http_status: null,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function serviceHealthReadiness(
+  env: ProductionReadinessEnvValues,
+  plannedPort: number,
+  originConfigured: string | undefined
+) {
+  const fixtureStatus = productionEnvValue(env, "RECALLANT_SERVICE_HEALTH_STATUS");
+  if (fixtureStatus) {
+    const parsed = Number(fixtureStatus);
+    return {
+      configured: true,
+      source: "env",
+      http_status: Number.isFinite(parsed) ? parsed : null,
+      status: Number.isFinite(parsed) && parsed >= 200 && parsed < 300 ? "healthy" : "unhealthy",
+      ok: Number.isFinite(parsed) && parsed >= 200 && parsed < 300,
+      error: Number.isFinite(parsed) ? null : "invalid_status"
+    };
+  }
+  const healthUrl = productionEnvValue(env, "RECALLANT_SERVICE_HEALTH_URL");
+  let url = healthUrl;
+  if (!url && originConfigured) {
+    try {
+      const parsed = new URL(originConfigured);
+      parsed.pathname = "/health";
+      parsed.search = "";
+      url = parsed.toString();
+    } catch {
+      url = undefined;
+    }
+  }
+  if (!url) url = `http://127.0.0.1:${plannedPort}/health`;
+  const local = localhostOriginUrl(url, plannedPort);
+  if (!local.valid || !local.local_only || !local.url) {
+    return {
+      configured: true,
+      source: healthUrl ? "env" : "derived",
+      http_status: null,
+      status: "invalid_or_non_private_health_url",
+      ok: false,
+      error: "invalid_or_non_private_health_url"
+    };
+  }
+  const checked = await checkHttpStatus(local.url);
+  if (checked.http_status === null && !healthUrl && !originConfigured) {
+    return {
+      configured: false,
+      source: "default",
+      http_status: null,
+      status: "not_checked",
+      ok: null,
+      error: checked.error
+    };
+  }
+  return {
+    configured: Boolean(healthUrl || originConfigured),
+    source: healthUrl ? "env" : originConfigured ? "derived" : "default",
+    http_status: checked.http_status,
+    status:
+      checked.http_status !== null && checked.http_status >= 200 && checked.http_status < 300
+        ? "healthy"
+        : checked.http_status === null
+          ? "down"
+          : "unhealthy",
+    ok: checked.http_status !== null && checked.http_status >= 200 && checked.http_status < 300,
+    error: checked.error
+  };
+}
+
+async function publicRouteReadiness(env: ProductionReadinessEnvValues) {
+  const fixtureStatus = productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_ROUTE_STATUS");
+  if (fixtureStatus) {
+    const parsed = Number(fixtureStatus);
+    const readiness = httpStatusReadiness(Number.isFinite(parsed) ? parsed : null);
+    return {
+      configured: true,
+      source: "env",
+      http_status: Number.isFinite(parsed) ? parsed : null,
+      status: readiness.status,
+      ok: readiness.ok === true,
+      error: Number.isFinite(parsed) ? null : "invalid_status"
+    };
+  }
+  const checkUrl =
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_URL");
+  if (!checkUrl) {
+    return {
+      configured: false,
+      source: "not_configured",
+      http_status: null,
+      status: "not_checked",
+      ok: null,
+      error: null
+    };
+  }
+  const checked = await checkHttpStatus(checkUrl);
+  const readiness = httpStatusReadiness(checked.http_status);
+  return {
+    configured: true,
+    source: productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_CHECK_URL")
+      ? "check_url"
+      : "public_url",
+    http_status: checked.http_status,
+    status: checked.http_status === null ? "down" : readiness.status,
+    ok: checked.http_status === null ? false : readiness.ok === true,
+    error: checked.error
+  };
+}
+
+async function checkServiceRuntimeReadiness(input: {
+  env: ProductionReadinessEnvValues;
+  plannedPort: number;
+  bindHost: string;
+  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>;
+  publicWorkbenchReadiness: Awaited<ReturnType<typeof checkPublicWorkbenchReadiness>>;
+}) {
+  const serviceName =
+    productionEnvValue(input.env, "RECALLANT_SYSTEMD_SERVICE_NAME") ?? "recallant.service";
+  const activeStatus =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_ACTIVE_STATUS") ??
+    systemctlValue(["is-active", serviceName]);
+  const enabledStatus =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_ENABLED_STATUS") ??
+    systemctlValue(["is-enabled", serviceName]);
+  const restartPolicy =
+    productionEnvValue(input.env, "RECALLANT_SERVICE_RESTART_POLICY") ??
+    systemctlValue(["show", serviceName, "-p", "Restart", "--value"]);
+  const originConfigured = productionEnvValue(input.env, "RECALLANT_WORKBENCH_ORIGIN_URL");
+  const health = await serviceHealthReadiness(input.env, input.plannedPort, originConfigured);
+  const public_route = await publicRouteReadiness(input.env);
+  const activeOk = activeStatus === null || activeStatus === "active";
+  const enabledOk =
+    enabledStatus === null ||
+    enabledStatus === "enabled" ||
+    enabledStatus === "static" ||
+    enabledStatus === "generated";
+  const restartOk = restartPolicy === null || restartPolicy === "" || restartPolicy !== "no";
+  const privateBindOk = bindHostIsPrivate(input.bindHost);
+  const serviceEnvMissing =
+    input.serviceEnvProfile.configured === true &&
+    input.serviceEnvProfile.service_env_file.present !== true;
+  const publicProtected = input.publicWorkbenchReadiness.ready === true;
+  const observed = Boolean(
+    activeStatus ||
+    enabledStatus ||
+    restartPolicy ||
+    health.configured ||
+    public_route.configured ||
+    input.serviceEnvProfile.configured ||
+    input.publicWorkbenchReadiness.configured
+  );
+  let status = observed ? "ready" : "not_checked";
+  let ok = true;
+  let operatorAction = observed
+    ? "Service runtime readiness is satisfied."
+    : "Configure service runtime checks before claiming service-level production readiness.";
+  if (!activeOk) {
+    status = "service_inactive";
+    ok = false;
+    operatorAction =
+      "Start or repair the Recallant service before sending users to the public Workbench.";
+  } else if (!enabledOk) {
+    status = "service_disabled";
+    ok = false;
+    operatorAction = "Enable the Recallant service or document an equivalent supervised lifecycle.";
+  } else if (!restartOk) {
+    status = "restart_policy_disabled";
+    ok = false;
+    operatorAction = "Configure a restart policy so Recallant recovers after process failures.";
+  } else if (!privateBindOk) {
+    status = "wrong_bind_host";
+    ok = false;
+    operatorAction = "Keep the Recallant origin bound to localhost or a private network interface.";
+  } else if (serviceEnvMissing) {
+    status = "service_env_missing";
+    ok = false;
+    operatorAction =
+      "Repair the configured service env file before treating the public Workbench as ready.";
+  } else if (health.configured && health.ok !== true) {
+    status = "health_failed";
+    ok = false;
+    operatorAction =
+      "Repair the local Recallant /health endpoint before sending users to the public Workbench.";
+  } else if (public_route.configured && public_route.ok !== true) {
+    status =
+      public_route.status === "bad_gateway"
+        ? "public_bad_gateway"
+        : public_route.status === "anonymous_access"
+          ? "public_anonymous_access"
+          : "public_route_unhealthy";
+    ok = false;
+    operatorAction = "Repair the public Workbench route or authenticated access layer.";
+  } else if (input.publicWorkbenchReadiness.configured && !publicProtected) {
+    status = "public_workbench_not_ready";
+    ok = false;
+    operatorAction = input.publicWorkbenchReadiness.operator_action;
+  }
+  return {
+    configured: observed,
+    status,
+    ok,
+    service: {
+      name: serviceName,
+      active_status: activeStatus ?? "unknown",
+      enabled_status: enabledStatus ?? "unknown",
+      restart_policy: restartPolicy ?? "unknown"
+    },
+    bind: {
+      host: input.bindHost,
+      private: privateBindOk
+    },
+    service_env_file: input.serviceEnvProfile.service_env_file,
+    health,
+    public_route,
+    operator_action: operatorAction
+  };
+}
+
+async function latestBackupVerificationStatus(
+  env: ProductionReadinessEnvValues = process.env,
+  backupMaximum = positiveHoursSetting(env, "RECALLANT_BACKUP_MAX_AGE_HOURS"),
+  restoreMaximum = positiveHoursSetting(env, "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS")
+) {
+  const verificationPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE");
+  if (!verificationPath) {
+    const legacyStatus = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS");
+    return {
+      status: legacyStatus ?? "unknown",
+      ok: false,
+      reason: legacyStatus
+        ? "legacy_status_without_evidence"
+        : "backup_verification_not_configured",
+      source: legacyStatus ? "legacy-env-insufficient" : "not_configured",
+      file_configured: false,
+      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
+      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
+      operator_action: backupOperatorAction(
+        legacyStatus ? "legacy_status_without_evidence" : "backup_verification_not_configured"
+      )
+    };
+  }
+  try {
+    const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
+    const status = String(parsed.restore_verification ?? "unknown");
+    const backup = timestampFreshness(parsed.backup_created_at, backupMaximum, "backup");
+    const restore = timestampFreshness(
+      parsed.restore_verified_at ?? parsed.verified_at,
+      restoreMaximum,
+      "restore"
+    );
+    let reason: string | null = null;
+    if (parsed.backup_kind !== "postgresql_custom") reason = "backup_kind_not_restorable";
+    else if (status !== "passed") reason = "restore_not_passed";
+    else if (parsed.artifact_sha256_verified !== true) reason = "backup_artifact_hash_unverified";
+    else if (parsed.production_overwritten !== false) reason = "production_overwrite_not_disproved";
+    else if (parsed.production_fingerprint_unchanged !== true)
+      reason = "production_fingerprint_unverified";
+    else if (parsed.disposable_database_removed !== true) reason = "rehearsal_cleanup_unverified";
+    else if (
+      !Array.isArray(parsed.missing_tables) ||
+      !Array.isArray(parsed.unexpected_tables) ||
+      !Array.isArray(parsed.row_count_mismatches) ||
+      parsed.missing_tables.length > 0 ||
+      parsed.unexpected_tables.length > 0 ||
+      parsed.row_count_mismatches.length > 0
+    )
+      reason = "restore_inventory_mismatch";
+    else if (!backup.fresh) reason = backup.reason;
+    else if (!restore.fresh) reason = restore.reason;
+    return {
+      status,
+      ok: reason === null,
+      reason,
+      source: "latest-verification-file",
+      file_configured: true,
+      backup: { ...backup, source: "latest-verification-file" },
+      restore: { ...restore, source: "latest-verification-file" },
+      artifact_sha256_verified: parsed.artifact_sha256_verified === true,
+      production_overwritten: parsed.production_overwritten,
+      manifest_configured: Boolean(parsed.manifest_path),
+      operator_action: backupOperatorAction(reason)
+    };
+  } catch {
+    return {
+      status: "unknown",
+      ok: false,
+      reason: "backup_verification_missing_or_invalid",
+      source: "missing",
+      file_configured: true,
+      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
+      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
+      operator_action: backupOperatorAction("backup_verification_missing_or_invalid")
+    };
+  }
+}
+
+function publicWorkbenchAccessConfig(env: ProductionReadinessEnvValues = process.env) {
+  const cloudflareMode = productionEnvValue(env, "RECALLANT_CLOUDFLARE_MODE") ?? "disabled";
+  const edgeAuth = productionEnvValue(env, "RECALLANT_CLOUDFLARE_EDGE_AUTH") ?? "disabled";
+  const adminEmailCount = (
+    productionEnvValue(env, "RECALLANT_ADMIN_EMAILS") ??
+    productionEnvValue(env, "RECALLANT_ADMIN_EMAIL") ??
+    ""
+  )
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean).length;
+  return {
+    mode: cloudflareMode,
+    edge_auth_required: edgeAuth === "required",
+    admin_email_count: adminEmailCount,
+    ok: cloudflareMode === "enabled" && edgeAuth === "required" && adminEmailCount > 0
+  };
+}
+
+function localhostOriginUrl(raw: string | null, plannedPort: number) {
+  const value = raw ?? `http://127.0.0.1:${plannedPort}/review`;
+  try {
+    const parsed = new URL(value);
+    if (parsed.pathname === "/" || parsed.pathname === "") parsed.pathname = "/review";
+    const localHost =
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "::1";
+    return {
+      url: parsed.toString(),
+      host: parsed.hostname,
+      local_only: localHost,
+      valid: true
+    };
+  } catch {
+    return {
+      url: null,
+      host: null,
+      local_only: false,
+      valid: false
+    };
+  }
+}
+
+async function checkPublicWorkbenchReadiness(
+  plannedPort: number,
+  env: ProductionReadinessEnvValues = process.env
+) {
+  const access = publicWorkbenchAccessConfig(env);
+  const publicUrl =
+    productionEnvValue(env, "RECALLANT_PUBLIC_WORKBENCH_URL") ??
+    productionEnvValue(env, "RECALLANT_PUBLIC_URL") ??
+    null;
+  const originConfigured = productionEnvValue(env, "RECALLANT_WORKBENCH_ORIGIN_URL") ?? null;
+  const shouldCheck =
+    envValueIsSet(publicUrl ?? undefined) ||
+    envValueIsSet(originConfigured ?? undefined) ||
+    access.mode === "enabled";
+  const origin = localhostOriginUrl(originConfigured, plannedPort);
+
+  if (!shouldCheck) {
+    return {
+      configured: false,
+      status: "not_configured",
+      ready: false,
+      public_url_configured: false,
+      cloudflare_access: access,
+      origin: {
+        configured: false,
+        local_only: origin.local_only,
+        status: "not_checked",
+        http_status: null,
+        error: null
+      },
+      operator_action:
+        "Configure the public Workbench URL and protected private origin before claiming public UI readiness."
+    };
+  }
+
+  if (!origin.valid || !origin.url) {
+    return {
+      configured: true,
+      status: "invalid_origin_url",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: false,
+        status: "invalid_url",
+        http_status: null,
+        error: "invalid_origin_url"
+      },
+      operator_action: "Fix the configured private Workbench origin URL."
+    };
+  }
+
+  if (!origin.local_only) {
+    return {
+      configured: true,
+      status: "origin_not_private",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: false,
+        status: "not_localhost",
+        http_status: null,
+        error: null
+      },
+      operator_action:
+        "Keep the Workbench origin on a private localhost listener and put Cloudflare Access in front of it."
+    };
+  }
+
+  const originStatusFixture = productionEnvValue(env, "RECALLANT_WORKBENCH_ORIGIN_STATUS");
+  if (originStatusFixture) {
+    const parsed = Number(originStatusFixture);
+    const httpStatus = Number.isFinite(parsed) ? parsed : null;
+    const originStatus =
+      httpStatus === 401 || httpStatus === 403
+        ? "auth_required"
+        : httpStatus !== null && httpStatus >= 300 && httpStatus < 400
+          ? "redirect"
+          : httpStatus !== null && httpStatus >= 200 && httpStatus < 300
+            ? "anonymous_access"
+            : httpStatus === null
+              ? "invalid_status"
+              : "unexpected_status";
+    const authRequired = originStatus === "auth_required" || originStatus === "redirect";
+    const ready = authRequired && access.ok;
+    return {
+      configured: true,
+      status: ready
+        ? "auth_ready"
+        : !access.ok
+          ? "cloudflare_access_not_required"
+          : originStatus === "anonymous_access"
+            ? "origin_allows_anonymous_access"
+            : "origin_unexpected_status",
+      ready,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: originStatus,
+        http_status: httpStatus,
+        error: httpStatus === null ? "invalid_origin_status" : null
+      },
+      operator_action: ready
+        ? "Public Workbench readiness is satisfied when users authenticate through the protected public URL."
+        : !access.ok
+          ? "Require Cloudflare Access edge auth and configure an admin allowlist for the public Workbench."
+          : originStatus === "anonymous_access"
+            ? "Require Workbench authentication at the private origin before public exposure."
+            : "Repair the private Workbench origin response before claiming public readiness."
+    };
+  }
+
+  try {
+    const response = await fetch(origin.url, {
+      redirect: "manual",
+      signal: httpReadinessSignal()
+    });
+    const originStatus =
+      response.status === 401 || response.status === 403
+        ? "auth_required"
+        : response.status >= 300 && response.status < 400
+          ? "redirect"
+          : response.status >= 200 && response.status < 300
+            ? "anonymous_access"
+            : "unexpected_status";
+    const authRequired = originStatus === "auth_required" || originStatus === "redirect";
+    const ready = authRequired && access.ok;
+    return {
+      configured: true,
+      status: ready
+        ? "auth_ready"
+        : !access.ok
+          ? "cloudflare_access_not_required"
+          : originStatus === "anonymous_access"
+            ? "origin_allows_anonymous_access"
+            : "origin_unexpected_status",
+      ready,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: originStatus,
+        http_status: response.status,
+        error: null
+      },
+      operator_action: ready
+        ? "Public Workbench readiness is satisfied when users authenticate through the protected public URL."
+        : !access.ok
+          ? "Require Cloudflare Access edge auth and configure an admin allowlist for the public Workbench."
+          : originStatus === "anonymous_access"
+            ? "Require Workbench authentication at the private origin before public exposure."
+            : "Repair the private Workbench origin response before claiming public readiness."
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      status: "origin_unreachable",
+      ready: false,
+      public_url_configured: envValueIsSet(publicUrl ?? undefined),
+      cloudflare_access: access,
+      origin: {
+        configured: envValueIsSet(originConfigured ?? undefined),
+        local_only: true,
+        status: "down",
+        http_status: null,
+        error: error instanceof Error ? error.message : String(error)
+      },
+      operator_action: "Repair the private Workbench origin that serves the protected public route."
+    };
+  }
+}
+
+async function checkProductionReadiness(
+  postgresReachable: boolean,
+  projectDir: string,
+  serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>,
+  deploymentProfile: Awaited<ReturnType<typeof checkDeploymentProfile>>
+) {
+  const productionEnv = await productionReadinessEnvSnapshot();
+  const env = productionEnv.values;
+  const bindHost = productionEnvValue(env, "RECALLANT_HOST") ?? "127.0.0.1";
+  const publicWorkbenchReadiness = await checkPublicWorkbenchReadiness(
+    Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005"),
+    env
+  );
+  const plannedPort = Number(productionEnvValue(env, "RECALLANT_PORT") ?? "3005");
+  const envBackupTimerEnabled =
+    productionEnvValue(env, "RECALLANT_BACKUP_TIMER_ENABLED") === "true" ||
+    productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS") === "enabled";
+  const backupTimer = productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS")
+    ? {
+        enabled: envBackupTimerEnabled,
+        status: productionEnvValue(env, "RECALLANT_BACKUP_TIMER_STATUS"),
+        source: "env"
+      }
+    : envBackupTimerEnabled
+      ? { enabled: true, status: "enabled", source: "env" }
+      : systemdBackupTimerStatus();
+  const backupMaximum = positiveHoursSetting(env, "RECALLANT_BACKUP_MAX_AGE_HOURS");
+  const restoreMaximum = positiveHoursSetting(env, "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS");
+  const backupJob = backupJobStatus(env, backupMaximum);
+  const latestBackupVerification = await latestBackupVerificationStatus(
+    env,
+    backupMaximum,
+    restoreMaximum
+  );
+  let deploymentProjectRows: number | null = null;
+  let unintendedPaidApiSuccessCalls30d: number | null = null;
+  const readinessProjectPath =
+    productionEnvValue(env, "RECALLANT_PRODUCTION_PROJECT_PATH") ?? projectDir;
+  if (process.env.RECALLANT_DATABASE_URL) {
+    const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
+    const developerId = process.env.RECALLANT_DEVELOPER_ID ?? null;
+    await client.connect();
+    try {
+      const checks = await client.query(
+        `
+          SELECT
+            (
+              SELECT count(*)::int
+              FROM projects
+              WHERE primary_path = $2
+                AND ($1::uuid IS NULL OR developer_id = $1::uuid)
+            ) AS recallant_project_rows,
+            (
+              SELECT count(*)::int
+              FROM model_calls c
+              JOIN projects p ON p.id = c.project_id
+              WHERE p.primary_path = $2
+                AND ($1::uuid IS NULL OR p.developer_id = $1::uuid)
+                AND c.route_class = 'paid_api_provider'
+                AND c.status = 'success'
+                AND c.created_at >= now() - interval '30 days'
+            ) AS paid_api_success_calls
+        `,
+        [developerId, readinessProjectPath]
+      );
+      deploymentProjectRows = Number(checks.rows[0]?.recallant_project_rows ?? 0);
+      unintendedPaidApiSuccessCalls30d = Number(checks.rows[0]?.paid_api_success_calls ?? 0);
+    } catch {
+      deploymentProjectRows = null;
+      unintendedPaidApiSuccessCalls30d = null;
+    } finally {
+      await client.end();
+    }
+  }
+  const localhostOnlyOrigin = bindHostIsPrivate(bindHost);
+  const serviceRuntime = await checkServiceRuntimeReadiness({
+    env,
+    plannedPort,
+    bindHost,
+    serviceEnvProfile,
+    publicWorkbenchReadiness
+  });
+  return {
+    doctor_ok: postgresReachable,
+    local_stdio_mcp_smoke: {
+      required: true,
+      command: "npm run mcp:smoke"
+    },
+    review_ui_cloudflare_access: publicWorkbenchReadiness.cloudflare_access,
+    public_workbench_readiness: publicWorkbenchReadiness,
+    service_runtime: serviceRuntime,
+    localhost_only_origin: {
+      bind_host: bindHost,
+      ok: localhostOnlyOrigin
+    },
+    backup_timer: {
+      enabled: backupTimer.enabled,
+      status: backupTimer.status,
+      source: backupTimer.source
+    },
+    backup_job: backupJob,
+    backup_freshness_sla: backupMaximum,
+    restore_freshness_sla: restoreMaximum,
+    latest_backup_verification: latestBackupVerification,
+    deployment_project_path: readinessProjectPath,
+    deployment_project_rows: deploymentProjectRows,
+    no_duplicate_deployment_project_rows:
+      deploymentProjectRows === null ? null : deploymentProjectRows <= 1,
+    unintended_paid_api_success_calls_30d: unintendedPaidApiSuccessCalls30d,
+    no_unintended_paid_api_use:
+      unintendedPaidApiSuccessCalls30d === null ? null : unintendedPaidApiSuccessCalls30d === 0,
+    service_env_profile: {
+      required_when_configured: true,
+      status: serviceEnvProfile.status,
+      ok: serviceEnvProfile.ok,
+      differences: serviceEnvProfile.differences
+    },
+    deployment_profile: {
+      server_inventory: deploymentProfile.server_inventory,
+      security_baseline: deploymentProfile.security_baseline,
+      warnings: deploymentProfile.warnings
+    },
+    production_env: productionEnv.service_env,
+    ready:
+      postgresReachable &&
+      localhostOnlyOrigin &&
+      serviceEnvProfile.ok &&
+      publicWorkbenchReadiness.ready &&
+      serviceRuntime.ok &&
+      deploymentProfile.server_inventory.registered &&
+      deploymentProfile.security_baseline.present &&
+      backupTimer.enabled &&
+      backupJob.ok &&
+      latestBackupVerification.ok &&
+      deploymentProjectRows !== null &&
+      deploymentProjectRows <= 1 &&
+      unintendedPaidApiSuccessCalls30d !== null &&
+      unintendedPaidApiSuccessCalls30d === 0
+  };
+}
+
+async function runDoctor(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const projectConfig = await readProjectConfig(projectDir);
+  const requireCapture = argv.includes("--require-capture");
+  const requireMemoryLoop = argv.includes("--require-memory-loop");
+  const requireAgentAudit = argv.includes("--require-agent-audit");
+  const semanticProofRequested = argv.includes("--semantic-proof");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
+  try {
+    if (database) {
+      try {
+        if (projectConfig?.project_id) {
+          await database.getProjectReadiness({ project_id: projectConfig.project_id });
+        } else {
+          await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
+        }
+        postgres = { configured: true, reachable: true };
+      } catch {
+        postgres = { configured: true, reachable: false };
+      }
+    }
+    const clientConnection = await clientConnectionReadiness(projectDir);
+    const remoteConsentScope = await readRemoteAgentConsentScope(projectDir);
+    const semanticProof = semanticProofRequested
+      ? database
+        ? await runLocalDoctorSemanticProof({ database, argv, projectDir })
+        : semanticProofUnavailable(
+            remoteConsentScope
+              ? "Local database is unavailable; run recallant remote-doctor --project-dir . --semantic-proof for remote MCP proof."
+              : "Local semantic proof requires RECALLANT_DATABASE_URL or an attached Recallant project."
+          )
+      : semanticProofNotRequested();
+    const captureReadiness = await checkMemoryLoopReadiness({ projectDir, database });
+    const localSpoolStatus = await getLocalSpoolStatus(argv);
+    const serviceEnvProfile = await checkServiceEnvProfile();
+    const productionEnv = await productionReadinessEnvSnapshot();
+    const deploymentProfile = await checkDeploymentProfile(productionEnv.values);
+    const pendingEmbeddingStatus = await checkPendingEmbeddingStatus(
+      database,
+      projectDir,
+      projectConfig?.project_id
+    );
+    const fallbackReadinessContract = readinessContractForDoctor({
+      captureReadiness,
+      clientConnection,
+      remoteConsentScope,
+      semanticProof
+    });
+    const persistentReadiness =
+      database && projectConfig?.project_id
+        ? await database
+            .getProjectReadiness({
+              project_id: projectConfig.project_id,
+              remote_mcp_ready: Boolean(remoteConsentScope)
+            })
+            .catch(() => null)
+        : null;
+    const readinessContract = mergeDoctorReadinessContract(
+      fallbackReadinessContract,
+      persistentReadiness
+    );
+    const result = {
+      ...describeCliBoundary(),
+      owner_summary: doctorOwnerSummary({
+        projectDir,
+        postgres,
+        captureReadiness,
+        clientConnection,
+        remoteConsentScope,
+        requireCapture,
+        requireMemoryLoop
+      }),
+      readiness_contract: readinessContract,
+      postgres,
+      project_config: {
+        path: join(projectDir, ".recallant", "config"),
+        present: (await readOptional(join(projectDir, ".recallant", "config"))) !== null
+      },
+      capture_readiness: {
+        ...captureReadiness,
+        required: requireMemoryLoop,
+        deprecated_name: true,
+        preferred_name: "memory_loop_readiness"
+      },
+      memory_loop_readiness: {
+        ...captureReadiness,
+        required: requireMemoryLoop
+      },
+      agent_audit: {
+        ...objectValue(clientConnection.automatic_agent_audit),
+        required: requireAgentAudit
+      },
+      semantic_memory_proof: semanticProof,
+      client_connection: clientConnection,
+      remote_project: remoteConsentScope
+        ? {
+            status: "remote_mcp_ready",
+            ...remoteAgentConsentOutput(remoteConsentScope)
+          }
+        : {
+            status: "not_configured"
+          },
+      local_spool_status: localSpoolStatus,
+      local_model: await checkOllama(),
+      pending_embeddings: pendingEmbeddingStatus,
+      service_env_profile: serviceEnvProfile,
+      model_routes: {
+        local_model: { enabled: true, provider: "ollama", route_class: "local_model" },
+        active_agent: {
+          enabled: true,
+          route_class: "active_agent",
+          before_paid_api: true
+        },
+        subscription_worker: {
+          enabled: false,
+          route_class: "subscription_worker",
+          before_paid_api: true,
+          limit_behavior: {
+            rate_limited: "defer_or_downgrade_or_ask",
+            exhausted: "defer_or_downgrade_or_ask",
+            silent_paid_api_fallthrough: false
+          }
+        },
+        paid_api_provider: {
+          enabled: false,
+          route_class: "paid_api_provider",
+          default_provider: "openai",
+          requires_approval: true,
+          default_mode: "confirm_each",
+          denied_or_expired_behavior: "defer_or_downgrade_without_provider_call",
+          auto_with_caps: {
+            enabled: false,
+            requires_explicit_project_task_profile: true
+          },
+          default_models: {
+            openai_baseline: "openai/gpt-5.4-mini",
+            gemini_cost: "gemini/gemini-2.5-flash-lite",
+            gemini_balanced: "gemini/gemini-2.5-flash",
+            claude_cheap: "anthropic/claude-haiku-4-5"
+          },
+          explicit_opt_in_required_for: [
+            "preview_models",
+            "gemini/gemini-3.5-flash",
+            "claude-sonnet",
+            "claude-opus"
+          ]
+        },
+        escalation_order: [
+          "local_model",
+          "active_agent",
+          "subscription_worker",
+          "paid_api_provider"
+        ]
+      },
+      paid_api_mode: "confirm_each",
+      policy: {
+        paid_api_requires_approval: true,
+        auto_with_caps_requires_explicit_enablement: true,
+        browser_automation_allowed: false,
+        scraping_allowed: false,
+        hidden_api_routes_allowed: false,
+        limit_bypass_routes_allowed: false,
+        preview_models_require_opt_in: true,
+        gemini_3_5_flash_requires_opt_in: true,
+        claude_sonnet_opus_require_quality_profile: true,
+        starts_local_services: false
+      },
+      deployment_profile: deploymentProfile,
+      production_readiness: await checkProductionReadiness(
+        postgres.reachable,
+        projectDir,
+        serviceEnvProfile,
+        deploymentProfile
+      ),
+      deployment_notes: [
+        "Set RECALLANT_SERVER_INVENTORY_FILE before service start.",
+        "Set RECALLANT_SECURITY_BASELINE_PATH before public exposure."
+      ]
+    };
+    process.stdout.write(
+      format === "json" ? `${JSON.stringify(result, null, 2)}\n` : doctorHumanReport(result)
+    );
+    if (requireMemoryLoop && !captureReadiness.ready) {
+      process.exitCode = 2;
+    }
+    if (
+      (requireCapture || requireAgentAudit) &&
+      objectValue(clientConnection.automatic_agent_audit).capture_active !== true
+    ) {
+      process.exitCode = 2;
+    }
+  } finally {
+    if (database) {
+      await database.close();
+    }
+  }
+}
+
+function auditArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function auditHumanReport(report: Record<string, unknown>) {
+  const filters = objectValue(report.filters);
+  const summary = objectValue(report.summary);
+  const capture = objectValue(report.capture);
+  const modelProvider = objectValue(report.model_provider);
+  const failures = auditArray(report.failures).map((row) => objectValue(row));
+  const recommendations = auditArray(report.recommendations).map((row) => objectValue(row));
+  const topErrors = auditArray(report.top_errors).map((row) => objectValue(row));
+  const timeline = auditArray(report.timeline).map((row) => objectValue(row));
+  const lines = [
+    "Recallant audit report",
+    "",
+    `Window: ${String(filters.since ?? "unknown")} to ${String(filters.until ?? "unknown")}`,
+    `Project: ${String(filters.project_id ?? filters.project_path ?? "all projects")}`,
+    `Filters: surface=${String(filters.surface ?? "all")} status=${String(filters.status ?? "all")} limit=${String(filters.limit ?? "default")}`,
+    "",
+    "Summary",
+    `- Activity rows: ${String(summary.total ?? 0)}`,
+    `- Failures/skips needing attention: ${String(summary.failures ?? 0)}`,
+    `- Slow operations: ${String(summary.slow_operations ?? 0)}`,
+    `- Open started rows: ${String(summary.pending_started ?? 0)}`,
+    "",
+    "Capture",
+    `- Sessions started: ${String(capture.sessions_started ?? 0)}`,
+    `- Events: ${String(capture.events ?? 0)}`,
+    `- Checkpoints: ${String(capture.checkpoints ?? 0)}`,
+    `- Recall traces: ${String(capture.recall_traces ?? 0)}`,
+    `- Pending embeddings: ${String(capture.pending_embeddings ?? 0)}`,
+    "",
+    "Model/provider",
+    `- Model calls: ${String(modelProvider.total_calls ?? 0)}`,
+    `- Failed model calls: ${String(modelProvider.failed_calls ?? 0)}`,
+    "",
+    "Failures"
+  ];
+  if (failures.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of failures.slice(0, 8)) {
+      lines.push(
+        `- ${String(row.surface ?? "surface")}/${String(row.operation ?? "operation")}: ${String(row.status ?? "unknown")} ${String(row.error_code ?? "")} trace=${String(row.trace_id ?? "none")}`
+      );
+    }
+  }
+  lines.push("", "Top errors");
+  if (topErrors.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of topErrors.slice(0, 8)) {
+      lines.push(`- ${String(row.error_code ?? "unknown")}: ${String(row.count ?? 0)}`);
+    }
+  }
+  lines.push("", "Recent timeline");
+  if (timeline.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const row of timeline.slice(0, 8)) {
+      lines.push(
+        `- ${String(row.started_at ?? "unknown")} ${String(row.surface ?? "surface")}/${String(row.operation ?? "operation")} ${String(row.status ?? "unknown")} trace=${String(row.trace_id ?? "none")}`
+      );
+    }
+  }
+  lines.push("", "Recommendations");
+  for (const recommendation of recommendations.slice(0, 8)) {
+    lines.push(
+      `- ${String(recommendation.severity ?? "info")}: ${String(recommendation.message ?? "No recommendation text.")}`
+    );
+  }
+  lines.push("", "JSON output: recallant audit --format json");
+  return `${lines.join("\n")}\n`;
+}
+
+async function runAudit(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for audit reports");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const rawLimit = parseFlag(argv, "--limit");
+  const rawSlowMs = parseFlag(argv, "--slow-ms");
+  const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+  const slowMs = rawSlowMs ? Number.parseInt(rawSlowMs, 10) : undefined;
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error("--limit must be a positive integer");
+  }
+  if (slowMs !== undefined && (!Number.isFinite(slowMs) || slowMs <= 0)) {
+    throw new Error("--slow-ms must be a positive integer");
+  }
+  try {
+    const report = await database.getSystemAuditReport({
+      project_id: parseFlag(argv, "--project-id") ?? null,
+      project_path: parseFlag(argv, "--project-id")
+        ? null
+        : resolve(parseFlag(argv, "--project-dir") ?? process.cwd()),
+      since: parseFlag(argv, "--since") ?? null,
+      until: parseFlag(argv, "--until") ?? null,
+      surface: parseFlag(argv, "--surface") ?? null,
+      status: parseFlag(argv, "--status") ?? null,
+      limit,
+      slow_ms: slowMs
+    });
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(report, null, 2)}\n`
+        : auditHumanReport(report as Record<string, unknown>)
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+function recoverEmbeddingsHumanReport(result: Record<string, unknown>) {
+  const status = String(result.status ?? "unknown");
+  const lines = [
+    "Recallant embedding recovery",
+    "",
+    `Status: ${status}`,
+    `Project: ${String(result.project_id ?? "unknown")}`,
+    `Limit: ${String(result.limit ?? "unknown")}`,
+    `Attempted chunks: ${String(result.attempted_chunks ?? result.eligible_chunks ?? 0)}`,
+    `Recovered chunks: ${String(result.recovered_chunks ?? 0)}`,
+    `Remaining pending: ${String(result.remaining_pending ?? result.pending_before ?? "unknown")}`
+  ];
+  if (result.warning) lines.push(`Warning: ${String(result.warning)}`);
+  lines.push("", "JSON output: recallant recover-embeddings --format json");
+  return `${lines.join("\n")}\n`;
+}
+
+async function runRecoverEmbeddings(argv: readonly string[]) {
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for embedding recovery");
+  const projectId = parseFlag(argv, "--project-id") ?? null;
+  const projectDir = projectId ? null : resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const rawLimit = parseFlag(argv, "--limit");
+  const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+    throw new Error("--limit must be a positive integer");
+  }
+  try {
+    const result = await database.recoverPendingEmbeddings({
+      project_id: projectId,
+      project_path: projectDir,
+      limit,
+      dry_run: argv.includes("--dry-run")
+    });
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : recoverEmbeddingsHumanReport(result)
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+async function snapshotTables(client: pg.Client) {
+  const inventory = await client.query<{ tablename: string }>(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+  );
+  const tableNames = inventory.rows.map((row) => row.tablename);
+  const tables: Record<string, unknown[]> = {};
+  for (const table of tableNames) {
+    if (!/^[a-z_][a-z0-9_]*$/i.test(table))
+      throw new Error("Unsafe table name in backup inventory");
+    const result = await client.query(`SELECT * FROM ${table}`);
+    tables[table] = result.rows;
+  }
+  return tables;
+}
+
+function rowsOf(tables: Record<string, unknown[]>, table: string) {
+  return (tables[table] ?? []).filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+  );
+}
+
+async function runBackup(argv: readonly string[]) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup");
+  const targetDir = resolve(parseFlag(argv, "--target") ?? join(process.cwd(), "backups"));
+  const backupId = `recallant-${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID()}`;
+  const backupDir = join(targetDir, backupId);
+  await mkdir(backupDir, { recursive: true });
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tables = await snapshotTables(client);
+    const tablesJson = `${JSON.stringify(tables, null, 2)}\n`;
+    const tablesHash = createHash("sha256").update(tablesJson).digest("hex");
+    await writeFile(join(backupDir, "tables.json"), tablesJson);
+    const manifest = {
+      backup_id: backupId,
+      backup_kind: "logical_snapshot",
+      created_at: new Date().toISOString(),
+      recallant_version: recallantCliVersion,
+      schema_version: "0001_initial",
+      included_dbs: ["recallant_agent_work"],
+      raw_artifact_roots: [],
+      files: [{ path: "tables.json", sha256: tablesHash, size_bytes: tablesJson.length }],
+      target: { kind: "local_directory", path: backupDir, future_ssh_tailscale_supported: true },
+      encryption: { status: "not_enabled_local_dev" },
+      snapshot_verification: { status: "not_run" },
+      restore_verification: { status: "not_performed" },
+      secret_policy: "manifest excludes provider keys and raw secrets"
+    };
+    await writeFile(join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, manifest_path: join(backupDir, "manifest.json"), ...manifest }, null, 2)}\n`
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+async function runBackupVerify(argv: readonly string[]) {
+  const manifestPath = parseFlag(argv, "--manifest");
+  if (!manifestPath) throw new Error("--manifest is required");
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for backup verification");
+  const resolvedManifest = await realpath(resolve(manifestPath));
+  const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
+    files: Array<{ path: string; sha256: string }>;
+    schema_version: string;
+  };
+  const tablesJson = await readFile(join(resolvedManifest, "..", "tables.json"), "utf8");
+  const actualHash = createHash("sha256").update(tablesJson).digest("hex");
+  const expectedHash = manifest.files.find((file) => file.path === "tables.json")?.sha256;
+  if (actualHash !== expectedHash) throw new Error("Backup hash verification failed");
+  const tables = JSON.parse(tablesJson) as Record<string, unknown[]>;
+  const checkpoints = rowsOf(tables, "checkpoints");
+  const chunks = rowsOf(tables, "chunks");
+  const agentMemories = rowsOf(tables, "agent_memories");
+  const rawArtifacts = rowsOf(tables, "raw_artifacts");
+  const searchQuery = parseFlag(argv, "--query")?.toLowerCase();
+  const boundedSearchMatches = searchQuery
+    ? chunks.filter((chunk) =>
+        String(chunk.text ?? "")
+          .toLowerCase()
+          .includes(searchQuery)
+      ).length
+    : chunks.length;
+  const rawArtifactPointerIssues = rawArtifacts.filter(
+    (artifact) =>
+      artifact.storage_backend !== "postgres_inline" && !artifact.uri && !artifact.sha256
+  ).length;
+  if (rawArtifactPointerIssues > 0) {
+    throw new Error("Backup raw artifact pointer verification failed");
+  }
+  if (searchQuery && boundedSearchMatches === 0) {
+    throw new Error("Backup bounded search verification failed");
+  }
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        snapshot_verification: "passed",
+        restore_verification: "not_performed",
+        project_count: rowsOf(tables, "projects").length,
+        latest_checkpoint_present: checkpoints.length > 0,
+        governed_memory_count: agentMemories.length,
+        chunk_count: chunks.length,
+        raw_artifact_count: rawArtifacts.length,
+        system_activity_event_count: rowsOf(tables, "system_activity_events").length,
+        table_count: Object.keys(tables).length,
+        raw_artifact_pointer_issues: rawArtifactPointerIssues,
+        bounded_search_checked: true,
+        bounded_search_query: searchQuery ?? null,
+        bounded_search_matches: boundedSearchMatches,
+        schema_version: manifest.schema_version,
+        production_overwritten: false,
+        warning:
+          "Logical snapshot integrity passed; production readiness requires a native PostgreSQL restore rehearsal."
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runRestorePlan(argv: readonly string[]) {
+  const manifestPath = parseFlag(argv, "--manifest");
+  if (!manifestPath) throw new Error("--manifest is required");
+  const remapPath = parseFlag(argv, "--remap");
+  const resolvedManifest = await realpath(resolve(manifestPath));
+  const manifest = JSON.parse(await readFile(resolvedManifest, "utf8")) as {
+    files: Array<{ path: string; sha256: string }>;
+    schema_version: string;
+  };
+  const tablesJson = await readFile(join(resolvedManifest, "..", "tables.json"), "utf8");
+  const actualHash = createHash("sha256").update(tablesJson).digest("hex");
+  const expectedHash = manifest.files.find((file) => file.path === "tables.json")?.sha256;
+  if (actualHash !== expectedHash) throw new Error("Backup hash verification failed");
+  const tables = JSON.parse(tablesJson) as Record<string, unknown[]>;
+  const remap = remapPath
+    ? (JSON.parse(await readFile(resolve(remapPath), "utf8")) as Record<string, unknown>)
+    : {};
+  const projectRoots =
+    remap.project_roots && typeof remap.project_roots === "object"
+      ? (remap.project_roots as Record<string, string>)
+      : {};
+  const rawArtifactRoots =
+    remap.raw_artifact_roots && typeof remap.raw_artifact_roots === "object"
+      ? (remap.raw_artifact_roots as Record<string, string>)
+      : {};
+  const projects = rowsOf(tables, "projects").map((project) => {
+    const oldPrimaryPath = String(project.primary_path ?? "");
+    return {
+      project_id: project.id,
+      name: project.name,
+      old_primary_path: oldPrimaryPath,
+      new_primary_path: projectRoots[oldPrimaryPath] ?? oldPrimaryPath,
+      needs_mapping: oldPrimaryPath.length > 0 && projectRoots[oldPrimaryPath] === undefined
+    };
+  });
+  const rawArtifacts = rowsOf(tables, "raw_artifacts");
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "restore_plan",
+        writes_database: false,
+        production_overwritten: false,
+        schema_version: manifest.schema_version,
+        projects,
+        raw_artifacts: {
+          count: rawArtifacts.length,
+          remapped_roots: rawArtifactRoots
+        },
+        secret_references: remap.secret_refs ?? {},
+        connector_accounts: remap.connector_accounts ?? {},
+        environment_facts: remap.environment_facts ?? {},
+        port_assignments: remap.ports ?? {},
+        warnings: projects.some((project) => project.needs_mapping)
+          ? ["Some project roots have no remap entry."]
+          : []
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+function parseDaysFlag(argv: readonly string[], name: string, fallback: number) {
+  const raw = parseFlag(argv, name);
+  if (!raw) return fallback;
+  const normalized = raw.endsWith("d") ? raw.slice(0, -1) : raw;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function queryCleanupCandidates(argv: readonly string[]) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for cleanup analysis");
+  const notAccessedDays = parseDaysFlag(argv, "--not-accessed", 90);
+  const olderThanDays = parseDaysFlag(argv, "--older-than", 180);
+  const limit = Number.parseInt(parseFlag(argv, "--limit") ?? "50", 10);
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const stale = await client.query(
+      `
+        SELECT id AS chunk_id, project_id, source_event_id, left(text, 180) AS excerpt,
+               created_at, last_accessed_at, access_count
+        FROM chunks
+        WHERE archived_at IS NULL
+          AND (
+            created_at < now() - ($1::int * interval '1 day')
+            OR (last_accessed_at IS NULL AND created_at < now() - ($2::int * interval '1 day'))
+            OR last_accessed_at < now() - ($2::int * interval '1 day')
+          )
+        ORDER BY created_at ASC
+        LIMIT $3::int
+      `,
+      [olderThanDays, notAccessedDays, Number.isFinite(limit) ? limit : 50]
+    );
+    const duplicates = await client.query(
+      `
+        WITH duplicate_text AS (
+          SELECT text
+          FROM chunks
+          WHERE archived_at IS NULL
+          GROUP BY text
+          HAVING count(*) > 1
+          LIMIT $1::int
+        )
+        SELECT c.id AS chunk_id, c.project_id, c.source_event_id, left(c.text, 180) AS excerpt,
+               c.created_at, c.last_accessed_at, c.access_count
+        FROM chunks c
+        JOIN duplicate_text d ON d.text = c.text
+        WHERE c.archived_at IS NULL
+        ORDER BY c.text, c.created_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const superseded = await client.query(
+      `
+        SELECT c.id AS chunk_id, c.project_id, c.source_event_id, left(c.text, 180) AS excerpt,
+               e.src_id AS superseded_by, c.created_at, c.last_accessed_at, c.access_count
+        FROM edges e
+        JOIN chunks c ON c.id::text = e.dst_id
+        WHERE e.relation_type = 'supersedes'
+          AND e.dst_kind = 'chunk'
+          AND c.archived_at IS NULL
+        ORDER BY e.created_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const lowValue = await client.query(
+      `
+        SELECT id AS chunk_id, project_id, source_event_id, left(text, 180) AS excerpt,
+               created_at, last_accessed_at, access_count, token_count_est
+        FROM chunks
+        WHERE archived_at IS NULL
+          AND access_count = 0
+          AND token_count_est <= 4
+        ORDER BY created_at ASC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const staleMemories = await client.query(
+      `
+        SELECT id AS memory_id, project_id, scope, memory_type, title, status, use_policy,
+               updated_at, superseded_by
+        FROM agent_memories
+        WHERE status IN ('stale', 'superseded')
+        ORDER BY updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const duplicateMemories = await client.query(
+      `
+        WITH duplicate_memory AS (
+          SELECT lower(title) AS normalized_title
+          FROM agent_memories
+          WHERE status NOT IN ('rejected', 'archived', 'superseded')
+          GROUP BY lower(title)
+          HAVING count(*) > 1
+          LIMIT $1::int
+        )
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.memory_type, m.title,
+               m.status, m.use_policy, m.updated_at
+        FROM agent_memories m
+        JOIN duplicate_memory d ON d.normalized_title = lower(m.title)
+        WHERE m.status NOT IN ('rejected', 'archived', 'superseded')
+        ORDER BY lower(m.title), m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const poorProvenanceMemories = await client.query(
+      `
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.scope_kind, m.scope_id,
+               m.memory_type, m.title, m.status, m.use_policy, m.created_by, m.updated_at
+        FROM agent_memories m
+        LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
+        WHERE m.status NOT IN ('rejected', 'archived', 'superseded')
+        GROUP BY m.id
+        HAVING count(r.memory_id) = 0
+        ORDER BY m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    const conflictingConnectorMemories = await client.query(
+      `
+        WITH connector_groups AS (
+          SELECT scope_kind, scope_id, lower(title) AS normalized_title
+          FROM agent_memories
+          WHERE status IN ('accepted', 'needs_review', 'candidate')
+            AND scope_kind = 'connector_account'
+            AND scope_id IS NOT NULL
+          GROUP BY scope_kind, scope_id, lower(title)
+          HAVING count(DISTINCT body) > 1
+          LIMIT $1::int
+        )
+        SELECT m.id AS memory_id, m.project_id, m.scope, m.scope_kind, m.scope_id,
+               m.memory_type, m.title, m.status, m.use_policy, m.updated_at
+        FROM agent_memories m
+        JOIN connector_groups g
+          ON g.scope_kind = m.scope_kind
+         AND g.scope_id = m.scope_id
+         AND g.normalized_title = lower(m.title)
+        WHERE m.status IN ('accepted', 'needs_review', 'candidate')
+        ORDER BY m.scope_id, lower(m.title), m.updated_at DESC
+        LIMIT $1::int
+      `,
+      [Number.isFinite(limit) ? limit : 50]
+    );
+    return {
+      policy: {
+        not_accessed_days: notAccessedDays,
+        older_than_days: olderThanDays,
+        limit: Number.isFinite(limit) ? limit : 50
+      },
+      stale_chunks: stale.rows,
+      duplicate_chunks: duplicates.rows,
+      superseded_chunks: superseded.rows,
+      low_value_chunks: lowValue.rows,
+      stale_or_superseded_memories: staleMemories.rows,
+      duplicate_memories: duplicateMemories.rows,
+      poor_provenance_memories: poorProvenanceMemories.rows,
+      conflicting_connector_memories: conflictingConnectorMemories.rows
+    };
+  } finally {
+    await client.end();
+  }
+}
+
+async function runAnalyze(argv: readonly string[]) {
+  const report = await queryCleanupCandidates(argv);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "analyze",
+        dry_run: argv.includes("--dry-run"),
+        writes_database: false,
+        report,
+        summary: {
+          stale_chunks: report.stale_chunks.length,
+          duplicate_chunks: report.duplicate_chunks.length,
+          superseded_chunks: report.superseded_chunks.length,
+          low_value_chunks: report.low_value_chunks.length,
+          stale_or_superseded_memories: report.stale_or_superseded_memories.length,
+          duplicate_memories: report.duplicate_memories.length,
+          poor_provenance_memories: report.poor_provenance_memories.length,
+          conflicting_connector_memories: report.conflicting_connector_memories.length
+        }
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runCleanup(argv: readonly string[]) {
+  if (argv.includes("--delete-archived")) {
+    throw new Error(
+      "POLICY_BLOCKED: cleanup hard delete must route through confirmed erasure policy"
+    );
+  }
+  const dryRun = argv.includes("--dry-run");
+  const archiveRequested = argv.includes("--archive");
+  const confirmed = argv.includes("--confirm");
+  if (!dryRun && (!archiveRequested || !confirmed)) {
+    throw new Error("POLICY_BLOCKED: cleanup writes require --archive --confirm");
+  }
+  const report = await queryCleanupCandidates(argv);
+  const candidates = [
+    ...report.stale_chunks.map((candidate) => ({ ...candidate, reason: "stale_or_not_accessed" })),
+    ...report.duplicate_chunks.map((candidate) => ({ ...candidate, reason: "duplicate_text" })),
+    ...report.superseded_chunks.map((candidate) => ({ ...candidate, reason: "superseded" }))
+  ];
+  const uniqueChunkIds = Array.from(new Set(candidates.map((candidate) => candidate.chunk_id)));
+  if (!dryRun && uniqueChunkIds.length > 0) {
+    const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+    if (!databaseUrl) throw new Error("RECALLANT_DATABASE_URL is required for cleanup");
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      await client.query(
+        `
+          UPDATE chunks
+          SET archived_at = coalesce(archived_at, now())
+          WHERE id = ANY($1::uuid[])
+        `,
+        [uniqueChunkIds]
+      );
+    } finally {
+      await client.end();
+    }
+  }
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "cleanup",
+        dry_run: dryRun,
+        writes_database: !dryRun,
+        archive_requested: archiveRequested,
+        archived_chunk_ids: dryRun ? [] : uniqueChunkIds,
+        candidates,
+        warnings: dryRun
+          ? [
+              "Dry run only. No chunks, embeddings, L0 events, raw artifacts, or governed memories were changed."
+            ]
+          : [
+              "Only derived chunks were archived. L0 events, raw artifacts, embeddings, and governed memories were not deleted."
+            ]
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function startAgentSession(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  argv: readonly string[]
+) {
+  const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
+  const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
+  const clientVersion = parseFlag(argv, "--client-version") ?? null;
+  const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+  const localSpoolStatus = await getLocalSpoolStatus(argv);
+  const started = await database.startSession({
+    client_kind: clientKind,
+    client_version: clientVersion,
+    project_id: config?.project_id ?? null,
+    project_path: dir,
+    session_label: parseFlag(argv, "--session-label") ?? "recallant-agent-session",
+    resume_policy: "normal"
+  });
+  const sessionId = String(started.session_id);
+  const pack = await database.getContextPack({
+    session_id: sessionId,
+    task_hint: taskHint,
+    include_raw_evidence: "auto",
+    include_recovery: true,
+    local_spool_status: localSpoolStatus
+  });
+  const contextRead = await database.appendEvent({
+    session_id: sessionId,
+    client_kind: clientKind,
+    event_kind: "system",
+    text: `Context pack read for task: ${taskHint}`,
+    metadata: {
+      capture_kind: "context_read",
+      context_pack_id: pack.context_pack_id,
+      task_hint: taskHint,
+      local_spool_status: localSpoolStatus
+    },
+    dedup_key: dedupHash("agent-context-read", {
+      session_id: sessionId,
+      context_pack_id: pack.context_pack_id
+    })
+  });
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "active",
+    session_id: sessionId,
+    project_id: String(started.project_id),
+    project_dir: dir,
+    client_kind: clientKind,
+    client_version: clientVersion,
+    task_hint: taskHint,
+    started_at: now,
+    updated_at: now,
+    context_pack_id: String(pack.context_pack_id),
+    last_context_read_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(contextRead.event_id)
+  };
+  await writeAgentSessionState(dir, state);
+  return { state, pack, context_read: contextRead, start_result: started };
+}
+
+async function assertAgentStateProjectBinding(
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
+  state: AgentSessionState,
+  dir: string
+) {
+  const binding = await database.getSessionProjectBinding(state.session_id);
+  const proof = validateProjectIdentity({
+    requestedProjectId: state.project_id,
+    bindingProjectId: binding.project_id,
+    projectPath: dir,
+    bindingPrimaryPath: binding.primary_path
+  });
+  if (proof.status === "mismatch") {
+    throw new Error(
+      `${proof.error_code}: active session project_id and project_path do not match the database binding`
+    );
+  }
+}
+
+function isHardProjectIdentityError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    "PROJECT_ID_PATH_MISMATCH",
+    "Unknown project_id",
+    "Unknown session_id",
+    "ambiguous project path"
+  ].some((marker) => message.includes(marker));
+}
+
+async function ensureOfflineAgentSession(argv: readonly string[], reason: string) {
+  const dir = projectDir(argv);
+  const existing = await readAgentSessionState(dir);
+  if (existing?.status === "offline" || existing?.status === "active") return existing;
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "offline",
+    session_id: `local-${randomUUID()}`,
+    project_id: null,
+    project_dir: dir,
+    client_kind: parseFlag(argv, "--client-kind") ?? "codex",
+    client_version: parseFlag(argv, "--client-version") ?? null,
+    task_hint: parseFlag(argv, "--task-hint") ?? reason,
+    started_at: now,
+    updated_at: now
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function loadActiveAgentState(argv: readonly string[]) {
+  const state = await readAgentSessionState(projectDir(argv));
+  if (state?.status === "active") return state;
+  return null;
+}
+
+async function loadClosableAgentState(argv: readonly string[]) {
+  const state = await readAgentSessionState(projectDir(argv));
+  if (state?.status === "active" || state?.status === "offline") return state;
+  return null;
+}
+
+async function runAgentStart(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "json");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const remoteConnection = await readRemoteAgentConnection(projectDir(argv));
+  const consentScope = remoteConnection?.scope ?? null;
+  if (consentScope) {
+    const remoteReadiness = await readRemoteAgentReadinessStatus(remoteConnection);
+    const consentOutput = remoteAgentConsentOutput(consentScope, remoteReadiness);
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "remote_mcp_ready",
+      ...consentOutput
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : remoteAgentStartReadyHumanReport(consentScope, remoteReadiness)
+    );
+    return;
+  }
+  const database = createRecallantDbFromEnv();
+  const consentOutput = remoteAgentConsentOutput(consentScope);
+  if (!database) {
+    const state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+    const record = await appendSpoolRecord(argv, "event", {
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: "Offline Recallant agent session started; server database is not configured.",
+      metadata: { capture_kind: "agent_start_offline", local_session_id: state.session_id },
+      raw_artifacts: []
+    });
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "offline_spool",
+      state_path: currentSessionPathFor(state.project_dir),
+      spool_path: spoolPath(argv),
+      local_id: record.local_id,
+      warning: "Server database is unavailable; capture records will sync later.",
+      ...consentOutput
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : agentStartHumanReport({
+            mode: "offline_spool",
+            sessionId: state.session_id,
+            statePath: currentSessionPathFor(state.project_dir),
+            spoolPath: spoolPath(argv),
+            warning: output.warning,
+            consentScope
+          })
+    );
+    return;
+  }
+  try {
+    const result = await startAgentSession(database, argv);
+    const output = {
+      ok: true,
+      action: "agent_start",
+      mode: "server",
+      project_id: result.state.project_id,
+      session_id: result.state.session_id,
+      context_pack_id: result.state.context_pack_id,
+      state_path: currentSessionPathFor(result.state.project_dir),
+      previous_unclosed_session: result.start_result.previous_unclosed_session,
+      previous_session_recovery: result.start_result.previous_session_recovery,
+      recommended_next_action:
+        consentScope !== null
+          ? "Use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow; agent runtime does not require Cloudflare browser auth. Then use recallant agent-event after meaningful decisions/actions/tests and recallant agent-closeout on pause or finish."
+          : "Use recallant agent-event after meaningful decisions/actions/tests.",
+      ...consentOutput
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : agentStartHumanReport({
+            mode: "server",
+            projectId: result.state.project_id,
+            sessionId: result.state.session_id,
+            contextPackId: result.state.context_pack_id,
+            statePath: currentSessionPathFor(result.state.project_dir),
+            previousUnclosedSession: result.start_result.previous_unclosed_session,
+            previousSessionRecovery: result.start_result.previous_session_recovery,
+            consentScope
+          })
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+async function runAgentEvent(argv: readonly string[]) {
+  const kind = parseFlag(argv, "--kind") ?? "action";
+  const text = parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ");
+  if (!text.trim()) throw new Error("VALIDATION_ERROR: agent-event requires --text");
+  const dir = projectDir(argv);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  const title = parseFlag(argv, "--title") ?? summarizeText(text, 72);
+  const clientKind = state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex";
+  const metadata = {
+    capture_kind: `agent_${kind}`,
+    observation_kind: observationKindForAgentKind(kind),
+    turn_id: parseFlag(argv, "--turn-id") || process.env.RECALLANT_HOOK_TURN_ID || null,
+    trace_id: parseFlag(argv, "--trace-id") || process.env.RECALLANT_HOOK_TRACE_ID || null,
+    parent_observation_id:
+      parseFlag(argv, "--parent-observation-id") || process.env.RECALLANT_HOOK_PARENT_ID || null,
+    tool_name: parseFlag(argv, "--tool-name") || null,
+    project_dir: dir,
+    title
+  };
+  const dedupKey =
+    parseFlag(argv, "--dedup-key") ??
+    dedupHash("agent-event", {
+      session_id: state?.session_id ?? null,
+      kind,
+      text,
+      created_at: new Date().toISOString()
+    });
+
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
+      }
+      const event = await database.appendEvent({
+        session_id: state.session_id,
+        client_kind: clientKind,
+        event_kind: eventKindForAgentKind(kind),
+        text,
+        metadata,
+        raw_artifacts: [],
+        dedup_key: dedupKey
+      });
+      let memory = null;
+      if (kind === "decision") {
+        memory = await database.createAgentMemory({
+          project_id: state.project_id,
+          project_path: dir,
+          memory_type: "decision",
+          scope: "project",
+          scope_kind: "project",
+          title,
+          body: text,
+          confidence: 0.9,
+          created_by: "agent",
+          source_refs: [
+            {
+              source_kind: "event",
+              source_id: String(event.event_id),
+              quote: summarizeText(text, 500),
+              metadata: { capture_kind: "agent_decision" }
+            }
+          ],
+          metadata: { created_from: "recallant_agent_event" }
+        });
+      }
+      const now = new Date().toISOString();
+      state = {
+        ...state,
+        updated_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(event.event_id),
+        last_memory_id: memory ? String(memory.memory_id) : state.last_memory_id
+      };
+      await writeAgentSessionState(dir, state);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_event",
+            mode: "server",
+            kind,
+            project_id: state.project_id,
+            session_id: state.session_id,
+            event_id: event.event_id,
+            memory
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      if (isHardProjectIdentityError(error)) throw error;
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+
+  const record = await appendSpoolRecord(argv, "event", {
+    session_id: state.session_id,
+    client_kind: clientKind,
+    event_kind: eventKindForAgentKind(kind),
+    text,
+    metadata: { ...metadata, local_session_id: state.session_id },
+    raw_artifacts: []
+  });
+  const now = new Date().toISOString();
+  await writeAgentSessionState(dir, {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(record.local_id)
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_event",
+        mode: "offline_spool",
+        kind,
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        warning: "Server write failed or is unavailable; event was spooled locally."
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+function optionalNumberFlag(argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`VALIDATION_ERROR: ${name} must be a number`);
+  return parsed;
+}
+
+function isAgentObservationValidationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.startsWith("VALIDATION_ERROR:") ||
+    message.includes(" must be a UUID") ||
+    message.includes("Unknown parent_observation_id") ||
+    message.includes("parent_observation_id must belong") ||
+    message.includes("occurred_at must be an ISO timestamp")
+  );
+}
+
+async function runAgentObserve(argv: readonly string[]) {
+  const kind = String(parseFlag(argv, "--kind") ?? "system")
+    .trim()
+    .toLowerCase();
+  if (!agentObservationKindValues.includes(kind as (typeof agentObservationKindValues)[number])) {
+    throw new Error(
+      `VALIDATION_ERROR: --kind must be one of ${agentObservationKindValues.join(", ")}`
+    );
+  }
+  const status = parseFlag(argv, "--status");
+  if (
+    status &&
+    !agentObservationStatusValues.includes(status as (typeof agentObservationStatusValues)[number])
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: --status must be one of ${agentObservationStatusValues.join(", ")}`
+    );
+  }
+  const resolutionStatus = parseFlag(argv, "--resolution-status");
+  if (
+    resolutionStatus &&
+    !agentObservationResolutionStatusValues.includes(
+      resolutionStatus as (typeof agentObservationResolutionStatusValues)[number]
+    )
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: --resolution-status must be one of ${agentObservationResolutionStatusValues.join(", ")}`
+    );
+  }
+
+  const dir = projectDir(argv);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  const body = (parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ")) || null;
+  const inputWithoutSession = {
+    run_id: parseFlag(argv, "--run-id") || null,
+    turn_id: parseFlag(argv, "--turn-id") || null,
+    trace_id: parseFlag(argv, "--trace-id") || null,
+    parent_observation_id: parseFlag(argv, "--parent-observation-id") || null,
+    source_event_id: parseFlag(argv, "--source-event-id") || null,
+    dedup_key: parseFlag(argv, "--dedup-key") || null,
+    kind: kind as (typeof agentObservationKindValues)[number],
+    status: (status || undefined) as AppendAgentObservationInput["status"],
+    occurred_at: parseFlag(argv, "--occurred-at") || null,
+    duration_ms: optionalNumberFlag(argv, "--duration-ms"),
+    title: parseFlag(argv, "--title") || null,
+    body,
+    tool_name: parseFlag(argv, "--tool-name") || null,
+    error_code: parseFlag(argv, "--error-code") || null,
+    attempt_number: optionalNumberFlag(argv, "--attempt-number"),
+    resolution_status: (resolutionStatus ||
+      undefined) as AppendAgentObservationInput["resolution_status"],
+    rationale: parseFlag(argv, "--rationale") || null,
+    metadata: parseJsonObjectOrEmpty(parseFlag(argv, "--metadata-json") ?? null),
+    client_kind: state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex",
+    client_version: parseFlag(argv, "--client-version") || null
+  };
+
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
+      }
+      const observation = await database.appendAgentObservation({
+        ...inputWithoutSession,
+        session_id: state.session_id
+      });
+      await writeAgentSessionState(dir, {
+        ...state,
+        updated_at: new Date().toISOString(),
+        last_memory_write_at: new Date().toISOString(),
+        last_event_id: observation.source_event_id ?? state.last_event_id
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_observe",
+            mode: "server",
+            project_id: state.project_id,
+            session_id: state.session_id,
+            observation
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      if (isHardProjectIdentityError(error) || isAgentObservationValidationError(error)) {
+        throw error;
+      }
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+
+  const record = await appendSpoolRecord(argv, "observation", {
+    ...inputWithoutSession,
+    metadata: {
+      ...(inputWithoutSession.metadata ?? {}),
+      local_session_id: state.session_id
+    }
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_observe",
+        mode: "offline_spool",
+        kind,
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        warning: "Server write failed or is unavailable; observation was spooled locally."
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+const codexHookStdinLimitBytes = 1_048_576;
+const codexHookConnectionTimeoutMs = 1_500;
+
+async function readCodexHookStdin() {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    totalBytes += buffer.byteLength;
+    if (totalBytes > codexHookStdinLimitBytes) {
+      throw new Error("CODEX_HOOK_PAYLOAD_TOO_LARGE");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function findRecallantProjectRoot(startPath: string) {
+  let current = resolve(startPath);
+  const currentStat = await stat(current).catch(() => null);
+  if (currentStat && !currentStat.isDirectory()) current = dirname(current);
+  while (true) {
+    if (await readOptional(join(current, ".recallant", "config"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function codexHookArgv(argv: readonly string[]) {
+  const explicitProjectDir = parseFlag(argv, "--project-dir");
+  const root = await findRecallantProjectRoot(explicitProjectDir ?? process.cwd());
+  if (!root) return null;
+  const next = [...argv];
+  const projectDirFlag = next.indexOf("--project-dir");
+  if (projectDirFlag >= 0) {
+    next[projectDirFlag + 1] = root;
+  } else {
+    next.push("--project-dir", root);
+  }
+  if (!parseFlag(next, "--client-kind")) next.push("--client-kind", "codex");
+  return next;
+}
+
+function createCodexHookDatabase() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH,
+    connectionTimeoutMillis: codexHookConnectionTimeoutMs
+  });
+}
+
+function nativeHookState(
+  prior: AgentSessionState["native_hook"],
+  event: CodexHookEvent,
+  mode: "server" | "offline_spool",
+  observationCount: number
+): NonNullable<AgentSessionState["native_hook"]> {
+  const now = new Date().toISOString();
+  return {
+    client: "codex",
+    external_session_id: event.session_id,
+    first_observed_at:
+      prior?.external_session_id === event.session_id ? prior.first_observed_at : now,
+    last_observed_at: now,
+    last_event_name: event.hook_event_name,
+    last_turn_id: event.turn_id,
+    last_mode: mode,
+    observation_count:
+      (prior?.external_session_id === event.session_id ? prior.observation_count : 0) +
+      observationCount
+  };
+}
+
+async function startCodexHookSession(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent
+) {
+  const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
+  const started = await database.startSession({
+    client_kind: "codex",
+    project_id: config?.project_id ?? null,
+    project_path: dir,
+    session_label: "codex-native-hook",
+    resume_policy: "normal"
+  });
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "active",
+    session_id: String(started.session_id),
+    project_id: String(started.project_id),
+    project_dir: dir,
+    client_kind: "codex",
+    client_version: null,
+    task_hint: "Automatic Codex audit capture",
+    started_at: now,
+    updated_at: now,
+    native_hook: nativeHookState(undefined, event, "server", 0)
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function ensureCodexHookServerState(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent
+) {
+  const dir = projectDir(argv);
+  const state = await readAgentSessionState(dir);
+  if (
+    state?.status === "active" &&
+    state.native_hook?.client === "codex" &&
+    state.native_hook.external_session_id === event.session_id
+  ) {
+    await assertAgentStateProjectBinding(database, state, dir);
+    return state;
+  }
+  return startCodexHookSession(database, argv, event);
+}
+
+function codexHookObservationInput(
+  action: CodexHookMappedObservation,
+  state: AgentSessionState
+): AppendAgentObservationInput {
+  return {
+    session_id: state.session_id,
+    run_id: action.run_id,
+    turn_id: action.turn_id,
+    trace_id: action.trace_id,
+    source_event_id: null,
+    dedup_key: action.dedup_key,
+    kind: action.kind,
+    status: action.status,
+    title: action.title,
+    body: action.body,
+    tool_name: action.tool_name,
+    error_code: action.error_code,
+    resolution_status: action.resolution_status,
+    metadata: {
+      ...action.metadata,
+      external_source_event_id: action.source_event_id
+    },
+    client_kind: "codex",
+    client_version: state.client_version ?? null
+  };
+}
+
+async function persistCodexHookCheckpoint(
+  database: RecallantDb,
+  state: AgentSessionState,
+  action: Extract<CodexHookCaptureAction, { type: "checkpoint" }>
+) {
+  const payload = {
+    schema_version: 1,
+    status: "in_progress",
+    current_focus: action.summary,
+    next_step: action.next_step,
+    summary: action.summary,
+    updated_at: new Date().toISOString(),
+    source: "codex-native-hook",
+    external_session_id: action.external_session_id,
+    external_turn_id: action.turn_id
+  };
+  return database.setCheckpoint(state.project_id, payload);
+}
+
+async function persistCodexHookServerActions(
+  database: RecallantDb,
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  const dir = projectDir(argv);
+  let state = await ensureCodexHookServerState(database, argv, event);
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    if (action.type === "observation") {
+      const observation = await database.appendAgentObservation(
+        codexHookObservationInput(action, state)
+      );
+      lastEventId = observation.source_event_id ?? lastEventId;
+      observationCount += 1;
+    } else {
+      const checkpoint = await persistCodexHookCheckpoint(database, state, action);
+      checkpointAt = new Date(checkpoint.updated_at).toISOString();
+    }
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "active",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(state.native_hook, event, "server", observationCount)
+  };
+  await writeAgentSessionState(dir, state);
+}
+
+function codexHookOfflineObservationPayload(
+  action: CodexHookMappedObservation,
+  state: AgentSessionState
+) {
+  const payload: Partial<AppendAgentObservationInput> = codexHookObservationInput(action, state);
+  delete payload.session_id;
+  return payload as Omit<AppendAgentObservationInput, "session_id">;
+}
+
+async function ensureCodexHookOfflineState(argv: readonly string[], event: CodexHookEvent) {
+  const dir = projectDir(argv);
+  const existing = await readAgentSessionState(dir);
+  const now = new Date().toISOString();
+  const matching =
+    existing?.native_hook?.external_session_id === event.session_id ? existing : null;
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "offline",
+    session_id: matching?.session_id ?? `local-${randomUUID()}`,
+    project_id: matching?.project_id ?? null,
+    project_dir: dir,
+    client_kind: "codex",
+    client_version: matching?.client_version ?? null,
+    task_hint: matching?.task_hint ?? "Automatic Codex audit capture",
+    started_at: matching?.started_at ?? now,
+    updated_at: now,
+    last_checkpoint_at: matching?.last_checkpoint_at ?? null,
+    last_event_id: matching?.last_event_id ?? null,
+    native_hook: nativeHookState(matching?.native_hook, event, "offline_spool", 0)
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function spoolCodexHookActions(
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  let state = await ensureCodexHookOfflineState(argv, event);
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    const record =
+      action.type === "observation"
+        ? await appendSpoolRecord(
+            argv,
+            "observation",
+            codexHookOfflineObservationPayload(action, state),
+            action.dedup_key
+          )
+        : await appendSpoolRecord(
+            argv,
+            "event",
+            {
+              client_kind: "codex",
+              event_kind: "checkpoint",
+              text: `Checkpoint: ${action.summary} Next: ${action.next_step}`,
+              metadata: {
+                capture_kind: "codex_native_hook_checkpoint",
+                hook_event_name: action.event_name,
+                external_session_id: action.external_session_id,
+                external_turn_id: action.turn_id,
+                trace_id: action.trace_id
+              },
+              raw_artifacts: []
+            },
+            action.dedup_key
+          );
+    lastEventId = String(record.local_id);
+    if (action.type === "observation") observationCount += 1;
+    else checkpointAt = new Date().toISOString();
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(state.native_hook, event, "offline_spool", observationCount)
+  };
+  await writeAgentSessionState(projectDir(argv), state);
+}
+
+function debugCodexHook(argv: readonly string[], value: Record<string, unknown>) {
+  if (!argv.includes("--debug")) return;
+  process.stderr.write(`${JSON.stringify(value)}\n`);
+}
+
+async function runOtelConfig(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const config = await readProjectConfig(dir);
+  const projectId = parseFlag(argv, "--project-id") ?? config?.project_id ?? null;
+  const developerId =
+    parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID ?? null;
+  const clientId = parseFlag(argv, "--client-id") ?? "codex-otel";
+  const serverUrl =
+    parseFlag(argv, "--server-url") ??
+    config?.recallant_server_url ??
+    process.env.RECALLANT_SERVER_URL ??
+    null;
+  if (!projectId) throw new Error("VALIDATION_ERROR: --project-id or attached project is required");
+  if (!developerId) throw new Error("VALIDATION_ERROR: --developer-id is required");
+  if (!serverUrl) throw new Error("VALIDATION_ERROR: --server-url is required");
+  const parsedServerUrl = new URL(serverUrl);
+  if (parsedServerUrl.protocol !== "https:" && parsedServerUrl.hostname !== "127.0.0.1") {
+    throw new Error("VALIDATION_ERROR: --server-url must use HTTPS or loopback HTTP");
+  }
+  const fragment = renderCodexOtelConfig({
+    server_url: parsedServerUrl.toString().replace(/\/$/, ""),
+    project_id: projectId,
+    developer_id: developerId,
+    client_id: clientId,
+    environment: parseFlag(argv, "--environment")
+  });
+  let markedConfigured = false;
+  let coverage = null;
+  const database = createRecallantDbFromEnv();
+  if (database) {
+    try {
+      if (argv.includes("--confirm-configured")) {
+        await database.configureProjectOtelControl({
+          project_id: projectId,
+          developer_id: developerId,
+          client_id: clientId
+        });
+        markedConfigured = true;
+      }
+      coverage = await database.getOtelControlCoverage(projectId);
+    } finally {
+      await database.close();
+    }
+  } else if (argv.includes("--confirm-configured")) {
+    throw new Error("RECALLANT_DATABASE_URL is required for --confirm-configured");
+  }
+  const result = {
+    ok: true,
+    action: "otel_config",
+    writes_global_config: false,
+    target: "user-level Codex config (~/.codex/config.toml or a named user profile)",
+    token_environment_variable: "RECALLANT_OTEL_TOKEN",
+    prompt_content_enabled: false,
+    protocol: "otlp_http_json",
+    project_id: projectId,
+    developer_id: developerId,
+    client_id: clientId,
+    fragment,
+    marked_configured: markedConfigured,
+    coverage,
+    next_steps: [
+      "Create or reuse a scoped Recallant credential whose client ID matches this fragment.",
+      "Expose that credential to Codex as RECALLANT_OTEL_TOKEN.",
+      "Merge the fragment into user-level Codex config; project-local telemetry is ignored by Codex.",
+      "Start a new Codex run, then check Workbench Activity > Coverage."
+    ]
+  };
+  process.stdout.write(
+    cliOutputFormat(argv) === "text"
+      ? `${fragment}\nRecallant did not edit global Codex configuration.\n`
+      : `${JSON.stringify(result, null, 2)}\n`
+  );
+}
+
+async function runCodexHook(argv: readonly string[]) {
+  let event: CodexHookEvent | null = null;
+  let hookArgv: readonly string[] | null = null;
+  try {
+    const raw = await readCodexHookStdin();
+    const parsed = parseCodexHookPayload(raw);
+    if (!parsed.ok) {
+      debugCodexHook(argv, { ok: false, ignored: true, code: parsed.code });
+      return;
+    }
+    event = parsed.event;
+    hookArgv = await codexHookArgv(argv);
+    if (!hookArgv) {
+      debugCodexHook(argv, { ok: false, ignored: true, code: "project_not_connected" });
+      return;
+    }
+    const actions = mapCodexHookEvent(event);
+    const database = createCodexHookDatabase();
+    if (database) {
+      try {
+        await persistCodexHookServerActions(database, hookArgv, event, actions);
+        debugCodexHook(argv, {
+          ok: true,
+          mode: "server",
+          event: event.hook_event_name,
+          actions: actions.length
+        });
+        return;
+      } catch (error) {
+        debugCodexHook(argv, {
+          ok: false,
+          code: "server_capture_failed",
+          error: redactSystemActivityValue(error instanceof Error ? error.message : String(error))
+        });
+        // The native hook must not block Codex. The same deduplicated actions continue to spool.
+      } finally {
+        await database.close().catch(() => undefined);
+      }
+    }
+    await spoolCodexHookActions(hookArgv, event, actions);
+    debugCodexHook(argv, {
+      ok: true,
+      mode: "offline_spool",
+      event: event.hook_event_name,
+      actions: actions.length
+    });
+  } catch {
+    if (event && hookArgv) {
+      await spoolCodexHookActions(hookArgv, event, mapCodexHookEvent(event)).catch(() => undefined);
+    }
+    debugCodexHook(argv, { ok: false, ignored: true, code: "capture_failed_soft" });
+  }
+}
+
+async function runAgentCheckpoint(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const payload = checkpointPayloadFromFlags(argv);
+  const database = createRecallantDbFromEnv();
+  let state = await loadActiveAgentState(argv);
+  if (database) {
+    try {
+      if (!state) {
+        const started = await startAgentSession(database, argv);
+        state = started.state;
+      } else {
+        await assertAgentStateProjectBinding(database, state, dir);
+      }
+      const checkpoint = await database.setCheckpoint(state.project_id, payload);
+      const event = await database.appendEvent({
+        session_id: state.session_id,
+        client_kind: state.client_kind,
+        event_kind: "checkpoint",
+        text: `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+        metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: payload },
+        raw_artifacts: [],
+        dedup_key: dedupHash("agent-checkpoint", {
+          session_id: state.session_id,
+          payload,
+          created_at: new Date().toISOString()
+        })
+      });
+      const checkpointMemory = await database.createAgentMemory({
+        project_id: state.project_id,
+        project_path: dir,
+        memory_type: "checkpoint",
+        scope: "project",
+        scope_kind: "project",
+        title: summarizeText(`Checkpoint: ${String(payload.current_focus)}`, 72),
+        body: [
+          `Status: ${String(payload.status ?? "checkpoint")}`,
+          `Current focus: ${String(payload.current_focus ?? "")}`,
+          `Next step: ${String(payload.next_step ?? "")}`,
+          payload.summary ? `Summary: ${String(payload.summary)}` : null
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        confidence: 0.95,
+        created_by: "agent",
+        source_refs: [
+          {
+            source_kind: "event",
+            source_id: String(event.event_id),
+            quote: summarizeText(
+              `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+              500
+            ),
+            metadata: { capture_kind: "agent_checkpoint" }
+          }
+        ],
+        metadata: { created_from: "recallant_agent_checkpoint" }
+      });
+      const now = new Date().toISOString();
+      await writeAgentSessionState(dir, {
+        ...state,
+        updated_at: now,
+        last_checkpoint_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(event.event_id),
+        last_memory_id: String(checkpointMemory.memory_id)
+      });
+      const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_checkpoint",
+            mode: "server",
+            project_id: state.project_id,
+            session_id: state.session_id,
+            checkpoint_updated_at: checkpoint.updated_at,
+            event_id: event.event_id,
+            memory: checkpointMemory,
+            project_log_update: projectLogUpdate
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      if (isHardProjectIdentityError(error)) throw error;
+      state = await ensureOfflineAgentSession(
+        argv,
+        error instanceof Error ? error.message : "server unavailable"
+      );
+    } finally {
+      await database.close();
+    }
+  } else {
+    state = await ensureOfflineAgentSession(argv, "RECALLANT_DATABASE_URL is not configured");
+  }
+  const record = await appendSpoolRecord(argv, "event", {
+    session_id: state.session_id,
+    client_kind: state.client_kind,
+    event_kind: "checkpoint",
+    text: `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
+    metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: payload },
+    raw_artifacts: []
+  });
+  const now = new Date().toISOString();
+  await writeAgentSessionState(dir, {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_checkpoint_at: now,
+    last_memory_write_at: now,
+    last_event_id: String(record.local_id)
+  });
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "agent_checkpoint",
+        mode: "offline_spool",
+        local_id: record.local_id,
+        spool_path: spoolPath(argv),
+        project_log_update: offlineProjectLogUpdate()
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+function closeoutMemoryStatusFromDbStatus(status: unknown): AgentLifecycleMemoryProofStatus {
+  if (status === "accepted") return "accepted";
+  if (status === "candidate") return "candidate";
+  if (status === "needs_review") return "needs_review";
+  if (status === "rejected") return "rejected";
+  return "missing";
+}
+
+function closeoutSummaryText(payload: JsonObject) {
+  return String(payload.summary ?? payload.current_focus ?? "Session closeout");
+}
+
+function closeoutLifecycleMarker(payload: JsonObject, state: AgentSessionState, eventId: string) {
+  return dedupHash("agent-closeout-lifecycle", {
+    session_id: state.session_id,
+    event_id: eventId,
+    summary: closeoutSummaryText(payload),
+    focus: payload.current_focus ?? null,
+    next_step: payload.next_step ?? null
+  });
+}
+
+function closeoutMemoryBody(
+  payload: JsonObject,
+  state: AgentSessionState,
+  eventId: string,
+  lifecycleMarker: string
+) {
+  return [
+    `Status: ${String(payload.status ?? payload.current_status ?? "closed")}`,
+    `Current focus: ${String(payload.current_focus ?? closeoutSummaryText(payload))}`,
+    `Next step: ${String(payload.next_step ?? "Continue from Recallant context.")}`,
+    `Summary: ${closeoutSummaryText(payload)}`,
+    `Lifecycle marker: ${lifecycleMarker}`,
+    `Session: ${state.session_id}`,
+    `Closeout event: ${eventId}`
+  ].join("\n");
+}
+
+function partialRecallProof(): AgentLifecycleCloseoutProof["recall"] {
+  return {
+    ok: false,
+    recall_verified: false,
+    query: null,
+    marker_found: false,
+    recalled_memory_ids: [],
+    checked_at: null
+  };
+}
+
+function partialNextSessionContextProof(): AgentLifecycleCloseoutProof["next_session_context"] {
+  return {
+    ok: false,
+    next_session_context_verified: false,
+    session_id: null,
+    context_pack_id: null,
+    marker_found: false,
+    checked_at: null
+  };
+}
+
+function contextPackWorkingMemories(pack: Awaited<ReturnType<RecallantDb["getContextPack"]>>) {
+  const sections = objectValue(pack.sections);
+  const workingMemories = sections.working_memories;
+  return Array.isArray(workingMemories)
+    ? workingMemories.filter(
+        (memory): memory is Record<string, unknown> =>
+          memory !== null && typeof memory === "object" && !Array.isArray(memory)
+      )
+    : [];
+}
+
+async function verifyCloseoutNextSessionContext(input: {
+  database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>;
+  argv: readonly string[];
+  projectDir: string;
+  state: AgentSessionState;
+  lifecycleMarker: string;
+  closeoutMemoryId: string;
+}): Promise<{
+  proof: AgentLifecycleCloseoutProof["next_session_context"];
+  warnings: string[];
+}> {
+  let verificationSessionId: string | null = null;
+  let contextPackId: string | null = null;
+  let proof = partialNextSessionContextProof();
+  let warnings: string[] = [];
+
+  try {
+    const started = await input.database.startSession({
+      client_kind: input.state.client_kind,
+      client_version: input.state.client_version ?? null,
+      project_id: input.state.project_id ?? null,
+      project_path: input.projectDir,
+      session_label: "recallant-agent-closeout-verification",
+      resume_policy: "normal"
+    });
+    verificationSessionId = String(started.session_id);
+    const pack = await input.database.getContextPack({
+      session_id: verificationSessionId,
+      task_hint: input.lifecycleMarker,
+      include_raw_evidence: "auto",
+      include_recovery: false,
+      local_spool_status: await getLocalSpoolStatus(input.argv),
+      max_chars_total: 4000
+    });
+    contextPackId = String(pack.context_pack_id);
+    const workingMemories = contextPackWorkingMemories(pack);
+    const markerFound = workingMemories.some(
+      (memory) =>
+        String(memory.memory_id ?? "") === input.closeoutMemoryId ||
+        String(memory.body ?? "").includes(input.lifecycleMarker) ||
+        String(memory.title ?? "").includes(input.lifecycleMarker)
+    );
+    proof = {
+      ok: markerFound,
+      next_session_context_verified: markerFound,
+      session_id: verificationSessionId,
+      context_pack_id: contextPackId,
+      marker_found: markerFound,
+      checked_at: new Date().toISOString()
+    };
+    if (!markerFound) {
+      warnings = ["Next-session context pack did not return the closeout memory."];
+    }
+  } catch {
+    proof = {
+      ok: false,
+      next_session_context_verified: false,
+      session_id: verificationSessionId,
+      context_pack_id: contextPackId,
+      marker_found: false,
+      checked_at: new Date().toISOString()
+    };
+    warnings = ["Next-session context verification failed; next agent readiness is false."];
+  } finally {
+    if (verificationSessionId) {
+      try {
+        await input.database.closeSession(verificationSessionId, "client_exit");
+      } catch {
+        proof = {
+          ...proof,
+          ok: false,
+          next_session_context_verified: false
+        };
+        warnings = [
+          ...warnings,
+          "Verification session cleanup failed; review active Recallant sessions."
+        ];
+      }
+    }
+  }
+
+  return { proof, warnings };
+}
+
+async function runAgentCloseout(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const state = await loadClosableAgentState(argv);
+  if (!state) throw new Error("VALIDATION_ERROR: no active Recallant agent session");
+  const payload = checkpointPayloadFromFlags(
+    argv,
+    parseFlag(argv, "--summary") ?? "Session closeout"
+  );
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    const record = await appendSpoolRecord(argv, "event", {
+      session_id: state.session_id,
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
+      metadata: {
+        capture_kind: "agent_closeout",
+        observation_kind: "closeout",
+        checkpoint_payload: payload
+      },
+      raw_artifacts: []
+    });
+    await writeAgentSessionState(dir, {
+      ...state,
+      status: "offline",
+      updated_at: new Date().toISOString(),
+      last_event_id: String(record.local_id)
+    });
+    const lifecycle = buildAgentLifecycleCloseoutResult({
+      mode: "offline_spool",
+      project_id: state.project_id ?? null,
+      session_id: state.session_id,
+      closeout_event_id: null,
+      spool_sync_status: "unsynced",
+      proof: {
+        event: {
+          ok: false,
+          event_written: false,
+          local_id: String(record.local_id),
+          spooled: true
+        },
+        checkpoint: {
+          ok: false,
+          checkpoint_updated: false,
+          checkpoint_updated_at: null,
+          checkpoint_state_only: true
+        },
+        memory: {
+          ok: false,
+          searchable_memory_created: false,
+          memory_status: "missing",
+          memory_id: null,
+          memory_type: null
+        },
+        recall: partialRecallProof(),
+        next_session_context: partialNextSessionContextProof()
+      },
+      warnings: ["Server write failed or is unavailable; closeout was spooled locally."]
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_closeout",
+          mode: "offline_spool",
+          local_id: record.local_id,
+          spool_path: spoolPath(argv),
+          lifecycle,
+          project_log_update: offlineProjectLogUpdate()
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+  try {
+    await assertAgentStateProjectBinding(database, state, dir);
+    const event = await database.appendEvent({
+      session_id: state.session_id,
+      client_kind: state.client_kind,
+      event_kind: "system",
+      text: `Closeout: ${String(payload.summary ?? payload.current_focus)}`,
+      metadata: {
+        capture_kind: "agent_closeout",
+        observation_kind: "closeout",
+        checkpoint_payload: payload
+      },
+      raw_artifacts: [],
+      dedup_key: dedupHash("agent-closeout", {
+        session_id: state.session_id,
+        payload,
+        created_at: new Date().toISOString()
+      })
+    });
+    const closeout = await database.closeout(
+      state.session_id,
+      payload,
+      "closeout",
+      await getLocalSpoolStatus(argv)
+    );
+    const closeoutProjectId =
+      typeof closeout.project_id === "string" ? closeout.project_id : (state.project_id ?? null);
+    const closeoutState = {
+      ...state,
+      project_id: closeoutProjectId
+    };
+    const lifecycleMarker = closeoutLifecycleMarker(payload, state, String(event.event_id));
+    const closeoutMemory = await database.createAgentMemory({
+      project_id: closeoutProjectId,
+      project_path: closeoutProjectId ? null : dir,
+      memory_type: "work_log",
+      scope: "project",
+      scope_kind: "project",
+      title: summarizeText(`Closeout: ${closeoutSummaryText(payload)}`, 72),
+      body: closeoutMemoryBody(payload, state, String(event.event_id), lifecycleMarker),
+      confidence: 0.95,
+      created_by: "agent",
+      source_refs: [
+        {
+          source_kind: "event",
+          source_id: String(event.event_id),
+          quote: summarizeText(`Closeout: ${closeoutSummaryText(payload)}`, 500),
+          metadata: {
+            capture_kind: "agent_closeout",
+            created_from: "recallant_agent_closeout",
+            lifecycle_marker: lifecycleMarker
+          }
+        }
+      ],
+      metadata: {
+        created_from: "recallant_agent_closeout",
+        closeout_event_id: String(event.event_id),
+        lifecycle_marker: lifecycleMarker
+      }
+    });
+    const memoryStatus = closeoutMemoryStatusFromDbStatus(closeoutMemory.status);
+    const recallCheckedAt = new Date().toISOString();
+    let recalledMemoryIds: string[] = [];
+    let recallVerified = false;
+    let recallWarnings: string[] = [];
+    try {
+      const recall = await database.recallAgentMemories({
+        ...(closeoutProjectId ? { project_id: closeoutProjectId } : {}),
+        query: lifecycleMarker,
+        memory_types: ["work_log"],
+        top_k: 5
+      });
+      recalledMemoryIds = recall.memories
+        .map((memory: Record<string, unknown>) => String(memory.memory_id ?? ""))
+        .filter(Boolean);
+      recallVerified =
+        recalledMemoryIds.includes(String(closeoutMemory.memory_id)) ||
+        recall.memories.some((memory: Record<string, unknown>) =>
+          String(memory.body ?? "").includes(lifecycleMarker)
+        );
+      if (!recallVerified) {
+        recallWarnings = ["Semantic recall did not return the closeout memory."];
+      }
+    } catch {
+      recallWarnings = ["Semantic recall verification failed; next agent readiness is false."];
+    }
+    const nextSessionContext = await verifyCloseoutNextSessionContext({
+      database,
+      argv,
+      projectDir: dir,
+      state: closeoutState,
+      lifecycleMarker,
+      closeoutMemoryId: String(closeoutMemory.memory_id)
+    });
+    const lifecycle = buildAgentLifecycleCloseoutResult({
+      mode: "server",
+      project_id: closeoutProjectId,
+      session_id: state.session_id,
+      closeout_event_id: String(event.event_id),
+      spool_sync_status: closeout.spool_sync_status ?? null,
+      proof: {
+        event: {
+          ok: true,
+          event_written: true,
+          event_id: String(event.event_id)
+        },
+        checkpoint: {
+          ok: Boolean(closeout.updated_at),
+          checkpoint_updated: Boolean(closeout.updated_at),
+          checkpoint_updated_at: closeout.updated_at ? String(closeout.updated_at) : null,
+          checkpoint_state_only: true
+        },
+        memory: {
+          ok: memoryStatus === "accepted",
+          searchable_memory_created: memoryStatus === "accepted",
+          memory_status: memoryStatus,
+          memory_id: String(closeoutMemory.memory_id),
+          memory_type: "work_log",
+          needs_review_ids:
+            memoryStatus === "candidate" || memoryStatus === "needs_review"
+              ? [String(closeoutMemory.memory_id)]
+              : []
+        },
+        recall: {
+          ok: recallVerified,
+          recall_verified: recallVerified,
+          query: lifecycleMarker,
+          marker_found: recallVerified,
+          recalled_memory_ids: recalledMemoryIds,
+          checked_at: recallCheckedAt
+        },
+        next_session_context: nextSessionContext.proof
+      },
+      warnings: [...(closeout.warnings ?? []), ...recallWarnings, ...nextSessionContext.warnings]
+    });
+    const now = new Date().toISOString();
+    await writeAgentSessionState(dir, {
+      ...state,
+      status: "closed",
+      updated_at: now,
+      last_checkpoint_at: now,
+      last_memory_write_at: now,
+      last_event_id: String(event.event_id),
+      last_memory_id: String(closeoutMemory.memory_id)
+    });
+    const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_closeout",
+          mode: "server",
+          project_id: state.project_id,
+          session_id: state.session_id,
+          closeout,
+          lifecycle,
+          project_log_update: projectLogUpdate
+        },
+        null,
+        2
+      )}\n`
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+async function runDemoCapture(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const config = await readProjectConfig(dir);
+  if (!config?.project_id) {
+    throw new Error("VALIDATION_ERROR: demo-capture requires an attached project");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for demo-capture");
+  const marker = parseFlag(argv, "--marker") ?? `DEMO-CAPTURE-${randomUUID()}`;
+  const taskHint = parseFlag(argv, "--task-hint") ?? `Recallant demo capture ${marker}`;
+  const rememberedText =
+    parseFlag(argv, "--text") ??
+    `The agent remembered this Recallant demo memory: ${marker}. This proves session start, memory write, checkpoint, and later recall.`;
+  let sessionId = "";
+  try {
+    const started = await startAgentSession(database, [
+      argv[0] ?? "",
+      argv[1] ?? "",
+      "agent-start",
+      "--project-dir",
+      dir,
+      "--task-hint",
+      taskHint,
+      "--session-label",
+      "recallant-demo-capture"
+    ]);
+    sessionId = started.state.session_id;
+    const event = await database.appendEvent({
+      session_id: sessionId,
+      client_kind: started.state.client_kind,
+      event_kind: "other",
+      text: rememberedText,
+      metadata: {
+        capture_kind: "agent_demo_memory",
+        project_dir: dir,
+        marker
+      },
+      raw_artifacts: [],
+      dedup_key: dedupHash("demo-capture-event", {
+        project_id: config.project_id,
+        marker,
+        rememberedText
+      })
+    });
+    const memory = await database.createAgentMemory({
+      project_id: String(config.project_id),
+      memory_type: "decision",
+      scope: "project",
+      scope_kind: "project",
+      title: `Demo capture memory ${marker}`,
+      body: rememberedText,
+      confidence: 0.95,
+      created_by: "agent",
+      source_refs: [
+        {
+          source_kind: "event",
+          source_id: String(event.event_id),
+          quote: summarizeText(rememberedText, 500),
+          metadata: { capture_kind: "agent_demo_memory" }
+        }
+      ],
+      metadata: { created_from: "recallant_demo_capture", marker }
+    });
+    const checkpointPayload: JsonObject = {
+      schema_version: 1,
+      status: "demo_capture_complete",
+      current_focus: `Demo capture for ${marker}`,
+      next_step: `Run recallant ask "what did the agent remember?" --project-dir ${dir}`,
+      summary: `Demo capture wrote and checkpointed ${marker}.`,
+      updated_at: new Date().toISOString(),
+      source: "recallant-demo-capture"
+    };
+    const checkpoint = await database.setCheckpoint(String(config.project_id), checkpointPayload);
+    const checkpointEvent = await database.appendEvent({
+      session_id: sessionId,
+      client_kind: started.state.client_kind,
+      event_kind: "checkpoint",
+      text: `Demo checkpoint for ${marker}: ${rememberedText}`,
+      metadata: { capture_kind: "agent_checkpoint", checkpoint_payload: checkpointPayload },
+      raw_artifacts: [],
+      dedup_key: dedupHash("demo-capture-checkpoint", {
+        project_id: config.project_id,
+        marker,
+        checkpointPayload
+      })
+    });
+    await updateProjectLogCheckpoint(dir, checkpointPayload);
+    const now = new Date().toISOString();
+    await writeAgentSessionState(dir, {
+      ...started.state,
+      status: "closed",
+      updated_at: now,
+      last_memory_write_at: now,
+      last_checkpoint_at: now,
+      last_event_id: String(checkpointEvent.event_id),
+      last_memory_id: String(memory.memory_id)
+    });
+    await database.closeout(
+      sessionId,
+      checkpointPayload,
+      "closeout",
+      await getLocalSpoolStatus(argv)
+    );
+    const recall = await database.recallAgentMemories({
+      project_id: String(config.project_id),
+      query: "what did the agent remember",
+      top_k: 5
+    });
+    const recalled = recall.memories.some((item: Record<string, unknown>) =>
+      String(item.body ?? "").includes(marker)
+    );
+    const result = {
+      ok: true,
+      action: "demo_capture",
+      project_dir: dir,
+      project_id: config.project_id,
+      marker,
+      session_id: sessionId,
+      context_pack_id: started.state.context_pack_id,
+      memory_id: memory.memory_id,
+      checkpoint_updated_at: checkpoint.updated_at,
+      recalled,
+      proof: {
+        session_started: Boolean(sessionId),
+        memory_written: Boolean(memory.memory_id),
+        checkpoint_exists: Boolean(checkpoint.updated_at),
+        later_recall_works: recalled
+      },
+      next_commands: [
+        `recallant doctor --project-dir ${dir} --require-memory-loop`,
+        `recallant ask "what did the agent remember?" --project-dir ${dir}`
+      ]
+    };
+    if (format === "json") {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else {
+      process.stdout.write(
+        [
+          "Recallant demo capture",
+          "",
+          "Status: memory capture proof written.",
+          `Project: ${dir}`,
+          `Session started: ${result.proof.session_started ? "yes" : "no"}`,
+          `Memory written: ${result.proof.memory_written ? "yes" : "no"}`,
+          `Checkpoint exists: ${result.proof.checkpoint_exists ? "yes" : "no"}`,
+          `Later recall works: ${result.proof.later_recall_works ? "yes" : "no"}`,
+          `Marker: ${marker}`,
+          "",
+          "Next commands:",
+          `- ${result.next_commands[0]}`,
+          `- ${result.next_commands[1]}`,
+          "",
+          `JSON output: recallant demo-capture --project-dir ${dir} --format json`
+        ].join("\n") + "\n"
+      );
+    }
+  } finally {
+    await database.close();
+  }
+}
+
+async function runAsk(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const query =
+    parseFlag(argv, "--query") ??
+    positionalArgs(argv)
+      .filter((arg) => arg !== "ask")
+      .join(" ");
+  if (!query.trim()) throw new Error("VALIDATION_ERROR: ask requires a question");
+  const explicitProjectId = parseFlag(argv, "--project-id");
+  const config = explicitProjectId ? null : await readProjectConfig(dir);
+  const projectId = explicitProjectId ?? config?.project_id;
+  if (!projectId) {
+    throw new Error("VALIDATION_ERROR: ask requires an attached project or --project-id");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for ask");
+  try {
+    const recall = await database.recallAgentMemories({
+      project_id: String(projectId),
+      query,
+      top_k: Number(parseFlag(argv, "--top-k") ?? 5)
+    });
+    const memories = recall.memories.map((memory: Record<string, unknown>) => ({
+      memory_id: memory.memory_id,
+      title: memory.title,
+      body: memory.body,
+      updated_at: memory.updated_at,
+      source_refs: memory.source_refs
+    }));
+    const result = {
+      ok: true,
+      action: "ask",
+      project_dir: explicitProjectId ? null : dir,
+      project_id: projectId,
+      recall_scope: explicitProjectId ? "explicit_project_id" : "attached_project",
+      question: query,
+      recalled: memories.length > 0,
+      memories,
+      trace_id: recall.trace_id ?? null,
+      warnings: recall.warnings ?? []
+    };
+    if (format === "json") {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else {
+      const lines = [
+        "Recallant answer",
+        "",
+        `Question: ${query}`,
+        memories.length > 0
+          ? "Recallant found memory for this project:"
+          : "Recallant did not find matching project memory."
+      ];
+      for (const memory of memories) {
+        lines.push("", String(memory.title ?? "Memory"), String(memory.body ?? ""));
+      }
+      lines.push(
+        "",
+        `JSON output: recallant ask ${JSON.stringify(query)} ${
+          explicitProjectId ? `--project-id ${projectId}` : `--project-dir ${dir}`
+        } --format json`
+      );
+      process.stdout.write(`${lines.join("\n")}\n`);
+    }
+  } finally {
+    await database.close();
+  }
+}
+
+async function runSpoolAppend(argv: readonly string[]) {
+  const recordKind = parseFlag(argv, "--kind") ?? "turn";
+  const role = parseFlag(argv, "--role") ?? "user";
+  const text = parseFlag(argv, "--text") ?? "";
+  const eventKind = parseFlag(argv, "--event-kind") ?? "other";
+  const rawArtifactJson = parseFlag(argv, "--raw-artifact-json");
+  const rawArtifacts = rawArtifactJson ? JSON.parse(rawArtifactJson) : [];
+  const payload: Record<string, unknown> =
+    recordKind === "event"
+      ? {
+          client_kind: "codex",
+          event_kind: eventKind,
+          text,
+          metadata: {},
+          raw_artifacts: rawArtifacts
+        }
+      : { client_kind: "codex", role, text };
+  const dedupKey =
+    parseFlag(argv, "--dedup-key") ??
+    `spool:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
+  const record = await appendSpoolRecord(argv, recordKind, payload, dedupKey);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "spool_append",
+        spool_path: spoolPath(argv),
+        local_id: record.local_id,
+        dedup_key: dedupKey,
+        synced: false
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runSpoolStatus(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const status = await getLocalSpoolStatus(argv);
+  if (format === "json") {
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, action: "spool_status", ...status }, null, 2)}\n`
+    );
+    return;
+  }
+  process.stdout.write(
+    [
+      "Recallant local spool",
+      "",
+      `Status: ${status.status}`,
+      `Pending records: ${status.unsynced_count}`,
+      `Total records: ${status.record_count}`,
+      `Last write: ${status.last_write_at ?? "none"}`,
+      `Spool file: ${status.spool_path}`,
+      "",
+      `Preview replay: ${status.replay_command}`,
+      `Replay now: ${status.sync_command}`,
+      `Prune synced records: ${status.prune_command}`,
+      "",
+      `JSON output: recallant spool-status --project-dir ${projectDir(argv)} --format json`
+    ].join("\n") + "\n"
+  );
+}
+
+async function runSyncSpool(argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  if (argv.includes("--dry-run")) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "sync_spool",
+          dry_run: true,
+          writes_database: false,
+          unsynced_count: unsynced.length,
+          records: unsynced.map((record) => ({
+            local_id: record.local_id,
+            record_kind: record.record_kind,
+            dedup_key: record.dedup_key
+          }))
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for sync-spool");
+  const config = await readProjectConfig(dir);
+  const synced = { ...manifest.synced };
+  let syncSessionId: string | null = null;
+  try {
+    const syncSession =
+      unsynced.length > 0
+        ? await database.startSession({
+            client_kind: "recallant-cli",
+            project_id: config?.project_id ?? null,
+            project_path: dir,
+            session_label: "spool-sync",
+            resume_policy: "normal"
+          })
+        : null;
+    syncSessionId = syncSession?.session_id ? String(syncSession.session_id) : null;
+    for (const record of unsynced) {
+      const payload = record.payload as Record<string, unknown>;
+      const result =
+        record.record_kind === "observation"
+          ? await database.appendAgentObservation({
+              ...(payload as Omit<AppendAgentObservationInput, "session_id">),
+              session_id: String(syncSessionId),
+              dedup_key: String(payload.dedup_key ?? record.dedup_key)
+            })
+          : record.record_kind === "event"
+            ? await database.appendEvent({
+                session_id: syncSessionId,
+                client_kind: String(payload.client_kind ?? "codex"),
+                event_kind: String(payload.event_kind ?? "other"),
+                text: (payload.text as string | null | undefined) ?? null,
+                metadata: (payload.metadata as Record<string, unknown> | undefined) ?? {},
+                raw_artifacts: (payload.raw_artifacts as RawArtifactInput[] | undefined) ?? [],
+                dedup_key: String(payload.dedup_key ?? record.dedup_key)
+              })
+            : await database.appendTurn({
+                session_id: syncSessionId,
+                client_kind: String(payload.client_kind ?? "codex"),
+                role: payload.role === "assistant" ? "assistant" : "user",
+                text: String(payload.text ?? ""),
+                dedup_key: String(payload.dedup_key ?? record.dedup_key)
+              });
+      synced[String(record.local_id)] = {
+        server_event_id: "event_id" in result ? result.event_id : null,
+        server_observation_id: "id" in result ? result.id : null,
+        status: "status" in result ? result.status : "created",
+        synced_at: new Date().toISOString()
+      };
+    }
+  } finally {
+    if (syncSessionId) await database.closeSession(syncSessionId, "client_exit");
+    await database.close();
+  }
+  await mkdir(spoolDir(argv), { recursive: true });
+  await writeFile(spoolManifestPath(argv), `${JSON.stringify({ synced }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "sync_spool",
+        dry_run: false,
+        synced_count: unsynced.length,
+        manifest_path: spoolManifestPath(argv),
+        mappings: synced
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function runPruneSpool(argv: readonly string[]) {
+  if (!argv.includes("--synced")) {
+    throw new Error("POLICY_BLOCKED: prune-spool requires --synced");
+  }
+  const records = await readJsonl(spoolPath(argv));
+  const manifest = await readSpoolManifest(argv);
+  const kept = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  await mkdir(spoolDir(argv), { recursive: true });
+  await writeFile(
+    spoolPath(argv),
+    kept.map((record) => JSON.stringify(record)).join("\n") + (kept.length ? "\n" : "")
+  );
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: true,
+        action: "prune_spool",
+        pruned_count: records.length - kept.length,
+        kept_unsynced_count: kept.length,
+        spool_path: spoolPath(argv)
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+async function resolveConnectDeveloperId(input: { projectId: string }) {
+  if (process.env.RECALLANT_DEVELOPER_ID) return process.env.RECALLANT_DEVELOPER_ID;
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    throw new Error(
+      "VALIDATION_ERROR: connect requires RECALLANT_DEVELOPER_ID or RECALLANT_DATABASE_URL"
+    );
+  }
+  try {
+    const binding = await database.getProjectBinding(input.projectId);
+    if (!binding) {
+      throw new Error(
+        `VALIDATION_ERROR: project ${input.projectId} is not registered in Recallant`
+      );
+    }
+    return binding.developer_id;
+  } finally {
+    await database.close();
+  }
+}
+
+function failSoftHookScript(input: {
+  command: string;
+  stdinText?: boolean;
+  fallbackEventKind?: string;
+}) {
+  const stdin = input.stdinText ? 'TEXT="$(cat)"' : 'TEXT="${RECALLANT_HOOK_TEXT:-hook event}"';
+  const fallbackEventKind = input.fallbackEventKind ?? "hook_event";
+  return `#!/usr/bin/env sh
+set +e
+
+PROJECT_DIR="\${RECALLANT_PROJECT_DIR:-$(pwd)}"
+TIMEOUT_SECONDS="\${RECALLANT_HOOK_TIMEOUT_SECONDS:-2}"
+FALLBACK_EVENT_KIND="\${RECALLANT_HOOK_FALLBACK_EVENT_KIND:-${fallbackEventKind}}"
+${stdin}
+
+if ! command -v recallant >/dev/null 2>&1; then
+  exit 0
+fi
+
+if command -v timeout >/dev/null 2>&1; then
+  timeout "$TIMEOUT_SECONDS" ${input.command} >/dev/null 2>&1
+  PRIMARY_STATUS="$?"
+else
+  ${input.command} >/dev/null 2>&1
+  PRIMARY_STATUS="$?"
+fi
+
+if [ "$PRIMARY_STATUS" -ne 0 ]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$TIMEOUT_SECONDS" recallant spool-append --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind event --event-kind "$FALLBACK_EVENT_KIND" --text "$TEXT" >/dev/null 2>&1
+  else
+    recallant spool-append --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind event --event-kind "$FALLBACK_EVENT_KIND" --text "$TEXT" >/dev/null 2>&1
+  fi
+fi
+
+exit 0
+`;
+}
+
+function localHookKitFiles() {
+  const eventScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind "${1:-action}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_hook_event"
+  });
+  const promptScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind prompt --turn-id "${RECALLANT_HOOK_TURN_ID:-}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --title "User prompt captured by hook" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_prompt"
+  });
+  const toolResultScript = failSoftHookScript({
+    command:
+      'recallant agent-event --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --kind tool_result --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --title "Tool result captured by hook" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_tool_result"
+  });
+  const assistantResponseScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind assistant_response --turn-id "${RECALLANT_HOOK_TURN_ID:-}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_assistant_response"
+  });
+  const toolCallScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind tool_call --tool-name "${1:-tool}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_tool_call"
+  });
+  const errorScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind error --error-code "${1:-AGENT_ERROR}" --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --attempt-number "${RECALLANT_HOOK_ATTEMPT:-1}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_error"
+  });
+  const retryScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind retry --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --attempt-number "${RECALLANT_HOOK_ATTEMPT:-2}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_retry"
+  });
+  const remediationScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind remediation --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_remediation"
+  });
+  const verificationScript = failSoftHookScript({
+    command:
+      'recallant agent-observe --project-dir "$PROJECT_DIR" --kind verification --status success --resolution-status resolved --trace-id "${RECALLANT_HOOK_TRACE_ID:-}" --parent-observation-id "${RECALLANT_HOOK_PARENT_ID:-}" --text "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_verification"
+  });
+  const startScript = failSoftHookScript({
+    command:
+      'recallant agent-start --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --task-hint "${1:-hook session start}"',
+    fallbackEventKind: "agent_session_start"
+  });
+  const checkpointScript = failSoftHookScript({
+    command:
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}"',
+    stdinText: true,
+    fallbackEventKind: "agent_checkpoint"
+  });
+  const closeoutScript = failSoftHookScript({
+    command:
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Continue from Recallant context.}" --summary "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_closeout"
+  });
+  const preCompactionScript = failSoftHookScript({
+    command:
+      'recallant agent-checkpoint --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-in_progress}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume after compaction from Recallant context.}"',
+    stdinText: true,
+    fallbackEventKind: "agent_pre_compaction"
+  });
+  const stopScript = failSoftHookScript({
+    command:
+      'recallant agent-closeout --project-dir "$PROJECT_DIR" --spool-dir "$PROJECT_DIR/.recallant/spool" --status "${RECALLANT_HOOK_STATUS:-closed}" --focus "$TEXT" --next-step "${RECALLANT_HOOK_NEXT_STEP:-Resume from Recallant context in the next session.}" --summary "$TEXT"',
+    stdinText: true,
+    fallbackEventKind: "agent_closeout"
+  });
+  const readme = `# Recallant Local Hook Kit
+
+These project-local hook scripts are optional client integration helpers.
+
+Codex projects connected by Recallant use the automatic command handlers in
+\`.codex/hooks.json\`. Those handlers call \`recallant codex-hook\` directly. Do not
+wire the helper scripts below to the same Codex events, because that would report the
+same activity twice. Use these scripts for other clients or custom integrations.
+
+They are fail-soft by design:
+
+- if \`recallant\` is unavailable, they exit 0;
+- if a hook times out, they exit 0;
+- if the primary capture command fails while \`recallant\` is available, they try
+  to write a local spool record under \`.recallant/spool/\`;
+- they never write global client config;
+- set \`RECALLANT_PROJECT_DIR\` when a client runs hooks outside the project folder;
+- set \`RECALLANT_HOOK_TIMEOUT_SECONDS\` to tune the default 2 second timeout.
+
+Client integrations can call:
+
+- \`start-session.sh "<task hint>"\` at session start;
+- \`user-prompt.sh < prompt.txt\` when the owner sends a prompt;
+- \`assistant-response.sh < response.txt\` after an assistant response;
+- \`tool-call.sh "tool-name" < call.txt\` before a meaningful tool call;
+- \`tool-result.sh < result.txt\` after meaningful tool/command results;
+- \`error.sh "ERROR_CODE" < error.txt\`, then \`retry.sh\`, \`remediation.sh\`, and
+  \`verification.sh\` to preserve the recovery chain. Set \`RECALLANT_HOOK_TRACE_ID\`,
+  \`RECALLANT_HOOK_PARENT_ID\`, and \`RECALLANT_HOOK_ATTEMPT\` when correlation is available;
+- \`capture-event.sh action|decision|test < input.txt\` for generic capture;
+- \`pre-compaction.sh < summary.txt\` before context compaction; this records state only.
+- \`checkpoint.sh < summary.txt\` before pause or handoff; this is an advanced state helper,
+  not semantic closeout proof.
+- \`stop-session.sh < summary.txt\` or \`closeout.sh < summary.txt\` when a session stops; this
+  is the normal helper-script closeout gate. Native Codex \`Stop\` is turn-scoped and records an
+  assistant response instead, so the agent still closes a completed session through
+  \`memory_closeout\` or \`recallant agent-closeout\`.
+`;
+  const manifest = `${JSON.stringify(
+    {
+      schema_version: 2,
+      name: "Recallant Local Hook Kit",
+      fail_soft: true,
+      writes_global_config: false,
+      project_dir_env: "RECALLANT_PROJECT_DIR",
+      timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
+      spool_dir: ".recallant/spool",
+      ready_proof: "recallant doctor --project-dir <project> --require-memory-loop",
+      targets: {
+        session_start: {
+          script: ".recallant/hooks/start-session.sh",
+          input: "optional task hint argument"
+        },
+        user_prompt: {
+          script: ".recallant/hooks/user-prompt.sh",
+          input: "owner prompt on stdin"
+        },
+        assistant_response: {
+          script: ".recallant/hooks/assistant-response.sh",
+          input: "assistant response on stdin; optional turn and trace ids from environment"
+        },
+        tool_call: {
+          script: ".recallant/hooks/tool-call.sh",
+          input: "tool name argument and bounded call summary on stdin"
+        },
+        tool_result: {
+          script: ".recallant/hooks/tool-result.sh",
+          input: "meaningful tool or command result on stdin"
+        },
+        error: {
+          script: ".recallant/hooks/error.sh",
+          input: "error code argument and safe error summary on stdin"
+        },
+        retry: {
+          script: ".recallant/hooks/retry.sh",
+          input: "retry summary on stdin with optional correlation environment"
+        },
+        remediation: {
+          script: ".recallant/hooks/remediation.sh",
+          input: "remediation summary on stdin with optional correlation environment"
+        },
+        verification: {
+          script: ".recallant/hooks/verification.sh",
+          input: "verification result on stdin with optional correlation environment"
+        },
+        generic_event: {
+          script: ".recallant/hooks/capture-event.sh",
+          input: "event kind argument plus event body on stdin"
+        },
+        pre_compaction_checkpoint: {
+          script: ".recallant/hooks/pre-compaction.sh",
+          input: "compact state-only handoff summary on stdin"
+        },
+        checkpoint: {
+          script: ".recallant/hooks/checkpoint.sh",
+          input: "advanced checkpoint state summary on stdin; not semantic closeout proof"
+        },
+        stop_closeout: {
+          script: ".recallant/hooks/stop-session.sh",
+          input: "normal closeout summary on stdin"
+        }
+      }
+    },
+    null,
+    2
+  )}\n`;
+  return [
+    {
+      path: ".recallant/hooks/README.md",
+      content: readme,
+      executable: false
+    },
+    {
+      path: ".recallant/hooks/manifest.json",
+      content: manifest,
+      executable: false
+    },
+    {
+      path: ".recallant/hooks/start-session.sh",
+      content: startScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/user-prompt.sh",
+      content: promptScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/assistant-response.sh",
+      content: assistantResponseScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/tool-call.sh",
+      content: toolCallScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/tool-result.sh",
+      content: toolResultScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/error.sh",
+      content: errorScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/retry.sh",
+      content: retryScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/remediation.sh",
+      content: remediationScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/verification.sh",
+      content: verificationScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/capture-event.sh",
+      content: eventScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/pre-compaction.sh",
+      content: preCompactionScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/checkpoint.sh",
+      content: checkpointScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/stop-session.sh",
+      content: stopScript,
+      executable: true
+    },
+    {
+      path: ".recallant/hooks/closeout.sh",
+      content: closeoutScript,
+      executable: true
+    }
+  ];
+}
+
+function parseJsonObjectOrEmpty(text: string | null) {
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function mergeMcpServers(
+  existingText: string | null,
+  desiredConfig: { mcpServers: Record<string, unknown> }
+) {
+  const existingObject = parseJsonObjectOrEmpty(existingText);
+  const existingServers =
+    existingObject.mcpServers &&
+    typeof existingObject.mcpServers === "object" &&
+    !Array.isArray(existingObject.mcpServers)
+      ? (existingObject.mcpServers as Record<string, unknown>)
+      : {};
+  return {
+    ...existingObject,
+    mcpServers: {
+      ...existingServers,
+      ...desiredConfig.mcpServers
+    }
+  };
+}
+
+function globalClientConfigDryRunPlan(input: {
+  target: string;
+  targetConfig: ReturnType<typeof connectClientTargetConfig>;
+  existingText?: string | null;
+}) {
+  const home = homedir();
+  const targetFiles: Record<string, string> = {
+    codex: join(home, ".codex", "config.toml"),
+    claude_code: join(home, ".claude.json"),
+    cursor: join(home, ".cursor", "mcp.json"),
+    windsurf: join(home, ".codeium", "windsurf", "mcp_config.json"),
+    generic: join(home, ".config", "recallant", "generic-mcp.json"),
+    other: join(home, ".config", "recallant", "generic-mcp.json")
+  };
+  const targetFile = targetFiles[input.target] ?? targetFiles.generic;
+  const writerSupported = input.target === "cursor";
+  const desiredGlobalConfig =
+    input.targetConfig.format === "codex_config_toml"
+      ? {
+          mcp_servers: {
+            recallant: {
+              command: "recallant",
+              args: ["mcp-server"],
+              env: {
+                RECALLANT_PROJECT_ID:
+                  input.targetConfig.mcp_config.mcpServers.recallant.env.RECALLANT_PROJECT_ID,
+                RECALLANT_DEVELOPER_ID:
+                  input.targetConfig.mcp_config.mcpServers.recallant.env.RECALLANT_DEVELOPER_ID
+              },
+              env_vars: ["RECALLANT_DATABASE_URL"]
+            }
+          }
+        }
+      : mergeMcpServers(input.existingText ?? null, input.targetConfig.mcp_config);
+  const desiredGlobalText = renderClientTargetConfig(
+    input.existingText ?? null,
+    input.targetConfig
+  );
+  return {
+    mode: writerSupported ? "dry_run_or_confirmed_write" : "dry_run_only",
+    scope: "global_client_config",
+    writes_global_config: false,
+    target_file: targetFile,
+    target_format:
+      input.target === "codex"
+        ? "codex_global_toml"
+        : input.target === "claude_code"
+          ? "claude_code_user_json"
+          : input.target === "cursor"
+            ? "cursor_user_mcp_json"
+            : "generic_user_mcp_json",
+    project_local_config_file: input.targetConfig.config_file,
+    planned_merge: {
+      operation: "add_or_replace_recallant_mcp_server",
+      preserve_existing_client_settings: true,
+      preserve_existing_mcp_servers: true,
+      server_name: "recallant",
+      mcp_server: input.targetConfig.mcp_config.mcpServers.recallant
+    },
+    desired_config: desiredGlobalConfig,
+    desired_config_text: desiredGlobalText,
+    writer_supported: writerSupported,
+    supported_writer_client: "cursor",
+    safety: {
+      this_goal_writes_global_config: false,
+      actual_global_write_requires_explicit_confirmation: writerSupported,
+      actual_global_write_requires_backup: writerSupported,
+      unsupported_clients_remain_dry_run_only: !writerSupported
+    },
+    note: "This is a preview only. It shows the global client file and MCP server merge Recallant would use later; it does not write the global file."
+  };
+}
+
+function connectHumanReport(result: Record<string, unknown>) {
+  const client = String(result.client ?? "agent");
+  const connectionStatus = String(result.connection_status ?? "unknown");
+  const hookStatus = String(result.hook_status ?? "unknown");
+  const dryRun = result.dry_run === true;
+  const projectId = String(result.project_id ?? "");
+  const projectDir = String(result.project_dir ?? "<project>");
+  const configFile = String(result.config_file ?? "");
+  const plannedChanges = Array.isArray(result.planned_changes)
+    ? result.planned_changes
+        .map((change) =>
+          change && typeof change === "object" ? (change as Record<string, unknown>) : null
+        )
+        .filter((change): change is Record<string, unknown> => change !== null)
+    : [];
+  const changedLines = plannedChanges.length
+    ? plannedChanges.map(
+        (change) => `  - ${String(change.action ?? "change")}: ${String(change.path ?? "")}`
+      )
+    : ["  - none"];
+  const globalConfig =
+    result.global_config && typeof result.global_config === "object"
+      ? (result.global_config as Record<string, unknown>)
+      : null;
+  const writesGlobalConfig = result.writes_global_config === true;
+  const clientConnection = objectValue(result.client_connection);
+  const automaticAgentAudit = objectValue(clientConnection.automatic_agent_audit);
+  const nativeHookConfig = objectValue(result.native_hook_config);
+  const nativeHooks = Array.isArray(clientConnection.native_hooks)
+    ? clientConnection.native_hooks
+        .map((entry) =>
+          entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null
+        )
+        .filter((entry): entry is Record<string, unknown> => entry !== null)
+    : [];
+  const nativeHookForClient = nativeHooks.find((entry) => String(entry.client) === client);
+  const globalLines = globalConfig
+    ? [
+        "",
+        `Global client config ${writesGlobalConfig ? "change" : "preview"}:`,
+        `  - target file: ${String(globalConfig.target_file ?? "not reported")}`,
+        `  - planned merge: ${String(
+          (globalConfig.planned_merge as Record<string, unknown> | undefined)?.operation ??
+            "not reported"
+        )}`,
+        `  - writer supported now: ${globalConfig.writer_supported === true ? "yes, with explicit confirmation" : "no, dry-run only"}`,
+        `  - backup path: ${String(globalConfig.backup_path ?? "created only before confirmed write")}`,
+        `  - writes global config now: ${writesGlobalConfig ? "yes" : "no"}`
+      ]
+    : [];
+  const hooksText =
+    hookStatus === "local_hook_kit_installed"
+      ? "installed"
+      : hookStatus === "local_hook_kit_planned"
+        ? "planned"
+        : hookStatus === "not_installed"
+          ? "skipped"
+          : hookStatus;
+  const proofCommand = String(
+    (result.mandatory_startup_layer as Record<string, unknown> | undefined)?.proof_command ??
+      `recallant doctor --project-dir ${projectDir} --require-capture`
+  );
+  const captureState = String(
+    automaticAgentAudit.capture_active === true
+      ? "automatic_agent_audit_observed"
+      : nativeHookConfig.configured_or_planned === true
+        ? "automatic_agent_audit_configured_unobserved"
+        : String(objectValue(result.client_connection).status ?? "unknown").includes("mcp")
+          ? "configured_without_local_hooks"
+          : connectionStatus === "hooks_without_mcp"
+            ? "hooks_without_client_config"
+            : "not_configured"
+  );
+  const installCommand = dryRun
+    ? `recallant connect ${client} --project-dir ${projectDir}`
+    : proofCommand;
+  return (
+    [
+      "Recallant connect",
+      "",
+      `Status: ${dryRun ? "planned" : "agent client configured"}`,
+      `Agent client: ${client}`,
+      `Project id: ${projectId}`,
+      `Client config: ${configFile || "not reported"}`,
+      `Local hooks: ${hooksText}`,
+      `Native hooks: ${String(
+        nativeHookConfig.status ?? nativeHookForClient?.status ?? "not reported"
+      )}`,
+      client === "codex"
+        ? `Codex hook review: ${String(
+            nativeHookConfig.trust_action ??
+              automaticAgentAudit.trust_action ??
+              "Open /hooks in Codex."
+          )}`
+        : null,
+      "",
+      "Files:",
+      ...changedLines,
+      ...globalLines,
+      "",
+      `Capture configured/proven: ${captureState}`,
+      `Verification command: ${proofCommand}`,
+      `Next command: ${installCommand}`,
+      "",
+      `JSON output: recallant connect ${client} --project-dir <project> --format json`
+    ].join("\n") + "\n"
+  );
+}
+
+function requiredFlag(argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (!value?.trim()) throw new Error(`VALIDATION_ERROR: ${name} is required`);
+  return value;
+}
+
+function remoteConnectHumanReport(result: {
+  target: string;
+  config_file: string;
+  target_file?: string;
+  writes_files?: boolean;
+  setup_hint: string;
+  rendered_config: string;
+  next_agent_steps?: string[];
+}) {
+  const nextAgentSteps = result.next_agent_steps ?? remoteConnectNextAgentSteps();
+  return (
+    [
+      "Recallant connect-remote",
+      "",
+      `Agent client: ${result.target}`,
+      `Config file: ${result.config_file}`,
+      result.target_file ? `Target file: ${result.target_file}` : null,
+      `Writes files: ${result.writes_files === true ? "yes" : "no"}`,
+      result.setup_hint,
+      "",
+      result.writes_files === true
+        ? "Remote MCP config written. The rendered config is omitted from text output because it may contain a scoped credential; use --format json only for trusted automation."
+        : result.rendered_config.trimEnd(),
+      "",
+      "Next agent steps:",
+      ...nextAgentSteps.map((step) => `- ${step}`),
+      ""
+    ].join("\n") + "\n"
+  );
+}
+
+function remoteConnectNextAgentSteps() {
+  return [
+    'Run `recallant agent-start --format json`; remote-only projects should report `mode: "remote_mcp_ready"`.',
+    "Use the configured remote MCP startup loop: `memory_start_session`, `memory_get_context_pack`, concise non-secret work memory, checkpoint state when needed, and `memory_closeout`.",
+    "If direct MCP is unavailable, use the CLI fallback: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`.",
+    "Keep checkpoint-only state separate from semantic memory proof; when proof is needed, create one safe marker with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`. `remote-doctor --semantic-proof` is an optional diagnostic shortcut.",
+    "Use the local-storage attach path only when intentionally switching this project away from remote MCP."
+  ];
+}
+
+type RemoteAgentReadyFilesReport = {
+  skipped_by_flag: boolean;
+  plan: {
+    schema_version: 1;
+    status: StarterDocsPlan["status"] | "skipped_by_flag";
+    reason: string;
+    eligible_for_apply: boolean;
+    writes_files: false;
+    planned_files: Array<{
+      path: string;
+      kind: string;
+      profile: string;
+      required: boolean;
+    }>;
+    skipped_files: StarterDocsPlan["skipped_files"];
+  };
+  outcome: StarterDocsOutcome | null;
+};
+
+function buildRemoteAgentReadyFilesReport(input: {
+  plan: StarterDocsPlan | null;
+  outcome: StarterDocsOutcome | null;
+  skippedByFlag: boolean;
+}): RemoteAgentReadyFilesReport {
+  if (input.skippedByFlag || !input.plan) {
+    return {
+      skipped_by_flag: true,
+      plan: {
+        schema_version: 1,
+        status: "skipped_by_flag",
+        reason: "Agent-ready thin files were skipped by --skip-agent-files.",
+        eligible_for_apply: false,
+        writes_files: false,
+        planned_files: [],
+        skipped_files: []
+      },
+      outcome: null
+    };
+  }
+  return {
+    skipped_by_flag: false,
+    plan: {
+      schema_version: 1,
+      status: input.plan.status,
+      reason: input.plan.reason,
+      eligible_for_apply: input.plan.eligible_for_apply,
+      writes_files: input.plan.writes_files,
+      planned_files: input.plan.files.map((file) => ({
+        path: file.path,
+        kind: file.kind,
+        profile: file.profile,
+        required: file.required
+      })),
+      skipped_files: input.plan.skipped_files
+    },
+    outcome: input.outcome
+  };
+}
+
+function remoteAgentReadyFilesHumanLines(report?: RemoteAgentReadyFilesReport | null) {
+  if (!report) return [] as string[];
+  const plannedFiles = report.plan.planned_files.map((file) => file.path);
+  const generatedFiles = report.outcome?.generated_files ?? [];
+  const updatedFiles = report.outcome?.updated_files ?? [];
+  const skippedFiles = report.outcome?.skipped_files ?? report.plan.skipped_files;
+  const conflictFiles = report.outcome?.conflict_files ?? [];
+  return [
+    `Agent-ready files: ${report.outcome?.status ?? report.plan.status}`,
+    plannedFiles.length ? `  - Planned: ${plannedFiles.join(", ")}` : "  - Planned: none",
+    generatedFiles.length ? `  - Generated: ${generatedFiles.join(", ")}` : "  - Generated: none",
+    updatedFiles.length ? `  - Updated: ${updatedFiles.join(", ")}` : "  - Updated: none",
+    skippedFiles.length
+      ? `  - Skipped: ${skippedFiles.map((file) => `${file.path} (${file.reason})`).join(", ")}`
+      : "  - Skipped: none",
+    conflictFiles.length
+      ? `  - Conflicts: ${conflictFiles.map((file) => `${file.path} (${file.reason})`).join(", ")}`
+      : "  - Conflicts: none",
+    `  - Reason: ${report.outcome?.reason ?? report.plan.reason}`
+  ];
+}
+
+type RemoteConnectProofLevel = "transport" | "context" | "semantic";
+
+type RemoteConnectProofReport = {
+  requested_level: RemoteConnectProofLevel;
+  status: "not_run_dry_run" | "skipped" | "passed" | "warning" | "failed";
+  remote_mcp_ready: boolean;
+  context_ready: boolean;
+  semantic_memory_ready: boolean;
+  capture_active: false;
+  readiness_state:
+    | "not_run"
+    | "remote_mcp_ready"
+    | "context_ready"
+    | "semantic_memory_ready"
+    | "attention_required";
+  next_action: string;
+  doctor_summary: RemoteMcpDoctorReport["summary"] | null;
+  stages: Array<{
+    id: string;
+    status: string;
+    code: string;
+    message: string;
+    remediation?: string | null;
+  }>;
+};
+
+function parseRemoteConnectProofLevel(argv: readonly string[]): RemoteConnectProofLevel {
+  if (argv.includes("--semantic-proof")) return "semantic";
+  if (argv.includes("--context-proof") || argv.includes("--capture-proof")) return "context";
+  const raw = parseFlag(argv, "--proof") ?? "context";
+  if (raw === "transport" || raw === "context" || raw === "semantic") return raw;
+  throw new Error("VALIDATION_ERROR: --proof must be transport, context, or semantic");
+}
+
+function remoteDoctorStageStatus(report: RemoteMcpDoctorReport | null, id: string) {
+  return report?.stages.find((stageEntry) => stageEntry.id === id) ?? null;
+}
+
+function firstRemoteDoctorRemediation(report: RemoteMcpDoctorReport | null) {
+  return (
+    report?.stages.find((stageEntry) => stageEntry.status === "fail" && stageEntry.remediation)
+      ?.remediation ??
+    report?.stages.find((stageEntry) => stageEntry.status === "warn" && stageEntry.remediation)
+      ?.remediation ??
+    null
+  );
+}
+
+function remoteConnectProofNextAction(input: {
+  proofLevel: RemoteConnectProofLevel;
+  status: RemoteConnectProofReport["status"];
+  remoteMcpReady: boolean;
+  contextReady: boolean;
+  semanticMemoryReady: boolean;
+  remediation?: string | null;
+}) {
+  if (input.status === "not_run_dry_run") {
+    return `After approval, connect-cloud will run ${input.proofLevel === "semantic" ? "semantic governed-memory proof" : input.proofLevel === "context" ? "session/context proof" : "transport proof"} unless --skip-doctor is used.`;
+  }
+  if (input.status === "skipped") {
+    return "Run `recallant remote-doctor --project-dir . --capture-proof` for context proof, or `recallant remote-doctor --project-dir . --semantic-proof` for governed semantic proof.";
+  }
+  if (input.status === "failed") {
+    return (
+      input.remediation ??
+      "Run `recallant remote-doctor --project-dir . --capture-proof` and fix the first failing stage."
+    );
+  }
+  if (input.semanticMemoryReady) {
+    return "Semantic proof is present. capture_active remains false until a fresh automatic agent event is observed; remote MCP activity alone does not claim automatic capture.";
+  }
+  if (input.contextReady) {
+    return "Run `recallant remote-doctor --project-dir . --semantic-proof` when you want a safe governed semantic marker create/recall proof.";
+  }
+  if (input.remoteMcpReady) {
+    return "Run `recallant remote-doctor --project-dir . --capture-proof` to prove session/context readiness.";
+  }
+  return "Run `recallant remote-doctor --project-dir . --format json` to diagnose remote MCP access.";
+}
+
+function remoteConnectProofReport(input: {
+  proofLevel: RemoteConnectProofLevel;
+  report: RemoteMcpDoctorReport | null;
+  dryRun: boolean;
+  skipped: boolean;
+}): RemoteConnectProofReport {
+  if (input.dryRun) {
+    return {
+      requested_level: input.proofLevel,
+      status: "not_run_dry_run",
+      remote_mcp_ready: false,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      readiness_state: "not_run",
+      next_action: remoteConnectProofNextAction({
+        proofLevel: input.proofLevel,
+        status: "not_run_dry_run",
+        remoteMcpReady: false,
+        contextReady: false,
+        semanticMemoryReady: false
+      }),
+      doctor_summary: null,
+      stages: []
+    };
+  }
+  if (input.skipped || !input.report) {
+    return {
+      requested_level: input.proofLevel,
+      status: "skipped",
+      remote_mcp_ready: false,
+      context_ready: false,
+      semantic_memory_ready: false,
+      capture_active: false,
+      readiness_state: "not_run",
+      next_action: remoteConnectProofNextAction({
+        proofLevel: input.proofLevel,
+        status: "skipped",
+        remoteMcpReady: false,
+        contextReady: false,
+        semanticMemoryReady: false
+      }),
+      doctor_summary: null,
+      stages: []
+    };
+  }
+  const initializeOk = remoteDoctorStageStatus(input.report, "mcp_initialize")?.status === "pass";
+  const toolsOk = remoteDoctorStageStatus(input.report, "tools_list")?.status === "pass";
+  const contextReady =
+    remoteDoctorStageStatus(input.report, "session_context_readiness")?.status === "pass";
+  const semanticMemoryReady =
+    remoteDoctorStageStatus(input.report, "semantic_memory_proof")?.status === "pass";
+  const remoteMcpReady = initializeOk && toolsOk;
+  const status = input.report.summary.ok
+    ? input.report.summary.warning_stage_ids.length > 0
+      ? "warning"
+      : "passed"
+    : "failed";
+  const readinessState = !input.report.summary.ok
+    ? "attention_required"
+    : semanticMemoryReady
+      ? "semantic_memory_ready"
+      : contextReady
+        ? "context_ready"
+        : remoteMcpReady
+          ? "remote_mcp_ready"
+          : "attention_required";
+  return {
+    requested_level: input.proofLevel,
+    status,
+    remote_mcp_ready: remoteMcpReady,
+    context_ready: contextReady,
+    semantic_memory_ready: semanticMemoryReady,
+    capture_active: false,
+    readiness_state: readinessState,
+    next_action: remoteConnectProofNextAction({
+      proofLevel: input.proofLevel,
+      status,
+      remoteMcpReady,
+      contextReady,
+      semanticMemoryReady,
+      remediation: firstRemoteDoctorRemediation(input.report)
+    }),
+    doctor_summary: input.report.summary,
+    stages: input.report.stages.map((stageEntry) => ({
+      id: stageEntry.id,
+      status: stageEntry.status,
+      code: stageEntry.code,
+      message: stageEntry.message,
+      remediation: stageEntry.remediation ?? null
+    }))
+  };
+}
+
+function remoteProofHumanLines(report?: RemoteConnectProofReport | null) {
+  if (!report) return [] as string[];
+  return [
+    `Remote proof: ${report.status}`,
+    `  - Requested: ${report.requested_level}`,
+    `  - State: ${report.readiness_state}`,
+    `  - remote_mcp_ready: ${report.remote_mcp_ready ? "yes" : "no"}`,
+    `  - context_ready: ${report.context_ready ? "yes" : "no"}`,
+    `  - semantic_memory_ready: ${report.semantic_memory_ready ? "yes" : "no"}`,
+    `  - capture_active: ${report.capture_active ? "yes" : "no"}`,
+    `  - Next: ${report.next_action}`
+  ];
+}
+
+function remoteConnectCloudHumanReport(result: {
+  projectDir: string;
+  target: string;
+  serverUrl: string;
+  approveUrl: string;
+  approvalMode?: string | null;
+  browserApprovalRequired?: boolean;
+  bootstrapTokenStatus?: string | null;
+  bootstrapTokenPrefix?: string | null;
+  trustedDeviceName?: string | null;
+  trustedDevicePath?: string | null;
+  trustedDeviceStatus?: string | null;
+  credentialStorePath?: string | null;
+  consentReceiptPath?: string | null;
+  configFile?: string | null;
+  targetFile?: string | null;
+  agentReadyFiles?: RemoteAgentReadyFilesReport | null;
+  remoteProof?: RemoteConnectProofReport | null;
+  writesFiles: boolean;
+  doctorStatus: string;
+  status: string;
+  nextAgentSteps?: string[];
+}) {
+  const nextAgentSteps = result.nextAgentSteps ?? remoteConnectNextAgentSteps();
+  const approvalCopy =
+    result.browserApprovalRequired === false
+      ? result.approvalMode === "bootstrap_token"
+        ? `Approval: one-time bootstrap token auto-approved (${result.bootstrapTokenPrefix ?? "redacted prefix"}); browser approval not required.`
+        : `Approval: trusted device auto-approved (${result.approvalMode ?? "trusted_device"}); browser approval not required.`
+      : "Approve this project in your browser:";
+  return (
+    [
+      "Recallant connect-cloud",
+      "",
+      `Status: ${result.status}`,
+      `Project: ${result.projectDir}`,
+      `Agent client: ${result.target}`,
+      `Server: ${result.serverUrl}`,
+      "",
+      result.trustedDeviceName ? `Trusted device: ${result.trustedDeviceName}` : null,
+      result.trustedDeviceStatus ? `Trusted device status: ${result.trustedDeviceStatus}` : null,
+      result.trustedDevicePath ? `Trusted device store: ${result.trustedDevicePath}` : null,
+      result.bootstrapTokenStatus ? `Bootstrap token: ${result.bootstrapTokenStatus}` : null,
+      result.bootstrapTokenPrefix ? `Bootstrap token prefix: ${result.bootstrapTokenPrefix}` : null,
+      result.trustedDeviceName ? "" : null,
+      approvalCopy,
+      result.browserApprovalRequired === false ? null : `  ${result.approveUrl}`,
+      "",
+      result.configFile ? `Config file: ${result.configFile}` : null,
+      result.targetFile ? `Target file: ${result.targetFile}` : null,
+      result.credentialStorePath
+        ? `Credential storage: local Recallant credential store (${result.credentialStorePath}); project config uses a credential ref, not the raw secret.`
+        : "Credential storage: project config uses a credential ref; raw scoped credentials are not written into tracked config.",
+      result.consentReceiptPath ? `Consent receipt: ${result.consentReceiptPath}` : null,
+      `Writes files: ${result.writesFiles ? "yes" : "no"}`,
+      ...remoteAgentReadyFilesHumanLines(result.agentReadyFiles),
+      ...remoteProofHumanLines(result.remoteProof),
+      `Remote doctor: ${result.doctorStatus}`,
+      "",
+      "Next agent steps:",
+      ...nextAgentSteps.map((step) => `- ${step}`),
+      "",
+      "First browser approval can register a trusted device key; later projects from that trusted device use signed nonce reconnect. Headless servers should use a one-time bootstrap token.",
+      "This flow does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, or provider secrets.",
+      ""
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n"
+  );
+}
+
+function remoteConnectHash(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+type RemoteConnectTrustedDeviceState = {
+  version: "remote-trusted-device-v1";
+  device_name: string;
+  device_key_prefix: string;
+  public_key_fingerprint: string;
+  public_key_algorithm: "ed25519-v1";
+  public_key_material: string;
+  private_key_material: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function remoteConnectTrustedDevicePath() {
+  return join(homedir(), ".config", "recallant", "trusted-device.json");
+}
+
+function parseRemoteTrustedDeviceState(
+  text: string | null
+): RemoteConnectTrustedDeviceState | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as Partial<RemoteConnectTrustedDeviceState>;
+    if (
+      parsed.version === "remote-trusted-device-v1" &&
+      parsed.device_key_prefix &&
+      parsed.public_key_fingerprint &&
+      parsed.public_key_algorithm === "ed25519-v1" &&
+      parsed.public_key_material &&
+      parsed.private_key_material
+    ) {
+      return {
+        version: "remote-trusted-device-v1",
+        device_name: parsed.device_name || hostname() || "remote-device",
+        device_key_prefix: parsed.device_key_prefix,
+        public_key_fingerprint: parsed.public_key_fingerprint,
+        public_key_algorithm: "ed25519-v1",
+        public_key_material: parsed.public_key_material,
+        private_key_material: parsed.private_key_material,
+        created_at: parsed.created_at || new Date().toISOString(),
+        updated_at: parsed.updated_at || new Date().toISOString()
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function ensureRemoteConnectTrustedDevice() {
+  const path = remoteConnectTrustedDevicePath();
+  const existing = parseRemoteTrustedDeviceState(await readOptional(path));
+  if (existing) return { state: existing, path, created: false };
+
+  const pair = generateKeyPairSync("ed25519");
+  const publicKeyMaterial = pair.publicKey.export({ format: "pem", type: "spki" }).toString();
+  const privateKeyMaterial = pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const fingerprint = createHash("sha256").update(publicKeyMaterial).digest("hex");
+  const now = new Date().toISOString();
+  const state: RemoteConnectTrustedDeviceState = {
+    version: "remote-trusted-device-v1",
+    device_name: hostname() || "remote-device",
+    device_key_prefix: fingerprint.slice(0, 16),
+    public_key_fingerprint: fingerprint,
+    public_key_algorithm: "ed25519-v1",
+    public_key_material: publicKeyMaterial,
+    private_key_material: privateKeyMaterial,
+    created_at: now,
+    updated_at: now
+  };
+  await mkdir(dirname(path), { recursive: true });
+  await chmod(dirname(path), 0o700).catch(() => undefined);
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await chmod(path, 0o600).catch(() => undefined);
+  return { state, path, created: true };
+}
+
+function remoteConnectTrustedDeviceChallengePayload(input: {
+  target: string;
+  projectFingerprint: string | null | undefined;
+  projectPathHintRedacted: string | null | undefined;
+  challengeNonce: string;
+}) {
+  return [
+    "recallant-connect-trusted-device-v1",
+    `target:${input.target}`,
+    `project_fingerprint:${input.projectFingerprint ?? ""}`,
+    `project_path_hint_redacted:${input.projectPathHintRedacted ?? ""}`,
+    `challenge_nonce:${input.challengeNonce}`
+  ].join("\n");
+}
+
+function signRemoteConnectTrustedDeviceChallenge(input: {
+  state: RemoteConnectTrustedDeviceState;
+  target: string;
+  projectFingerprint: string;
+  projectPathHintRedacted: string;
+  challengeNonce: string;
+}) {
+  const payload = remoteConnectTrustedDeviceChallengePayload({
+    target: input.target,
+    projectFingerprint: input.projectFingerprint,
+    projectPathHintRedacted: input.projectPathHintRedacted,
+    challengeNonce: input.challengeNonce
+  });
+  return signPayload(
+    null,
+    Buffer.from(payload, "utf8"),
+    createPrivateKey(input.state.private_key_material)
+  ).toString("base64url");
+}
+
+async function confirmRemoteConnectLocalFolder(
+  argv: readonly string[],
+  projectDir: string,
+  pathHint: string
+) {
+  if (argv.includes("--yes") || argv.includes("--non-interactive")) return "explicit_yes";
+  if (!process.stdin.isTTY) return "skipped_non_tty";
+  const answer = await promptLine(
+    [
+      "Recallant will request a scoped remote project credential for this local folder.",
+      `Project: ${projectDir}`,
+      `Path hint: ${pathHint}`,
+      "Type yes to continue, or press Enter to cancel: "
+    ].join("\n")
+  );
+  if (!["y", "yes"].includes(answer.toLowerCase())) {
+    throw new Error(
+      "VALIDATION_ERROR: local folder confirmation declined. No remote project credential was requested."
+    );
+  }
+  return "confirmed_tty";
+}
+
+async function projectPathHint(projectDir: string) {
+  let real = projectDir;
+  try {
+    real = await realpath(projectDir);
+  } catch {
+    real = resolve(projectDir);
+  }
+  return `${basename(real) || "project"}:${remoteConnectHash(real)}`;
+}
+
+async function postJson(url: string, body: Record<string, unknown>) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`Remote connect endpoint returned non-JSON response (${response.status})`);
+  }
+  if (!response.ok) {
+    const message =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String((parsed as Record<string, unknown>).error)
+        : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function requireStringField(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`VALIDATION_ERROR: remote connect response is missing ${key}`);
+  }
+  return value;
+}
+
+function runNodeHelperScript(scriptRelativePath: string, args: readonly string[]) {
+  const script = join(repoRootFromCliModule(), scriptRelativePath);
+  const result = spawnSync(process.execPath, [script, ...args], {
+    stdio: "inherit",
+    env: process.env
+  });
+  if (result.error) throw result.error;
+  process.exit(typeof result.status === "number" ? result.status : 1);
+}
+
+function runRemoteAcceptance(argv: readonly string[]) {
+  const subcommand = argv[3];
+  if (subcommand === "validate-live" || subcommand === "verify-live") {
+    return runNodeHelperScript(
+      "scripts/validate-capture-recall-acceptance-live.mjs",
+      argv.slice(4)
+    );
+  }
+  if (subcommand === "validate" || subcommand === "verify") {
+    return runNodeHelperScript(
+      "scripts/validate-remote-mcp-separate-machine-evidence.mjs",
+      argv.slice(4)
+    );
+  }
+  const args = subcommand === "run" ? argv.slice(4) : argv.slice(3);
+  return runNodeHelperScript("scripts/remote-mcp-separate-machine-evidence.mjs", args);
+}
+
+async function runConnectRemote(argv: readonly string[]) {
+  const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const writeConfig = argv.includes("--write");
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const config = validateRemoteMcpBridgeConfig({
+    serverUrl: requiredFlag(argv, "--server-url"),
+    credential: requiredFlag(argv, "--credential"),
+    projectId: requiredFlag(argv, "--project-id"),
+    developerId: requiredFlag(argv, "--developer-id"),
+    clientId: requiredFlag(argv, "--client-id"),
+    sessionId: parseFlag(argv, "--session-id"),
+    traceId: parseFlag(argv, "--trace-id")
+  });
+  const credentialStore = writeConfig
+    ? storeRemoteMcpCredential({
+        credential: config.credential,
+        serverUrl: config.serverUrl,
+        projectId: config.projectId,
+        developerId: config.developerId,
+        clientId: config.clientId
+      })
+    : null;
+  const targetConfig = remoteClientTargetConfig(target, {
+    ...config,
+    credential: credentialStore ? null : config.credential,
+    credentialRef: credentialStore?.key ?? null,
+    credentialStorePath: credentialStore?.display_path ?? null
+  });
+  const targetFile = resolve(projectDir, targetConfig.config_file);
+  const existing = writeConfig ? await readOptional(targetFile) : null;
+  const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
+  if (writeConfig) {
+    await mkdir(dirname(targetFile), { recursive: true });
+    await writeFile(targetFile, rendered);
+  }
+  const consentReceipt = writeConfig
+    ? await writeRemoteAgentConsentReceipt({
+        projectDir,
+        serverUrl: config.serverUrl,
+        projectId: config.projectId,
+        developerId: config.developerId,
+        clientId: config.clientId,
+        credentialRef: credentialStore?.key ?? null,
+        credentialPrefix: credentialStore?.credential_prefix ?? null,
+        credentialStorePath: credentialStore?.display_path ?? null,
+        approvalMode: "scoped_credential"
+      })
+    : null;
+  const result = {
+    ok: true,
+    action: "connect_remote",
+    remote: true,
+    target: targetConfig.target,
+    config_file: targetConfig.config_file,
+    project_dir: projectDir,
+    target_file: targetFile,
+    credential_store: credentialStore,
+    format: targetConfig.format,
+    setup_hint: targetConfig.setup_hint,
+    writes_files: writeConfig,
+    writes_database: false,
+    uses_local_storage: false,
+    required_scope: {
+      project_id: config.projectId,
+      developer_id: config.developerId,
+      client_id: config.clientId,
+      session_id: config.sessionId,
+      trace_id: config.traceId
+    },
+    mcp_config: targetConfig.mcp_config,
+    rendered_config: rendered,
+    consent_receipt: consentReceipt
+      ? {
+          path: remoteAgentConsentReceiptPath(projectDir),
+          no_raw_credentials_or_private_keys: consentReceipt.no_raw_credentials_or_private_keys,
+          redaction_boundary: consentReceipt.consent_scope.redaction_boundary
+        }
+      : null,
+    safety: {
+      command: "recallant remote-bridge",
+      uses_https_mcp_endpoint: true,
+      requires_recallant_database_url: false,
+      exposes_postgres: false,
+      exposes_workbench_or_admin_auth: false,
+      exposes_raw_artifacts_or_backups: false,
+      exposes_provider_secrets: false
+    },
+    next_agent_steps: remoteConnectNextAgentSteps()
+  };
+  process.stdout.write(
+    format === "json" ? `${JSON.stringify(result, null, 2)}\n` : remoteConnectHumanReport(result)
+  );
+}
+
+async function runConnectCloud(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const positional = positionalArgs(argv);
+  const projectDir = resolve(parseFlag(argv, "--project-dir") ?? positional[0] ?? process.cwd());
+  const target = parseFlag(argv, "--target") ?? parseFlag(argv, "--client") ?? "codex";
+  const serverUrl = normalizeInviteServerUrl(requiredFlag(argv, "--server-url"));
+  const bootstrapToken = parseFlag(argv, "--bootstrap-token");
+  const skipDoctor = argv.includes("--skip-doctor");
+  const skipAgentFiles = argv.includes("--skip-agent-files");
+  const dryRun = argv.includes("--dry-run");
+  const proofLevel = parseRemoteConnectProofLevel(argv);
+  const pollTimeoutMs = parsePositiveInt(parseFlag(argv, "--poll-timeout-ms"), 120_000);
+  const pollIntervalMs = parsePositiveInt(parseFlag(argv, "--poll-interval-ms"), 2_000);
+  const documentationPosture = skipAgentFiles
+    ? null
+    : await analyzeProjectDocumentationPosture(projectDir);
+  const agentReadyFilesPlan = documentationPosture
+    ? planRemoteAgentReadyFiles({
+        projectName: basename(projectDir) || "project",
+        posture: documentationPosture,
+        existingTargetPaths: documentationPosture.existing_docs
+      })
+    : null;
+  const plannedAgentReadyFiles = buildRemoteAgentReadyFilesReport({
+    plan: agentReadyFilesPlan,
+    outcome: null,
+    skippedByFlag: skipAgentFiles
+  });
+  const pathHint = await projectPathHint(projectDir);
+  const projectFingerprint = remoteConnectHash(`${target}:${pathHint}`);
+  const localConfirmation = await confirmRemoteConnectLocalFolder(argv, projectDir, pathHint);
+  const trustedDevice = bootstrapToken ? null : await ensureRemoteConnectTrustedDevice();
+  const challengeNonce = trustedDevice ? randomUUID() : null;
+  const challengeSignature =
+    trustedDevice && challengeNonce
+      ? signRemoteConnectTrustedDeviceChallenge({
+          state: trustedDevice.state,
+          target,
+          projectFingerprint,
+          projectPathHintRedacted: pathHint,
+          challengeNonce
+        })
+      : null;
+  const startBody: Record<string, unknown> = {
+    target,
+    project_display_name: basename(projectDir) || "project",
+    project_fingerprint: projectFingerprint,
+    project_path_hint_redacted: pathHint
+  };
+  if (bootstrapToken) {
+    startBody.bootstrap_token = bootstrapToken;
+  }
+  if (trustedDevice && challengeNonce && challengeSignature) {
+    startBody.trusted_device_registration = {
+      device_name: trustedDevice.state.device_name,
+      device_key_prefix: trustedDevice.state.device_key_prefix,
+      public_key_fingerprint: trustedDevice.state.public_key_fingerprint,
+      public_key_material: trustedDevice.state.public_key_material,
+      public_key_algorithm: trustedDevice.state.public_key_algorithm
+    };
+    startBody.trusted_device = {
+      device_key_prefix: trustedDevice.state.device_key_prefix,
+      public_key_fingerprint: trustedDevice.state.public_key_fingerprint,
+      public_key_material: trustedDevice.state.public_key_material,
+      challenge_nonce: challengeNonce,
+      challenge_signature: challengeSignature,
+      signature_algorithm: trustedDevice.state.public_key_algorithm
+    };
+  }
+  const start = await postJson(`${serverUrl}/api/connect/start`, startBody);
+  const approveUrl = requireStringField(start, "approve_url");
+  const pollToken = requireStringField(start, "poll_token");
+  const startTrustedDevice =
+    start.trusted_device &&
+    typeof start.trusted_device === "object" &&
+    !Array.isArray(start.trusted_device)
+      ? (start.trusted_device as Record<string, unknown>)
+      : null;
+  const startBootstrapToken =
+    start.bootstrap_token &&
+    typeof start.bootstrap_token === "object" &&
+    !Array.isArray(start.bootstrap_token)
+      ? (start.bootstrap_token as Record<string, unknown>)
+      : null;
+  const browserApprovalRequired =
+    startBootstrapToken?.browser_approval_required === false
+      ? false
+      : startTrustedDevice?.browser_approval_required !== false;
+  const trustedDeviceReconnectStatus =
+    typeof startTrustedDevice?.status === "string" ? startTrustedDevice.status : null;
+  const trustedDeviceFallbackReason =
+    typeof startTrustedDevice?.reason === "string" ? startTrustedDevice.reason : null;
+  const bootstrapTokenStatus =
+    typeof startBootstrapToken?.status === "string" ? startBootstrapToken.status : null;
+  const bootstrapTokenPrefix =
+    typeof startBootstrapToken?.token_prefix === "string" ? startBootstrapToken.token_prefix : null;
+  const startApprovalMode =
+    typeof start.approval_mode === "string"
+      ? start.approval_mode
+      : browserApprovalRequired
+        ? "human_approval"
+        : "trusted_device";
+  if (format === "text") {
+    process.stdout.write(
+      [
+        "Recallant connect-cloud",
+        "",
+        `Project: ${projectDir}`,
+        `Server: ${serverUrl}`,
+        "",
+        trustedDevice ? `Trusted device: ${trustedDevice.state.device_name}` : null,
+        trustedDevice
+          ? `Trusted device status: ${trustedDevice.created ? "created" : "reused"}`
+          : null,
+        trustedDeviceReconnectStatus
+          ? `Trusted reconnect: ${trustedDeviceReconnectStatus}${trustedDeviceFallbackReason ? ` (${trustedDeviceFallbackReason})` : ""}`
+          : null,
+        trustedDevice ? `Trusted device store: ${trustedDevice.path}` : null,
+        bootstrapToken ? `Bootstrap token: ${bootstrapTokenStatus ?? "submitted"}` : null,
+        bootstrapTokenPrefix ? `Bootstrap token prefix: ${bootstrapTokenPrefix}` : null,
+        `Local confirmation: ${localConfirmation}`,
+        "",
+        browserApprovalRequired
+          ? "Approve this project in your browser:"
+          : startApprovalMode === "bootstrap_token"
+            ? "Bootstrap token approved this project; browser approval is not required."
+            : "Trusted device approved this project; browser approval is not required.",
+        browserApprovalRequired ? `  ${approveUrl}` : null,
+        "",
+        browserApprovalRequired
+          ? `Waiting for approval for up to ${Math.round(pollTimeoutMs / 1000)} seconds...`
+          : "Waiting for scoped project credential...",
+        ""
+      ]
+        .filter((line): line is string => line !== null)
+        .join("\n")
+    );
+  }
+  if (dryRun) {
+    const result = {
+      ok: true,
+      action: "connect_cloud",
+      status: "dry_run",
+      project_dir: projectDir,
+      target,
+      server_url: serverUrl,
+      approve_url: approveUrl,
+      approval_mode: startApprovalMode,
+      browser_approval_required: browserApprovalRequired,
+      local_confirmation: localConfirmation,
+      trusted_device: {
+        device_name: trustedDevice?.state.device_name ?? null,
+        device_key_prefix: trustedDevice?.state.device_key_prefix ?? null,
+        public_key_fingerprint: trustedDevice?.state.public_key_fingerprint ?? null,
+        public_key_algorithm: trustedDevice?.state.public_key_algorithm ?? null,
+        store_path: trustedDevice?.path ?? null,
+        created: trustedDevice?.created ?? false,
+        reconnect_status: trustedDeviceReconnectStatus,
+        fallback_reason: trustedDeviceFallbackReason,
+        private_key_printed: false
+      },
+      bootstrap_token: bootstrapToken
+        ? {
+            status: bootstrapTokenStatus,
+            token_prefix: bootstrapTokenPrefix,
+            token_printed: false
+          }
+        : null,
+      writes_files: false,
+      agent_ready_files: plannedAgentReadyFiles,
+      remote_proof: remoteConnectProofReport({
+        proofLevel,
+        report: null,
+        dryRun: true,
+        skipped: skipDoctor
+      }),
+      doctor_status: "not_run_dry_run",
+      safety: {
+        requires_recallant_database_url: false,
+        requires_docker: false,
+        requires_postgres: false,
+        exposes_workbench_or_admin_auth: false,
+        exposes_raw_artifacts_or_backups: false,
+        exposes_provider_secrets: false
+      }
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : remoteConnectCloudHumanReport({
+            projectDir,
+            target,
+            serverUrl,
+            approveUrl,
+            approvalMode: startApprovalMode,
+            browserApprovalRequired,
+            trustedDeviceName: trustedDevice?.state.device_name,
+            trustedDevicePath: trustedDevice?.path,
+            trustedDeviceStatus: trustedDevice
+              ? trustedDevice.created
+                ? "created"
+                : "reused"
+              : null,
+            bootstrapTokenStatus,
+            bootstrapTokenPrefix,
+            agentReadyFiles: plannedAgentReadyFiles,
+            remoteProof: remoteConnectProofReport({
+              proofLevel,
+              report: null,
+              dryRun: true,
+              skipped: skipDoctor
+            }),
+            writesFiles: false,
+            doctorStatus: "not_run_dry_run",
+            status: "dry_run"
+          })
+    );
+    return;
+  }
+
+  const deadline = Date.now() + pollTimeoutMs;
+  let approved: Record<string, unknown> | null = null;
+  while (Date.now() <= deadline) {
+    const poll = await postJson(`${serverUrl}/api/connect/poll`, { poll_token: pollToken });
+    const status = String(poll.status ?? "");
+    if (status === "approved") {
+      approved = poll;
+      break;
+    }
+    if (status === "denied" || status === "expired" || status === "redeemed") {
+      throw new Error(`VALIDATION_ERROR: remote connect request is ${status}`);
+    }
+    if (status !== "pending")
+      throw new Error(`VALIDATION_ERROR: unsupported poll status ${status}`);
+    if (format === "text") process.stdout.write(".");
+    await sleep(pollIntervalMs);
+  }
+  if (!approved) throw new Error("VALIDATION_ERROR: remote connect approval timed out");
+  const approvalReceivedLabel =
+    startApprovalMode === "trusted_device"
+      ? "Trusted device approval received"
+      : startApprovalMode === "bootstrap_token"
+        ? "Bootstrap token approval received"
+        : "Approval received";
+  if (format === "text")
+    process.stdout.write(`\n${approvalReceivedLabel}. Writing remote MCP config...\n`);
+  const bootstrap = approved.bootstrap;
+  if (!bootstrap || typeof bootstrap !== "object" || Array.isArray(bootstrap)) {
+    throw new Error("VALIDATION_ERROR: approved remote connect response is missing bootstrap data");
+  }
+  const bootstrapRecord = bootstrap as Record<string, unknown>;
+  const config = validateRemoteMcpBridgeConfig({
+    serverUrl: requireStringField(bootstrapRecord, "server_url"),
+    credential: requireStringField(bootstrapRecord, "credential"),
+    projectId: requireStringField(bootstrapRecord, "project_id"),
+    developerId: requireStringField(bootstrapRecord, "developer_id"),
+    clientId: requireStringField(bootstrapRecord, "client_id"),
+    sessionId: parseFlag(argv, "--session-id"),
+    traceId: parseFlag(argv, "--trace-id")
+  });
+  const approvedCredential =
+    approved.credential &&
+    typeof approved.credential === "object" &&
+    !Array.isArray(approved.credential)
+      ? (approved.credential as Record<string, unknown>)
+      : null;
+  const credentialStore = storeRemoteMcpCredential({
+    credential: config.credential,
+    serverUrl: config.serverUrl,
+    projectId: config.projectId,
+    developerId: config.developerId,
+    clientId: config.clientId,
+    credentialPrefix:
+      typeof approvedCredential?.credential_prefix === "string"
+        ? approvedCredential.credential_prefix
+        : null
+  });
+  const approvedTarget = String(bootstrapRecord.target ?? target);
+  const targetConfig = remoteClientTargetConfig(approvedTarget, {
+    ...config,
+    credential: null,
+    credentialRef: credentialStore.key,
+    credentialStorePath: credentialStore.display_path
+  });
+  const targetFile = resolve(projectDir, targetConfig.config_file);
+  const existing = await readOptional(targetFile);
+  const rendered = renderRemoteClientTargetConfig(existing, targetConfig);
+  await mkdir(dirname(targetFile), { recursive: true });
+  await writeFile(targetFile, rendered);
+
+  let doctorStatus = "skipped";
+  let remoteDoctorReport: RemoteMcpDoctorReport | null = null;
+  if (!skipDoctor) {
+    doctorStatus = "running";
+    const doctorArgs = [
+      argv[0] ?? "recallant",
+      argv[1] ?? "recallant",
+      "remote-doctor",
+      "--server-url",
+      config.serverUrl,
+      "--credential-ref",
+      credentialStore.key,
+      "--credential-store",
+      credentialStore.display_path,
+      "--project-id",
+      config.projectId,
+      "--developer-id",
+      config.developerId,
+      "--client-id",
+      config.clientId,
+      "--format",
+      "json",
+      ...(proofLevel === "context" ? ["--capture-proof"] : []),
+      ...(proofLevel === "semantic" ? ["--semantic-proof"] : []),
+      ...(argv.includes("--allow-insecure-localhost") ? ["--allow-insecure-localhost"] : [])
+    ];
+    remoteDoctorReport = await buildRemoteDoctorReport(doctorArgs);
+    doctorStatus = remoteDoctorReport.summary.ok ? "passed" : "failed";
+  }
+  const approvalMode =
+    typeof approved.approval_mode === "string" ? approved.approval_mode : startApprovalMode;
+  const consentReceipt = await writeRemoteAgentConsentReceipt({
+    projectDir,
+    serverUrl: config.serverUrl,
+    projectId: config.projectId,
+    developerId: config.developerId,
+    clientId: config.clientId,
+    credentialRef: credentialStore.key,
+    credentialPrefix: credentialStore.credential_prefix ?? credentialStore.key,
+    credentialStorePath: credentialStore.display_path,
+    approvalMode
+  });
+  const agentReadyFilesOutcome = agentReadyFilesPlan
+    ? await applyRemoteAgentReadyFiles({
+        projectDir,
+        projectName: basename(projectDir) || "project",
+        plan: agentReadyFilesPlan
+      })
+    : null;
+  const agentReadyFiles = buildRemoteAgentReadyFilesReport({
+    plan: agentReadyFilesPlan,
+    outcome: agentReadyFilesOutcome,
+    skippedByFlag: skipAgentFiles
+  });
+  const remoteProof = remoteConnectProofReport({
+    proofLevel,
+    report: remoteDoctorReport,
+    dryRun: false,
+    skipped: skipDoctor
+  });
+  const result = {
+    ok: true,
+    action: "connect_cloud",
+    status: "connected",
+    project_dir: projectDir,
+    target: targetConfig.target,
+    server_url: config.serverUrl,
+    approve_url: approveUrl,
+    approval_mode: approvalMode,
+    browser_approval_required: browserApprovalRequired,
+    local_confirmation: localConfirmation,
+    credential_store: credentialStore,
+    trusted_device: {
+      device_name: trustedDevice?.state.device_name ?? null,
+      device_key_prefix: trustedDevice?.state.device_key_prefix ?? null,
+      public_key_fingerprint: trustedDevice?.state.public_key_fingerprint ?? null,
+      public_key_algorithm: trustedDevice?.state.public_key_algorithm ?? null,
+      store_path: trustedDevice?.path ?? null,
+      created: trustedDevice?.created ?? false,
+      reconnect_status: trustedDeviceReconnectStatus,
+      fallback_reason: trustedDeviceFallbackReason,
+      private_key_printed: false
+    },
+    bootstrap_token: bootstrapToken
+      ? {
+          status: bootstrapTokenStatus,
+          token_prefix: bootstrapTokenPrefix,
+          token_printed: false
+        }
+      : null,
+    config_file: targetConfig.config_file,
+    target_file: targetFile,
+    consent_receipt: {
+      path: remoteAgentConsentReceiptPath(projectDir),
+      no_raw_credentials_or_private_keys: consentReceipt.no_raw_credentials_or_private_keys,
+      redaction_boundary: consentReceipt.consent_scope.redaction_boundary
+    },
+    writes_files: true,
+    agent_ready_files: agentReadyFiles,
+    remote_proof: remoteProof,
+    doctor_status: doctorStatus,
+    scope: {
+      project_id: config.projectId,
+      developer_id: config.developerId,
+      client_id: config.clientId,
+      session_id: config.sessionId,
+      trace_id: config.traceId
+    },
+    safety: {
+      command: "recallant remote-bridge",
+      uses_https_mcp_endpoint: true,
+      requires_recallant_database_url: false,
+      requires_docker: false,
+      requires_postgres: false,
+      exposes_workbench_or_admin_auth: false,
+      exposes_raw_artifacts_or_backups: false,
+      exposes_provider_secrets: false
+    },
+    next_agent_steps: remoteConnectNextAgentSteps()
+  };
+  process.stdout.write(
+    format === "json"
+      ? `${JSON.stringify(result, null, 2)}\n`
+      : remoteConnectCloudHumanReport({
+          projectDir,
+          target: targetConfig.target,
+          serverUrl: config.serverUrl,
+          approveUrl,
+          approvalMode,
+          browserApprovalRequired,
+          trustedDeviceName: trustedDevice?.state.device_name,
+          trustedDevicePath: trustedDevice?.path,
+          trustedDeviceStatus: trustedDevice
+            ? trustedDevice.created
+              ? "created"
+              : "reused"
+            : null,
+          bootstrapTokenStatus,
+          bootstrapTokenPrefix,
+          credentialStorePath: credentialStore.display_path,
+          consentReceiptPath: remoteAgentConsentReceiptPath(projectDir),
+          configFile: targetConfig.config_file,
+          targetFile,
+          agentReadyFiles,
+          remoteProof,
+          writesFiles: true,
+          doctorStatus,
+          status: "connected"
+        })
+  );
+  if (remoteDoctorReport && !remoteDoctorReport.summary.ok) process.exitCode = 1;
+}
+
+function remoteCredentialProvisioningServerUrl(argv: readonly string[]) {
+  return (
+    parseFlag(argv, "--server-url") ??
+    process.env.RECALLANT_REMOTE_MCP_URL ??
+    "<https-recallant-server>"
+  );
+}
+
+function remoteCredentialProvisioningTarget(argv: readonly string[]) {
+  return parseFlag(argv, "--target") ?? "codex";
+}
+
+function remoteCredentialProvisioningBridgeClientId(
+  argv: readonly string[],
+  clientId?: string | null
+) {
+  return parseFlag(argv, "--bridge-client-id") ?? clientId ?? "remote-agent";
+}
+
+function normalizeInviteServerUrl(raw: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(withDefaultServerUrlScheme(raw));
+  } catch {
+    throw new Error(
+      "VALIDATION_ERROR: server URL must be a valid Recallant server URL, for example https://memory.example.com"
+    );
+  }
+  if (
+    parsed.protocol !== "https:" &&
+    parsed.hostname !== "127.0.0.1" &&
+    parsed.hostname !== "localhost"
+  ) {
+    throw new Error("VALIDATION_ERROR: invite --server-url must use https");
+  }
+  parsed.hash = "";
+  parsed.search = "";
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function shellCliArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function inviteConnectCommand(serverUrl: string, token: string) {
+  return `curl -fsSL ${shellCliArg(`${serverUrl}/j/${token}`)} | bash`;
+}
+
+function inviteHumanReport(input: {
+  projectDir: string | null;
+  command: string;
+  invite: { target: string; expires_at: Date | string; status: string };
+}) {
+  const expiresAt =
+    input.invite.expires_at instanceof Date
+      ? input.invite.expires_at.toISOString()
+      : input.invite.expires_at;
+  return (
+    [
+      "Recallant remote invite created",
+      "",
+      input.projectDir ? `Server-side project: ${input.projectDir}` : null,
+      `Target: ${input.invite.target}`,
+      `Status: ${input.invite.status}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "Run this from the project folder on the remote computer:",
+      `  ${input.command}`,
+      "",
+      "The invite is a short-lived one-time secret. The remote computer does not need Postgres, Docker, RECALLANT_DATABASE_URL, Workbench admin auth, or server-internal paths.",
+      ""
+    ]
+      .filter(Boolean)
+      .join("\n") + "\n"
+  );
+}
+
+function remoteCredentialProvisioningHumanReport(input: {
+  title: string;
+  provisioning: ReturnType<typeof remoteMcpProvisioningOutput>;
+}) {
+  const { provisioning } = input;
+  return (
+    [
+      input.title,
+      `id: ${provisioning.credential.id}`,
+      `status: ${provisioning.credential.status}`,
+      `project_id: ${provisioning.scope.project_id}`,
+      `developer_id: ${provisioning.scope.developer_id}`,
+      `credential_client_id: ${provisioning.scope.credential_client_id ?? ""}`,
+      `bridge_client_id: ${provisioning.scope.bridge_client_id}`,
+      `credential_prefix: ${provisioning.credential.credential_prefix}`,
+      provisioning.previous_credential
+        ? `previous_id: ${provisioning.previous_credential.id}`
+        : null,
+      provisioning.one_time_secret.shown
+        ? `secret: ${provisioning.one_time_secret.value ?? ""}`
+        : "secret: [redacted]",
+      "",
+      "Copy/paste the full remote client bootstrap command. The bootstrap URL by itself only prints the script and does not connect the project.",
+      "",
+      "Remote client bootstrap command:",
+      provisioning.provisioning.command,
+      "",
+      "Remote doctor command:",
+      provisioning.provisioning.doctor_command,
+      "",
+      `Local runtime: Docker=${provisioning.provisioning.local_runtime.requires_docker}, Postgres=${provisioning.provisioning.local_runtime.requires_postgres}`,
+      "",
+      `Config file: ${provisioning.provisioning.config_file}`,
+      provisioning.provisioning.rendered_config.trimEnd(),
+      ""
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n"
+  );
+}
+
+function connectTargetToken(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!normalized) return null;
+  if (normalized === "claude-code") return "claude_code";
+  return normalized;
+}
+
+function isSupportedConnectTarget(value: string | undefined) {
+  const normalized = connectTargetToken(value);
+  return Boolean(
+    normalized && supportedClientKinds.includes(normalized as (typeof supportedClientKinds)[number])
+  );
+}
+
+function shouldUseUniversalConnect(argv: readonly string[]) {
+  const firstPositional = positionalArgs(argv)[0];
+  return Boolean(
+    parseFlag(argv, "--server-url") ||
+    argv.includes("--remote") ||
+    argv.includes("--local") ||
+    argv.includes("--auto") ||
+    (firstPositional && !isSupportedConnectTarget(firstPositional))
+  );
+}
+
+function universalConnectProjectDir(argv: readonly string[]) {
+  const firstPositional = positionalArgs(argv)[0];
+  return resolve(
+    parseFlag(argv, "--project-dir") ??
+      (firstPositional && !isSupportedConnectTarget(firstPositional)
+        ? firstPositional
+        : process.cwd())
+  );
+}
+
+function universalConnectTarget(argv: readonly string[]) {
+  return parseFlag(argv, "--client") ?? parseFlag(argv, "--target") ?? "codex";
+}
+
+function appendFlagIfPresent(args: string[], argv: readonly string[], name: string) {
+  const value = parseFlag(argv, name);
+  if (value) args.push(name, value);
+}
+
+function appendBooleanFlagIfPresent(args: string[], argv: readonly string[], name: string) {
+  if (argv.includes(name)) args.push(name);
+}
+
+function buildConnectCloudArgv(input: {
+  argv: readonly string[];
+  projectDir: string;
+  target: string;
+  serverUrl: string;
+}) {
+  const connectCloudArgv = [
+    input.argv[0] ?? "node",
+    input.argv[1] ?? "recallant",
+    "connect-cloud",
+    input.projectDir
+  ];
+  connectCloudArgv.push("--server-url", input.serverUrl, "--client", input.target);
+  for (const flag of ["--bootstrap-token", "--poll-timeout-ms", "--poll-interval-ms", "--format"]) {
+    appendFlagIfPresent(connectCloudArgv, input.argv, flag);
+  }
+  for (const flag of ["--skip-doctor", "--yes", "--non-interactive", "--dry-run", "--json"]) {
+    appendBooleanFlagIfPresent(connectCloudArgv, input.argv, flag);
+  }
+  return connectCloudArgv;
+}
+
+function universalConnectChoiceReport(result: {
+  project_dir: string;
+  client: string;
+  remote_command: string;
+  local_command: string;
+}) {
+  return (
+    [
+      "Recallant connect",
+      "",
+      "Status: choice_required",
+      `Project: ${result.project_dir}`,
+      `Agent client: ${result.client}`,
+      "",
+      "Recallant could not determine whether this project should use local storage or an existing central server.",
+      "",
+      "Use the same universal command interactively to choose:",
+      `  ${result.local_command}`,
+      "",
+      "Or provide the central server URL explicitly for automation:",
+      `  ${result.remote_command}`,
+      ""
+    ].join("\n") + "\n"
+  );
+}
+
+function emitUniversalConnectChoiceRequired(input: {
+  projectDir: string;
+  target: string;
+  format: "text" | "json";
+}) {
+  const payload = {
+    ok: false,
+    action: "connect",
+    status: "choice_required",
+    project_dir: input.projectDir,
+    client: input.target,
+    local_storage: {
+      reachable: false
+    },
+    choices: [
+      {
+        id: "existing_central_server",
+        label: "Connect to an existing Recallant server",
+        command: `recallant connect ${input.projectDir} --server-url <https-url>`
+      },
+      {
+        id: "local_storage",
+        label: "Set up or use local Recallant storage on this machine",
+        command: `recallant connect ${input.projectDir} --local`
+      }
+    ],
+    next_command: `recallant connect ${input.projectDir}`,
+    remote_command: `recallant connect ${input.projectDir} --server-url <https-url>`,
+    local_command: `recallant connect ${input.projectDir} --local`,
+    message:
+      "Run the same command in an interactive terminal to choose, or pass --server-url for an existing central Recallant server."
+  };
+  process.stdout.write(
+    input.format === "json"
+      ? `${JSON.stringify(payload, null, 2)}\n`
+      : universalConnectChoiceReport({
+          project_dir: input.projectDir,
+          client: input.target,
+          remote_command: payload.remote_command,
+          local_command: payload.local_command
+        })
+  );
+  process.exitCode = 2;
+}
+
+async function runUniversalConnect(argv: readonly string[]) {
+  const projectDir = universalConnectProjectDir(argv);
+  const target = universalConnectTarget(argv);
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  const explicitServerUrl = normalizeRemoteConnectServerUrl(parseFlag(argv, "--server-url"));
+  const envServerUrl = remoteConnectServerUrlFromEnv();
+  const localOnly = argv.includes("--local");
+  const remoteOnly = argv.includes("--remote");
+  const shouldCheckLocalStorage = localOnly || (!remoteOnly && !explicitServerUrl);
+  const localStorageReady = shouldCheckLocalStorage ? await readyStorageStep() : null;
+  let serverUrl = explicitServerUrl ?? (!localStorageReady ? envServerUrl : null);
+
+  if (!localOnly && !remoteOnly && !serverUrl && !localStorageReady) {
+    if (format === "text" && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+      const answer = await promptLine(
+        [
+          "Recallant connect did not find local storage.",
+          "Enter an existing central Recallant server URL to connect remotely, or press Enter to set up/use local storage on this machine.",
+          "Server URL: "
+        ].join("\n")
+      );
+      serverUrl = normalizeRemoteConnectServerUrl(answer);
+    } else {
+      emitUniversalConnectChoiceRequired({ projectDir, target, format });
+      return;
+    }
+  }
+
+  if ((remoteOnly || serverUrl) && !localOnly) {
+    if (!serverUrl) {
+      throw new Error(
+        "VALIDATION_ERROR: recallant connect --remote requires --server-url or RECALLANT_CONNECT_SERVER_URL"
+      );
+    }
+    return runConnectCloud(buildConnectCloudArgv({ argv, projectDir, target, serverUrl }));
+  }
+
+  const onboardArgv = [
+    argv[0] ?? "node",
+    argv[1] ?? "recallant",
+    "onboard",
+    projectDir,
+    "--client",
+    target
+  ];
+  for (const flag of ["--format"]) {
+    appendFlagIfPresent(onboardArgv, argv, flag);
+  }
+  for (const flag of [
+    "--install-local-hooks",
+    "--hook-kit",
+    "--no-install-local-hooks",
+    "--no-local-hooks",
+    "--verify",
+    "--no-verify",
+    "--dry-run",
+    "--yes",
+    "-y",
+    "--cancel",
+    "--init-git",
+    "--skip-vcs-safety",
+    "--json"
+  ]) {
+    appendBooleanFlagIfPresent(onboardArgv, argv, flag);
+  }
+  if (localOnly) onboardArgv.push("--local");
+  return runOnboard(onboardArgv);
+}
+
+async function runConnect(argv: readonly string[]) {
+  if (shouldUseUniversalConnect(argv)) return runUniversalConnect(argv);
+
+  const dir = projectDir(argv);
+  const target = parseFlag(argv, "--target") ?? argv[3] ?? "codex";
+  const dryRun = argv.includes("--dry-run");
+  const globalConfigRequested = argv.includes("--global");
+  const confirmGlobalWrite = argv.includes("--confirm-global-write");
+  const restoreGlobalBackup = parseFlag(argv, "--restore-global-backup");
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  if ((confirmGlobalWrite || restoreGlobalBackup) && !globalConfigRequested) {
+    throw new Error("VALIDATION_ERROR: global write/restore requires --global");
+  }
+  if (globalConfigRequested && !dryRun && !confirmGlobalWrite && !restoreGlobalBackup) {
+    throw new Error(
+      "POLICY_BLOCKED: connect --global writes require --confirm-global-write or --restore-global-backup. Run --global --dry-run first."
+    );
+  }
+  if (dryRun && (confirmGlobalWrite || restoreGlobalBackup)) {
+    throw new Error("VALIDATION_ERROR: dry-run cannot be combined with global write or restore");
+  }
+  const installHooksRequested =
+    argv.includes("--install-local-hooks") || argv.includes("--hook-kit");
+  const installHooksDisabled =
+    argv.includes("--no-install-local-hooks") || argv.includes("--no-local-hooks");
+  if (installHooksRequested && installHooksDisabled) {
+    throw new Error("Use either --install-local-hooks or --no-local-hooks, not both.");
+  }
+  const config = await readProjectConfig(dir);
+  if (!config?.project_id) {
+    throw new Error(
+      "VALIDATION_ERROR: connect requires an attached project with .recallant/config"
+    );
+  }
+  const developerId = await resolveConnectDeveloperId({
+    projectId: config.project_id
+  });
+  const targetConfig = connectClientTargetConfig(target, config.project_id, developerId, dir);
+  const installLocalHooks =
+    !installHooksDisabled && (targetConfig.target === "codex" || installHooksRequested);
+  if (
+    globalConfigRequested &&
+    (confirmGlobalWrite || restoreGlobalBackup) &&
+    targetConfig.target !== "cursor"
+  ) {
+    throw new Error(
+      "POLICY_BLOCKED: confirmed global config writes are currently enabled only for cursor"
+    );
+  }
+  const targetPath = join(dir, targetConfig.config_file);
+  const existing = await readOptional(targetPath);
+  const desired = renderClientTargetConfig(existing, targetConfig);
+  const same = existing === desired;
+  const hookFiles = installLocalHooks ? localHookKitFiles() : [];
+  const hookFilePlans = [];
+  for (const hookFile of hookFiles) {
+    const hookPath = join(dir, hookFile.path);
+    const current = await readOptional(hookPath);
+    hookFilePlans.push({
+      ...hookFile,
+      absolute_path: hookPath,
+      same: current === hookFile.content
+    });
+  }
+  const installCodexNativeHooks = installLocalHooks && targetConfig.target === "codex";
+  const codexHookConfigPath = ".codex/hooks.json";
+  const codexHookAbsolutePath = join(dir, codexHookConfigPath);
+  const existingCodexHookConfig = installCodexNativeHooks
+    ? await readOptional(codexHookAbsolutePath)
+    : null;
+  const codexHookRender = installCodexNativeHooks
+    ? renderCodexHookConfig(existingCodexHookConfig)
+    : null;
+  if (codexHookRender && !codexHookRender.ok) {
+    throw new Error(`VALIDATION_ERROR: ${codexHookRender.message}`);
+  }
+  const desiredCodexHookConfig = codexHookRender?.ok ? codexHookRender.content : null;
+  const codexHookConfigSame =
+    desiredCodexHookConfig !== null && existingCodexHookConfig === desiredCodexHookConfig;
+  const localHookKitPresent =
+    (await readOptional(join(dir, ".recallant", "hooks", "capture-event.sh"))) !== null;
+  const state = await readAgentSessionState(dir);
+  const backupRoot = join(
+    recallantDir(dir),
+    "backups",
+    `connect-${new Date().toISOString().replace(/[:.]/g, "-")}`
+  );
+  const backupPath =
+    existing && !same ? join(backupRoot, targetConfig.config_file.replace(/[\\/]/g, "__")) : null;
+  const codexHookBackupPath =
+    existingCodexHookConfig !== null && !codexHookConfigSame
+      ? join(backupRoot, codexHookConfigPath.replace(/[\\/]/g, "__"))
+      : null;
+  const plannedChanges = same
+    ? [{ action: "no_change", path: targetConfig.config_file }]
+    : [
+        ...(backupPath ? [{ action: "backup_file", path: backupPath }] : []),
+        {
+          action: targetConfig.merge_mcp_servers ? "merge_file" : "write_file",
+          path: targetConfig.config_file
+        }
+      ];
+  const globalTargetPath = globalConfigRequested
+    ? String(
+        globalClientConfigDryRunPlan({
+          target: targetConfig.target,
+          targetConfig
+        }).target_file
+      )
+    : null;
+  const existingGlobal = globalTargetPath ? await readOptional(globalTargetPath) : null;
+  const globalConfigPlan = globalConfigRequested
+    ? {
+        ...globalClientConfigDryRunPlan({
+          target: targetConfig.target,
+          targetConfig,
+          existingText: existingGlobal
+        }),
+        backup_path:
+          existingGlobal && targetConfig.target === "cursor"
+            ? join(
+                recallantDir(dir),
+                "backups",
+                `connect-global-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+                "cursor__mcp.json"
+              )
+            : null,
+        restore_command:
+          existingGlobal && targetConfig.target === "cursor"
+            ? `recallant connect cursor --project-dir ${dir} --global --restore-global-backup <backup-path>`
+            : null,
+        confirmation_command:
+          targetConfig.target === "cursor"
+            ? `recallant connect cursor --project-dir ${dir} --global --confirm-global-write --previewed-global-target ${globalTargetPath}`
+            : null
+      }
+    : null;
+  const desiredGlobal =
+    typeof globalConfigPlan?.desired_config_text === "string"
+      ? globalConfigPlan.desired_config_text
+      : globalConfigPlan?.desired_config && typeof globalConfigPlan.desired_config === "object"
+        ? `${JSON.stringify(globalConfigPlan.desired_config, null, 2)}\n`
+        : null;
+  const globalSame = Boolean(
+    globalTargetPath && desiredGlobal !== null && existingGlobal === desiredGlobal
+  );
+  const globalBackupPath =
+    typeof globalConfigPlan?.backup_path === "string" ? globalConfigPlan.backup_path : null;
+  const globalRestoreTarget = globalTargetPath;
+  const globalConfigRestored = Boolean(restoreGlobalBackup && globalRestoreTarget);
+  const globalConfigWritten = Boolean(
+    confirmGlobalWrite && globalTargetPath && desiredGlobal !== null && !globalSame
+  );
+  const previewedGlobalTarget = parseFlag(argv, "--previewed-global-target");
+  if (confirmGlobalWrite && previewedGlobalTarget !== globalTargetPath) {
+    throw new Error(
+      `POLICY_BLOCKED: confirmed global write requires --previewed-global-target ${globalTargetPath}. Run --global --dry-run first and confirm the exact target file.`
+    );
+  }
+  const globalChanges = globalConfigPlan
+    ? restoreGlobalBackup
+      ? [
+          {
+            action: "restore_global_backup",
+            path: globalTargetPath,
+            backup_path: restoreGlobalBackup,
+            scope: "global_client_config",
+            writes_file: true
+          }
+        ]
+      : [
+          ...(globalBackupPath && confirmGlobalWrite && !globalSame
+            ? [
+                {
+                  action: "backup_global_file",
+                  path: globalBackupPath,
+                  source_path: globalTargetPath,
+                  scope: "global_client_config",
+                  writes_file: true
+                }
+              ]
+            : []),
+          globalSame
+            ? {
+                action: "no_change",
+                path: globalTargetPath,
+                scope: "global_client_config",
+                writes_file: false
+              }
+            : {
+                action: confirmGlobalWrite ? "write_global_file" : "preview_global_merge",
+                path: globalTargetPath,
+                scope: "global_client_config",
+                writes_file: confirmGlobalWrite
+              }
+        ]
+    : [];
+  const hookChanges = hookFilePlans.map((hookFile) =>
+    hookFile.same
+      ? { action: "no_change", path: hookFile.path }
+      : { action: "write_file", path: hookFile.path }
+  );
+  const codexNativeHookChanges = !installCodexNativeHooks
+    ? []
+    : codexHookConfigSame
+      ? [{ action: "no_change", path: codexHookConfigPath }]
+      : [
+          ...(codexHookBackupPath ? [{ action: "backup_file", path: codexHookBackupPath }] : []),
+          {
+            action: existingCodexHookConfig === null ? "write_file" : "merge_file",
+            path: codexHookConfigPath
+          }
+        ];
+  const hookFilesNeedWrite = hookFilePlans.some((hookFile) => !hookFile.same);
+  if (!dryRun && !same) {
+    if (backupPath && existing !== null) {
+      await mkdir(backupPath.split("/").slice(0, -1).join("/"), { recursive: true });
+      await writeFile(backupPath, existing);
+    }
+    await mkdir(join(dir, targetConfig.config_file).split("/").slice(0, -1).join("/"), {
+      recursive: true
+    });
+    await writeFile(targetPath, desired);
+  }
+  if (restoreGlobalBackup && globalRestoreTarget) {
+    const backupText = await readFile(restoreGlobalBackup, "utf8");
+    await mkdir(globalRestoreTarget.split("/").slice(0, -1).join("/"), { recursive: true });
+    await writeFile(globalRestoreTarget, backupText);
+  } else if (confirmGlobalWrite && globalTargetPath && desiredGlobal !== null && !globalSame) {
+    if (existingGlobal !== null && globalBackupPath) {
+      await mkdir(globalBackupPath.split("/").slice(0, -1).join("/"), { recursive: true });
+      await writeFile(globalBackupPath, existingGlobal);
+    }
+    await mkdir(globalTargetPath.split("/").slice(0, -1).join("/"), { recursive: true });
+    await writeFile(globalTargetPath, desiredGlobal);
+  }
+  if (!dryRun && installLocalHooks) {
+    for (const hookFile of hookFilePlans) {
+      if (!hookFile.same) {
+        await mkdir(hookFile.absolute_path.split("/").slice(0, -1).join("/"), { recursive: true });
+        await writeFile(hookFile.absolute_path, hookFile.content);
+      }
+      if (hookFile.executable) await chmod(hookFile.absolute_path, 0o755);
+    }
+  }
+  if (!dryRun && installCodexNativeHooks && desiredCodexHookConfig !== null) {
+    if (codexHookBackupPath && existingCodexHookConfig !== null) {
+      await mkdir(dirname(codexHookBackupPath), { recursive: true });
+      await writeFile(codexHookBackupPath, existingCodexHookConfig);
+    }
+    if (!codexHookConfigSame) {
+      await mkdir(dirname(codexHookAbsolutePath), { recursive: true });
+      await writeFile(codexHookAbsolutePath, desiredCodexHookConfig);
+    }
+  }
+  const clientConnection = await clientConnectionReadiness(dir);
+  const hookKitReady = clientConnection.hook_kit.ready;
+  const hookKitPlanned = installLocalHooks && dryRun && (hookFilesNeedWrite || !hookKitReady);
+  const hookStatus = installLocalHooks
+    ? hookKitPlanned
+      ? "local_hook_kit_planned"
+      : "local_hook_kit_installed"
+    : localHookKitPresent
+      ? "local_hook_kit_installed"
+      : "not_installed";
+  const mcpConfigWillExist = clientConnection.mcp_configured || !same;
+  const hookKitWillExist = hookStatus !== "not_installed";
+  const automaticAgentAudit = objectValue(clientConnection.automatic_agent_audit);
+  const nativeHookConfiguredNow = automaticAgentAudit.configured === true;
+  const nativeHookWillExist =
+    nativeHookConfiguredNow || (installCodexNativeHooks && desiredCodexHookConfig !== null);
+  const effectiveHookWillExist =
+    targetConfig.target === "codex" ? nativeHookWillExist : hookKitWillExist;
+  const nativeHookPlanned = installCodexNativeHooks && dryRun && !codexHookConfigSame;
+  const startupLayerPlanned =
+    installLocalHooks && dryRun && (!same || hookKitPlanned || nativeHookPlanned);
+  const mandatoryStartupLayerStatus =
+    startupLayerPlanned && mcpConfigWillExist && effectiveHookWillExist
+      ? "mcp_and_hooks_planned"
+      : mcpConfigWillExist && effectiveHookWillExist
+        ? "mcp_and_hooks_ready"
+        : mcpConfigWillExist
+          ? "mcp_only"
+          : effectiveHookWillExist
+            ? "hooks_without_mcp"
+            : "not_configured";
+  const result = {
+    ok: true,
+    action: "connect",
+    dry_run: dryRun,
+    client: targetConfig.target,
+    project_dir: dir,
+    project_id: config.project_id,
+    developer_id: developerId,
+    connection_status: mandatoryStartupLayerStatus,
+    hook_status: hookStatus,
+    memory_loop_status: memoryLoopStatusFromState(state),
+    mandatory_startup_layer: {
+      status: mandatoryStartupLayerStatus,
+      mcp_configured_or_planned: mcpConfigWillExist,
+      hook_kit_status: hookStatus,
+      native_hook_status: nativeHookPlanned
+        ? "configured_planned"
+        : String(automaticAgentAudit.status ?? "not_configured"),
+      native_hook_configured_or_planned: nativeHookWillExist,
+      automatic_agent_audit_active: automaticAgentAudit.capture_active === true,
+      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+      fail_soft: true,
+      writes_global_config: false,
+      capture_targets: captureTargetNames,
+      automatic_capture_events: codexHookEventNames,
+      proof_command: `recallant doctor --project-dir ${dir} --require-agent-audit --format json`,
+      ready_definition:
+        "MCP and native Codex hooks can be configured before capture is active; active automatic audit requires an observed codex-hook invocation."
+    },
+    client_connection: clientConnection,
+    writes_files:
+      !dryRun &&
+      (!same ||
+        hookFilePlans.some((hookFile) => !hookFile.same) ||
+        (installCodexNativeHooks && !codexHookConfigSame)),
+    writes_global_config: globalConfigWritten || globalConfigRestored,
+    config_scope: globalConfigRequested ? "project_local_and_global_dry_run" : "project_local",
+    project_local_config: {
+      scope: "project_local_config",
+      config_file: targetConfig.config_file,
+      planned_changes: plannedChanges,
+      writes_files: !dryRun && !same
+    },
+    global_config: globalConfigPlan,
+    planned_changes: [
+      ...plannedChanges,
+      ...globalChanges,
+      ...hookChanges,
+      ...codexNativeHookChanges
+    ],
+    config_file: targetConfig.config_file,
+    config_format: targetConfig.format,
+    client_specific: targetConfig.client_specific,
+    merge_mcp_servers: targetConfig.merge_mcp_servers,
+    setup_hint: targetConfig.setup_hint,
+    hook_integration: {
+      mode: installCodexNativeHooks
+        ? "codex_native_hooks_with_helper_kit"
+        : installLocalHooks || localHookKitPresent
+          ? "local_hook_kit"
+          : "none",
+      fail_soft: true,
+      writes_global_config: false,
+      installed_files: [
+        ...hookFilePlans.map((hookFile) => hookFile.path),
+        ...(installCodexNativeHooks ? [codexHookConfigPath] : [])
+      ],
+      native_hooks: clientConnection.native_hooks,
+      timeout_seconds_env: "RECALLANT_HOOK_TIMEOUT_SECONDS",
+      project_dir_env: "RECALLANT_PROJECT_DIR"
+    },
+    native_hook_config: {
+      path: codexHookConfigPath,
+      requested: installCodexNativeHooks,
+      status: nativeHookPlanned
+        ? "configured_planned"
+        : String(automaticAgentAudit.status ?? "not_configured"),
+      configured_or_planned: nativeHookWillExist,
+      changed_or_planned: installCodexNativeHooks && !codexHookConfigSame,
+      backup_path: codexHookBackupPath,
+      command: recallantCodexHookCommand,
+      events: codexHookEventNames,
+      preserved_handler_count: codexHookRender?.ok ? codexHookRender.preserved_handler_count : 0,
+      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+      writes_global_config: false
+    },
+    mcp_config: targetConfig.mcp_config,
+    rendered_config: desired
+  };
+  process.stdout.write(
+    format === "json" ? `${JSON.stringify(result, null, 2)}\n` : connectHumanReport(result)
+  );
+}
+
+function inferTargetClient(input: { client: string | null }) {
+  return input.client && input.client.trim() ? input.client : "codex";
+}
+
+function emptyOnboardVerifyEvidence(): OnboardVerifyEvidence {
+  return {
+    context_read: false,
+    memory_write: false,
+    checkpoint: false,
+    recall: false
+  };
+}
+
+function onboardVerifyEvidenceFromDoctor(doctorJson: Record<string, unknown> | null) {
+  const readiness = objectValue(doctorJson?.capture_readiness);
+  const databaseReadiness = objectValue(readiness.database_readiness);
+  const localState = objectValue(readiness.local_state);
+  return {
+    context_read: Boolean(
+      databaseReadiness.last_context_read_at ?? localState.last_context_read_at
+    ),
+    memory_write: Boolean(
+      databaseReadiness.last_memory_write_at ?? localState.last_memory_write_at
+    ),
+    checkpoint: Boolean(databaseReadiness.checkpoint_updated_at ?? localState.last_checkpoint_at),
+    recall: false
+  };
+}
+
+const onboardEmbeddingRecoveryLimit = 50;
+
+function finiteNumberValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function baseOnboardEmbeddingRecovery(input: {
+  status: OnboardEmbeddingRecoveryPayload["status"];
+  projectId: string | null;
+  pendingBefore: number | null;
+  attempted?: boolean;
+  attemptedChunks?: number;
+  recoveredChunks?: number;
+  remainingPending?: number | null;
+  recoveryAvailable?: boolean;
+  latestFailure?: unknown;
+  warning?: string | null;
+  recommendation: string;
+}): OnboardEmbeddingRecoveryPayload {
+  return {
+    status: input.status,
+    attempted: input.attempted ?? false,
+    project_id: input.projectId,
+    pending_before: input.pendingBefore,
+    attempted_chunks: input.attemptedChunks ?? 0,
+    recovered_chunks: input.recoveredChunks ?? 0,
+    remaining_pending: input.remainingPending ?? input.pendingBefore,
+    limit: onboardEmbeddingRecoveryLimit,
+    recovery_available: input.recoveryAvailable ?? true,
+    latest_failure: input.latestFailure ?? null,
+    warning: input.warning ?? null,
+    recommendation: input.recommendation,
+    scope: {
+      project_scoped: true,
+      bounded: true,
+      limit: onboardEmbeddingRecoveryLimit
+    }
+  };
+}
+
+function createUncachedRecallantDbFromEnv() {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: process.env.RECALLANT_DEVELOPER_ID,
+    projectId: process.env.RECALLANT_PROJECT_ID,
+    projectPath: process.env.RECALLANT_PROJECT_PATH
+  });
+}
+
+async function recoverOnboardPendingEmbeddings(
+  projectDir: string,
+  doctorJson: Record<string, unknown> | null
+): Promise<OnboardEmbeddingRecoveryPayload> {
+  const pending = objectValue(doctorJson?.pending_embeddings);
+  const projectId = typeof pending.project_id === "string" ? pending.project_id : null;
+  const pendingBefore = finiteNumberValue(pending.pending_chunks);
+  const latestFailure =
+    pending.latest_failure ?? objectValue(pending.recovery).latest_failure ?? null;
+  if (pendingBefore !== null && pendingBefore <= 0) {
+    return baseOnboardEmbeddingRecovery({
+      status: "no_pending",
+      projectId,
+      pendingBefore,
+      remainingPending: 0,
+      latestFailure,
+      recommendation: "Semantic embeddings are current."
+    });
+  }
+  if (pendingBefore === null) {
+    return baseOnboardEmbeddingRecovery({
+      status: "unknown",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: "Pending embedding state could not be read from doctor output.",
+      recommendation:
+        "Capture and recall remain available; rerun Recallant readiness after storage is reachable."
+    });
+  }
+  const database = createUncachedRecallantDbFromEnv();
+  if (!database) {
+    return baseOnboardEmbeddingRecovery({
+      status: "skipped",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: "Recallant storage is not configured for embedding recovery.",
+      recommendation:
+        "Capture and recall remain available; semantic indexing will wait until storage is configured."
+    });
+  }
+  try {
+    const recovery = await database.recoverPendingEmbeddings({
+      project_path: projectDir,
+      limit: onboardEmbeddingRecoveryLimit
+    });
+    const embedding = objectValue(recovery.embedding);
+    const attemptedChunks = finiteNumberValue(recovery.attempted_chunks) ?? 0;
+    const recoveredChunks = finiteNumberValue(recovery.recovered_chunks) ?? 0;
+    const remainingPending = finiteNumberValue(recovery.remaining_pending) ?? pendingBefore;
+    const unavailable =
+      embedding.error === "UNAVAILABLE" ||
+      String(recovery.warning ?? "")
+        .toLowerCase()
+        .includes("provider is unavailable");
+    const status =
+      remainingPending <= 0 && recoveredChunks > 0
+        ? "recovered"
+        : remainingPending <= 0
+          ? "no_pending"
+          : unavailable
+            ? "model_unavailable"
+            : "still_pending";
+    return baseOnboardEmbeddingRecovery({
+      status,
+      projectId: typeof recovery.project_id === "string" ? recovery.project_id : projectId,
+      pendingBefore,
+      attempted: attemptedChunks > 0,
+      attemptedChunks,
+      recoveredChunks,
+      remainingPending,
+      latestFailure,
+      warning: typeof recovery.warning === "string" ? recovery.warning : null,
+      recommendation:
+        status === "recovered" || status === "no_pending"
+          ? "Semantic embeddings are current."
+          : "Capture and recall are ready; semantic embeddings are waiting for local model recovery."
+    });
+  } catch (error) {
+    return baseOnboardEmbeddingRecovery({
+      status: "unknown",
+      projectId,
+      pendingBefore,
+      recoveryAvailable: false,
+      latestFailure,
+      warning: error instanceof Error ? error.message : String(error),
+      recommendation:
+        "Capture and recall remain available; semantic indexing recovery should be retried by Recallant readiness."
+    });
+  } finally {
+    await database.close();
+  }
+}
+
+function unavailableWorkbenchOutcome(message: string): OnboardWorkbenchOutcome {
+  return {
+    available: false,
+    url: null,
+    auth_required: true,
+    private_by_default: true,
+    project_visible: null,
+    migration_review_queue: {
+      import_candidate_count: null,
+      pending_review: null,
+      review_needed: null
+    },
+    message
+  };
+}
+
+function buildWorkbenchUrl(projectId: string) {
+  const baseUrl =
+    process.env.RECALLANT_WORKBENCH_URL ??
+    process.env.RECALLANT_SERVER_URL ??
+    `http://${process.env.RECALLANT_HOST ?? "127.0.0.1"}:${process.env.RECALLANT_PORT ?? "3005"}`;
+  try {
+    const url = new URL("/review", baseUrl);
+    url.searchParams.set("project_id", projectId);
+    url.searchParams.set("view", "review");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function resolveOnboardWorkbenchOutcome(
+  projectDir: string
+): Promise<OnboardWorkbenchOutcome> {
+  const config = await readProjectConfig(projectDir);
+  if (!config?.project_id) {
+    return unavailableWorkbenchOutcome(
+      "Workbench needs an attached project before it can show review state."
+    );
+  }
+  const url = buildWorkbenchUrl(config.project_id);
+  if (!url) {
+    return unavailableWorkbenchOutcome("Workbench URL is not valid in the current environment.");
+  }
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    return unavailableWorkbenchOutcome(
+      "Workbench needs Recallant storage before it can show review state."
+    );
+  }
+  try {
+    const dashboard = await database.getReviewDashboard({ project_id: config.project_id });
+    const projectVisible = dashboard.projects.some(
+      (project) => project.project_id === config.project_id
+    );
+    const importCandidateCount = Array.isArray(dashboard.import_candidates)
+      ? dashboard.import_candidates.length
+      : null;
+    const pendingReview =
+      typeof dashboard.critical?.pending_review === "number"
+        ? dashboard.critical.pending_review
+        : null;
+    return {
+      available: true,
+      url,
+      auth_required: true,
+      private_by_default: true,
+      project_visible: projectVisible,
+      migration_review_queue: {
+        import_candidate_count: importCandidateCount,
+        pending_review: pendingReview,
+        review_needed:
+          importCandidateCount === null && pendingReview === null
+            ? null
+            : (importCandidateCount ?? 0) > 0 || (pendingReview ?? 0) > 0
+      },
+      message: projectVisible
+        ? "Workbench can show this project with capture and review state."
+        : "Workbench is reachable, but this project was not visible in the review dashboard."
+    };
+  } catch {
+    return unavailableWorkbenchOutcome("Workbench review state could not be checked.");
+  } finally {
+    await database.close();
+  }
+}
+
+async function runOnboard(argv: readonly string[]) {
+  const options = parseOnboardOptions(argv);
+  if (await maybeUpdateRecallantBeforeOnboard(argv, options)) return;
+  const forceLocal = argv.includes("--local") || argv.includes("--local-storage");
+  const forceRemote = argv.includes("--remote") || argv.includes("--remote-storage");
+  const localStorage = forceRemote ? null : await readyStorageStep();
+
+  if (!forceLocal && (forceRemote || !localStorage?.reachable)) {
+    const projectConfig = await readProjectConfig(options.projectDir);
+    const serverUrl = universalOnboardServerUrl({
+      explicit: parseFlag(argv, "--server-url"),
+      projectConfig
+    });
+    if (serverUrl) {
+      const remoteArgv = [
+        argv[0] ?? "node",
+        argv[1] ?? "recallant",
+        "connect-cloud",
+        options.projectDir,
+        "--server-url",
+        serverUrl,
+        "--client",
+        inferTargetClient({ client: options.client })
+      ];
+      for (const flag of [
+        "--bootstrap-token",
+        "--poll-timeout-ms",
+        "--poll-interval-ms",
+        "--format"
+      ]) {
+        appendFlagIfPresent(remoteArgv, argv, flag);
+      }
+      for (const flag of ["--skip-doctor", "--yes", "--non-interactive", "--dry-run", "--json"]) {
+        appendBooleanFlagIfPresent(remoteArgv, argv, flag);
+      }
+      return runConnectCloud(remoteArgv);
+    }
+    if (forceRemote) {
+      throw new Error(
+        "VALIDATION_ERROR: recallant onboard --remote requires --server-url, project configuration, or a Recallant server URL environment setting"
+      );
+    }
+  }
+
+  return runLocalOnboard(argv);
+}
+
+async function runLocalOnboard(argv: readonly string[]) {
+  const options = parseOnboardOptions(argv);
+  const targetClient = inferTargetClient({ client: options.client });
+  const documentationPosture = await analyzeProjectDocumentationPosture(options.projectDir);
+  const steps: { attached: OnboardAttachedStep; connected: OnboardConnectedStep } = {
+    attached: {
+      command: formatCommandHint(["recallant", "attach", "--project-dir", options.projectDir]),
+      status: "skipped"
+    },
+    connected: {
+      command: formatCommandHint([
+        "recallant",
+        "connect",
+        targetClient,
+        "--project-dir",
+        options.projectDir
+      ]),
+      status: "skipped"
+    }
+  };
+  const existingConfig = await readProjectConfig(options.projectDir);
+  const storage = await resolveOnboardStorage(options);
+  if (!storage.reachable) {
+    const payload = {
+      action: "onboard",
+      status: "storage_blocked",
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      version_control: null,
+      attach_details: null,
+      documentation_posture: documentationPosture,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: "skipped" as const,
+        command: null,
+        details: "storage is not ready"
+      },
+      connected: {
+        status: "skipped" as const,
+        command: null,
+        details: "storage is not ready"
+      },
+      verify: null,
+      next_command: formatOnboardRerunCommand(options, targetClient)
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
+    return;
+  }
+  const versionControl = await resolveOnboardVersionControl(options);
+  const versionControlBlocks = ["needs_choice", "git_missing", "failed"].includes(
+    versionControl.status
+  );
+  const needAttach = !existingConfig?.project_id;
+  if (options.verify && !options.client) {
+    throw new Error(
+      `onboard --verify requires a client. Run the beginner flow with: recallant onboard ${options.projectDir}`
+    );
+  }
+  const verifyResult: OnboardVerifyPayload = {
+    status: "skipped",
+    ask_answer: null,
+    failed_stage: null,
+    message: null,
+    capture_active: false,
+    memory_loop_ready: false,
+    evidence: emptyOnboardVerifyEvidence(),
+    proof: { demo: "skipped", doctor: "skipped", ask: "skipped" },
+    stages: {
+      capture: { status: "skipped", detail: null },
+      readiness: {
+        status: "skipped",
+        detail: null,
+        evidence: emptyOnboardVerifyEvidence()
+      },
+      recall: { status: "skipped", detail: null }
+    }
+  };
+  let onboardStatus: "completed" | "needs_confirmation" | "plan_only" | "cancelled" | "incomplete" =
+    "completed";
+  let attachDetails: ReturnType<typeof safeAttachDetailsForOnboard> | null = null;
+  let embeddingRecovery: OnboardEmbeddingRecoveryPayload | null = null;
+
+  if (versionControlBlocks) {
+    const payload = {
+      action: "onboard",
+      status: "vcs_blocked",
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      version_control: versionControl,
+      attach_details: null,
+      documentation_posture: documentationPosture,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: "skipped" as const,
+        command: null,
+        details: "version-control safety needs a choice before project files are changed"
+      },
+      connected: {
+        status: "skipped" as const,
+        command: null,
+        details: "version-control safety needs a choice before project files are changed"
+      },
+      verify: null,
+      next_command: formatOnboardRerunCommand(options, targetClient)
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const buildAttachPlanPayload = (status: typeof onboardStatus, nextCommand: string) => ({
+    action: "onboard",
+    status,
+    project_dir: options.projectDir,
+    format: options.format,
+    storage,
+    version_control: versionControl,
+    attach_details: attachDetails,
+    documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
+    project_already_attached: Boolean(existingConfig?.project_id),
+    client: options.client ? targetClient : null,
+    install_local_hooks: options.installLocalHooks,
+    verify_requested: options.verify,
+    attached: {
+      status: steps.attached.status,
+      command: steps.attached.command,
+      details: steps.attached.details ?? null
+    },
+    connected: {
+      status: "skipped" as const,
+      command: steps.connected.command,
+      details: "waiting for onboard attach confirmation"
+    },
+    verify: null,
+    next_command: nextCommand
+  });
+
+  const emitAttachPlan = (status: typeof onboardStatus, exitCode: number) => {
+    onboardStatus = status;
+    const payload = buildAttachPlanPayload(
+      onboardStatus,
+      status === "cancelled"
+        ? formatOnboardRerunCommand({ ...options, yes: false, cancel: false }, targetClient)
+        : formatOnboardRerunCommand({ ...options, yes: true, cancel: false }, targetClient)
+    );
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = exitCode;
+  };
+
+  const emitVerifyFailure = (
+    failedStage: NonNullable<OnboardVerifyPayload["failed_stage"]>,
+    message: string
+  ) => {
+    onboardStatus = "incomplete";
+    verifyResult.status = "failed";
+    verifyResult.failed_stage = failedStage;
+    verifyResult.message = message;
+    const payload = {
+      action: "onboard",
+      status: onboardStatus,
+      project_dir: options.projectDir,
+      format: options.format,
+      storage,
+      version_control: versionControl,
+      attach_details: attachDetails,
+      documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
+      project_already_attached: Boolean(existingConfig?.project_id),
+      client: options.client ? targetClient : null,
+      install_local_hooks: options.installLocalHooks,
+      verify_requested: options.verify,
+      attached: {
+        status: needAttach ? steps.attached.status : ("skipped" as const),
+        command: steps.attached.command,
+        details: steps.attached.details ?? null
+      },
+      connected: {
+        status: steps.connected.status,
+        command: steps.connected.command,
+        details: steps.connected.details ?? null
+      },
+      verify: verifyResult,
+      embedding_recovery: embeddingRecovery,
+      next_command: formatOnboardRerunCommand(options, targetClient)
+    };
+    process.stdout.write(
+      options.format === "json"
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : onboardHumanReport(payload)
+    );
+    process.exitCode = 2;
+  };
+
+  if (needAttach) {
+    const attachCommand = [
+      "attach",
+      "--project-dir",
+      options.projectDir,
+      "--target",
+      targetClient,
+      "--format",
+      "json"
+    ];
+    if (options.dryRun) attachCommand.push("--dry-run");
+    const attachResult = runLocalCliSubcommand(attachCommand);
+    steps.attached.command = formatCommandHint(attachCommand);
+    if (attachResult.status !== 0) {
+      steps.attached.status = "failed";
+      const issue = summarizeSubcommandFailure(attachResult);
+      steps.attached.details = issue;
+      throw new Error(`onboard attach failed: ${issue}. Fix the reported issue and rerun onboard.`);
+    }
+    let attachPayload = attachResult.json;
+    let attachStatus = String(attachPayload?.status ?? "unknown");
+    attachDetails = safeAttachDetailsForOnboard(attachPayload);
+    if (options.dryRun && attachStatus === "plan_only") {
+      steps.attached.status = "skipped";
+      steps.attached.details = "dry-run plan; no project files or database rows changed";
+      emitAttachPlan("plan_only", 0);
+      return;
+    }
+    if (attachStatus === "needs_confirmation") {
+      steps.attached.status = "needs_confirmation";
+      steps.attached.details = "production-sensitive plan needs onboard confirmation";
+      if (options.cancel) {
+        steps.attached.details = "cancelled by user; no project files or database rows changed";
+        emitAttachPlan("cancelled", 3);
+        return;
+      }
+      if (options.dryRun) {
+        steps.attached.details = "dry-run plan; no project files or database rows changed";
+        emitAttachPlan("plan_only", 0);
+        return;
+      }
+      let attachApproved = options.yes;
+      if (!attachApproved) {
+        if (canPromptForOnboarding(options)) {
+          const reviewPayload = buildAttachPlanPayload(
+            "needs_confirmation",
+            "Answer the prompt below."
+          );
+          process.stdout.write(onboardHumanReport(reviewPayload));
+          const continueOnboarding = await promptYesNo(
+            "Continue onboarding and apply these planned changes?",
+            false
+          );
+          if (!continueOnboarding) {
+            steps.attached.details = "cancelled by user; no project files or database rows changed";
+            emitAttachPlan("cancelled", 3);
+            return;
+          }
+          attachApproved = true;
+        } else {
+          emitAttachPlan("needs_confirmation", 2);
+          return;
+        }
+      }
+      if (!attachApproved) {
+        emitAttachPlan("needs_confirmation", 2);
+        return;
+      }
+      const confirmedCommand = [...attachCommand, "--confirm"];
+      const confirmedResult = runLocalCliSubcommand(confirmedCommand);
+      if (confirmedResult.status !== 0) {
+        steps.attached.status = "failed";
+        const issue = summarizeSubcommandFailure(confirmedResult);
+        steps.attached.details = issue;
+        throw new Error(
+          `onboard attach confirmation failed: ${issue}. Fix the reported issue and rerun onboard.`
+        );
+      }
+      attachPayload = confirmedResult.json;
+      attachStatus = String(attachPayload?.status ?? "unknown");
+      attachDetails = safeAttachDetailsForOnboard(attachPayload);
+    }
+    if (attachStatus !== "attached" && attachStatus !== "plan_only") {
+      steps.attached.status = "failed";
+      throw new Error(`onboard attach failed with status '${attachStatus}'. Rerun onboard.`);
+    }
+    steps.attached.status = attachStatus === "attached" ? "attached" : "failed";
+    steps.attached.details = `status=${attachStatus}`;
+  } else {
+    steps.attached.status = "skipped";
+    steps.attached.details = "recallant attach already has .recallant/config";
+  }
+
+  let alreadyConnected = false;
+  if (options.client) {
+    const clientConnection = await clientConnectionReadiness(options.projectDir);
+    const clientHasConfig = clientConnection.mcp_configs.some(
+      (entry) => entry.client === targetClient && entry.present
+    );
+    const hooksReady = clientConnection.hook_kit.ready;
+    const nativeHookReady =
+      targetClient !== "codex" ||
+      objectValue(clientConnection.automatic_agent_audit).configured === true;
+    alreadyConnected =
+      clientHasConfig && (options.installLocalHooks ? hooksReady && nativeHookReady : true);
+    if (!alreadyConnected) {
+      const connectCommand = [
+        "connect",
+        targetClient,
+        "--project-dir",
+        options.projectDir,
+        "--format",
+        "json"
+      ];
+      if (options.installLocalHooks) connectCommand.push("--install-local-hooks");
+      if (options.dryRun) connectCommand.push("--dry-run");
+      const connectResult = runLocalCliSubcommand(connectCommand);
+      steps.connected.command = formatCommandHint(connectCommand);
+      if (connectResult.status !== 0) {
+        steps.connected.status = "failed";
+        const issue = summarizeSubcommandFailure(connectResult);
+        steps.connected.details = issue;
+        throw new Error(
+          `onboard connect failed: ${issue}. Run again after fixing: ${steps.connected.command}`
+        );
+      }
+      const connectPayload = connectResult.json;
+      const connectionStatus = String(
+        connectPayload?.connection_status ??
+          objectValue(connectPayload?.mandatory_startup_layer).status ??
+          "not_configured"
+      );
+      steps.connected.status =
+        connectionStatus === "mcp_only" ||
+        connectionStatus === "mcp_and_hooks_ready" ||
+        (options.dryRun && connectionStatus === "mcp_and_hooks_planned")
+          ? "connected"
+          : "needed";
+      steps.connected.details = `connection_status=${connectionStatus}`;
+      if (steps.connected.status === "needed") {
+        throw new Error(
+          options.installLocalHooks
+            ? `onboard connect installed partial setup without hooks. Run: ${steps.connected.command}`
+            : `onboard connect is configured but not fully ready. Run: ${steps.connected.command}`
+        );
+      }
+    } else {
+      steps.connected.status = "connected";
+      steps.connected.details = `client=${targetClient} already connected`;
+    }
+  } else {
+    steps.connected.status = "skipped";
+    steps.connected.details = "no --client set, skipped connect";
+  }
+
+  if (options.verify) {
+    const marker = `onboard-${randomUUID()}`;
+    const demoCommand = [
+      "demo-capture",
+      "--project-dir",
+      options.projectDir,
+      "--format",
+      "json",
+      "--marker",
+      marker
+    ];
+    const demoResult = runLocalCliSubcommand(demoCommand);
+    if (demoResult.status !== 0) {
+      verifyResult.proof.demo = "failed";
+      verifyResult.stages.capture.status = "failed";
+      verifyResult.stages.capture.detail = "capture proof did not complete";
+      verifyResult.ask_answer = "not available";
+      emitVerifyFailure("capture", "capture proof did not complete");
+      return;
+    }
+    verifyResult.proof.demo = "done";
+    verifyResult.stages.capture.status = "done";
+    verifyResult.stages.capture.detail = "context read, memory write, and checkpoint were written";
+    const doctorCommand = [
+      "doctor",
+      "--project-dir",
+      options.projectDir,
+      "--require-memory-loop",
+      "--format",
+      "json"
+    ];
+    const doctorResult = runLocalCliSubcommand(doctorCommand);
+    verifyResult.evidence = onboardVerifyEvidenceFromDoctor(doctorResult.json);
+    verifyResult.stages.readiness.evidence = verifyResult.evidence;
+    if (doctorResult.status !== 0) {
+      verifyResult.proof.doctor = "failed";
+      verifyResult.stages.readiness.status = "failed";
+      verifyResult.stages.readiness.detail = "memory-loop readiness proof did not complete";
+      emitVerifyFailure("readiness", "memory-loop readiness proof did not complete");
+      return;
+    }
+    const memoryLoopReady = Boolean(objectValue(doctorResult.json?.memory_loop_readiness).ready);
+    if (!memoryLoopReady) {
+      verifyResult.proof.doctor = "failed";
+      verifyResult.stages.readiness.status = "failed";
+      verifyResult.stages.readiness.detail =
+        "the governed memory loop is not complete; onboarding is incomplete";
+      emitVerifyFailure("readiness", "the governed memory loop is not complete");
+      return;
+    }
+    verifyResult.proof.doctor = "done";
+    verifyResult.stages.readiness.status = "done";
+    verifyResult.stages.readiness.detail = "memory-loop readiness is complete";
+    verifyResult.memory_loop_ready = true;
+    verifyResult.capture_active =
+      objectValue(doctorResult.json?.readiness_contract).capture_active === true;
+    embeddingRecovery = await recoverOnboardPendingEmbeddings(
+      options.projectDir,
+      doctorResult.json
+    );
+
+    const query = "what did you remember?";
+    const askCommand = [
+      "ask",
+      "--project-dir",
+      options.projectDir,
+      "--format",
+      "json",
+      "--query",
+      query
+    ];
+    const askResult = runLocalCliSubcommand(askCommand);
+    if (askResult.status !== 0) {
+      verifyResult.proof.ask = "failed";
+      verifyResult.stages.recall.status = "failed";
+      verifyResult.stages.recall.detail = "recall proof did not complete";
+      emitVerifyFailure("recall", "recall proof did not complete");
+      return;
+    }
+    verifyResult.proof.ask = "done";
+    const memories = objectValue(askResult.json).memories;
+    const firstMemory =
+      Array.isArray(memories) && memories.length > 0
+        ? (memories[0] as Record<string, unknown>)
+        : null;
+    const answer = firstMemory && typeof firstMemory.body === "string" ? firstMemory.body : null;
+    verifyResult.ask_answer = answer;
+    verifyResult.status = answer ? "passed" : "failed";
+    if (verifyResult.status === "failed") {
+      verifyResult.proof.ask = "failed";
+      verifyResult.stages.recall.status = "failed";
+      verifyResult.stages.recall.detail = "recall proof did not return the captured memory";
+      emitVerifyFailure("recall", "recall proof did not return the captured memory");
+      return;
+    }
+    verifyResult.evidence = { ...verifyResult.evidence, recall: true };
+    verifyResult.stages.readiness.evidence = verifyResult.evidence;
+    verifyResult.stages.recall.status = "done";
+    verifyResult.stages.recall.detail = "captured memory was recalled";
+  }
+
+  const workbench = await resolveOnboardWorkbenchOutcome(options.projectDir);
+  const verifyNextOptions: OnboardOptions = {
+    ...options,
+    client: options.client ?? "codex",
+    installLocalHooks: options.client ? options.installLocalHooks : true,
+    verify: true,
+    dryRun: false,
+    yes: false,
+    cancel: false
+  };
+  const nextCommand = options.verify
+    ? "Start normal work in your agent client."
+    : formatOnboardRerunCommand(verifyNextOptions, options.client ? targetClient : "codex");
+  const payload = {
+    action: "onboard",
+    status: onboardStatus,
+    project_dir: options.projectDir,
+    format: options.format,
+    storage,
+    version_control: versionControl,
+    attach_details: attachDetails,
+    documentation_posture: attachDetails?.documentation_posture ?? documentationPosture,
+    workbench,
+    project_already_attached: Boolean(existingConfig?.project_id),
+    client: options.client ? targetClient : null,
+    install_local_hooks: options.installLocalHooks,
+    verify_requested: options.verify,
+    attached: {
+      status: needAttach ? steps.attached.status : ("skipped" as const),
+      command: steps.attached.command,
+      details: steps.attached.details ?? null
+    },
+    connected: {
+      status:
+        options.client && !needAttach
+          ? steps.connected.status
+          : needAttach
+            ? steps.connected.status
+            : options.client
+              ? steps.connected.status
+              : "skipped",
+      command: steps.connected.command,
+      details: steps.connected.details ?? null
+    },
+    verify: options.verify ? verifyResult : null,
+    embedding_recovery: embeddingRecovery,
+    next_command: nextCommand
+  };
+  process.stdout.write(
+    options.format === "json"
+      ? `${JSON.stringify(payload, null, 2)}\n`
+      : onboardHumanReport(payload)
+  );
+}
+
+function parseProjectSourceKind(raw: string | undefined): ProjectSourceKind {
+  const value = raw ?? "workspace_path";
+  const allowed: ProjectSourceKind[] = [
+    "workspace_path",
+    "repo",
+    "server_path",
+    "document_collection",
+    "connector",
+    "manual",
+    "virtual",
+    "other"
+  ];
+  if (!allowed.includes(value as ProjectSourceKind)) {
+    throw new Error(`VALIDATION_ERROR: invalid source kind ${value}`);
+  }
+  return value as ProjectSourceKind;
+}
+
+function parseProjectKind(raw: string | undefined) {
+  const value = raw ?? "other";
+  const allowed = ["repo", "subproject", "workspace", "personal_domain", "other"];
+  if (!allowed.includes(value)) throw new Error(`VALIDATION_ERROR: invalid project kind ${value}`);
+  return value as "repo" | "subproject" | "workspace" | "personal_domain" | "other";
+}
+
+function isRemoteSourceReference(value: string) {
+  return (
+    /^(?:[a-z][a-z0-9+.-]*:\/\/|[a-z][a-z0-9+.-]*:|[A-Za-z0-9_.-]+:~?\/)/i.test(value) &&
+    !/^[A-Za-z]:[\\/]/.test(value)
+  );
+}
+
+function normalizeSourceUri(sourceKind: ProjectSourceKind, rawUri: string | undefined) {
+  if (!rawUri) return rawUri;
+  if (sourceKind === "workspace_path") return resolve(rawUri);
+  if (sourceKind === "server_path") {
+    return isRemoteSourceReference(rawUri) ? rawUri : resolve(rawUri);
+  }
+  return rawUri;
+}
+
+function cliOutputFormat(argv: readonly string[]) {
+  const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
+  if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
+  return format;
+}
+
+function writeCliPayload(payload: Record<string, unknown>, format: "text" | "json", text: string) {
+  process.stdout.write(format === "json" ? `${JSON.stringify(payload, null, 2)}\n` : text);
+}
+
+async function runMemorySpace(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for memory-space commands");
+  try {
+    if (subcommand === "create") {
+      const name =
+        parseFlag(argv, "--name") ?? positionalArgs(argv).find((arg) => arg !== "create");
+      if (!name) throw new Error("VALIDATION_ERROR: memory-space create requires --name");
+      const primaryPath = parseFlag(argv, "--primary-path");
+      const space = await database.createMemorySpace({
+        name,
+        projectKind: parseProjectKind(parseFlag(argv, "--project-kind")),
+        memoryDomain: parseFlag(argv, "--memory-domain") ?? "agent_work",
+        primaryPath: primaryPath ? resolve(primaryPath) : null
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_create",
+            memory_space: space,
+            writes_database: true
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "remember") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId)
+        throw new Error("VALIDATION_ERROR: memory-space remember requires --project-id");
+      const text =
+        parseFlag(argv, "--text") ??
+        positionalArgs(argv)
+          .filter((arg) => arg !== "remember")
+          .join(" ");
+      if (!text.trim()) throw new Error("VALIDATION_ERROR: memory-space remember requires --text");
+      const title = parseFlag(argv, "--title") ?? "Manual human memory";
+      const memory = await database.createAgentMemory({
+        project_id: projectId,
+        memory_type: "decision",
+        scope: "project",
+        scope_kind: "domain",
+        scope_id: projectId,
+        audience: [{ kind: "owner", id: process.env.RECALLANT_DEVELOPER_ID ?? null }],
+        title,
+        body: text,
+        confidence: 0.9,
+        created_by: "user",
+        source_refs: [
+          {
+            source_kind: "external",
+            source_id: `manual:${createHash("sha256").update(`${projectId}:${title}:${text}`).digest("hex").slice(0, 16)}`,
+            quote: summarizeText(text, 500),
+            metadata: {
+              source_policy: "manual_owner_supplied",
+              memory_space_project_id: projectId
+            }
+          }
+        ],
+        metadata: {
+          created_from: "recallant_memory_space_remember",
+          write_policy: "manual_owner_or_agent_mediated",
+          passive_capture: false,
+          reversible_via_review_archive: true
+        }
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_remember",
+            project_id: projectId,
+            memory,
+            writes_database: true,
+            passive_capture: false,
+            reversible: "review_or_archive"
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const spaces = await database.listMemorySpaces();
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "memory_space_list",
+            count: spaces.length,
+            memory_spaces: spaces
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: memory-space supports create|remember|list");
+  } finally {
+    await database.close();
+  }
+}
+
+async function runInvite(argv: readonly string[]) {
+  const format = cliOutputFormat(argv);
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for invite commands");
+  const positional = positionalArgs(argv).filter((arg) => arg !== "create");
+  const projectDirInput = parseFlag(argv, "--project-dir") ?? positional[0] ?? null;
+  const projectDir = projectDirInput ? resolve(projectDirInput) : null;
+  const rawServerUrl =
+    parseFlag(argv, "--server-url") ??
+    process.env.RECALLANT_PUBLIC_WORKBENCH_URL ??
+    process.env.RECALLANT_REMOTE_MCP_URL;
+  if (!rawServerUrl) {
+    throw new Error(
+      "VALIDATION_ERROR: invite requires --server-url or RECALLANT_PUBLIC_WORKBENCH_URL"
+    );
+  }
+  const serverUrl = normalizeInviteServerUrl(rawServerUrl);
+  try {
+    const config = projectDir ? await readProjectConfig(projectDir) : null;
+    const projectId = parseFlag(argv, "--project-id") ?? config?.project_id;
+    if (!projectId) {
+      throw new Error(
+        "VALIDATION_ERROR: invite needs --project-id or an attached project with .recallant/config"
+      );
+    }
+    const binding = await database.getProjectBinding(projectId);
+    if (!binding) throw new Error("VALIDATION_ERROR: invite project was not found in Recallant");
+    const developerId = parseFlag(argv, "--developer-id") ?? binding.developer_id;
+    const expiresMinutes = parseFlag(argv, "--expires-minutes");
+    const expiresAt =
+      parseFlag(argv, "--expires-at") ??
+      (expiresMinutes
+        ? new Date(
+            Date.now() + Math.max(1, Number.parseInt(expiresMinutes, 10) || 30) * 60 * 1000
+          ).toISOString()
+        : null);
+    const result = await database.createRemoteOnboardingInvite({
+      projectId,
+      developerId,
+      target: parseFlag(argv, "--target") ?? "codex",
+      label: parseFlag(argv, "--label") ?? null,
+      expiresAt,
+      createdBy: "recallant-cli"
+    });
+    const command = inviteConnectCommand(serverUrl, result.token);
+    writeCliPayload(
+      {
+        ok: true,
+        action: "remote_invite_create",
+        remote: true,
+        invite: result.invite,
+        invite_token: result.token,
+        server_url: serverUrl,
+        redeem_url: `${serverUrl}/api/remote-invite/redeem`,
+        command,
+        secret_print_policy: "shown_once_create_output_only",
+        safety: {
+          remote_computer_requires_recallant_database_url: false,
+          exposes_postgres: false,
+          exposes_workbench_or_admin_auth: false,
+          exposes_internal_server_paths: false,
+          exposes_provider_secrets: false
+        }
+      },
+      format,
+      inviteHumanReport({
+        projectDir,
+        command,
+        invite: result.invite
+      })
+    );
+  } finally {
+    await database.close();
+  }
+}
+
+async function runRemoteCredential(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const format = cliOutputFormat(argv);
+  const database = createRecallantDbFromEnv();
+  if (!database) {
+    throw new Error("RECALLANT_DATABASE_URL is required for remote-credential commands");
+  }
+  try {
+    if (subcommand === "create") {
+      const projectId = parseFlag(argv, "--project-id");
+      const developerId = parseFlag(argv, "--developer-id");
+      if (!projectId || !developerId) {
+        throw new Error(
+          "VALIDATION_ERROR: remote-credential create requires --project-id and --developer-id"
+        );
+      }
+      const result = await database.createRemoteMcpCredential({
+        projectId,
+        developerId,
+        clientId: parseFlag(argv, "--client-id") ?? null,
+        label: parseFlag(argv, "--label") ?? null,
+        expiresAt: parseFlag(argv, "--expires-at") ?? null,
+        createdBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "create",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential: result.credential,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(
+          argv,
+          result.credential.client_id
+        ),
+        credentialSecret: result.secret,
+        includeSecret: true,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_create",
+          credential: result.credential,
+          secret: result.secret,
+          provisioning,
+          secret_print_policy: "shown_once_create_output_only",
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential created.",
+          provisioning
+        })
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const projectId = parseFlag(argv, "--project-id");
+      const developerId = parseFlag(argv, "--developer-id");
+      if (!projectId || !developerId) {
+        throw new Error(
+          "VALIDATION_ERROR: remote-credential list requires --project-id and --developer-id"
+        );
+      }
+      const credentials = await database.listRemoteMcpCredentials({
+        projectId,
+        developerId,
+        clientId: parseFlag(argv, "--client-id") ?? null,
+        includeRevoked: argv.includes("--include-revoked")
+      });
+      const provisioning = credentials.map((credential) =>
+        remoteMcpProvisioningOutput({
+          action: "list",
+          target: remoteCredentialProvisioningTarget(argv),
+          serverUrl: remoteCredentialProvisioningServerUrl(argv),
+          credential,
+          bridgeClientId: remoteCredentialProvisioningBridgeClientId(argv, credential.client_id),
+          includeSecret: false,
+          sessionId: parseFlag(argv, "--session-id"),
+          traceId: parseFlag(argv, "--trace-id")
+        })
+      );
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_list",
+          count: credentials.length,
+          credentials,
+          provisioning
+        },
+        format,
+        [
+          `Remote MCP credentials: ${credentials.length}`,
+          ...credentials.map((credential, index) =>
+            [
+              `- id: ${credential.id}`,
+              `  status: ${credential.status}`,
+              `  project_id: ${credential.project_id}`,
+              `  developer_id: ${credential.developer_id}`,
+              `  client_id: ${credential.client_id ?? ""}`,
+              `  credential_prefix: ${credential.credential_prefix}`,
+              `  remote_client_bootstrap_command: ${provisioning[index]?.provisioning.command ?? ""}`,
+              `  remote_doctor_command: ${provisioning[index]?.provisioning.doctor_command ?? ""}`,
+              `  created_at: ${credential.created_at.toISOString()}`,
+              `  last_used_at: ${credential.last_used_at?.toISOString() ?? ""}`,
+              `  expires_at: ${credential.expires_at?.toISOString() ?? ""}`,
+              `  revoked_at: ${credential.revoked_at?.toISOString() ?? ""}`,
+              `  rotated_from_credential_id: ${credential.rotated_from_credential_id ?? ""}`
+            ].join("\n")
+          ),
+          ""
+        ].join("\n")
+      );
+      return;
+    }
+    if (subcommand === "rotate") {
+      const credentialId = parseFlag(argv, "--credential-id");
+      if (!credentialId) {
+        throw new Error("VALIDATION_ERROR: remote-credential rotate requires --credential-id");
+      }
+      const result = await database.rotateRemoteMcpCredential({
+        credentialId,
+        expiresAt: parseFlag(argv, "--expires-at") ?? null,
+        rotatedBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "rotate",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential: result.credential,
+        previousCredential: result.previous,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(
+          argv,
+          result.credential.client_id
+        ),
+        credentialSecret: result.secret,
+        includeSecret: true,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_rotate",
+          previous: result.previous,
+          credential: result.credential,
+          secret: result.secret,
+          provisioning,
+          secret_print_policy: "shown_once_rotate_output_only",
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential rotated.",
+          provisioning
+        })
+      );
+      return;
+    }
+    if (subcommand === "revoke") {
+      const credentialId = parseFlag(argv, "--credential-id");
+      if (!credentialId) {
+        throw new Error("VALIDATION_ERROR: remote-credential revoke requires --credential-id");
+      }
+      const credential = await database.revokeRemoteMcpCredential({
+        credentialId,
+        revokedBy: "recallant-cli"
+      });
+      const provisioning = remoteMcpProvisioningOutput({
+        action: "revoke",
+        target: remoteCredentialProvisioningTarget(argv),
+        serverUrl: remoteCredentialProvisioningServerUrl(argv),
+        credential,
+        bridgeClientId: remoteCredentialProvisioningBridgeClientId(argv, credential.client_id),
+        includeSecret: false,
+        sessionId: parseFlag(argv, "--session-id"),
+        traceId: parseFlag(argv, "--trace-id")
+      });
+      writeCliPayload(
+        {
+          ok: true,
+          action: "remote_credential_revoke",
+          credential,
+          provisioning,
+          writes_database: true
+        },
+        format,
+        remoteCredentialProvisioningHumanReport({
+          title: "Remote MCP credential revoked.",
+          provisioning
+        })
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: remote-credential supports create|list|rotate|revoke");
+  } finally {
+    await database.close();
+  }
+}
+
+async function runSourceCommand(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "list";
+  const database = createRecallantDbFromEnv();
+  if (!database) throw new Error("RECALLANT_DATABASE_URL is required for source commands");
+  try {
+    if (subcommand === "attach") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId) throw new Error("VALIDATION_ERROR: source attach requires --project-id");
+      const sourceKind = parseProjectSourceKind(parseFlag(argv, "--source-kind"));
+      const rawUri = parseFlag(argv, "--uri");
+      const uri = normalizeSourceUri(sourceKind, rawUri);
+      const label =
+        parseFlag(argv, "--label") ??
+        (uri ? uri.split("/").filter(Boolean).at(-1) : undefined) ??
+        `${sourceKind} source`;
+      const source = await database.attachProjectSource({
+        project_id: projectId,
+        source_kind: sourceKind,
+        label,
+        uri: uri ?? null,
+        is_primary: argv.includes("--primary"),
+        status: "active",
+        metadata: { created_by: "recallant-cli" }
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "source_attach",
+            source,
+            writes_database: true
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "list") {
+      const projectId = parseFlag(argv, "--project-id");
+      if (!projectId) throw new Error("VALIDATION_ERROR: source list requires --project-id");
+      const sources = await database.listProjectSources(projectId);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "source_list",
+            project_id: projectId,
+            count: sources.length,
+            sources
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    if (subcommand === "detach") {
+      const sourceId = parseFlag(argv, "--source-id");
+      if (!sourceId) throw new Error("VALIDATION_ERROR: source detach requires --source-id");
+      const source = await database.detachProjectSource({
+        source_id: sourceId,
+        reason: parseFlag(argv, "--reason") ?? "recallant source detach"
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: Boolean(source),
+            action: "source_detach",
+            source,
+            writes_database: Boolean(source)
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    throw new Error("VALIDATION_ERROR: source supports attach|list|detach");
+  } finally {
+    await database.close();
+  }
+}
+
+function repeatedFlag(argv: readonly string[], name: string) {
+  const values: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === name && argv[index + 1]) values.push(argv[index + 1]!);
+  }
+  return values;
+}
+
+type KeeperCliPlan = MemoryKeeperPlan & {
+  action: "keeper_candidates";
+  project_dir: string;
+};
+
+type KeeperCandidateTextPlan = Omit<KeeperCliPlan, "dry_run" | "writes_database" | "proposals"> & {
+  dry_run: boolean;
+  writes_database: boolean;
+  persisted?: {
+    count: number;
+    graph_candidate_ids: Array<string | undefined>;
+  };
+  proposals: Array<KeeperCliPlan["proposals"][number] & { persisted?: string | null }>;
+};
+
+function parseGraphFormat(argv: readonly string[]) {
+  const format = parseFlag(argv, "--format") ?? "json";
+  if (format !== "json" && format !== "text") {
+    throw new Error("VALIDATION_ERROR: graph --format must be json or text");
+  }
+  return format;
+}
+
+function formatGraphHygieneText(
+  report: Awaited<ReturnType<RecallantDb["getGraphCandidateHygiene"]>>
+) {
+  return [
+    "Recallant graph hygiene",
+    `Read only: ${report.governance.read_only}`,
+    `Endpoint policy: ${report.governance.supported_endpoint_policy}`,
+    `Active edge endpoint kinds: ${report.governance.active_edge_endpoint_kinds.join(", ")}`,
+    `Chunk retrieval endpoint policy: ${report.governance.chunk_retrieval_endpoint_policy}`,
+    `Project id: ${report.project_id ?? "current"}`,
+    `Total: ${report.counts.total}`,
+    `Promotable: ${report.counts.promotable}`,
+    `Blocked: ${report.counts.blocked}`,
+    `Duplicate: ${report.counts.duplicate}`,
+    `Stale: ${report.counts.stale}`,
+    `Promoted: ${report.counts.promoted}`,
+    `Conflict review: ${report.counts.conflict_review}`,
+    `Duplicate groups: ${report.duplicate_groups.length}`,
+    ""
+  ].join("\n");
+}
+
+function formatGraphPromotionText(
+  result: Awaited<ReturnType<RecallantDb["promoteGraphCandidate"]>>
+) {
+  return [
+    "Recallant graph candidate promotion",
+    `Candidate: ${result.graph_candidate_id}`,
+    `Status: ${result.status}`,
+    `Active edge: ${result.active_edge}`,
+    `Retrieval active: ${result.retrieval_active}`,
+    `Endpoint policy: ${result.governance.supported_endpoint_policy}`,
+    `Chunk retrieval supported: ${result.governance.endpoint_capabilities.chunk_retrieval_supported}`,
+    `Promoted edge: ${result.promoted_edge_id ?? "none"}`,
+    result.blocked_reason ? `Blocked reason: ${result.blocked_reason}` : null,
+    result.blocked_detail ? `Blocked detail: ${result.blocked_detail}` : null,
+    ""
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function formatGraphMaintenanceText(
+  plan: Awaited<ReturnType<RecallantDb["getGraphCandidateMaintenancePlan"]>>
+) {
+  const laneLines = plan.lanes.map(
+    (lane) =>
+      `- ${lane.label}: ${lane.count} recommendation${lane.count === 1 ? "" : "s"}${
+        lane.truncated ? ` (${lane.omitted_count} omitted)` : ""
+      }`
+  );
+  return [
+    "Recallant graph maintenance",
+    `Read-only plan: ${plan.governance.read_only_plan}`,
+    `Apply requires confirm: ${plan.governance.apply_requires_confirm}`,
+    `Mutates edges: ${plan.governance.mutates_edges}`,
+    `Retrieval semantics changed: ${plan.governance.retrieval_semantics_changed}`,
+    `Project id: ${plan.project_id ?? "current"}`,
+    `Total recommendations: ${plan.counts.total_recommendations}`,
+    `Omitted recommendations: ${plan.counts.omitted_recommendations}`,
+    ...laneLines,
+    ""
+  ].join("\n");
+}
+
+function formatGraphMaintenanceApplyText(
+  result: Awaited<ReturnType<RecallantDb["applyGraphCandidateMaintenance"]>>
+) {
+  return [
+    "Recallant graph maintenance apply",
+    `Candidate: ${result.graph_candidate_id}`,
+    `Action: ${result.action_kind}`,
+    `Status: ${result.status}`,
+    `Target: ${result.target_graph_candidate_id ?? "none"}`,
+    `Dry run: ${result.mutation.dry_run}`,
+    `Confirmed: ${result.mutation.confirmed}`,
+    `Review action appended: ${result.mutation.review_action_appended}`,
+    `Mutates edges: ${result.mutation.mutates_edges}`,
+    `Retrieval semantics changed: ${result.mutation.retrieval_semantics_changed}`,
+    ""
+  ].join("\n");
+}
+
+function parseGraphMaintenanceActionKind(
+  raw: string | undefined
+): GraphCandidateMaintenanceActionKind {
+  if (
+    !raw ||
+    !graphCandidateMaintenanceActionKindValues.includes(raw as GraphCandidateMaintenanceActionKind)
+  ) {
+    throw new Error(
+      `VALIDATION_ERROR: graph maintenance action must be one of ${graphCandidateMaintenanceActionKindValues.join(", ")}`
+    );
+  }
+  return raw as GraphCandidateMaintenanceActionKind;
+}
+
+function createGraphDatabase(argv: readonly string[], projectDir: string) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID,
+    projectId: parseFlag(argv, "--project-id") ?? process.env.RECALLANT_PROJECT_ID,
+    projectPath: projectDir
+  });
+}
+
+async function runGraphCommand(argv: readonly string[]) {
+  let database: RecallantDb | null = null;
+  try {
+    const subcommand = argv[3] ?? "hygiene";
+    const format = parseGraphFormat(argv);
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const projectId = parseFlag(argv, "--project-id") ?? null;
+    const developerId = parseFlag(argv, "--developer-id") ?? null;
+    const scope = projectId
+      ? { project_id: projectId, project_path: projectDir, developer_id: developerId ?? undefined }
+      : { project_path: projectDir, developer_id: developerId ?? undefined };
+    database = createGraphDatabase(argv, projectDir);
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for graph commands");
+
+    if (subcommand === "hygiene" || subcommand === "health") {
+      const report = await database.getGraphCandidateHygiene({
+        ...scope,
+        limit: Number(parseFlag(argv, "--limit") ?? 500)
+      });
+      process.stdout.write(
+        format === "text" ? formatGraphHygieneText(report) : `${JSON.stringify(report, null, 2)}\n`
+      );
+      return;
+    }
+
+    if (subcommand === "maintenance") {
+      const args = positionalArgs(argv);
+      const mode = args[1] === "apply" ? "apply" : "plan";
+      if (mode === "apply") {
+        const actionKind = parseGraphMaintenanceActionKind(
+          args[2] ?? parseFlag(argv, "--action-kind")
+        );
+        const candidateId = args[3] ?? parseFlag(argv, "--graph-candidate-id");
+        if (!candidateId) {
+          throw new Error("VALIDATION_ERROR: graph maintenance apply requires a candidate id");
+        }
+        if (!argv.includes("--confirm")) {
+          throw new Error("VALIDATION_ERROR: graph maintenance apply requires --confirm");
+        }
+        const targetGraphCandidateId =
+          parseFlag(argv, "--target-graph-candidate-id") ?? parseFlag(argv, "--target-id");
+        if (
+          (actionKind === "merge_duplicate" || actionKind === "supersede_candidate") &&
+          !targetGraphCandidateId
+        ) {
+          throw new Error(
+            "VALIDATION_ERROR: graph maintenance apply requires --target-graph-candidate-id for merge/supersede"
+          );
+        }
+        const result =
+          actionKind === "merge_duplicate" || actionKind === "supersede_candidate"
+            ? await (() => {
+                const requiredTargetGraphCandidateId = targetGraphCandidateId;
+                if (!requiredTargetGraphCandidateId) {
+                  throw new Error(
+                    "VALIDATION_ERROR: graph maintenance apply requires --target-graph-candidate-id for merge/supersede"
+                  );
+                }
+                return database.applyGraphCandidateMaintenance({
+                  ...scope,
+                  graph_candidate_id: candidateId,
+                  action_kind: actionKind,
+                  target_graph_candidate_id: requiredTargetGraphCandidateId,
+                  confirm: true,
+                  actor_kind: "user"
+                });
+              })()
+            : await database.applyGraphCandidateMaintenance({
+                ...scope,
+                graph_candidate_id: candidateId,
+                action_kind: actionKind,
+                target_graph_candidate_id: targetGraphCandidateId ?? null,
+                confirm: true,
+                actor_kind: "user"
+              });
+        process.stdout.write(
+          format === "text"
+            ? formatGraphMaintenanceApplyText(result)
+            : `${JSON.stringify(result, null, 2)}\n`
+        );
+        return;
+      }
+      const plan = await database.getGraphCandidateMaintenancePlan({
+        ...scope,
+        limit: Number(parseFlag(argv, "--limit") ?? 50)
+      });
+      process.stdout.write(
+        format === "text" ? formatGraphMaintenanceText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+      );
+      return;
+    }
+
+    if (subcommand === "promote-candidate" || subcommand === "promote") {
+      const args = positionalArgs(argv);
+      const candidateId = args[1] ?? parseFlag(argv, "--graph-candidate-id");
+      if (!candidateId) {
+        throw new Error("VALIDATION_ERROR: graph promote-candidate requires a candidate id");
+      }
+      if (!argv.includes("--confirm")) {
+        throw new Error("VALIDATION_ERROR: graph candidate promotion requires --confirm");
+      }
+      const result = await database.promoteGraphCandidate({
+        ...scope,
+        graph_candidate_id: candidateId,
+        actor_kind: "user"
+      });
+      process.stdout.write(
+        format === "text"
+          ? formatGraphPromotionText(result)
+          : `${JSON.stringify(result, null, 2)}\n`
+      );
+      return;
+    }
+
+    throw new Error("VALIDATION_ERROR: graph supports hygiene|maintenance|promote-candidate");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  } finally {
+    await database?.close();
+  }
+}
+
+function parseKeeperFormat(argv: readonly string[]) {
+  const format = parseFlag(argv, "--format") ?? "json";
+  if (format !== "json" && format !== "text") {
+    throw new Error("VALIDATION_ERROR: keeper candidates --format must be json or text");
+  }
+  return format;
+}
+
+function parseKeeperSourceKind(raw: string | undefined): GraphCandidateSourceRefKind {
+  if (!raw) return "external";
+  if (!graphCandidateSourceRefKindValues.includes(raw as GraphCandidateSourceRefKind)) {
+    throw new Error(`VALIDATION_ERROR: invalid keeper source kind ${raw}`);
+  }
+  return raw as GraphCandidateSourceRefKind;
+}
+
+function parseKeeperPositiveIntFlag(argv: readonly string[], name: string) {
+  const raw = parseFlag(argv, name);
+  if (raw === undefined) return undefined;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`VALIDATION_ERROR: ${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function createKeeperDatabase(argv: readonly string[], projectDir: string) {
+  const databaseUrl = process.env.RECALLANT_DATABASE_URL;
+  if (!databaseUrl) return null;
+  return new RecallantDb({
+    databaseUrl,
+    developerId: parseFlag(argv, "--developer-id") ?? process.env.RECALLANT_DEVELOPER_ID,
+    projectId: parseFlag(argv, "--project-id") ?? process.env.RECALLANT_PROJECT_ID,
+    projectPath: projectDir
+  });
+}
+
+async function readKeeperSourceInput(
+  argv: readonly string[],
+  projectDir: string,
+  database?: RecallantDb | null
+): Promise<MemoryKeeperSourceInput> {
+  const text = parseFlag(argv, "--text");
+  const fromFile = parseFlag(argv, "--from-file");
+  const fromSource = parseFlag(argv, "--from-source");
+  const inputModes = [text !== undefined, fromFile !== undefined, fromSource !== undefined].filter(
+    Boolean
+  ).length;
+  if (inputModes > 1) {
+    throw new Error(
+      "VALIDATION_ERROR: keeper candidates accepts exactly one of --text, --from-file, or --from-source"
+    );
+  }
+  if (inputModes === 0) {
+    throw new Error(
+      "VALIDATION_ERROR: keeper candidates requires --text, --from-file, or --from-source"
+    );
+  }
+
+  if (fromSource !== undefined) {
+    if (!database) {
+      throw new Error(
+        "RECALLANT_DATABASE_URL is required for keeper --from-source source resolution"
+      );
+    }
+    const resolved = await database.resolveKeeperProjectSource({
+      source_id: fromSource,
+      project_id: parseFlag(argv, "--project-id") ?? null,
+      project_path: projectDir,
+      max_source_chars: parseKeeperPositiveIntFlag(argv, "--max-source-chars"),
+      max_source_memories: parseKeeperPositiveIntFlag(argv, "--max-source-memories")
+    });
+    return {
+      input_kind: "source_excerpt",
+      text: resolved.text,
+      source_kind: "source",
+      source_id: resolved.source_id,
+      uri: resolved.uri,
+      path: parseFlag(argv, "--source-path") ?? resolved.path,
+      label: parseFlag(argv, "--label") ?? resolved.label,
+      metadata: {
+        ...resolved.metadata,
+        cli_command: "keeper candidates",
+        project_dir: projectDir
+      },
+      source_resolution: resolved.source_resolution
+    };
+  }
+
+  const resolvedFile = fromFile ? resolve(fromFile) : null;
+  const sourcePath = parseFlag(argv, "--source-path") ?? resolvedFile;
+  const content = text !== undefined ? text : await readFile(resolvedFile!, "utf8");
+  return {
+    input_kind: fromFile ? "file" : "text",
+    text: content,
+    source_kind: parseKeeperSourceKind(parseFlag(argv, "--source-kind")),
+    source_id: parseFlag(argv, "--source-id") ?? null,
+    path: sourcePath,
+    label: parseFlag(argv, "--label") ?? (fromFile ? basename(fromFile) : "Keeper CLI text"),
+    metadata: {
+      cli_command: "keeper candidates",
+      project_dir: projectDir
+    }
+  };
+}
+
+function formatKeeperCandidateText(plan: KeeperCandidateTextPlan) {
+  const lines = [
+    "Recallant keeper candidates",
+    `Dry run: ${plan.dry_run}`,
+    `Writes database: ${plan.writes_database}`,
+    `Project dir: ${plan.project_dir}`,
+    `Input: ${plan.input.input_kind} source=${plan.input.source_kind} source_id=${plan.input.source_id ?? "none"}`,
+    `Proposals: ${plan.summary.proposals} (${plan.summary.node_candidates} nodes, ${plan.summary.edge_candidates} edges)`,
+    `Lifecycle states: ${plan.summary.lifecycle_states.join(", ")}`,
+    `Source refs required: ${plan.summary.source_refs_required}`
+  ];
+  const sourceResolution = plan.input.source_resolution;
+  if (sourceResolution) {
+    lines.push(
+      `Source evidence: ${sourceResolution.evidence_count} used, ${sourceResolution.omitted_count} omitted, ${sourceResolution.text_chars}/${sourceResolution.max_source_chars} chars`
+    );
+  }
+  if (plan.persisted) {
+    lines.push(`Persisted: ${plan.persisted.count}`);
+  }
+  lines.push("");
+
+  for (const proposal of plan.proposals) {
+    const candidate = proposal.candidate;
+    const lifecycle = candidate.lifecycle_state ?? "candidate";
+    const confidence =
+      typeof candidate.confidence === "number" ? candidate.confidence.toFixed(2) : "n/a";
+    const sourceRefStatus = candidate.source_refs.length > 0 ? "present" : "missing";
+    const reason = String(candidate.metadata?.reason ?? proposal.reason);
+    const persisted = proposal.persisted ? ` persisted=${proposal.persisted}` : "";
+    if (candidate.candidate_kind === "node") {
+      lines.push(
+        `- node ${candidate.node_kind} "${candidate.title}" lifecycle=${lifecycle} confidence=${confidence} source_refs=${sourceRefStatus}(${candidate.source_refs.length})${persisted} reason=${reason}`
+      );
+    } else {
+      lines.push(
+        `- edge ${candidate.relation_type} "${candidate.src.label ?? candidate.src.id}" -> "${
+          candidate.dst.label ?? candidate.dst.id
+        }" lifecycle=${lifecycle} confidence=${confidence} source_refs=${sourceRefStatus}(${
+          candidate.source_refs.length
+        })${persisted} reason=${reason}`
+      );
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function runKeeperCommand(argv: readonly string[]) {
+  let database: RecallantDb | null = null;
+  try {
+    const subcommand = argv[3] ?? "candidates";
+    if (subcommand !== "candidates" && subcommand !== "proposals") {
+      throw new Error("VALIDATION_ERROR: keeper supports candidates");
+    }
+
+    const writeCandidates = argv.includes("--write-candidates");
+    if (writeCandidates && !argv.includes("--confirm")) {
+      throw new Error(
+        "VALIDATION_ERROR: keeper candidate persistence requires --write-candidates --confirm"
+      );
+    }
+
+    const format = parseKeeperFormat(argv);
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+    const fromSource = parseFlag(argv, "--from-source");
+    if (fromSource !== undefined || writeCandidates) {
+      database = createKeeperDatabase(argv, projectDir);
+      if (!database) {
+        throw new Error(
+          fromSource !== undefined
+            ? "RECALLANT_DATABASE_URL is required for keeper --from-source source resolution"
+            : "RECALLANT_DATABASE_URL is required for keeper candidate writes"
+        );
+      }
+    }
+    const sourceInput = await readKeeperSourceInput(argv, projectDir, database);
+    const plan: KeeperCliPlan = {
+      action: "keeper_candidates",
+      project_dir: projectDir,
+      ...buildMemoryKeeperPlan(sourceInput)
+    };
+
+    if (writeCandidates) {
+      if (!database) {
+        throw new Error("RECALLANT_DATABASE_URL is required for keeper candidate writes");
+      }
+      const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
+      for (const proposal of plan.proposals) {
+        created.push(
+          await database.createGraphCandidate({
+            ...proposal.candidate,
+            project_id: parseFlag(argv, "--project-id") ?? undefined,
+            project_path: projectDir
+          })
+        );
+      }
+      const persistedPlan = {
+        ...plan,
+        dry_run: false,
+        writes_database: true,
+        persisted: {
+          count: created.length,
+          graph_candidate_ids: created.map((candidate) => candidate.graph_candidate_id)
+        },
+        proposals: plan.proposals.map((proposal, index) => ({
+          ...proposal,
+          persisted: created[index]?.graph_candidate_id ?? null
+        }))
+      };
+      process.stdout.write(
+        format === "text"
+          ? formatKeeperCandidateText(persistedPlan)
+          : `${JSON.stringify(persistedPlan, null, 2)}\n`
+      );
+      return;
+    }
+
+    process.stdout.write(
+      format === "text" ? formatKeeperCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+    );
+  } finally {
+    await database?.close();
+  }
+}
+
+async function runVaultCommand(argv: readonly string[]) {
+  const subcommand = argv[3] ?? "inventory";
+  const args = positionalArgs(argv).slice(1);
+  const vaultDir = args[0]
+    ? resolve(args[0])
+    : resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const format = parseFlag(argv, "--format") ?? (argv.includes("--text") ? "text" : "json");
+
+  const inventory = await inventoryVault({
+    vaultDir,
+    includePrefixes: repeatedFlag(argv, "--include"),
+    excludePrefixes: repeatedFlag(argv, "--exclude")
+  });
+
+  if (subcommand === "inventory" || subcommand === "inspect") {
+    process.stdout.write(
+      format === "text"
+        ? formatVaultInventoryText(inventory)
+        : `${JSON.stringify(inventory, null, 2)}\n`
+    );
+    return;
+  }
+
+  if (subcommand === "candidates" || subcommand === "proposals") {
+    const plan = buildVaultCandidatePlan(inventory);
+    const writeCandidates = argv.includes("--write-candidates");
+    if (!writeCandidates) {
+      process.stdout.write(
+        format === "text" ? formatVaultCandidateText(plan) : `${JSON.stringify(plan, null, 2)}\n`
+      );
+      return;
+    }
+    if (!argv.includes("--confirm")) {
+      throw new Error(
+        "VALIDATION_ERROR: vault candidate persistence requires --write-candidates --confirm"
+      );
+    }
+    const projectDir = resolve(parseFlag(argv, "--project-dir") ?? vaultDir);
+    const database = createRecallantDbFromEnv();
+    if (!database) throw new Error("RECALLANT_DATABASE_URL is required for vault candidate writes");
+    try {
+      const created: Array<{ graph_candidate_id?: string; title?: string | null }> = [];
+      for (const proposal of plan.proposals) {
+        created.push(
+          await database.createGraphCandidate({
+            ...proposal.candidate,
+            project_path: projectDir
+          })
+        );
+      }
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ...plan,
+            dry_run: false,
+            writes_database: true,
+            project_dir: projectDir,
+            persisted: {
+              count: created.length,
+              graph_candidate_ids: created.map((candidate) => candidate.graph_candidate_id)
+            },
+            proposals: plan.proposals.map((proposal) => ({
+              ...proposal,
+              persisted: created.find((candidate) => candidate.title === proposal.candidate.title)
+                ?.graph_candidate_id
+            }))
+          },
+          null,
+          2
+        )}\n`
+      );
+    } finally {
+      await database.close();
+    }
+    return;
+  }
+
+  if (subcommand === "export") {
+    const outputDir = parseFlag(argv, "--output");
+    const plan = buildVaultMarkdownExportPlan(inventory, outputDir);
+    const writeExport = argv.includes("--write");
+    if (!writeExport) {
+      process.stdout.write(
+        format === "text"
+          ? formatVaultMarkdownExportText(plan)
+          : `${JSON.stringify(plan, null, 2)}\n`
+      );
+      return;
+    }
+    if (!argv.includes("--confirm")) {
+      throw new Error("VALIDATION_ERROR: vault export writes require --write --confirm");
+    }
+    const written = await writeVaultMarkdownExport(plan, {
+      overwrite: argv.includes("--overwrite")
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ...plan,
+          dry_run: false,
+          writes_files: true,
+          written: {
+            count: written.length,
+            files: written
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
+
+  throw new Error("VALIDATION_ERROR: vault supports inventory|candidates|export");
+}
+
+function usageText(command?: string) {
+  if (command === "onboard") {
+    return [
+      "Usage: recallant onboard <project-dir> [--server-url <https-url>] [--local|--remote] [--client <codex|cursor|claude-code|generic>] [--install-local-hooks|--no-local-hooks] [--verify] [--dry-run] [--yes] [--no-update-check] [--format json]",
+      "",
+      "Universal beginner flow: check the installed CLI against the official Recallant main branch in an interactive terminal, offer a safe update when needed, then use reachable local Recallant storage or a central server supplied through project configuration, deployment environment, or --server-url. If neither route is configured, stop before changing project files and show the available setup paths. Attach the project, configure the agent client, install fail-soft local hooks when supported, prove capture/recall, and print the outcome.",
+      ""
+    ].join("\n");
+  }
+  if (command === "connect") {
+    return [
+      "Usage: recallant connect <project-dir> [--server-url <https-url>] [--client codex|cursor|claude-code|generic] [--yes] [--format json]",
+      "       recallant connect <client> --project-dir <project-dir> [--install-local-hooks|--no-local-hooks] [--dry-run] [--global] [--format json]",
+      "",
+      "Beginner universal flow. With reachable local storage, runs local onboarding for the project. Without local storage, asks for an existing central server URL or local storage choice before changing project files. Automation can pass --server-url to choose the remote path up front.",
+      "",
+      "Advanced local client flow: configure a supported agent client to call `recallant mcp-server` for an attached project. Codex also receives automatic project hooks by default; pass --no-local-hooks to configure MCP only.",
+      ""
+    ].join("\n");
+  }
+  if (command === "connect-remote") {
+    return [
+      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--project-dir <path>] [--write] [--session-id <id>] [--trace-id <id>] [--format json|text]",
+      "",
+      "Preview a supported agent client config that runs `recallant remote-bridge` against a scoped central /api/mcp endpoint without local database access.",
+      "Add --write --project-dir <path> to merge the remote MCP config into the project-local client config.",
+      ""
+    ].join("\n");
+  }
+  if (
+    command === "connect-cloud" ||
+    command === "cloud-connect" ||
+    command === "connect-remote-auto"
+  ) {
+    return [
+      "Usage: recallant connect-cloud <project-dir> --server-url <https-url> [--client codex|cursor|claude-code|generic] [--bootstrap-token <one-time-token>] [--poll-timeout-ms <ms>] [--proof context|semantic|transport] [--semantic-proof] [--skip-doctor] [--skip-agent-files] [--yes] [--format json|text]",
+      "",
+      "Universal remote beginner flow. Starts browser approval against an existing central Recallant server, registers a local trusted device key on first approval, reuses that key for signed trusted-device reconnect, supports one-time headless bootstrap tokens for servers, writes project-local remote MCP config plus safe thin agent-ready files after approval, and runs remote-doctor context proof by default. Use --proof semantic or --semantic-proof to create and recall one safe governed semantic marker.",
+      "",
+      "This command does not install local Recallant storage and does not require Docker, Postgres, RECALLANT_DATABASE_URL, Workbench/admin cookies, server-internal paths, raw artifacts, backups, provider secrets, or a current preinstalled Recallant CLI when launched through `curl -fsSL https://memory.example.com/connect | bash`.",
+      "",
+      "Advanced/admin fallback remains: recallant invite <server-project-dir> --server-url <https-url>",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-doctor") {
+    return [
+      "Usage: recallant remote-doctor [--project-dir <path>] [--capture-proof] [--semantic-proof] [--format json|text]",
+      "       recallant remote-doctor --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>] [--timeout-ms <ms>] [--capture-proof] [--semantic-proof] [--format json|text]",
+      "",
+      "Diagnose HTTPS /api/mcp reachability, edge/access posture, scoped credential auth, project/developer/client scope, MCP initialize, tools/list, optional session/context readiness proof, and optional governed semantic marker proof without local database access.",
+      "If the project already has a project-local remote MCP config, --project-dir is enough; remote-doctor reads the server, scope, credential ref, and local credential store path from that config.",
+      "",
+      "--capture-proof proves session/context readiness only. --semantic-proof also proves checkpoint state and governed memory create+recall with one synthetic marker.",
+      "",
+      "Example: recallant remote-doctor --project-dir . --semantic-proof",
+      "Advanced example: recallant remote-doctor --server-url https://recallant.example.com --credential <scoped-token> --project-id <project-id> --developer-id <developer-id> --client-id <client-id> --format json",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-acceptance") {
+    return [
+      "Usage: recallant remote-acceptance --project-dir <path> [--capture-proof|--semantic-proof] [--output-dir <path>]",
+      "",
+      "Run the external-machine acceptance gate: bootstrap remote client config, remote-doctor, remote MCP session/context/write/checkpoint/recall, and redacted evidence output without local Docker/Postgres. If the project already has Recallant remote config, scoped connection values are read from it; credential-ref configs skip bootstrap automatically.",
+      "",
+      "Advanced/manual scope override:",
+      "  recallant remote-acceptance --server-url <https-url> --credential <scoped-token> --project-id <id> --developer-id <id> --client-id <id> --project-dir <path>",
+      "",
+      "Validate a saved evidence file:",
+      "  recallant remote-acceptance validate --evidence <path>",
+      "",
+      "Validate strict capture/recall acceptance on the central server:",
+      "  recallant remote-acceptance validate-live --evidence <path>",
+      "",
+      "Clean stale local storage artifacts before retrying remote acceptance:",
+      "  recallant remote-acceptance cleanup --project-dir <path> --confirm",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-cleanup" || command === "disconnect-remote") {
+    return [
+      "Usage: recallant remote-cleanup --project-dir <path> [--target <codex|cursor|claude-code|generic>] [--confirm] [--remove-cli-wrapper] [--cli-path <path>] [--format json|text]",
+      "",
+      "Safely remove only the remote Recallant client config entry from a project. Dry-run is the default; confirmed cleanup never deletes source files, .recallant local storage, Docker/Postgres, or central Recallant server records.",
+      "",
+      "Examples:",
+      "  recallant remote-cleanup --project-dir .",
+      "  recallant remote-cleanup --project-dir . --confirm",
+      "  recallant remote-cleanup --project-dir . --remove-cli-wrapper --confirm",
+      ""
+    ].join("\n");
+  }
+  if (command === "doctor") {
+    return [
+      "Usage: recallant doctor [--project-dir <path>] [--require-capture] [--require-memory-loop] [--require-agent-audit] [--semantic-proof] [--format json|text]",
+      "",
+      "Diagnose local Recallant setup. --require-capture requires a fresh automatic native Codex hook event. --require-memory-loop separately requires context read + memory write + checkpoint evidence. --require-agent-audit is a compatibility alias for the automatic-capture gate. --semantic-proof also creates and recalls one safe synthetic governed memory marker.",
+      "",
+      recallantReadinessInvariant,
+      "",
+      "Example:",
+      "  recallant doctor --project-dir . --require-capture --require-memory-loop --semantic-proof",
+      ""
+    ].join("\n");
+  }
+  if (command === "otel-config") {
+    return [
+      "Usage: recallant otel-config --server-url <https-url> [--project-dir <path>|--project-id <id>] --developer-id <id> [--client-id <id>] [--environment <name>] [--confirm-configured] [--format json|text]",
+      "",
+      "Print the exact user-level Codex OTLP/HTTP JSON fragment for Recallant's independent audit control lane. This command never edits global Codex configuration and never enables prompt content.",
+      "",
+      "After merging the fragment and exposing RECALLANT_OTEL_TOKEN, start a new Codex run. Use --confirm-configured only after the user-level config is actually in place; receipt of a real OTel event also marks the lane configured automatically.",
+      ""
+    ].join("\n");
+  }
+  if (command === "project-sanitize" || command === "sanitize" || command === "project-purge") {
+    return [
+      "Usage: recallant project-sanitize [--project-id <id>|--project-dir <dir>] [--mode <detach|purge>] [--detach-mode <live|sandbox>] [--dry-run] [--confirm-token <token>] [--no-local] [--format json|text]",
+      "",
+      "Preview and confirm project cleanup. Detach hides a project from active Recallant views. Purge is the clean-slate path: it physically removes project-scoped Recallant records, writes a redacted receipt, and disconnects local Recallant artifacts when a project directory is known.",
+      "",
+      "Dry-run is the default. Confirmed purge requires the exact token printed by the dry-run.",
+      ""
+    ].join("\n");
+  }
+  if (command === "audit") {
+    return [
+      "Usage: recallant audit [--project-id <id>|--project-dir <dir>] [--since <iso>] [--until <iso>] [--surface <name>] [--status <name>] [--limit <n>] [--format json|text]",
+      "",
+      "Build an owner-readable system activity report from the Recallant audit ledger.",
+      ""
+    ].join("\n");
+  }
+  if (command === "recover-embeddings") {
+    return [
+      "Usage: recallant recover-embeddings [--project-id <id>|--project-dir <dir>] [--limit <n>] [--dry-run] [--format json|text]",
+      "",
+      "Recover pending project chunk embeddings with a bounded local-model pass. This is project-scoped by default and does not reindex the whole database.",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-credential" || command === "remote-credentials") {
+    return [
+      "Usage: recallant remote-credential <create|list|rotate|revoke> [--project-id <id>] [--developer-id <id>] [--client-id <id>] [--credential-id <id>] [--label <text>] [--expires-at <iso>] [--server-url <https-url>] [--target <codex|cursor|claude-code|generic>] [--bridge-client-id <id>] [--include-revoked] [--format json|text]",
+      "",
+      "Create, list, rotate, or revoke scoped remote MCP credentials. Create and rotate print the credential secret only in that command output and include a remote bridge command/config preview; list and revoke never print raw secrets.",
+      ""
+    ].join("\n");
+  }
+  if (command === "invite" || command === "remote-invite") {
+    return [
+      "Usage: recallant invite [create] <project-dir> --server-url <https-url> [--target <codex|cursor|claude-code|generic>] [--label <text>] [--expires-minutes <n>] [--format json|text]",
+      "",
+      "Create a short-lived one-command remote onboarding invite for an already attached project. The output is the only command the remote computer needs to run from its project folder.",
+      "",
+      "Example:",
+      "  recallant invite /path/to/project --server-url https://memory.example.com",
+      ""
+    ].join("\n");
+  }
+  if (command === "remote-bridge") {
+    return [
+      "Usage: recallant remote-bridge --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--session-id <id>] [--trace-id <id>]",
+      "",
+      "Run a stdio MCP bridge that forwards scoped memory calls to a central Recallant /api/mcp endpoint without local database access.",
+      ""
+    ].join("\n");
+  }
+  if (command === "vault") {
+    return [
+      "Usage: recallant vault <inventory|candidates|export> <vault-dir> [--project-dir <project-dir>] [--format json|text] [--include <path-prefix>] [--exclude <path-prefix>] [--output <dir>] [--write-candidates --confirm] [--write --confirm] [--overwrite]",
+      "",
+      "Inspect an Obsidian-compatible Markdown vault, optionally persist governed graph candidates, or export Recallant Markdown review files. Dry-run is the default.",
+      ""
+    ].join("\n");
+  }
+  if (command === "keeper") {
+    return [
+      "Usage: recallant keeper candidates [--text <text>|--from-file <path>|--from-source <project-source-id>] [--project-dir <dir>] [--project-id <id>] [--source-kind <kind>] [--source-id <id>] [--source-path <path>] [--max-source-chars <n>] [--max-source-memories <n>] [--format json|text] [--write-candidates --confirm]",
+      "",
+      "Extract governed graph candidate proposals from controlled source text or bounded governed project-source evidence. Text/file dry-run does not require RECALLANT_DATABASE_URL; --from-source does.",
+      ""
+    ].join("\n");
+  }
+  if (command === "graph") {
+    return [
+      "Usage: recallant graph <hygiene|maintenance|promote-candidate> [candidate-id] [--project-id <id>] [--developer-id <id>] [--project-dir <dir>] [--format json|text] [--limit <n>] [--confirm]",
+      "       recallant graph maintenance apply <action> <graph-candidate-id> [--target-graph-candidate-id <id>] --confirm",
+      "",
+      "Inspect graph candidate hygiene, preview governed graph maintenance, or explicitly promote one accepted compatible edge candidate. Hygiene and maintenance preview are read-only. Maintenance apply and promotion require --confirm.",
+      "",
+      "Examples:",
+      "  recallant graph hygiene --project-dir .",
+      "  recallant graph maintenance --project-dir .",
+      "  recallant graph maintenance apply archive_duplicate <graph-candidate-id> --target-graph-candidate-id <canonical-id> --confirm",
+      "  recallant graph promote-candidate <graph-candidate-id> --project-id <project-id> --confirm",
+      ""
+    ].join("\n");
+  }
+  return "Usage: recallant <mcp-server|remote-bridge|connect-cloud|connect-remote|remote-doctor|remote-acceptance|remote-cleanup|doctor|otel-config|audit|attach|connect|onboard|invite|recover-embeddings|remote-credential|project-sanitize|detach|memory-space|source|vault|keeper|graph|local-cleanup|init|discover|import|lint-context|context|closeout-intent|backup|backup-verify|restore-plan|analyze|cleanup|agent-start|agent-event|agent-observe|agent-checkpoint|agent-closeout|codex-hook|demo-capture|ask|spool-append|spool-status|sync-spool|prune-spool>\n";
+}
+
+function wantsHelp(argv: readonly string[]) {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+async function main(argv: readonly string[]) {
+  const command = argv[2];
+
+  if (command === "--version" || command === "-v" || command === "version") {
+    process.stdout.write(`recallant ${recallantCliVersion}\n`);
+    return;
+  }
+  if (!command || command === "--help" || command === "-h" || command === "help") {
+    process.stdout.write(usageText());
+    return;
+  }
+  if (wantsHelp(argv)) {
+    process.stdout.write(usageText(command));
+    return;
+  }
+  if (command === "mcp-server") {
+    await runRecallantStdioServer();
+    return;
+  }
+  if (command === "remote-bridge") {
+    await runRecallantRemoteBridge(argv);
+    return;
+  }
+  if (command === "remote-doctor") return runRemoteDoctor(argv);
+  if (command === "remote-acceptance") return runRemoteAcceptance(argv);
+  if (command === "remote-cleanup" || command === "disconnect-remote")
+    return runRemoteCleanup(argv);
+  if (command === "doctor") return runDoctor(argv);
+  if (command === "otel-config") return runOtelConfig(argv);
+  if (command === "audit") return runAudit(argv);
+  if (command === "attach") return runAttach(argv);
+  if (command === "connect") return runConnect(argv);
+  if (
+    command === "connect-cloud" ||
+    command === "cloud-connect" ||
+    command === "connect-remote-auto"
+  )
+    return runConnectCloud(argv);
+  if (command === "connect-remote") return runConnectRemote(argv);
+  if (command === "onboard") return runOnboard(argv);
+  if (command === "invite" || command === "remote-invite") return runInvite(argv);
+  if (command === "recover-embeddings") return runRecoverEmbeddings(argv);
+  if (command === "remote-credential" || command === "remote-credentials")
+    return runRemoteCredential(argv);
+  if (command === "project-sanitize" || command === "sanitize" || command === "project-purge")
+    return runProjectSanitize(argv);
+  if (command === "detach" || command === "project-detach") return runDetach(argv);
+  if (command === "memory-space" || command === "memory-spaces") return runMemorySpace(argv);
+  if (command === "source" || command === "project-source") return runSourceCommand(argv);
+  if (command === "vault") return runVaultCommand(argv);
+  if (command === "keeper") return runKeeperCommand(argv);
+  if (command === "graph") return runGraphCommand(argv);
+  if (command === "local-cleanup" || command === "sandbox-local-cleanup")
+    return runLocalCleanup(argv);
+  if (command === "init") return runInit(argv);
+  if (command === "discover") return runDiscover(argv);
+  if (command === "import") return runImport(argv);
+  if (command === "lint-context") return runLintContext(argv);
+  if (command === "context") return runContext(argv);
+  if (command === "closeout-intent") return runCloseoutIntent(argv);
+  if (command === "backup") return runBackup(argv);
+  if (command === "backup-verify") return runBackupVerify(argv);
+  if (command === "restore-plan") return runRestorePlan(argv);
+  if (command === "analyze") return runAnalyze(argv);
+  if (command === "cleanup") return runCleanup(argv);
+  if (command === "agent-start") return runAgentStart(argv);
+  if (command === "agent-event") return runAgentEvent(argv);
+  if (command === "agent-observe") return runAgentObserve(argv);
+  if (command === "agent-checkpoint") return runAgentCheckpoint(argv);
+  if (command === "agent-closeout") return runAgentCloseout(argv);
+  if (command === "codex-hook") return runCodexHook(argv);
+  if (command === "demo-capture") return runDemoCapture(argv);
+  if (command === "ask") return runAsk(argv);
+  if (command === "spool-append") return runSpoolAppend(argv);
+  if (command === "spool-status") return runSpoolStatus(argv);
+  if (command === "sync-spool") return runSyncSpool(argv);
+  if (command === "prune-spool") return runPruneSpool(argv);
+
+  process.stderr.write(usageText());
+  process.exitCode = 1;
+}
+
+const remoteOnlyBootstrap = commandUsesRemoteOnlyBootstrap(process.argv[2]);
+if (!remoteOnlyBootstrap) {
+  await loadDefaultEnv();
+}
+const cliAudit = remoteOnlyBootstrap ? null : await startCliAudit(process.argv);
+try {
+  await main(process.argv);
+  await finishCliAudit(process.argv, cliAudit);
+} catch (error) {
+  await finishCliAudit(process.argv, cliAudit, error);
+  throw error;
+}

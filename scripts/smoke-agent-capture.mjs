@@ -1,0 +1,629 @@
+import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { RecallantDb } from "../packages/db/dist/index.js";
+
+const execFileAsync = promisify(execFile);
+
+const databaseUrl =
+  process.env.RECALLANT_DATABASE_URL ??
+  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+const developerId = randomUUID();
+const cliPath = resolve("apps/cli/dist/index.js");
+const missingEnvFile = join(tmpdir(), `recallant-missing-env-${randomUUID()}`);
+
+function env(extra = {}) {
+  return {
+    ...process.env,
+    RECALLANT_DATABASE_URL: databaseUrl,
+    RECALLANT_DEVELOPER_ID: developerId,
+    RECALLANT_PROJECT_ID: "",
+    RECALLANT_PROJECT_PATH: "",
+    ...extra
+  };
+}
+
+async function cliRaw(cwd, args, extraEnv = {}) {
+  const { stdout, stderr } = await execFileAsync(process.execPath, [cliPath, ...args], {
+    cwd,
+    env: env(extraEnv),
+    maxBuffer: 8 * 1024 * 1024
+  });
+  if (stderr.trim()) process.stderr.write(stderr);
+  return stdout;
+}
+
+async function cli(cwd, args, extraEnv = {}) {
+  return JSON.parse(await cliRaw(cwd, args, extraEnv));
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function assertReadyLifecycle(output, label) {
+  const lifecycle = output.lifecycle;
+  assert(lifecycle, `${label} did not return lifecycle proof: ${JSON.stringify(output)}`);
+  assert(
+    lifecycle.next_agent_ready === true,
+    `${label} did not become next-agent ready: ${JSON.stringify(lifecycle)}`
+  );
+  assert(
+    Array.isArray(lifecycle.failure_reasons) && lifecycle.failure_reasons.length === 0,
+    `${label} had lifecycle failure reasons: ${JSON.stringify(lifecycle.failure_reasons)}`
+  );
+  assert(lifecycle.report_required === false, `${label} unexpectedly required a report`);
+  assert(lifecycle.proof?.event?.event_written === true, `${label} missing closeout event proof`);
+  assert(
+    lifecycle.proof?.checkpoint?.checkpoint_updated === true,
+    `${label} missing checkpoint proof`
+  );
+  assert(
+    lifecycle.proof?.memory?.searchable_memory_created === true &&
+      lifecycle.proof?.memory?.memory_status === "accepted",
+    `${label} missing accepted searchable memory proof: ${JSON.stringify(lifecycle.proof?.memory)}`
+  );
+  assert(
+    lifecycle.proof?.recall?.recall_verified === true &&
+      lifecycle.proof?.recall?.marker_found === true,
+    `${label} missing semantic recall proof: ${JSON.stringify(lifecycle.proof?.recall)}`
+  );
+  assert(
+    lifecycle.proof?.next_session_context?.next_session_context_verified === true &&
+      lifecycle.proof?.next_session_context?.marker_found === true,
+    `${label} missing next-session context proof: ${JSON.stringify(
+      lifecycle.proof?.next_session_context
+    )}`
+  );
+
+  const memoryId = String(lifecycle.proof?.memory?.memory_id ?? "");
+  const recallQuery = String(lifecycle.proof?.recall?.query ?? "");
+  assert(memoryId, `${label} did not return closeout memory id`);
+  assert(recallQuery, `${label} did not return closeout recall query`);
+  return {
+    memoryId,
+    recallQuery,
+    nextAgentReady: lifecycle.next_agent_ready,
+    memoryStatus: lifecycle.proof.memory.memory_status,
+    recallVerified: lifecycle.proof.recall.recall_verified,
+    nextSessionContextVerified: lifecycle.proof.next_session_context.next_session_context_verified
+  };
+}
+
+function assertContextIncludesCloseout(context, closeoutProof, label) {
+  const working = context.sections?.working_memories ?? [];
+  assert(
+    working.some(
+      (memory) =>
+        String(memory.memory_id ?? "") === closeoutProof.memoryId ||
+        String(memory.body ?? "").includes(closeoutProof.recallQuery) ||
+        String(memory.title ?? "").includes(closeoutProof.recallQuery)
+    ),
+    `${label} did not include closeout memory: ${JSON.stringify({
+      closeoutProof,
+      working
+    })}`
+  );
+}
+
+const onlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-online-"));
+const offlineProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-offline-"));
+const managedProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-managed-log-"));
+const remoteProject = await mkdtemp(join(tmpdir(), "recallant-agent-capture-remote-"));
+const marker = `CAPTURE-SMOKE-${randomUUID()}`;
+let firstCloseoutProof;
+let secondCloseoutProof;
+
+try {
+  const attach = await cli(onlineProject, ["attach", ".", "--format", "json"]);
+  assert(attach.status === "attached", `attach failed: ${JSON.stringify(attach)}`);
+  assert(
+    attach.requested_mode === "autopilot" && attach.effective_mode === "autopilot",
+    `ordinary attach did not use autopilot: ${JSON.stringify(attach)}`
+  );
+  const onlineProjectLogBefore = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
+
+  const started = await cli(onlineProject, [
+    "agent-start",
+    "--task-hint",
+    `${marker} readiness decision`
+  ]);
+  assert(
+    started.mode === "server",
+    `agent-start did not use server mode: ${JSON.stringify(started)}`
+  );
+  assert(started.session_id, "agent-start did not return a session id");
+  assert(
+    started.project_id === attach.project_id,
+    `agent-start used a different project id than attach: ${JSON.stringify({ attach, started })}`
+  );
+
+  const decisionText = `Owner decision ${marker}: Recallant readiness requires proven agent capture before project readiness can be claimed.`;
+  const decision = await cli(onlineProject, [
+    "agent-event",
+    "--kind",
+    "decision",
+    "--title",
+    `${marker} readiness decision`,
+    "--text",
+    decisionText
+  ]);
+  assert(decision.event_id, "decision event was not written");
+  assert(
+    decision.project_id === attach.project_id,
+    `decision event used a different project id than attach: ${JSON.stringify(decision)}`
+  );
+  assert(
+    decision.memory?.status === "accepted",
+    `decision memory was not accepted: ${JSON.stringify(decision)}`
+  );
+
+  const action = await cli(onlineProject, [
+    "agent-event",
+    "--kind",
+    "action",
+    "--text",
+    `Agent action ${marker}: wrote the capture loop smoke decision.`
+  ]);
+  assert(action.event_id, "action event was not written");
+  assert(
+    action.project_id === attach.project_id,
+    `action event used a different project id than attach: ${JSON.stringify(action)}`
+  );
+
+  const verification = await cli(onlineProject, [
+    "agent-event",
+    "--kind",
+    "test",
+    "--text",
+    `Verification ${marker}: decision, action, and checkpoint are expected to be recalled later.`
+  ]);
+  assert(verification.event_id, "verification event was not written");
+
+  const checkpoint = await cli(onlineProject, [
+    "agent-checkpoint",
+    "--status",
+    "capture_smoke",
+    "--focus",
+    `Capture smoke for ${marker}`,
+    "--next-step",
+    `Start a new session and recall ${marker}`,
+    "--summary",
+    `Checkpoint for ${marker}`
+  ]);
+  assert(checkpoint.event_id, "checkpoint event was not written");
+  assert(
+    checkpoint.project_id === attach.project_id,
+    `checkpoint used a different project id than attach: ${JSON.stringify(checkpoint)}`
+  );
+  assert(
+    checkpoint.memory?.status === "accepted",
+    `checkpoint memory was not accepted: ${JSON.stringify(checkpoint)}`
+  );
+  assert(
+    checkpoint.project_log_update?.status === "disabled" &&
+      checkpoint.project_log_update?.reason === "project_log_sync_disabled",
+    `default checkpoint unexpectedly changed PROJECT_LOG.md: ${JSON.stringify(checkpoint)}`
+  );
+
+  const checkpointAsk = await cli(onlineProject, [
+    "ask",
+    `checkpoint ${marker}`,
+    "--format",
+    "json"
+  ]);
+  assert(
+    checkpointAsk.memories?.some((memory) => String(memory.body ?? "").includes(marker)),
+    `ask did not recall checkpoint memory: ${JSON.stringify(checkpointAsk)}`
+  );
+
+  const closeout = await cli(onlineProject, [
+    "agent-closeout",
+    "--status",
+    "closed",
+    "--focus",
+    `Capture smoke for ${marker}`,
+    "--next-step",
+    `Recall ${marker} from the next session`,
+    "--summary",
+    `Closed capture smoke for ${marker}`
+  ]);
+  firstCloseoutProof = assertReadyLifecycle(closeout, "first agent-closeout");
+
+  const secondStart = await cli(onlineProject, [
+    "agent-start",
+    "--task-hint",
+    `${marker} readiness decision ${firstCloseoutProof.recallQuery}`
+  ]);
+  assert(
+    secondStart.session_id !== started.session_id,
+    "second session reused the first session id"
+  );
+  assert(
+    secondStart.project_id === attach.project_id,
+    `second agent-start used a different project id than attach: ${JSON.stringify(secondStart)}`
+  );
+
+  const context = await cli(onlineProject, [
+    "context",
+    "--task-hint",
+    `${marker} readiness decision ${firstCloseoutProof.recallQuery}`
+  ]);
+  const working = context.sections?.working_memories ?? [];
+  assert(
+    working.some((memory) => String(memory.body).includes(marker)),
+    `context pack did not recall captured decision: ${JSON.stringify(context)}`
+  );
+  assertContextIncludesCloseout(context, firstCloseoutProof, "second context pack");
+  assert(
+    String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
+    "context pack did not include the latest checkpoint"
+  );
+
+  const secondCloseout = await cli(onlineProject, [
+    "agent-closeout",
+    "--status",
+    "closed",
+    "--focus",
+    `Completed recall verification for ${marker}`,
+    "--next-step",
+    "No follow-up for smoke project.",
+    "--summary",
+    `Closed recall verification session for ${marker}`
+  ]);
+  secondCloseoutProof = assertReadyLifecycle(secondCloseout, "second agent-closeout");
+
+  const db = new RecallantDb({
+    databaseUrl,
+    developerId,
+    projectId: attach.project_id,
+    projectPath: onlineProject
+  });
+  try {
+    const dashboard = await db.getReviewDashboard({ project_id: attach.project_id });
+    assert(
+      dashboard.project_readiness?.last_context_read_at,
+      "dashboard readiness is missing last context read"
+    );
+    assert(
+      dashboard.project_readiness?.last_memory_write_at,
+      "dashboard readiness is missing last memory write"
+    );
+    assert(
+      dashboard.project_readiness?.checkpoint_updated_at,
+      "dashboard readiness is missing checkpoint timestamp"
+    );
+    assert(
+      Number(dashboard.project_readiness?.capture_event_count ?? 0) >= 3,
+      "dashboard readiness did not count capture events"
+    );
+    assert(
+      Number(dashboard.project_readiness?.active_sessions ?? 0) === 0,
+      `dashboard readiness still has active sessions: ${JSON.stringify(dashboard.project_readiness)}`
+    );
+  } finally {
+    await db.close();
+  }
+
+  const projectLog = await readFile(join(onlineProject, "PROJECT_LOG.md"), "utf8");
+  assert(projectLog === onlineProjectLogBefore, "default lifecycle changed PROJECT_LOG.md");
+
+  const managedAttach = await cli(managedProject, ["attach", ".", "--format", "json"]);
+  const managedConfigPath = join(managedProject, ".recallant", "config");
+  const managedConfig = JSON.parse(await readFile(managedConfigPath, "utf8"));
+  await writeFile(
+    managedConfigPath,
+    `${JSON.stringify({ ...managedConfig, project_log_sync: "managed_block" }, null, 2)}\n`
+  );
+  const managedLogBefore = await readFile(join(managedProject, "PROJECT_LOG.md"), "utf8");
+  const managedStarted = await cli(managedProject, [
+    "agent-start",
+    "--task-hint",
+    "managed log smoke"
+  ]);
+  assert(
+    managedStarted.project_id === managedAttach.project_id,
+    `managed log agent-start used wrong project: ${JSON.stringify({ managedAttach, managedStarted })}`
+  );
+  const managedCheckpoint = await cli(managedProject, [
+    "agent-checkpoint",
+    "--status",
+    "managed_log_smoke",
+    "--focus",
+    `Managed checkpoint ${marker}`,
+    "--next-step",
+    "Verify exact marker block."
+  ]);
+  const managedLogAfter = await readFile(join(managedProject, "PROJECT_LOG.md"), "utf8");
+  assert(
+    managedCheckpoint.project_log_update?.status === "updated" &&
+      managedLogAfter.includes(`Current focus: Managed checkpoint ${marker}`) &&
+      managedLogAfter.includes("<!-- recallant:checkpoint:start -->") &&
+      managedLogAfter.includes("<!-- recallant:checkpoint:end -->") &&
+      managedLogBefore.replace(
+        /<!-- recallant:checkpoint:start -->[\s\S]*?<!-- recallant:checkpoint:end -->/,
+        ""
+      ) ===
+        managedLogAfter.replace(
+          /<!-- recallant:checkpoint:start -->[\s\S]*?<!-- recallant:checkpoint:end -->/,
+          ""
+        ),
+    `managed checkpoint did not update only its marker block: ${JSON.stringify({ managedCheckpoint, managedLogBefore, managedLogAfter })}`
+  );
+
+  const semanticDoctor = await cli(onlineProject, [
+    "doctor",
+    "--require-memory-loop",
+    "--semantic-proof",
+    "--format",
+    "json"
+  ]);
+  assert(
+    semanticDoctor.readiness_contract?.semantic_memory_ready === true &&
+      semanticDoctor.readiness_contract?.memory_loop_ready === true &&
+      semanticDoctor.readiness_contract?.capture_active === false &&
+      semanticDoctor.semantic_memory_proof?.semantic_memory_proof?.marker_found === true,
+    `semantic doctor did not prove semantic/capture readiness: ${JSON.stringify(semanticDoctor)}`
+  );
+
+  const defaultDoctor = await cli(onlineProject, ["doctor", "--format", "json"]);
+  assert(
+    defaultDoctor.readiness_contract?.semantic_memory_ready === true &&
+      defaultDoctor.readiness_contract?.memory_loop_ready === true &&
+      defaultDoctor.readiness_contract?.capture_active === false,
+    `default doctor did not read persisted semantic/capture readiness: ${JSON.stringify(defaultDoctor)}`
+  );
+  assert(
+    defaultDoctor.pending_embeddings?.project_id === attach.project_id,
+    `default doctor did not use configured project id for project-scoped checks: ${JSON.stringify(defaultDoctor.pending_embeddings)}`
+  );
+
+  const detachDryRun = await cli(onlineProject, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--dry-run"
+  ]);
+  assert(
+    detachDryRun.status === "pending_confirmation" && detachDryRun.writes_database === false,
+    `detach dry-run changed state or skipped confirmation: ${JSON.stringify(detachDryRun)}`
+  );
+
+  const detach = await cli(onlineProject, [
+    "detach",
+    "--project-id",
+    attach.project_id,
+    "--confirm"
+  ]);
+  assert(
+    detach.status === "detached" &&
+      detach.writes_database === true &&
+      detach.changes?.physically_deleted_records === 0 &&
+      detach.changes?.files_changed === 0 &&
+      detach.lifecycle?.visibility === "hidden" &&
+      detach.lifecycle?.searchable === false,
+    `detach did not safely remove project from active Recallant views: ${JSON.stringify(detach)}`
+  );
+  const configAfterDetach = await readFile(join(onlineProject, ".recallant", "config"), "utf8");
+  assert(
+    configAfterDetach.includes(attach.project_id),
+    "detach unexpectedly removed or rewrote local project config"
+  );
+
+  const offlineStart = await cli(
+    offlineProject,
+    ["agent-start", "--task-hint", `${marker} offline capture`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(offlineStart.mode === "offline_spool", "offline agent-start did not use spool mode");
+  const offlineProjectLog = ["# Owner project log", "", `OWNER_LOG_SENTINEL_${marker}`, ""].join(
+    "\n"
+  );
+  await writeFile(join(offlineProject, "PROJECT_LOG.md"), offlineProjectLog);
+
+  const offlineEvent = await cli(
+    offlineProject,
+    [
+      "agent-event",
+      "--kind",
+      "action",
+      "--text",
+      `Offline action ${marker}: spool fallback works.`
+    ],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(offlineEvent.mode === "offline_spool", "offline agent-event did not spool");
+
+  const offlineCheckpoint = await cli(
+    offlineProject,
+    [
+      "agent-checkpoint",
+      "--focus",
+      `Offline checkpoint ${marker}`,
+      "--next-step",
+      "Sync when available."
+    ],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    offlineCheckpoint.mode === "offline_spool" &&
+      offlineCheckpoint.project_log_update?.reason === "offline_spool_no_project_log_write",
+    `offline checkpoint changed project documentation: ${JSON.stringify(offlineCheckpoint)}`
+  );
+
+  const offlineCloseout = await cli(
+    offlineProject,
+    ["agent-closeout", "--summary", `Offline closeout ${marker}`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    offlineCloseout.mode === "offline_spool" &&
+      offlineCloseout.project_log_update?.reason === "offline_spool_no_project_log_write",
+    `offline closeout changed project documentation: ${JSON.stringify(offlineCloseout)}`
+  );
+  assert(
+    (await readFile(join(offlineProject, "PROJECT_LOG.md"), "utf8")) === offlineProjectLog,
+    "offline lifecycle modified owner PROJECT_LOG.md"
+  );
+
+  const dryRun = await cli(offlineProject, ["sync-spool", "--dry-run"]);
+  assert(
+    dryRun.unsynced_count >= 2,
+    `sync-spool dry-run missed offline records: ${JSON.stringify(dryRun)}`
+  );
+
+  const synced = await cli(offlineProject, ["sync-spool"]);
+  assert(
+    synced.synced_count >= 2,
+    `sync-spool did not upload offline records: ${JSON.stringify(synced)}`
+  );
+
+  const syncedAgain = await cli(offlineProject, ["sync-spool"]);
+  assert(syncedAgain.synced_count === 0, "repeat sync-spool created duplicate work");
+
+  await mkdir(join(remoteProject, ".codex"), { recursive: true });
+  await writeFile(
+    join(remoteProject, ".codex", "config.toml"),
+    `[mcp_servers.recallant]
+command = "recallant"
+args = ["remote-bridge"]
+env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PROJECT_ID = "remote-project-id", RECALLANT_DEVELOPER_ID = "remote-developer-id", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-client-id", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "rclcred_lookup" }
+`
+  );
+  const requiredSecretClasses = [
+    ".env",
+    "private keys",
+    "raw credentials",
+    "customer data",
+    "provider secrets",
+    "database URLs",
+    "raw artifacts",
+    "backups"
+  ];
+  const remoteStart = await cli(
+    remoteProject,
+    ["agent-start", "--format", "json", "--task-hint", `${marker} remote consent`],
+    {
+      RECALLANT_DATABASE_URL: "postgres://example-user:example-password@127.0.0.1:5432/example-db",
+      RECALLANT_ENV_FILE: missingEnvFile
+    }
+  );
+  assert(
+    remoteStart.mode === "remote_mcp_ready",
+    `remote agent-start should use remote_mcp_ready, not local fallback: ${JSON.stringify(remoteStart)}`
+  );
+  assert(
+    !remoteStart.spool_path && !remoteStart.local_id,
+    "remote agent-start should not create an offline spool record"
+  );
+  assert(
+    !String(remoteStart.warning ?? "").includes("Server database is unavailable"),
+    "remote agent-start should not warn about local/server database availability"
+  );
+  assert(
+    remoteStart.destination?.server_url === "https://recallant.example.com",
+    "remote consent missing destination"
+  );
+  assert(
+    remoteStart.destination?.endpoint_path === "/api/mcp",
+    "remote consent missing endpoint path"
+  );
+  assert(
+    remoteStart.credential_scope?.project_id === "remote-project-id",
+    "remote consent missing project scope"
+  );
+  assert(
+    remoteStart.credential_scope?.developer_id === "remote-developer-id",
+    "remote consent missing developer scope"
+  );
+  assert(
+    remoteStart.credential_scope?.client_id === "remote-client-id",
+    "remote consent missing client scope"
+  );
+  for (const secretClass of requiredSecretClasses) {
+    assert(
+      remoteStart.redaction_boundary?.includes(secretClass),
+      `redaction boundary missing ${secretClass}`
+    );
+    assert(remoteStart.not_sent?.includes(secretClass), `not_sent missing ${secretClass}`);
+  }
+  assert(
+    remoteStart.recommended_next_call === "memory_get_context_pack",
+    "remote agent-start did not recommend context pack startup"
+  );
+  const remoteMcpCalls =
+    remoteStart.startup_contract?.direct_mcp_sequence?.map((entry) => entry.call).join(" ") ?? "";
+  const remoteCliFallback = remoteStart.startup_contract?.cli_fallback_sequence?.join(" ") ?? "";
+  assert(
+    remoteStart.startup_contract?.primary_path === "configured_remote_mcp" &&
+      remoteMcpCalls.includes("memory_start_session") &&
+      remoteMcpCalls.includes("memory_get_context_pack") &&
+      remoteMcpCalls.includes("memory_closeout") &&
+      remoteCliFallback.includes("recallant agent-start --format json") &&
+      remoteCliFallback.includes("recallant agent-event") &&
+      remoteCliFallback.includes("recallant agent-closeout") &&
+      !remoteCliFallback.includes("agent-checkpoint"),
+    `remote agent-start missing startup contract: ${JSON.stringify(remoteStart.startup_contract)}`
+  );
+  assert(
+    String(remoteStart.recommended_next_action ?? "").includes(
+      "does not require Cloudflare browser auth"
+    ),
+    "remote agent-start recommendation did not clarify Cloudflare browser auth"
+  );
+  assert(
+    !JSON.stringify(remoteStart).includes("PRIVATE KEY"),
+    "remote consent JSON leaked private key text"
+  );
+  assert(
+    !JSON.stringify(remoteStart).includes("rcl_mcp_connect_secret"),
+    "remote consent JSON leaked raw credential"
+  );
+
+  const remoteText = await cliRaw(
+    remoteProject,
+    ["agent-start", "--format", "text", "--task-hint", `${marker} remote consent text`],
+    { RECALLANT_DATABASE_URL: "", RECALLANT_ENV_FILE: missingEnvFile }
+  );
+  assert(
+    remoteText.includes("Remote Recallant consent boundary"),
+    "text output missing consent section"
+  );
+  assert(remoteText.includes("Do not send:"), "text output missing prohibited classes");
+  assert(
+    remoteText.includes("does not require Cloudflare browser auth"),
+    "text output missing Cloudflare clarification"
+  );
+  for (const secretClass of requiredSecretClasses) {
+    assert(remoteText.includes(secretClass), `text output missing ${secretClass}`);
+  }
+} finally {
+  await rm(onlineProject, { recursive: true, force: true });
+  await rm(offlineProject, { recursive: true, force: true });
+  await rm(managedProject, { recursive: true, force: true });
+  await rm(remoteProject, { recursive: true, force: true });
+}
+
+process.stdout.write(
+  JSON.stringify(
+    {
+      product_acceptance_smoke: "passed",
+      agent_capture_smoke: "passed",
+      golden_lifecycle_gate: {
+        first_closeout_next_agent_ready: firstCloseoutProof?.nextAgentReady === true,
+        second_closeout_next_agent_ready: secondCloseoutProof?.nextAgentReady === true,
+        first_closeout_memory_status: firstCloseoutProof?.memoryStatus ?? null,
+        first_closeout_recall_verified: firstCloseoutProof?.recallVerified === true,
+        first_closeout_next_session_context_verified:
+          firstCloseoutProof?.nextSessionContextVerified === true
+      },
+      offline_spool: "passed",
+      remote_consent_boundary: "passed"
+    },
+    null,
+    2
+  ) + "\n"
+);

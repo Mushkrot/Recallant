@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: recallant_agent_work
+      POSTGRES_USER: recallant
+      POSTGRES_PASSWORD: example-password
+    volumes:
+      - recallant-postgres-data:/var/lib/postgresql/data
+      - ./packages/db/migrations:/migrations:ro
+    ports:
+      - "127.0.0.1:15433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U recallant -d recallant_agent_work -tAc 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  recallant-postgres-data:
