@@ -18,8 +18,8 @@ self-host evaluation.
 For an immutable prerelease install, use the versioned command after the tag is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.0/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.0
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.1
 ```
 
 That checkout stays pinned to the prerelease tag. It does not silently move to `main` during
@@ -43,11 +43,11 @@ Verify the CLI:
 
 ```bash
 recallant --version
-# recallant 0.1.0-dev.0+<git-sha>
+# recallant 0.1.0-dev.1+<git-sha>
 ```
 
 `recallant --version` reports the shared release version with git build metadata when installed from
-a checkout. It should report `0.1.0-dev.0` plus the exact source revision for this prerelease.
+a checkout. It should report `0.1.0-dev.1` plus the exact source revision for this prerelease.
 
 ## 2. Make A Project Agent-Ready
 

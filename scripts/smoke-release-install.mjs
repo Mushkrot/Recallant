@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 
 const repoRoot = process.cwd();
-const expectedVersion = "0.1.0-dev.0";
+const expectedVersion = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).version;
 const expectedTag = `v${expectedVersion}`;
 const smokeRoot = await mkdtemp(join(tmpdir(), "recallant-release-install-"));
 const externalRepository = process.env.RECALLANT_RELEASE_REPO_URL?.trim() || null;

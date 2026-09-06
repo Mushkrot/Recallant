@@ -92,7 +92,7 @@ Changing channels is an explicit owner action, such as rerunning the trusted boo
 `--ref main`.
 
 After the CLI is installed or refreshed, `recallant --version` should report the CLI package version
-plus git build metadata, such as `recallant 0.1.0-dev.0+<git-sha>`. All monorepo workspace manifests
+plus git build metadata, such as `recallant 0.1.0-dev.1+<git-sha>`. All monorepo workspace manifests
 use the same prerelease identity; the Git revision identifies the exact installed checkout.
 
 When it asks for the central server URL, enter `https://memory.example.com` or the bare host name

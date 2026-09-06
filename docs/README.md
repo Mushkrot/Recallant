@@ -8,7 +8,7 @@ operating contracts come first. Design comparisons and source research are kept 
 - [Quickstart](QUICKSTART.md): install Recallant and prove one project can remember.
 - [Current status](STATUS.md): what works now and why the project remains a development prerelease.
 - [Product contract status](CONTRACT_STATUS.md): shipped slices, evidence, and remaining release work.
-- [v0.1.0-dev.0 release notes](releases/v0.1.0-dev.0.md): pinned install, verification, limits, and rollback.
+- [v0.1.0-dev.1 release notes](releases/v0.1.0-dev.1.md): pinned install, verification, limits, and rollback.
 - [Why Recallant](WHY_RECALLANT.md): the problem, trust model, and community value.
 
 ## Use Recallant

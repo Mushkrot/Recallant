@@ -10,7 +10,7 @@ The normal beginner path remains:
 recallant onboard <project>
 ```
 
-The published baseline is `v0.1.0-dev.0`. It includes the pinned install path, synthetic-data
+The published baseline is `v0.1.0-dev.1`. It includes the pinned install path, synthetic-data
 Workbench screenshots, release gates, CodeQL, rollback, and managed-runtime proof. The milestones
 below describe product maturity beyond that development prerelease.
 

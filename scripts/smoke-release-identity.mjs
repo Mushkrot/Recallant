@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { recallantContractVersion } from "../packages/contracts/dist/index.js";
 
 const repoRoot = process.cwd();
-const expectedVersion = "0.1.0-dev.0";
+const rootPackage = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
+const expectedVersion = rootPackage.version;
 const expectedTag = `v${expectedVersion}`;
 
 function assert(condition, message) {

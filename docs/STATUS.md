@@ -6,7 +6,7 @@ recall, Workbench review, project-scoped safety checks, production backup/restor
 required product/public smoke gates. It should not yet be treated as stable multi-client or
 team-wide infrastructure.
 
-The versioned prerelease target is `v0.1.0-dev.0`. Its annotated tag and GitHub prerelease are
+The versioned prerelease target is `v0.1.0-dev.1`. Its annotated tag and GitHub prerelease are
 published only after the exact candidate SHA passes release gates, CodeQL, three consecutive CI
 runs, pinned installation, update-channel, rollback, security, and route verification.
 
