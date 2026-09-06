@@ -479,6 +479,13 @@ async function expectBridgeFailure(fixture, env, label, overrides) {
   const requestCountBefore = fixture.requests.length;
   try {
     const result = await runBridgeRoundtrip(fixture, env, overrides);
+    if (result.call?.isError === true) {
+      assertNoLeak(label, JSON.stringify(result.call));
+      await result.client.close().catch(() => undefined);
+      await result.transport.close().catch(() => undefined);
+      assert(fixture.requests.length > requestCountBefore, `${label} did not reach HTTPS fixture`);
+      return label;
+    }
     await result.client.close().catch(() => undefined);
     await result.transport.close().catch(() => undefined);
   } catch (error) {
