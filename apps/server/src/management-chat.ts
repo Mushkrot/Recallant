@@ -209,14 +209,23 @@ type ClarificationContext = {
 };
 
 function projectFromClarificationMessage(message: string, dashboard: DashboardLike) {
+  const normalizedMessage = normalizeProjectReference(message);
+  const compactMessage = normalizedMessage.replace(/\s+/g, "");
   const matches = asRows(dashboard.projects)
     .filter((project) => messageMentionsProject(message, project))
     .map((project) => ({
       project,
       score: Math.max(
-        ...projectReferenceCandidates(project).map(
-          (candidate) => normalizeProjectReference(candidate).length
-        )
+        ...projectReferenceCandidates(project)
+          .map((candidate) => normalizeProjectReference(candidate))
+          .filter((candidate) => {
+            const compactCandidate = candidate.replace(/\s+/g, "");
+            return (
+              normalizedMessage.includes(candidate) ||
+              (compactCandidate.length >= 4 && compactMessage.includes(compactCandidate))
+            );
+          })
+          .map((candidate) => candidate.length)
       )
     }))
     .sort((left, right) => right.score - left.score);

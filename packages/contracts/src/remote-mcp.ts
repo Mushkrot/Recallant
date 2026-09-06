@@ -656,6 +656,7 @@ export const remoteMcpErrorCodes = {
   MISSING_PROJECT_OR_DEVELOPER_SCOPE: { httpStatus: 400, retryable: false },
   INVALID_SCOPE_TOKEN: { httpStatus: 401, retryable: false },
   PROJECT_SCOPE_MISMATCH: { httpStatus: 403, retryable: false },
+  POLICY_BLOCKED: { httpStatus: 403, retryable: false },
   PROJECT_NOT_ATTACHED: { httpStatus: 404, retryable: false },
   FORBIDDEN_HEADER: { httpStatus: 400, retryable: false },
   PAYLOAD_TOO_LARGE: { httpStatus: 413, retryable: false },
@@ -851,6 +852,12 @@ export function normalizeRemoteMcpBridgeServerUrl(serverUrl: string) {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("VALIDATION_ERROR: remote MCP bridge server URL must use http or https");
+  }
+  const loopbackHost = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]).has(url.hostname);
+  if (url.protocol === "http:" && !loopbackHost) {
+    throw new Error(
+      "VALIDATION_ERROR: remote MCP bridge server URL must use https outside loopback"
+    );
   }
   url.hash = "";
   url.search = "";

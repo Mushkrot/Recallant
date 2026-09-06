@@ -4,32 +4,18 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   remoteMcpBridgeEnv,
   remoteMcpBridgeFlags,
-  remoteMcpBridgeHeaders,
   recallantContractVersion,
   validateRemoteMcpBridgeConfig,
-  type RemoteMcpBridgeConfig,
-  type RemoteMcpBridgeConfigInput
+  type RemoteMcpBridgeConfig
 } from "@recallant/contracts";
 import process from "node:process";
 import { z } from "zod";
-
-type JsonRpcId = string | number | null;
-
-type JsonRpcSuccess = {
-  jsonrpc: "2.0";
-  id: JsonRpcId;
-  result: unknown;
-};
-
-type JsonRpcError = {
-  jsonrpc: "2.0";
-  id: JsonRpcId;
-  error: {
-    code: number;
-    message: string;
-    data?: unknown;
-  };
-};
+import {
+  callRecallantRemoteMcp,
+  callRecallantRemoteTool,
+  remoteMcpFailure
+} from "./remote-client.js";
+import { recallantTools } from "./tools.js";
 
 type RemoteTool = {
   name: string;
@@ -157,10 +143,8 @@ function remoteBridgeError(
   error: unknown,
   config: RemoteMcpBridgeConfig
 ): CallToolResult {
-  const message = redactRemoteBridgeValue(
-    error instanceof Error ? error.message : String(error),
-    config
-  );
+  const failure = remoteMcpFailure(error);
+  const message = redactRemoteBridgeValue(failure.message, config);
   return {
     isError: true,
     content: [
@@ -172,7 +156,7 @@ function remoteBridgeError(
             bridge: bridgeServerName,
             tool: toolName,
             error: {
-              code: "REMOTE_MCP_ERROR",
+              ...failure,
               message
             }
           },
@@ -209,83 +193,32 @@ function parseRemoteTools(result: unknown): RemoteTool[] {
   });
 }
 
-function parseToolResult(result: unknown) {
-  const payload = assertObject(result, "tools/call");
-  if (!Array.isArray(payload.content)) {
-    throw new Error("VALIDATION_ERROR: remote MCP tools/call response must include content[]");
-  }
-  return {
-    content: payload.content as CallToolResult["content"],
-    structuredContent:
-      payload.structuredContent &&
-      typeof payload.structuredContent === "object" &&
-      !Array.isArray(payload.structuredContent)
-        ? (payload.structuredContent as Record<string, unknown>)
-        : undefined,
-    isError: payload.isError === true
-  } satisfies CallToolResult;
-}
-
-async function callRemoteMcp(
-  config: RemoteMcpBridgeConfig,
-  method: "initialize" | "tools/list" | "tools/call",
-  params: Record<string, unknown>,
-  id: JsonRpcId
-) {
-  const response = await fetch(config.endpointUrl, {
-    method: "POST",
-    headers: remoteMcpBridgeHeaders(config satisfies RemoteMcpBridgeConfigInput),
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      method,
-      params
-    })
-  });
-  const text = await response.text();
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `REMOTE_MCP_HTTP_${response.status}: remote MCP returned non-JSON response (${text.length} bytes)`
-    );
-  }
-  const envelope = assertObject(payload, method);
-  if ("error" in envelope) {
-    const errorEnvelope = envelope as JsonRpcError;
-    throw new Error(
-      `REMOTE_MCP_JSON_RPC_${errorEnvelope.error?.code ?? "ERROR"}: ${
-        errorEnvelope.error?.message ?? "remote MCP call failed"
-      }`
-    );
-  }
-  if (!response.ok) {
-    throw new Error(`REMOTE_MCP_HTTP_${response.status}: remote MCP call failed`);
-  }
-  if (!("result" in envelope)) {
-    throw new Error(`VALIDATION_ERROR: remote MCP ${method} response is missing result`);
-  }
-  return (envelope as JsonRpcSuccess).result;
-}
-
 export async function createRecallantRemoteBridgeServer(config: RemoteMcpBridgeConfig) {
-  await callRemoteMcp(
-    config,
-    "initialize",
-    {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: {
-        name: bridgeServerName,
-        version: bridgeVersion
-      }
-    },
-    "remote-bridge-initialize"
-  );
-  const tools = parseRemoteTools(
-    await callRemoteMcp(config, "tools/list", {}, "remote-bridge-tools")
-  );
+  let tools: RemoteTool[];
+  try {
+    await callRecallantRemoteMcp(
+      config,
+      "initialize",
+      {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: {
+          name: bridgeServerName,
+          version: bridgeVersion
+        }
+      },
+      { id: "remote-bridge-initialize" }
+    );
+    tools = parseRemoteTools(
+      await callRecallantRemoteMcp(config, "tools/list", {}, { id: "remote-bridge-tools" })
+    );
+  } catch {
+    tools = recallantTools.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description
+    }));
+  }
 
   const server = new McpServer({
     name: bridgeServerName,
@@ -303,16 +236,13 @@ export async function createRecallantRemoteBridgeServer(config: RemoteMcpBridgeC
       async (args) => {
         try {
           rejectForbiddenBridgePayload(args);
-          const result = await callRemoteMcp(
+          const { result } = await callRecallantRemoteTool(
             config,
-            "tools/call",
-            {
-              name: tool.name,
-              arguments: (args ?? {}) as Record<string, unknown>
-            },
-            `remote-bridge-tool-${tool.name}`
+            tool.name,
+            (args ?? {}) as Record<string, unknown>,
+            { id: `remote-bridge-tool-${tool.name}` }
           );
-          return parseToolResult(result);
+          return result;
         } catch (error) {
           return remoteBridgeError(tool.name, error, config);
         }

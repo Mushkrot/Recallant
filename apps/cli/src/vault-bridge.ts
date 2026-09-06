@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import type {
   CreateGraphCandidateInput,
   GraphCandidateEndpointRef,
   GraphCandidateSourceRef
 } from "@recallant/contracts";
+import { redactPrivateKeyBlocks } from "@recallant/core";
+import { redactSecretValues } from "./discovery.js";
 
 export type VaultLinkKind = "markdown" | "wiki" | "external" | "media";
 
@@ -450,6 +452,10 @@ async function collectVaultFiles(
   for (const entry of await readdir(currentDir, { withFileTypes: true })) {
     const absolutePath = join(currentDir, entry.name);
     const relativePath = relativeVaultPath(vaultDir, absolutePath);
+    if (entry.isSymbolicLink()) {
+      skipped.push({ path: relativePath, reason: "symbolic_link_not_followed" });
+      continue;
+    }
     if (entry.isDirectory()) {
       if (shouldIgnoreDirectory(entry.name)) {
         skipped.push({ path: relativePath, reason: "ignored_directory" });
@@ -482,7 +488,7 @@ async function collectVaultFiles(
 export async function inventoryVault(
   options: VaultInventoryOptions
 ): Promise<VaultInventoryResult> {
-  const vaultDir = resolve(options.vaultDir);
+  const vaultDir = await realpath(resolve(options.vaultDir));
   const vaultStats = await stat(vaultDir);
   if (!vaultStats.isDirectory()) {
     throw new Error("VALIDATION_ERROR: vault inventory requires a directory");
@@ -506,20 +512,48 @@ export async function inventoryVault(
     const content = await readFile(absolutePath, "utf8");
     const { frontmatter, body } = parseFrontmatter(content);
     const links = parseLinks(body);
-    const mediaReferences = links.filter((link) => link.kind === "media");
     const secretReferences = detectSecretReferences(content, frontmatter);
+    const unsafe = secretReferences.length > 0;
+    const safeLinks = links.map((link) =>
+      unsafe
+        ? {
+            ...link,
+            target: "<redacted>",
+            label: link.label ? "<redacted>" : link.label,
+            anchor: link.anchor ? "<redacted>" : link.anchor
+          }
+        : {
+            ...link,
+            target: redactPrivateKeyBlocks(redactSecretValues(link.target), "<redacted>"),
+            label: link.label ? redactSecretValues(link.label) : link.label,
+            anchor: link.anchor ? redactSecretValues(link.anchor) : link.anchor
+          }
+    );
+    const safeHeadings = parseHeadings(body).map((heading) => ({
+      ...heading,
+      title: unsafe ? "<redacted>" : redactSecretValues(heading.title),
+      anchor: unsafe ? `heading-${heading.line}` : redactSecretValues(heading.anchor)
+    }));
+    const safeFrontmatter = unsafe
+      ? Object.fromEntries(
+          Object.entries(frontmatter).map(([key, value]) => [
+            key,
+            Array.isArray(value) ? value.map(() => "<redacted>") : "<redacted>"
+          ])
+        )
+      : frontmatter;
     files.push({
       path: relativePath,
       source_id: `vault:${vaultIdentity}:${sha256(relativePath).slice(0, 16)}`,
       sha256: sha256(content),
       size_bytes: fileStats.size,
-      frontmatter,
+      frontmatter: safeFrontmatter,
       frontmatter_keys: Object.keys(frontmatter).sort((left, right) => left.localeCompare(right)),
-      tags: parseTags(body, frontmatter),
-      headings: parseHeadings(body),
-      links,
-      media_references: mediaReferences,
-      block_anchors: parseBlockAnchors(body),
+      tags: unsafe ? [] : parseTags(body, frontmatter),
+      headings: safeHeadings,
+      links: safeLinks,
+      media_references: safeLinks.filter((link) => link.kind === "media"),
+      block_anchors: unsafe ? [] : parseBlockAnchors(body),
       risk: secretReferences.length > 0 ? "needs_review" : "low",
       secret_references: secretReferences
     });
@@ -1052,14 +1086,44 @@ export function buildVaultMarkdownExportPlan(
   };
 }
 
+async function assertNoSymlinkPath(path: string) {
+  let current = resolve(path);
+  while (true) {
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`VALIDATION_ERROR: refusing to follow symlink ${current}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("VALIDATION_ERROR:")) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
 export async function writeVaultMarkdownExport(
   plan: VaultMarkdownExportPlan,
   options: { overwrite?: boolean } = {}
 ) {
+  await assertNoSymlinkPath(plan.output_dir);
   await mkdir(plan.output_dir, { recursive: true });
+  await assertNoSymlinkPath(plan.output_dir);
   const written: Array<{ path: string; size_bytes: number }> = [];
   for (const file of plan.files) {
     const target = join(plan.output_dir, file.path);
+    await assertNoSymlinkPath(dirname(target));
+    await mkdir(dirname(target), { recursive: true });
+    await assertNoSymlinkPath(dirname(target));
+    try {
+      if ((await lstat(target)).isSymbolicLink()) {
+        throw new Error(`VALIDATION_ERROR: refusing to overwrite symlink ${file.path}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("VALIDATION_ERROR:")) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     if (!options.overwrite) {
       try {
         await stat(target);

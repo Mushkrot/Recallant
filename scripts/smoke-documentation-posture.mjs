@@ -134,6 +134,9 @@ const starterUnknownAgents =
   starterUnknown.files.find((file) => file.path === "AGENTS.md")?.content ?? "";
 assert(
   starterUnknownAgents.includes("configured Recallant MCP/client integration") &&
+    starterUnknownAgents.includes("The owner is not the default QA") &&
+    starterUnknownAgents.includes("VERIFIED FIXED") &&
+    starterUnknownAgents.includes("at most two evidence-driven repair/retest cycles") &&
     !starterUnknownAgents.includes("central Recallant server through remote MCP"),
   `Default starter AGENTS should preserve local-storage wording: ${starterUnknownAgents}`
 );
@@ -152,6 +155,9 @@ assert(
     starterRemoteAgents.includes("memory_start_session") &&
     starterRemoteAgents.includes("memory_get_context_pack") &&
     starterRemoteAgents.includes("memory_closeout") &&
+    starterRemoteAgents.includes("The owner is not the default QA") &&
+    starterRemoteAgents.includes("VERIFIED FIXED") &&
+    starterRemoteAgents.includes("at most two evidence-driven repair/retest cycles") &&
     starterRemoteAgents.includes("checkpoint state; it is not semantic recall proof") &&
     starterRemoteAgents.includes("recallant agent-start --format json") &&
     starterRemoteAgents.includes("recallant agent-closeout"),

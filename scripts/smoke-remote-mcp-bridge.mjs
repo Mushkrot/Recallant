@@ -9,6 +9,10 @@ import {
   runRecallantRemoteBridge
 } from "../packages/mcp/dist/remote-bridge.js";
 import {
+  classifyRemoteMcpTransportError,
+  remoteMcpFailure
+} from "../packages/mcp/dist/remote-client.js";
+import {
   storeRemoteMcpCredential,
   validateRemoteMcpBridgeConfig
 } from "../packages/contracts/dist/index.js";
@@ -24,11 +28,19 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const validCredential = ['synthetic', 'credential'].join('-');
-const rotatedNewCredential = ['synthetic', 'credential'].join('-');
-const revokedCredential = ['synthetic', 'credential'].join('-');
-const rotatedOldCredential = ['synthetic', 'credential'].join('-');
-const wrongCredential = ['synthetic', 'credential'].join('-');
+const dnsFailure = remoteMcpFailure(
+  classifyRemoteMcpTransportError(
+    new TypeError("fetch failed", { cause: Object.assign(new Error("dns"), { code: "ENOTFOUND" }) })
+  )
+);
+assert(dnsFailure.code === "REMOTE_MCP_DNS_FAILURE", "DNS failure was not classified");
+assert(dnsFailure.retryable === true, "DNS failure should be retryable");
+
+const validCredential = ["synthetic", "valid", "credential"].join("-");
+const rotatedNewCredential = ["synthetic", "rotated-new", "credential"].join("-");
+const revokedCredential = ["synthetic", "revoked", "credential"].join("-");
+const rotatedOldCredential = ["synthetic", "rotated-old", "credential"].join("-");
+const wrongCredential = ["synthetic", "wrong", "credential"].join("-");
 const expectedScope = {
   projectId: "remote-bridge-project",
   developerId: "remote-bridge-developer",
@@ -262,18 +274,40 @@ async function runBridgeRoundtrip(overrides = {}) {
   }
 }
 
-async function expectStartupFailure(label, overrides, expectedCode) {
+async function expectCallFailure(label, overrides, expectedCode, expectFixtureRequests = true) {
   const before = fixture.requests.length;
+  let server;
+  let client;
   try {
-    const server = await createRecallantRemoteBridgeServer(bridgeConfig(overrides));
-    await server.close().catch(() => undefined);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    assert(message.includes(expectedCode), `${label} did not surface ${expectedCode}`);
-    assert(fixture.requests.length === before + 1, `${label} should fail during remote initialize`);
+    server = await createRecallantRemoteBridgeServer(bridgeConfig(overrides));
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: "remote-bridge-failure-smoke-client", version: "0.0.0" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport, { timeout: 5_000 });
+    const list = await client.listTools({}, { timeout: 5_000 });
+    assert(
+      list.tools.some((tool) => tool.name === "memory_heartbeat"),
+      `${label} degraded bridge did not return the known Recallant tool list`
+    );
+    const result = await client.callTool(
+      { name: "memory_heartbeat", arguments: { message: label } },
+      undefined,
+      { timeout: 5_000 }
+    );
+    const text = JSON.stringify(result);
+    assert(result.isError === true, `${label} did not return a tool-level error`);
+    assert(text.includes(expectedCode), `${label} did not surface ${expectedCode}`);
+    if (expectFixtureRequests) {
+      assert(
+        fixture.requests.length === before + 2,
+        `${label} should try remote initialize and the requested tool exactly once`
+      );
+    }
     return label;
+  } finally {
+    await client?.close().catch(() => undefined);
+    await server?.close().catch(() => undefined);
   }
-  throw new Error(`${label} unexpectedly succeeded`);
 }
 
 async function expectConfigBlocked(label, argv, env) {
@@ -389,35 +423,40 @@ try {
   bridgeServer = undefined;
 
   const failureCases = [
-    await expectStartupFailure(
+    await expectCallFailure(
       "wrong_credential",
       { credential: wrongCredential },
-      "INVALID_SCOPE_TOKEN"
+      "REMOTE_MCP_AUTH_ERROR"
     ),
-    await expectStartupFailure(
+    await expectCallFailure(
       "revoked_credential",
       { credential: revokedCredential },
-      "INVALID_SCOPE_TOKEN"
+      "REMOTE_MCP_AUTH_ERROR"
     ),
-    await expectStartupFailure(
+    await expectCallFailure(
       "rotated_old_credential",
       { credential: rotatedOldCredential },
-      "INVALID_SCOPE_TOKEN"
+      "REMOTE_MCP_AUTH_ERROR"
     ),
-    await expectStartupFailure(
+    await expectCallFailure(
       "wrong_project",
       { projectId: "wrong-project" },
-      "PROJECT_SCOPE_MISMATCH"
+      "REMOTE_MCP_SCOPE_ERROR"
     ),
-    await expectStartupFailure(
+    await expectCallFailure(
       "wrong_developer",
       { developerId: "wrong-developer" },
-      "PROJECT_SCOPE_MISMATCH"
+      "REMOTE_MCP_SCOPE_ERROR"
     ),
-    await expectStartupFailure(
-      "wrong_client",
-      { clientId: "wrong-client" },
-      "PROJECT_SCOPE_MISMATCH"
+    await expectCallFailure("wrong_client", { clientId: "wrong-client" }, "REMOTE_MCP_SCOPE_ERROR"),
+    await expectCallFailure(
+      "connection_refused",
+      {
+        serverUrl: "http://127.0.0.1:65534",
+        endpointUrl: "http://127.0.0.1:65534/api/mcp"
+      },
+      "REMOTE_MCP_CONNECTION_REFUSED",
+      false
     )
   ];
 

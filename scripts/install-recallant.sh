@@ -218,7 +218,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 POSTGRES_DB=recallant_agent_work
 POSTGRES_USER=recallant
 POSTGRES_PASSWORD=$db_password
-RECALLANT_DATABASE_URL=postgres://example-user:example-password@127.0.0.1:5432/example-db
+RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work
 RECALLANT_POSTGRES_HOST=$POSTGRES_HOST
 RECALLANT_POSTGRES_PORT=$POSTGRES_PORT
 RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME
@@ -348,7 +348,8 @@ EOF
   echo "Installed and started recallant.service"
   echo "Installed and enabled recallant-backup.timer"
 else
-  echo "systemd not available; start manually with: cd $RECALLANT_HOME && npm run server:start"
+  echo "Start the server manually with the installed environment:"
+  printf '  cd %q && node --env-file=%q apps/server/dist/index.js\n' "$RECALLANT_HOME" "$ENV_FILE"
 fi
 
 echo

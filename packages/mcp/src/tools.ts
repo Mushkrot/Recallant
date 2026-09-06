@@ -30,6 +30,7 @@ import {
   type ReviewGraphCandidateInput
 } from "@recallant/contracts";
 import {
+  boundContextPack,
   createRecallantDbFromEnv,
   emptyCanonCapabilityContext,
   forgetTargetKindValues,
@@ -64,6 +65,9 @@ type ToolDb = ReturnType<typeof createRecallantDbFromEnv>;
 export type RecallantToolsRuntimeContext = {
   projectId?: string | null;
   projectPath?: string | null;
+  /** Remote MCP requests must not inherit the Recallant server host project path. */
+  allowEnvironmentProjectPath?: boolean;
+  enforceProjectScope?: boolean;
   developerId?: string | null;
   clientId?: string | null;
   sessionId?: string | null;
@@ -262,6 +266,8 @@ function contextAwarePath(context: RecallantToolsRuntimeContext) {
   return {
     projectId: context.projectId ?? null,
     projectPath: context.projectPath ?? null,
+    allowEnvironmentProjectPath: context.allowEnvironmentProjectPath,
+    enforceProjectScope: context.enforceProjectScope,
     developerId: context.developerId ?? null,
     clientId: context.clientId ?? null,
     sessionId: context.sessionId ?? null,
@@ -370,9 +376,10 @@ function scopedProjectInputWithDiagnostics<T extends Record<string, unknown>>(
     );
   }
   const contextProjectPath = stringInput(context.projectPath);
-  const envProjectPath = options.includeEnvironmentProjectScope
-    ? stringInput(process.env.RECALLANT_PROJECT_PATH)
-    : null;
+  const envProjectPath =
+    options.includeEnvironmentProjectScope && context.allowEnvironmentProjectPath !== false
+      ? stringInput(process.env.RECALLANT_PROJECT_PATH)
+      : null;
   const projectPath =
     argumentProjectPath ?? argumentProjectDir ?? contextProjectPath ?? envProjectPath ?? undefined;
   const projectPathSource: ProjectPathSource = argumentProjectPath
@@ -386,6 +393,7 @@ function scopedProjectInputWithDiagnostics<T extends Record<string, unknown>>(
           : "none";
   const input = {
     ...args,
+    ...(context.enforceProjectScope ? { project_only: true } : {}),
     project_id:
       args.project_id ??
       context.projectId ??
@@ -790,13 +798,14 @@ function closeoutSourceRefs(rawRefs: unknown[], sessionId: string): AgentMemoryS
 async function resolveProjectPath(
   database?: ToolDb,
   contextProjectId?: string | null,
-  contextProjectPath?: string | null
+  contextProjectPath?: string | null,
+  allowEnvironmentProjectPath = true
 ) {
   if (contextProjectPath) return { path: contextProjectPath, source: "context" };
   const databaseProjectPath =
     database && contextProjectId ? await database.projectPrimaryPath(contextProjectId) : null;
   if (databaseProjectPath) return { path: databaseProjectPath, source: "database_primary_path" };
-  const envProjectPath = process.env.RECALLANT_PROJECT_PATH;
+  const envProjectPath = allowEnvironmentProjectPath ? process.env.RECALLANT_PROJECT_PATH : null;
   if (envProjectPath) return { path: envProjectPath, source: "env" };
   return null;
 }
@@ -805,12 +814,14 @@ async function syncProjectLog(
   payload: JsonObject,
   database?: ToolDb,
   contextProjectId?: string | null,
-  contextProjectPath?: string | null
+  contextProjectPath?: string | null,
+  options: { allowEnvironmentProjectPath?: boolean } = {}
 ) {
   const resolvedProjectPath = await resolveProjectPath(
     database,
     contextProjectId,
-    contextProjectPath
+    contextProjectPath,
+    options.allowEnvironmentProjectPath
   );
   if (!resolvedProjectPath) {
     return {
@@ -992,62 +1003,70 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     handler: async (args) => {
       const database = db();
       if (database) return database.getContextPack(scopedProjectInput(args) as ContextPackInput);
-      return stubResponse("memory_get_context_pack", {
-        context_pack_id: randomUUID(),
-        project_id:
-          args.project_id ??
-          currentRecallantToolsContext().projectId ??
-          process.env.RECALLANT_PROJECT_ID ??
-          randomUUID(),
-        session_id: args.session_id,
-        profile: "compact",
-        sections: {
-          checkpoint: {},
-          documentation_posture: {
-            status: "not_recorded",
-            profile: "unknown",
-            summary: "No database-backed documentation posture is available in MCP skeleton mode.",
-            missing_recommended_docs: [],
-            review_options: [
-              {
-                option: "discuss_first",
-                recommended: true,
-                reason: "Connect Recallant storage or open Workbench review before changing docs."
-              }
-            ],
-            authority: {
-              source: "mcp_skeleton_stub",
-              key: "documentation_posture",
-              role: "startup_guidance",
-              instruction_grade: false,
-              notes: [
-                "Placeholder only. This stub contains no project docs, secrets, or binding rules."
-              ]
+      return stubResponse(
+        "memory_get_context_pack",
+        boundContextPack(
+          {
+            context_pack_id: randomUUID(),
+            project_id:
+              args.project_id ??
+              currentRecallantToolsContext().projectId ??
+              process.env.RECALLANT_PROJECT_ID ??
+              randomUUID(),
+            session_id: args.session_id,
+            profile: "compact",
+            sections: {
+              checkpoint: {},
+              documentation_posture: {
+                status: "not_recorded",
+                profile: "unknown",
+                summary:
+                  "No database-backed documentation posture is available in MCP skeleton mode.",
+                missing_recommended_docs: [],
+                review_options: [
+                  {
+                    option: "discuss_first",
+                    recommended: true,
+                    reason:
+                      "Connect Recallant storage or open Workbench review before changing docs."
+                  }
+                ],
+                authority: {
+                  source: "mcp_skeleton_stub",
+                  key: "documentation_posture",
+                  role: "startup_guidance",
+                  instruction_grade: false,
+                  notes: [
+                    "Placeholder only. This stub contains no project docs, secrets, or binding rules."
+                  ]
+                },
+                canon_context: {
+                  needed: false,
+                  reason: null,
+                  recommended_reference_kinds: [],
+                  configured_references: []
+                },
+                capability_hints: []
+              },
+              canon_capability_context: emptyCanonCapabilityContext(),
+              recovery: {},
+              binding_rules: [],
+              working_memories: [],
+              operational_bindings: [],
+              local_spool_status: args.local_spool_status ?? { status: "unknown" },
+              evidence_excerpts: [],
+              suggested_next_fetches: [],
+              warnings: ["MCP skeleton stub: database-backed context pack is not implemented yet."]
             },
-            canon_context: {
-              needed: false,
-              reason: null,
-              recommended_reference_kinds: [],
-              configured_references: []
-            },
-            capability_hints: []
+            truncated: false,
+            budget: {
+              max_chars_total: Number(args.max_chars_total),
+              used_chars_estimate: 0
+            }
           },
-          canon_capability_context: emptyCanonCapabilityContext(),
-          recovery: {},
-          binding_rules: [],
-          working_memories: [],
-          operational_bindings: [],
-          local_spool_status: args.local_spool_status ?? { status: "unknown" },
-          evidence_excerpts: [],
-          suggested_next_fetches: [],
-          warnings: ["MCP skeleton stub: database-backed context pack is not implemented yet."]
-        },
-        truncated: false,
-        budget: {
-          max_chars_total: args.max_chars_total,
-          used_chars_estimate: 0
-        }
-      });
+          Number(args.max_chars_total)
+        )
+      );
     }
   },
   {
@@ -1064,7 +1083,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.appendTurn(args as AppendTurnInput);
+      if (database) return database.appendTurn(scopedProjectInput(args) as AppendTurnInput);
       return stubResponse("memory_append_turn", { event_id: randomUUID(), status: "created" });
     }
   },
@@ -1117,7 +1136,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.appendEvent(args as AppendEventInput);
+      if (database) return database.appendEvent(scopedProjectInput(args) as AppendEventInput);
       return stubResponse("memory_append_event", {
         event_id: randomUUID(),
         raw_artifact_ids: Array.from({ length: (args.raw_artifacts as unknown[]).length }, () =>
@@ -1190,6 +1209,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       const database = db();
       if (database) {
         return database.search({
+          project_id: currentRecallantToolsContext().projectId,
           query: args.query as string,
           mode: args.mode as string | undefined,
           top_k: args.top_k as number | undefined,
@@ -1244,7 +1264,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.linkMemory(args as LinkMemoryInput);
+      if (database) return database.linkMemory(scopedProjectInput(args) as LinkMemoryInput);
       return stubResponse("memory_link", { edge_id: randomUUID() });
     }
   },
@@ -1969,7 +1989,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
               args.payload as JsonObject,
               database,
               identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID,
-              identity.project_path ?? context.projectPath ?? null
+              identity.project_path ?? context.projectPath ?? null,
+              { allowEnvironmentProjectPath: context.allowEnvironmentProjectPath }
             )
           };
         } catch (error) {
@@ -2297,7 +2318,13 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     }),
     handler: async (args) => {
       const database = db();
-      if (database) return database.getAgentMemory(args.memory_id as string);
+      if (database)
+        return database.getAgentMemory(
+          args.memory_id as string,
+          currentRecallantToolsContext().enforceProjectScope
+            ? currentRecallantToolsContext().projectId
+            : undefined
+        );
       return stubResponse("memory_get_agent_memory", {
         memory: { memory_id: args.memory_id },
         source_refs: [],
@@ -2617,7 +2644,8 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
             args.checkpoint_payload as JsonObject,
             database,
             closeoutProjectId,
-            identity.project_path ?? context.projectPath ?? sessionBinding.primary_path
+            identity.project_path ?? context.projectPath ?? sessionBinding.primary_path,
+            { allowEnvironmentProjectPath: context.allowEnvironmentProjectPath }
           );
         } catch (error) {
           projectLogUpdate = {

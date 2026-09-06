@@ -163,6 +163,14 @@ assert(lint.ok === true, `installed wrapper did not run lint-context: ${JSON.str
 
 const missingStorageProject = await mkdtemp(join(smokeRoot, "missing-storage-"));
 await writeFile(join(missingStorageProject, "README.md"), "# Missing storage onboarding smoke\n");
+const noRemoteServerEnv = {
+  RECALLANT_CONNECT_SERVER_URL: "",
+  RECALLANT_REMOTE_CONNECT_SERVER_URL: "",
+  RECALLANT_REMOTE_MCP_URL: "",
+  RECALLANT_PUBLIC_WORKBENCH_URL: "",
+  RECALLANT_DEFAULT_SERVER_URL: "",
+  RECALLANT_SERVER_URL: ""
+};
 const missingStorage = runRaw(
   recallant,
   ["onboard", missingStorageProject, "--local", "--yes", "--format", "json"],
@@ -170,7 +178,8 @@ const missingStorage = runRaw(
     cwd: missingStorageProject,
     omitDatabaseUrl: true,
     env: {
-      RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env")
+      RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env"),
+      ...noRemoteServerEnv
     }
   }
 );
@@ -223,7 +232,8 @@ const missingStorageText = runRaw(recallant, ["onboard", missingStorageProject, 
   cwd: missingStorageProject,
   omitDatabaseUrl: true,
   env: {
-    RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env")
+    RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env"),
+    ...noRemoteServerEnv
   }
 });
 assert(
@@ -939,6 +949,17 @@ const agents = await readFile(join(projectDir, "AGENTS.md"), "utf8");
 assert(
   agents.includes("recallant agent-start"),
   "installed wrapper attach did not write capture runtime instructions"
+);
+assert(
+  agents.includes("The owner is not the default QA") &&
+    agents.includes("actual consumed target") &&
+    agents.includes("supporting evidence, not proof") &&
+    agents.includes("VERIFIED FIXED") &&
+    agents.includes("IMPLEMENTED NOT VERIFIED") &&
+    agents.includes("BLOCKED") &&
+    agents.includes("NOT FIXED") &&
+    agents.includes("at most two evidence-driven repair/retest cycles"),
+  `installed wrapper attach did not write compact delivery QA instructions: ${agents}`
 );
 
 const start = runJson(recallant, ["agent-start", "--task-hint", "fresh onboarding smoke"], {

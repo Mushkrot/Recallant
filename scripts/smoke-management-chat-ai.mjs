@@ -211,7 +211,7 @@ try {
       ...baseDashboard,
       projects: [
         ...baseDashboard.projects,
-        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/example-project" }
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/docs-archive-a" }
       ]
     }
   });
@@ -243,11 +243,11 @@ try {
       ...baseDashboard,
       projects: [
         ...baseDashboard.projects,
-        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/example-project" },
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/docs-archive-a" },
         {
           project_id: secondNamedProjectId,
           name: "docs archive",
-          primary_path: "/srv/example-project"
+          primary_path: "/srv/docs-archive-b"
         }
       ]
     }
@@ -260,16 +260,16 @@ try {
     `Ambiguous named cleanup should ask for clarification: ${JSON.stringify(ambiguousNamedCleanup)}`
   );
   const clarifiedNamedCleanup = await buildManagementChatResponse({
-    message: "/srv/example-project",
+    message: "/srv/docs-archive-b",
     dashboard: {
       ...baseDashboard,
       projects: [
         ...baseDashboard.projects,
-        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/example-project" },
+        { project_id: namedProjectId, name: "docs archive", primary_path: "/srv/docs-archive-a" },
         {
           project_id: secondNamedProjectId,
           name: "docs archive",
-          primary_path: "/srv/example-project"
+          primary_path: "/srv/docs-archive-b"
         }
       ]
     },
@@ -527,7 +527,7 @@ try {
   assert(
     attachedSourceInput?.project_id === currentProjectId &&
       attachedSourceInput?.source_kind === "workspace_path" &&
-      attachedSourceInput?.label === "docs" &&
+      attachedSourceInput?.label === "example-project" &&
       attachedSourceInput?.uri === "/srv/example-project" &&
       attachedSourceInput?.metadata?.safe_db_only_attach === true,
     `Concrete source attach wrote wrong DB input: ${JSON.stringify(attachedSourceInput)}`

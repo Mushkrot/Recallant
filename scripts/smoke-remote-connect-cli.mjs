@@ -1100,6 +1100,15 @@ try {
     approvedJson.agent_ready_files?.skipped_by_flag === false,
     "approved flow unexpectedly skipped agent-ready files"
   );
+  assert(
+    approvedJson.next_agent_steps?.some(
+      (step) =>
+        step.includes("Restart Codex") &&
+        step.includes("already open") &&
+        step.includes("memory_start_session")
+    ),
+    "approved flow did not require an already-open Codex client to restart before MCP startup proof"
+  );
   assertIncludesAll(
     agentReadyPlannedPaths(approvedJson),
     ["README.md", "AGENTS.md", "PROJECT_LOG.md"],
@@ -1123,7 +1132,13 @@ try {
       approvedAgents.includes("checkpoint state; it is not semantic recall proof") &&
       approvedAgents.includes("recallant agent-start --format json") &&
       approvedAgents.includes("recallant agent-closeout") &&
-      approvedAgents.includes("memory_get_context_pack"),
+      approvedAgents.includes("memory_get_context_pack") &&
+      approvedAgents.includes("includes the remote session and context-pack ids") &&
+      approvedAgents.includes("classified transport failure is spooled") &&
+      approvedAgents.includes("retry `recallant remote-doctor --capture-proof`") &&
+      approvedAgents.includes("without asking the project owner") &&
+      approvedAgents.includes("already open") &&
+      approvedAgents.includes("restart Codex"),
     "approved AGENTS.md missing remote MCP agent-ready wording"
   );
   assert(
@@ -1158,12 +1173,12 @@ try {
   );
   assert(
     remoteStartJson.remote_readiness_status === "read" &&
-      remoteStartJson.readiness_state === "configured" &&
+      remoteStartJson.readiness_state === "context_ready" &&
       remoteStartJson.proof_status?.remote_mcp_ready === true &&
-      remoteStartJson.proof_status?.context_ready === false &&
+      remoteStartJson.proof_status?.context_ready === true &&
       remoteStartJson.proof_status?.semantic_memory_ready === false &&
       remoteStartJson.proof_status?.capture_active === false &&
-      remoteStartJson.readiness_contract?.primary_state === "configured" &&
+      remoteStartJson.readiness_contract?.primary_state === "context_ready" &&
       remoteStartJson.readiness_contract?.semantic_memory_ready === false &&
       remoteStartJson.readiness_contract?.capture_active === false &&
       remoteStartJson.readiness_contract?.evidence?.last_checkpoint_at === CHECKPOINT_ONLY_AT &&
@@ -1505,6 +1520,73 @@ try {
   } finally {
     await rm(connectRemoteTextProject, { recursive: true, force: true });
     await rm(connectRemoteTextHome, { recursive: true, force: true });
+  }
+
+  const refOnlyProject = await mkdtemp(join(tmpdir(), "recallant-connect-remote-ref-only-"));
+  const refOnlyHome = await mkdtemp(join(tmpdir(), "recallant-connect-remote-ref-only-home-"));
+  const refOnlyStorePath = join(refOnlyHome, "credentials.json");
+  try {
+    const refOnlySecret = "rcl_mcp_ref_only_secret";
+    await mkdir(join(refOnlyProject, ".codex"), { recursive: true });
+    await writeFile(
+      join(refOnlyProject, ".codex", "config.toml"),
+      [
+        "[sandbox_workspace_write]",
+        'writable_roots = ["/tmp/existing-safe-root"]',
+        "network_access = false",
+        "",
+        "[mcp_servers.recallant]",
+        'command = "recallant"',
+        'args = ["remote-bridge"]',
+        `env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "existing-ref", RECALLANT_REMOTE_MCP_CREDENTIAL_STORE = "${refOnlyStorePath}", RECALLANT_PROJECT_ID = "33333333-3333-4333-8333-333333333333", RECALLANT_DEVELOPER_ID = "44444444-4444-4444-8444-444444444444", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-cli-ref-only" }`,
+        "",
+        "[mcp_servers.unrelated]",
+        'command = "node"',
+        'args = ["fixture-unrelated-server.js"]',
+        ""
+      ].join("\n")
+    );
+    await writeFile(
+      refOnlyStorePath,
+      JSON.stringify(
+        {
+          version: "remote-mcp-credential-store-v1",
+          credentials: {
+            "existing-ref": {
+              credential: refOnlySecret,
+              credential_prefix: "rcl_mcp_ref_only",
+              server_url: "https://recallant.example.com",
+              project_id: "33333333-3333-4333-8333-333333333333",
+              developer_id: "44444444-4444-4444-8444-444444444444",
+              client_id: "remote-cli-ref-only",
+              created_at: "2026-06-27T00:00:00.000Z",
+              updated_at: "2026-06-27T00:00:00.000Z"
+            }
+          }
+        },
+        null,
+        2
+      ) + "\n"
+    );
+    const refOnly = await runCli(
+      ["connect-remote", "codex", "--project-dir", refOnlyProject, "--write", "--format", "text"],
+      { env: { HOME: refOnlyHome, RECALLANT_DATABASE_URL: "" } }
+    );
+    assert(refOnly.status === 0, `credential-ref repair failed: ${refOnly.stderr}`);
+    assert(!refOnly.stdout.includes(refOnlySecret), "credential-ref repair leaked raw credential");
+    const refOnlyConfig = await readFile(join(refOnlyProject, ".codex", "config.toml"), "utf8");
+    assert(
+      refOnlyConfig.includes("remote-bridge") &&
+        refOnlyConfig.includes('RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "existing-ref"') &&
+        refOnlyConfig.includes("network_access = true") &&
+        refOnlyConfig.includes("[features.network_proxy]") &&
+        refOnlyConfig.includes('"recallant.example.com" = "allow"') &&
+        refOnlyConfig.includes("[mcp_servers.unrelated]"),
+      "credential-ref repair did not add scoped network policy while preserving config"
+    );
+  } finally {
+    await rm(refOnlyProject, { recursive: true, force: true });
+    await rm(refOnlyHome, { recursive: true, force: true });
   }
 
   const bootstrapProject = await mkdtemp(join(tmpdir(), "recallant-connect-bootstrap-"));

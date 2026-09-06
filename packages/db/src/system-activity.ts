@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { redactPrivateKeyBlocks } from "@recallant/core";
 
 export type SystemActivityStatus = "started" | "success" | "error" | "cancelled" | "skipped";
 
@@ -96,7 +97,10 @@ function redactString(value: string) {
   if (/^(\/|~\/|[a-z]:\\)/i.test(value)) {
     return "[REDACTED_PATH]";
   }
-  let redacted = value.replace(uuidPattern, "[REDACTED_UUID]");
+  let redacted = redactPrivateKeyBlocks(value, "[REDACTED_PRIVATE_KEY]").replace(
+    uuidPattern,
+    "[REDACTED_UUID]"
+  );
   for (const [pattern, replacement] of redactionPatterns) {
     redacted = redacted.replace(pattern, replacement);
   }

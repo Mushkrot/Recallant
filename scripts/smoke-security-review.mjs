@@ -184,7 +184,7 @@ const redacted = redactSecretValues(
     `OPENAI_API_KEY=${rawApiKey}`,
     `  SERVICE_TOKEN =${rawApiKey}`,
     "postgresql://example-user:example-password@127.0.0.1:5432/example-db",
-    "postgresql://example-user:example-password@127.0.0.1:5432/example-db"
+    "DATABASE_URL=postgresql://example-user:example-password@127.0.0.1:5432/example-db"
   ].join("\n")
 );
 assert(!redacted.includes(rawApiKey), "Secret redaction left raw API key value");
@@ -195,7 +195,7 @@ mustInclude(
     "OPENAI_API_KEY=<redacted>",
     "  SERVICE_TOKEN =<redacted>",
     "DATABASE_URL=<redacted>",
-    "postgres://<redacted>:<redacted>@"
+    "postgresql://<redacted>:<redacted>@"
   ],
   "redacted secret fixture"
 );

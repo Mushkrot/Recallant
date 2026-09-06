@@ -1,6 +1,6 @@
 const pemBeginPrefix = "-----BEGIN ";
 const pemBoundarySuffix = "-----";
-const privateKeyLabelSuffix = ["PRIVATE", "KEY", "FIXTURE"].join(" ");
+const privateKeyLabelSuffix = ["PRIVATE", "KEY"].join(" ");
 const maxPemLabelChars = 64;
 
 type PrivateKeyBlock = {

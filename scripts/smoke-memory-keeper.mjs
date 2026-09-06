@@ -39,17 +39,19 @@ function assertNoForbidden(text, label) {
   }
 }
 
-const privateKeyLabel = ["RSA", "PRIVATE", "KEY"].join(" ");
-const privateKeyFixture = [
-  `-----BEGIN ${privateKeyLabel}-----`,
-  "fixture-private-key-material",
-  `-----END ${privateKeyLabel}-----`
-].join("\n");
-assert(
-  redactKeeperText(`before ${privateKeyFixture} after`) ===
-    "before [redacted_private_key] after",
-  "keeper private-key redaction did not preserve safe surrounding text"
-);
+for (const prefix of ["", "RSA ", "EC ", "OPENSSH "]) {
+  const privateKeyLabel = `${prefix}${["PRIVATE", "KEY"].join(" ")}`;
+  const privateKeyFixture = [
+    `-----BEGIN ${privateKeyLabel}-----`,
+    "fixture-private-key-material",
+    `-----END ${privateKeyLabel}-----`
+  ].join("\n");
+  assert(
+    redactKeeperText(`before ${privateKeyFixture} after`) ===
+      "before [redacted_private_key] after",
+    `keeper ${privateKeyLabel} redaction did not preserve safe surrounding text`
+  );
+}
 assert(
   keeperProposalId([`${"-".repeat(50_000)}keeper${"-".repeat(50_000)}`]) === "keeper",
   "keeper proposal id did not trim a long boundary deterministically"

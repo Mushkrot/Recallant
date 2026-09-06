@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { redactPrivateKeyBlocks } from "@recallant/core";
 
 type DiscoveryClass =
   | "repo_contract"
@@ -324,6 +325,15 @@ function lineWithRedactedSecrets(line: string) {
     return line.replace(/=.*/, "=<redacted>");
   }
   return line
+    .replaceAll(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer <redacted-token>")
+    .replaceAll(
+      /\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"'<>]+/gi,
+      "[REDACTED_DATABASE_URL]"
+    )
+    .replaceAll(
+      /\b(authorization|password|passwd|api[_-]?key|secret|token|cookie|credential)\s*[:=]\s*['"]?[^'",\s;]{4,}/gi,
+      "$1=<redacted>"
+    )
     .replaceAll(
       /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
       "<redacted-private-key>"
@@ -335,11 +345,18 @@ function lineWithRedactedSecrets(line: string) {
 }
 
 export function redactSecretValues(content: string) {
-  return content.split("\n").map(lineWithRedactedSecrets).join("\n");
+  return redactPrivateKeyBlocks(content, "<redacted-private-key>")
+    .split("\n")
+    .map(lineWithRedactedSecrets)
+    .join("\n");
+}
+
+export function shellQuote(value: string) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function boundedExcerpt(content: string) {
-  const lines = content
+  const lines = redactSecretValues(content)
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0)
@@ -755,7 +772,7 @@ function buildDiscoveryCandidate(relativePath: string, content: string, sizeByte
   });
   const migrationAction = migrationActionFor(migrationClasses);
   const sourceScope = scopeFor(relativePath);
-  const commandPath = relativePath.includes(" ") ? JSON.stringify(relativePath) : relativePath;
+  const commandPath = shellQuote(relativePath);
   const importable =
     !(isSecretReferencePath(relativePath) && !isSecretExamplePath(relativePath)) &&
     !migrationClasses.some((item) =>
@@ -809,7 +826,11 @@ function buildDiscoveryCandidate(relativePath: string, content: string, sizeByte
 
 async function readDiscoveryInput(projectDir: string, relativePath: string) {
   const safePath = safeRelativePath(relativePath);
-  const absolutePath = join(projectDir, safePath);
+  const projectRoot = await readCanonicalPath(resolve(projectDir));
+  if (!projectRoot) return null;
+  const absolutePath = join(projectRoot, safePath);
+  const canonicalPath = await readCanonicalPath(absolutePath);
+  if (!canonicalPath || canonicalPath !== absolutePath) return null;
   let sizeBytes = 0;
   try {
     sizeBytes = (await stat(absolutePath)).size;
@@ -834,6 +855,14 @@ async function readDiscoveryInput(projectDir: string, relativePath: string) {
     content: (await readOptional(absolutePath)) ?? "",
     sizeBytes
   };
+}
+
+async function readCanonicalPath(path: string) {
+  try {
+    return await realpath(path);
+  } catch {
+    return null;
+  }
 }
 
 async function readDiscoveryCandidate(projectDir: string, relativePath: string) {
@@ -929,7 +958,8 @@ export async function readImportTextForCandidate(
       )
       .join("\n");
   }
-  const content = await readOptional(join(projectDir, safeRelativePath(candidate.path)));
+  const input = await readDiscoveryInput(projectDir, safeRelativePath(candidate.path));
+  const content = input?.content ?? null;
   if (content === null) return "";
   return redactSecretValues(content);
 }

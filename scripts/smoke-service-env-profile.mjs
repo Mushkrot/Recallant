@@ -8,10 +8,11 @@ import { URL } from "node:url";
 
 const repoRoot = process.cwd();
 
-function databaseUrlFixture({ username, password, port, database }) {
+function databaseUrlFixture({ username, password, host, port, database }) {
   const url = new URL("postgresql://example-user:example-password@127.0.0.1:5432/example-db");
   url.username = username;
   url.password = password;
+  url.hostname = host;
   url.port = port;
   url.pathname = `/${database}`;
   return url.toString();

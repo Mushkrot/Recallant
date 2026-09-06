@@ -7,9 +7,36 @@ const repoRoot = process.cwd();
 const fixtureSource = join(repoRoot, "tests", "fixtures", "pre-pilot-discovery");
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-prepilot-discovery-"));
 await cp(fixtureSource, projectDir, { recursive: true });
+await mkdir(join(projectDir, ".cursor"), { recursive: true });
+await writeFile(
+  join(projectDir, ".cursor", "SESSION_HANDOFF.md"),
+  [
+    "# Session Handoff",
+    "",
+    "## Current Session",
+    "",
+    "Status: copied into a Recallant pre-pilot fixture.",
+    "Current focus: validate existing-project discovery.",
+    "Next step: preview import candidates only.",
+    "",
+    "## Historical Log",
+    "",
+    "2025-01-10: Old setup note duplicated in a handoff file.",
+    "2025-02-12: Previous session changed deployment notes.",
+    "2025-03-15: Previous session added an obsolete model route note.",
+    "2025-04-20: Previous session left stale handoff material.",
+    ""
+  ].join("\n")
+);
 await writeFile(
   join(projectDir, ".env.example"),
-  "OPENAI_API_KEY=synthetic-placeholder\nPUBLIC_FLAG=true\n"
+  [
+    "OPENAI_API_KEY=synthetic-placeholder",
+    "DATABASE_URL=postgres://synthetic-placeholder",
+    "PUBLIC_FEATURE_FLAG=true",
+    "GOOGLE_DRIVE_ACCOUNT=synthetic-account",
+    ""
+  ].join("\n")
 );
 await appendFile(
   join(projectDir, "AGENTS.md"),

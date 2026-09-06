@@ -418,10 +418,10 @@ try {
         (SELECT count(*)::int FROM events WHERE project_id = $1 AND kind = 'import_batch') AS import_events,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND created_by = 'system' AND metadata->>'attach_bootstrap' = 'true') AS starter_memories,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND use_policy = 'instruction_grade') AS instruction_grade,
-        (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND (text LIKE "%example-password%" OR text LIKE "%example-password%" OR text LIKE '%' || $2 || '%')) AS leaked_chunks,
-        (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND (excerpt LIKE "%example-password%" OR excerpt LIKE "%example-password%" OR excerpt LIKE '%' || $2 || '%')) AS leaked_raw_artifacts
+        (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND (text LIKE $3 OR text LIKE '%' || $2 || '%')) AS leaked_chunks,
+        (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND (excerpt LIKE $3 OR excerpt LIKE '%' || $2 || '%')) AS leaked_raw_artifacts
     `,
-    [attach.project_id, openAiProviderTokenFixture]
+    [attach.project_id, openAiProviderTokenFixture, "%example-password%"]
   );
   const row = checks.rows[0];
   dbSummary = {

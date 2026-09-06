@@ -378,7 +378,7 @@ assert(
 );
 assert(
   installerSource.includes(
-    "RECALLANT_DATABASE_URL=postgres://example-user:example-password@127.0.0.1:5432/example-db"
+    "RECALLANT_DATABASE_URL=postgres://recallant:$db_password@$POSTGRES_HOST:$POSTGRES_PORT/recallant_agent_work"
   ) &&
     installerSource.includes("RECALLANT_POSTGRES_CONTAINER_NAME=$POSTGRES_CONTAINER_NAME") &&
     installerSource.includes("RECALLANT_COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME"),
