@@ -107,7 +107,7 @@ const publicDocs = [
   "docs/research/README.md",
   "docs/research/REFERENCE_PROJECTS.md",
   "docs/research/JARVIS_OBSIDIAN_COMPARISON.md",
-  "docs/releases/v0.1.0-dev.0.md",
+  "docs/releases/v0.1.0-dev.1.md",
   "docs/WORKBENCH_UI.md",
   "docs/GRAPH_TREE_CONTRACT.md",
   "docs/ARCHITECTURE.md",
@@ -255,8 +255,8 @@ mustInclude(
     "It is not the primary beginner remote UX",
     "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.0/scripts/install-recallant-bootstrap.sh",
-    "--ref v0.1.0-dev.0",
+    "raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh",
+    "--ref v0.1.0-dev.1",
     "stays pinned to the prerelease tag",
     "explicitly reinstall with `--ref main`",
     "recallant onboard /path/to/project",
@@ -312,7 +312,7 @@ mustInclude(
     "Recallant is pre-release",
     "What Works Now",
     "Release Position",
-    "v0.1.0-dev.0",
+    "v0.1.0-dev.1",
     "production_readiness.ready: true",
     "Required Verification",
     "Documentation Authority",
@@ -1088,7 +1088,7 @@ for (const [label, text] of remoteProofDocs) {
 }
 
 const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-assert(packageJson.version === "0.1.0-dev.0", "Root package must carry prerelease identity");
+assert(packageJson.version === "0.1.0-dev.1", "Root package must carry prerelease identity");
 assert(
   packageJson.scripts?.["release-identity:smoke"] === "node scripts/smoke-release-identity.mjs",
   "package.json must expose release-identity:smoke"

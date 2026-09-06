@@ -19,7 +19,7 @@ Installs Recallant from a trusted repository source with one command.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.0/scripts/install-recallant-bootstrap.sh | bash -s -- --ref v0.1.0-dev.0
+  curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh | bash -s -- --ref v0.1.0-dev.1
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --confirm-local-self-host --onboard .
   curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/install-recallant-bootstrap.sh | bash -s -- --profile managed-server
 
