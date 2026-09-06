@@ -221,13 +221,13 @@ const server = createServer(async (request, response) => {
             : { tools: [] }
       })
     );
-  } catch (error) {
+  } catch {
     response.statusCode = 500;
     response.end(
       JSON.stringify({
         jsonrpc: "2.0",
         id: null,
-        error: { code: -32000, message: error instanceof Error ? error.message : String(error) }
+        error: { code: -32000, message: "fixture request failed" }
       })
     );
   }
