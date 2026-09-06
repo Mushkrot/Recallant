@@ -195,7 +195,7 @@ mustInclude(
     "OPENAI_API_KEY=<redacted>",
     "  SERVICE_TOKEN =<redacted>",
     "DATABASE_URL=<redacted>",
-    "postgresql://<redacted>:<redacted>@"
+    "[REDACTED_DATABASE_URL]"
   ],
   "redacted secret fixture"
 );
