@@ -196,8 +196,10 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const developerId = "22222222-2222-4222-8222-222222222222";
 const clientId = "remote-credential-client";
 const sessionId = "33333333-3333-4333-8333-333333333333";
+const otherProjectId = "44444444-4444-4444-8444-444444444444";
 const harness = new CredentialHarness();
 const remoteAuditRows = [];
+const scopedCalls = [];
 
 const endpointCredential = harness.create({
   projectId,
@@ -217,6 +219,13 @@ const rotateTarget = harness.create({ projectId, developerId, clientId });
 const rotatedCredential = harness.rotate(rotateTarget.credential.id);
 
 const fakeDb = {
+  async assertRemoteResourceScope(kind, resourceId, requestedProjectId, requestedDeveloperId) {
+    assert(kind === "session" && resourceId === sessionId, "unexpected synthetic resource");
+    assert(
+      requestedProjectId === projectId && requestedDeveloperId === developerId,
+      "unexpected resource scope"
+    );
+  },
   verifyRemoteMcpCredential: (input) => harness.verifyRemoteMcpCredential(input),
   async getProjectBinding(requestProjectId) {
     if (requestProjectId !== projectId) return null;
@@ -261,6 +270,27 @@ const fakeDb = {
       metadata: metadata ?? {},
       last_seen_at: new Date().toISOString(),
       last_heartbeat_at: new Date().toISOString()
+    };
+  },
+  async listAgentMemories(input) {
+    scopedCalls.push({ operation: "listAgentMemories", input });
+    return { memories: [] };
+  },
+  async createAgentMemory(input) {
+    scopedCalls.push({ operation: "createAgentMemory", input });
+    return {
+      memory_id: "55555555-5555-4555-8555-555555555555",
+      status: "accepted",
+      use_policy: "instruction_grade"
+    };
+  },
+  async reviewAgentMemory(input) {
+    scopedCalls.push({ operation: "reviewAgentMemory", input });
+    return {
+      ok: true,
+      memory_id: input.memory_id,
+      status: "accepted",
+      use_policy: "instruction_grade"
     };
   }
 };
@@ -321,6 +351,70 @@ try {
   assert(result.status === 200, "active credential tools/call failed");
   assert(result.body?.result?.structuredContent?.ok === true, "heartbeat result missing ok");
   cases.push("valid_tools_call");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "cross-project-tool-argument",
+    method: "tools/call",
+    params: {
+      name: "memory_list_agent_memories",
+      arguments: { view: "all", project_id: otherProjectId, limit: 10 }
+    }
+  });
+  assertError(result, "VALIDATION_ERROR", "cross-project tool argument");
+  assert(
+    !scopedCalls.some((call) => call.operation === "listAgentMemories"),
+    "cross-project tool argument reached the database"
+  );
+  cases.push("cross_project_tool_argument_rejected");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "remote-owner-impersonation-create",
+    method: "tools/call",
+    params: {
+      name: "memory_create_agent_memory",
+      arguments: {
+        memory_type: "constraint",
+        scope: "developer",
+        audience: [{ kind: "all_agents", id: null }],
+        title: "Synthetic authority boundary marker",
+        body: "Synthetic neutral instruction marker.",
+        created_by: "user",
+        source_refs: [],
+        metadata: { owner_confirmed_global_rule: true }
+      }
+    }
+  });
+  assertError(result, "POLICY_BLOCKED", "remote owner impersonation create");
+  assert(
+    !scopedCalls.some((call) => call.operation === "createAgentMemory"),
+    "remote owner impersonation create reached the database"
+  );
+  cases.push("remote_owner_impersonation_create_rejected");
+
+  result = await rpc(baseUrl, {
+    jsonrpc: "2.0",
+    id: "remote-owner-impersonation-review",
+    method: "tools/call",
+    params: {
+      name: "memory_review_agent_memory",
+      arguments: {
+        memory_id: "55555555-5555-4555-8555-555555555555",
+        action: "promote_instruction",
+        merge_memory_ids: [],
+        patch: {},
+        note: "Synthetic authority boundary check",
+        actor_kind: "user"
+      }
+    }
+  });
+  assertError(result, "POLICY_BLOCKED", "remote owner impersonation review");
+  assert(
+    !scopedCalls.some((call) => call.operation === "reviewAgentMemory"),
+    "remote owner impersonation review reached the database"
+  );
+  cases.push("remote_owner_impersonation_review_rejected");
 
   assert(
     harness.rows.find((row) => row.id === endpointCredential.credential.id)?.last_used_at,
@@ -446,7 +540,13 @@ process.stdout.write(
         credentials_created: harness.rows.length,
         credential_audit_events: harness.auditRows.length,
         remote_mcp_audit_events: remoteAuditRows.length,
-        no_raw_secret_in: ["stored_rows", "credential_audit", "remote_mcp_audit", "list_output", "docs"],
+        no_raw_secret_in: [
+          "stored_rows",
+          "credential_audit",
+          "remote_mcp_audit",
+          "list_output",
+          "docs"
+        ],
         package_script: "remote-mcp-credentials:smoke"
       }
     },

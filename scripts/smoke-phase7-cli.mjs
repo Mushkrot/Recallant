@@ -158,6 +158,9 @@ if (
   !agents.includes("memory_start_session") ||
   !agents.includes("memory_get_context_pack") ||
   !agents.includes("memory_create_agent_memory") ||
+  !agents.includes("The owner is not the default QA") ||
+  !agents.includes("VERIFIED FIXED") ||
+  !agents.includes("at most two evidence-driven repair/retest cycles") ||
   agents.includes("memory_promote") ||
   !gitignore.includes(".recallant/") ||
   !projectLog.includes("Current focus: project onboarding") ||

@@ -49,6 +49,13 @@ promotion, and new traversal semantics remain future work.
 
 ## Recent Verification
 
+The current startup contract also includes aggregate-bounded Context Pack responses with explicit
+omission metadata and task-relevance ranking for working memories. Generated starter instructions
+carry the client-neutral delivery-verification rule: the owner is not the default QA, user-visible
+claims require target verification when feasible, and retry limits and non-success states remain
+explicit. The focused budget, relevance, documentation-posture, and onboarding smokes cover these
+generated and server-built surfaces.
+
 Recent verification across the current public checkpoint sequence includes:
 
 - `npm run build`

@@ -66,7 +66,8 @@ import { agentObservationKindValues } from "@recallant/contracts";
 import {
   analyzeAgentObservationCompleteness,
   deriveAgentRecoveryChains,
-  normalizeAgentObservation
+  normalizeAgentObservation,
+  redactPrivateKeyBlocks
 } from "@recallant/core";
 import { Pool, type PoolClient } from "pg";
 import {
@@ -86,12 +87,14 @@ import {
   ensureSystemActivitySchema,
   normalizeSystemActivityFinish,
   normalizeSystemActivityStart,
+  redactedSystemActivityObject,
   type FinishSystemActivityInput,
   type ResolveSystemActivityScopeInput,
   type ResolvedSystemActivityScope,
   type SystemActivityInput,
   type SystemActivityRecord
 } from "./system-activity.js";
+import { boundContextPack } from "./context-pack.js";
 
 export {
   agentObservationSchemaStatements,
@@ -127,6 +130,13 @@ export {
   type SystemActivityRecord,
   type SystemActivityStatus
 } from "./system-activity.js";
+export {
+  boundContextPack,
+  isContextPackPayload,
+  type ContextPackBudget,
+  type ContextPackOmissions,
+  type ContextPackPayload
+} from "./context-pack.js";
 
 export const recallantDatabasePackage = "recallant-db";
 
@@ -149,6 +159,64 @@ const graphCandidateSourceRefKindSet = new Set<string>(graphCandidateSourceRefKi
 const graphCandidateReviewActionSet = new Set<string>(graphCandidateReviewActionValues);
 const graphCandidateCreatedBySet = new Set(["agent", "user", "system", "import"]);
 const graphCandidateReviewActorSet = new Set(["agent", "user", "system"]);
+
+const startupQueryStopWords = new Set([
+  "agent",
+  "and",
+  "before",
+  "context",
+  "current",
+  "failure",
+  "fix",
+  "for",
+  "from",
+  "has",
+  "memory",
+  "memories",
+  "mcp",
+  "needs",
+  "next",
+  "pack",
+  "repair",
+  "recallant",
+  "session",
+  "startup",
+  "the",
+  "task",
+  "working"
+]);
+
+function startupRelevanceTerms(query: string) {
+  return Array.from(
+    new Set(
+      query
+        .toLowerCase()
+        .split(/[^a-z0-9_-]+/i)
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 3 && !startupQueryStopWords.has(term))
+        .slice(0, 8)
+    )
+  );
+}
+
+function startupMemoryScore(row: Record<string, unknown>, terms: readonly string[]) {
+  const title = String(row.title ?? "").toLowerCase();
+  const body = String(row.body ?? "").toLowerCase();
+  const titleMatches = terms.filter((term) => title.includes(term)).length;
+  const bodyMatches = terms.filter((term) => body.includes(term)).length;
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const isCloseout =
+    row.memory_type === "work_log" ||
+    (typeof metadata.created_from === "string" && metadata.created_from.includes("closeout"));
+  const updatedAt = Date.parse(String(row.updated_at ?? ""));
+  const recencyBonus = Number.isFinite(updatedAt)
+    ? Math.max(0, 2 - (Date.now() - updatedAt) / (1000 * 60 * 60 * 24 * 30))
+    : 0;
+  return titleMatches * 8 + bodyMatches * 3 + recencyBonus - (isCloseout ? 4 : 0);
+}
 
 export type RecallantDbConfig = {
   databaseUrl: string;
@@ -940,6 +1008,7 @@ function previousSessionRecovery(previousSession: unknown, isStale: boolean) {
 }
 
 export type AppendTurnInput = {
+  project_id?: string | null;
   session_id?: string | null;
   client_kind: string;
   role: "user" | "assistant";
@@ -960,6 +1029,7 @@ export type RawArtifactInput = {
 };
 
 export type AppendEventInput = {
+  project_id?: string | null;
   session_id?: string | null;
   client_kind: string;
   event_kind: string;
@@ -1072,6 +1142,8 @@ export type ReviewAgentMemoryInput = {
 };
 
 export type ListAgentMemoriesInput = {
+  /** Internal authorization constraint, never a caller-selectable MCP field. */
+  project_only?: boolean;
   view: string;
   project_id?: string | null;
   source_id?: string | null;
@@ -1086,6 +1158,8 @@ export type ListAgentMemoriesInput = {
 };
 
 export type RecallAgentMemoriesInput = {
+  /** Internal authorization constraint, never a caller-selectable MCP field. */
+  project_only?: boolean;
   query: string;
   project_id?: string | null;
   source_id?: string | null;
@@ -1098,6 +1172,8 @@ export type RecallAgentMemoriesInput = {
   include_needs_review?: boolean;
   top_k?: number;
   max_chars_total?: number;
+  /** Internal startup mode: favor task-specific working memories over historical closeouts. */
+  startup_relevance?: boolean;
 };
 
 export type CrossProjectRecallMode =
@@ -1643,7 +1719,17 @@ function redactSecretValues(content: string) {
     "DSN",
     "DATABASE_URL"
   ];
-  return content
+  const redactedPem = redactPrivateKeyBlocks(content, "<redacted-private-key>")
+    .replaceAll(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer <redacted>")
+    .replaceAll(
+      /\b(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"'<>]+/gi,
+      "[REDACTED_DATABASE_URL]"
+    )
+    .replaceAll(
+      /\b(authorization|password|passwd|api[_-]?key|secret|token|cookie|credential)\s*[:=]\s*['"]?[^'",\s;]{4,}/gi,
+      "$1=<redacted>"
+    );
+  return redactedPem
     .split("\n")
     .map((line) => {
       const assignmentIndex = line.indexOf("=");
@@ -2799,6 +2885,36 @@ export class RecallantDb {
 
   async close() {
     await this.pool.end();
+  }
+
+  async assertRemoteResourceScope(
+    kind: string,
+    id: string,
+    projectId: string,
+    developerId: string
+  ) {
+    const tables: Record<string, string> = {
+      session: "sessions",
+      memory: "agent_memories",
+      agent_memory: "agent_memories",
+      chunk: "chunks",
+      event: "events",
+      source: "project_sources",
+      raw_artifact: "raw_artifacts",
+      edge: "edges",
+      graph_candidate: "graph_candidates",
+      recall_trace: "recall_traces"
+    };
+    const table = Object.hasOwn(tables, kind) ? tables[kind] : undefined;
+    if (!table) throw new Error("VALIDATION_ERROR: unsupported remote resource kind");
+    const result = await this.pool.query(
+      `SELECT 1 FROM ${table} r JOIN projects p ON p.id = r.project_id
+       WHERE r.id::text = $1 AND p.id = $2::uuid AND p.developer_id = $3::uuid`,
+      [id, projectId, developerId]
+    );
+    if (result.rowCount !== 1) {
+      throw new Error("VALIDATION_ERROR: remote resource is outside the authenticated project");
+    }
   }
 
   async ensureSystemActivitySchema() {
@@ -6726,7 +6842,10 @@ export class RecallantDb {
       input.text,
       readPositiveIntEnv("RECALLANT_APPEND_TURN_MAX_CHARS", 200_000)
     );
-    const context = await this.contextForSession(input.session_id);
+    const context =
+      !input.session_id && input.project_id
+        ? await this.contextForProject(input.project_id)
+        : await this.contextForSession(input.session_id);
     const legacy = await withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
@@ -6738,7 +6857,8 @@ export class RecallantDb {
         context.developerId,
         input.session_id
       );
-      const capturedText = capText(input.text, policy.turnTextMaxChars) ?? "";
+      const safeInputText = redactSecretValues(input.text);
+      const capturedText = capText(safeInputText, policy.turnTextMaxChars) ?? "";
       const payload = {
         schema_version: 1,
         text: capturedText,
@@ -6803,6 +6923,7 @@ export class RecallantDb {
   }
 
   async search(input: {
+    project_id?: string | null;
     query: string;
     mode?: string;
     top_k?: number;
@@ -6819,7 +6940,9 @@ export class RecallantDb {
   }) {
     const context = input.session_id
       ? await this.contextForSession(input.session_id)
-      : await this.ensureProject();
+      : input.project_id
+        ? await this.contextForProject(input.project_id)
+        : await this.ensureProject();
     const lifecycle = await this.getProjectLifecycle(context.projectId);
     if (projectLifecycleIsDetached(lifecycle)) {
       return {
@@ -7165,8 +7288,10 @@ export class RecallantDb {
     };
   }
 
-  async linkMemory(input: LinkMemoryInput) {
-    const context = await this.ensureProject();
+  async linkMemory(input: LinkMemoryInput & { project_id?: string | null }) {
+    const context = input.project_id
+      ? await this.contextForProject(input.project_id)
+      : await this.ensureProject();
     const result = await this.pool.query<{ id: string }>(
       `
         INSERT INTO edges (project_id, src_kind, src_id, dst_kind, dst_id, relation_type, weight, metadata)
@@ -8805,6 +8930,7 @@ export class RecallantDb {
           m.scope,
           m.scope_kind,
           m.scope_id,
+          m.audience,
           m.use_policy,
           coalesce(
             jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
@@ -8826,8 +8952,9 @@ export class RecallantDb {
         ? await this.recallAgentMemories({
             project_id: context.projectId,
             query: input.task_hint,
-            top_k: 8,
-            max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 2)
+            top_k: 4,
+            max_chars_total: Math.floor((input.max_chars_total ?? 12_000) / 2),
+            startup_relevance: true
           })
         : { memories: [], trace_id: null };
     const evidence =
@@ -8925,29 +9052,41 @@ export class RecallantDb {
       })),
       max_items_per_category: 8
     });
-    return {
-      context_pack_id: randomUUID(),
-      project_id: context.projectId,
-      session_id: input.session_id,
-      profile: "compact",
-      sections: {
-        checkpoint,
-        documentation_posture: documentationPosture,
-        canon_capability_context: canonCapabilityContext,
-        recovery: input.include_recovery === false ? [] : recovery.rows,
-        binding_rules: rules.rows.map((memory) => this.withSourceProvenance(memory)),
-        working_memories: working.memories.filter(
-          (memory: { use_policy?: string }) => memory.use_policy !== "instruction_grade"
-        ),
-        operational_bindings: [],
-        local_spool_status: input.local_spool_status ?? { status: "unknown" },
-        evidence_excerpts: evidence.hits,
-        suggested_next_fetches: []
+    return boundContextPack(
+      {
+        context_pack_id: randomUUID(),
+        project_id: context.projectId,
+        session_id: input.session_id,
+        profile: "compact",
+        sections: {
+          checkpoint,
+          documentation_posture: documentationPosture,
+          canon_capability_context: canonCapabilityContext,
+          recovery: input.include_recovery === false ? [] : recovery.rows,
+          binding_rules: rules.rows.map((memory) => this.withSourceProvenance(memory)),
+          working_memories: working.memories.filter(
+            (memory: { use_policy?: string }) => memory.use_policy !== "instruction_grade"
+          ),
+          operational_bindings: [],
+          local_spool_status: input.local_spool_status ?? { status: "unknown" },
+          evidence_excerpts: evidence.hits,
+          suggested_next_fetches: []
+        },
+        provenance: {
+          source_kind: "project_context",
+          source_id: context.projectId,
+          scope: "project",
+          authority: "startup_guidance",
+          review_status: "review_required"
+        },
+        trace_id: "trace_id" in working ? working.trace_id : null,
+        truncated:
+          ("truncated" in working && working.truncated === true) ||
+          ("truncated" in evidence && evidence.truncated === true),
+        budget: { max_chars_total: input.max_chars_total ?? 12_000 }
       },
-      trace_id: "trace_id" in working ? working.trace_id : null,
-      truncated: false,
-      budget: { max_chars_total: input.max_chars_total ?? 12_000 }
-    };
+      input.max_chars_total ?? 12_000
+    );
   }
 
   async forget(input: ForgetInput) {
@@ -9050,7 +9189,10 @@ export class RecallantDb {
         artifactExcerptMaxChars
       );
     }
-    const context = await this.contextForSession(input.session_id);
+    const context =
+      !input.session_id && input.project_id
+        ? await this.contextForProject(input.project_id)
+        : await this.contextForSession(input.session_id);
     const legacy = await withTransaction(this.pool, async (client) => {
       await this.touchSession(client, input.session_id);
       const existing = await this.findDedup(client, context.projectId, input.dedup_key);
@@ -9062,11 +9204,13 @@ export class RecallantDb {
         context.developerId,
         input.session_id
       );
-      const capturedText = capText(input.text, policy.workflowTextMaxChars);
+      const safeInputText = redactSecretValues(input.text ?? "");
+      const safeMetadata = redactedSystemActivityObject(input.metadata ?? {});
+      const capturedText = capText(safeInputText, policy.workflowTextMaxChars);
       const payload = {
         schema_version: 1,
         text: capturedText,
-        metadata: input.metadata ?? {},
+        metadata: safeMetadata,
         raw_artifacts: [],
         capture: {
           profile: policy.profile,
@@ -9100,12 +9244,12 @@ export class RecallantDb {
             event.id,
             artifact.artifact_kind,
             artifact.storage_backend,
-            artifact.uri ?? "",
+            redactSecretValues(artifact.uri ?? ""),
             artifact.sha256 ?? null,
             artifact.size_bytes ?? null,
             artifact.content_type ?? null,
-            artifact.excerpt ?? null,
-            JSON.stringify(artifact.metadata ?? {})
+            artifact.excerpt ? redactSecretValues(artifact.excerpt) : null,
+            JSON.stringify(redactedSystemActivityObject(artifact.metadata ?? {}))
           ]
         );
         rawArtifactIds.push(inserted.rows[0]?.id);
@@ -9561,7 +9705,9 @@ export class RecallantDb {
       const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
       const clauses = [
         "developer_id = $2::uuid",
-        "(project_id = $1::uuid OR scope = 'developer')",
+        input.project_only
+          ? "project_id = $1::uuid"
+          : "(project_id = $1::uuid OR scope = 'developer')",
         "status IN ('candidate', 'needs_review', 'accepted')",
         "use_policy <> 'do_not_use'",
         "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'",
@@ -9610,7 +9756,9 @@ export class RecallantDb {
       const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
       const clauses = [
         "developer_id = $2::uuid",
-        "(project_id = $1::uuid OR scope = 'developer')",
+        input.project_only
+          ? "project_id = $1::uuid"
+          : "(project_id = $1::uuid OR scope = 'developer')",
         "status = 'accepted'",
         "use_policy <> 'do_not_use'",
         "coalesce(metadata->>'diagnostic_marker', 'false') <> 'true'",
@@ -9683,6 +9831,7 @@ export class RecallantDb {
 
     const values: unknown[] = [input.project_id ?? context.projectId, context.developerId];
     const clauses = ["m.developer_id = $2::uuid"];
+    if (input.project_only) clauses.push("m.project_id = $1::uuid");
     if (input.view === "all") clauses.push("$1::uuid IS NOT NULL");
     if (input.view !== "all") clauses.push("(m.project_id = $1::uuid OR m.scope = 'developer')");
     if (input.view === "inbox") {
@@ -9763,8 +9912,14 @@ export class RecallantDb {
     return { memories: result.rows.map((row) => this.withSourceProvenance(row)) };
   }
 
-  async getAgentMemory(memoryId: string) {
-    const memory = await this.pool.query("SELECT * FROM agent_memories WHERE id = $1", [memoryId]);
+  async getAgentMemory(memoryId: string, authorizedProjectId?: string | null) {
+    const memory = await this.pool.query(
+      "SELECT * FROM agent_memories WHERE id = $1 AND ($2::uuid IS NULL OR project_id = $2::uuid)",
+      [memoryId, authorizedProjectId ?? null]
+    );
+    if (authorizedProjectId && memory.rows.length === 0) {
+      throw new Error("VALIDATION_ERROR: remote resource is outside the authenticated project");
+    }
     const sourceRefs = await this.pool.query(
       "SELECT * FROM agent_memory_source_refs WHERE memory_id = $1 ORDER BY created_at ASC",
       [memoryId]
@@ -9813,8 +9968,9 @@ export class RecallantDb {
                      created_at, updated_at
               FROM project_sources
               WHERE id = ANY($1::uuid[])
+                AND ($2::uuid IS NULL OR project_id = $2::uuid)
             `,
-            [projectSourceIds]
+            [projectSourceIds, authorizedProjectId ?? null]
           )
         : { rows: [] as Record<string, unknown>[] };
     const projectSourcesById = new Map(
@@ -9880,19 +10036,26 @@ export class RecallantDb {
     if (input.include_candidates) statuses.push("candidate");
     if (input.include_needs_review) statuses.push("needs_review");
     if (input.include_stale) statuses.push("stale");
-    const terms = Array.from(
-      new Set(
-        input.query
-          .split(/[^A-Za-z0-9_-]+/)
-          .map((term) => term.trim())
-          .filter((term) => term.length >= 3)
-          .slice(0, 8)
-      )
-    );
+    const terms = input.startup_relevance
+      ? startupRelevanceTerms(input.query)
+      : Array.from(
+          new Set(
+            input.query
+              .split(/[^A-Za-z0-9_-]+/)
+              .map((term) => term.trim())
+              .filter((term) => term.length >= 3)
+              .slice(0, 8)
+          )
+        );
+    if (input.startup_relevance && terms.length === 0) {
+      return { trace_id: null, memories: [], truncated: false };
+    }
     const values: unknown[] = [context.developerId, context.projectId, input.query, statuses];
     const clauses = [
       "m.developer_id = $1::uuid",
-      "(m.project_id = $2::uuid OR m.scope = 'developer')",
+      input.project_only
+        ? "m.project_id = $2::uuid"
+        : "(m.project_id = $2::uuid OR m.scope = 'developer')",
       "m.status = ANY($4::text[])",
       "m.use_policy <> 'do_not_use'"
     ];
@@ -9936,6 +10099,7 @@ export class RecallantDb {
           m.audience,
           m.confidence,
           m.updated_at,
+          m.metadata,
           coalesce(
             jsonb_agg(to_jsonb(r) ORDER BY r.created_at ASC)
               FILTER (WHERE r.id IS NOT NULL),
@@ -9945,17 +10109,25 @@ export class RecallantDb {
         LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
         WHERE ${clauses.join(" AND ")}
         GROUP BY m.id
-        ORDER BY
-          CASE m.use_policy WHEN 'instruction_grade' THEN 0 WHEN 'recall_allowed' THEN 1 ELSE 2 END,
-          m.updated_at DESC
+        ORDER BY m.updated_at DESC
         LIMIT $${values.length + 1}::int
       `,
-      [...values, input.top_k ?? 8]
+      [
+        ...values,
+        input.startup_relevance ? Math.max((input.top_k ?? 4) * 8, 16) : (input.top_k ?? 8)
+      ]
     );
+    const rankedRows = input.startup_relevance
+      ? [...result.rows].sort((left, right) => {
+          const score = startupMemoryScore(right, terms) - startupMemoryScore(left, terms);
+          if (score !== 0) return score;
+          return String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""));
+        })
+      : result.rows;
     let usedChars = 0;
     const maxChars = input.max_chars_total ?? 12_000;
     const memories = [];
-    for (const row of result.rows) {
+    for (const row of rankedRows.slice(0, input.top_k ?? 8)) {
       if (usedChars >= maxChars) break;
       const body = String(row.body ?? "");
       const remaining = maxChars - usedChars;
@@ -9975,7 +10147,7 @@ export class RecallantDb {
         context.projectId,
         JSON.stringify(memories.map((memory) => memory.memory_id)),
         JSON.stringify({
-          truncated: result.rows.length > memories.length,
+          truncated: rankedRows.length > memories.length,
           source_id: sourceFilter?.source_id ?? null,
           query_sha256: sha256(input.query),
           query_length: input.query.length,
@@ -9986,7 +10158,7 @@ export class RecallantDb {
     return {
       trace_id: trace.rows[0]?.id,
       memories,
-      truncated: result.rows.length > memories.length
+      truncated: rankedRows.length > memories.length
     };
   }
 

@@ -16,8 +16,9 @@ not require Docker, Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin cookies,
 paths, raw artifacts, backups, provider secrets, or private deployment overlays on the remote
 machine. First approval can register a trusted device, later projects can reconnect with signed
 device challenges, headless hosts can use one-time bootstrap tokens, generated project config stores
-only credential references, and remote-only `agent-start` returns `remote_mcp_ready` with the
-remote consent/redaction boundary instead of falling back to local offline spool messaging.
+only credential references, and remote-only lifecycle commands use HTTPS MCP directly. A transport
+failure is classified and queued for ordered remote replay; absence of local PostgreSQL is not a
+failure for a remote project.
 
 ## Product Decision
 
@@ -49,9 +50,9 @@ https://memory.example.com/connect/approve?code=ABCD-1234
 After the owner approves in the browser, the CLI receives a provisioning package, writes the
 project-local remote MCP config, stores only a credential reference, prepares thin agent-ready files
 (`README.md`, `AGENTS.md`, and `PROJECT_LOG.md`), runs `remote-doctor`, and reports the next
-`agent-start` command. For remote-only projects, that command is a readiness/consent handoff: it
-should report `mode: "remote_mcp_ready"` and direct the agent to the configured MCP
-`memory_get_context_pack` flow without requiring local Recallant storage or Cloudflare browser auth.
+`agent-start` command. For remote-only projects, that command starts a real remote session, loads its
+context pack, and returns their ids with the backward-compatible `mode: "remote_mcp_ready"`. It does
+not require local Recallant storage or Cloudflare browser auth.
 
 ## Authentication Paths
 

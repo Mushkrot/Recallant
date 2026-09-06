@@ -339,6 +339,138 @@ function upsertTomlTable(existingText: string | null, tableName: string, tableTe
   return existing ? `${existing}\n\n${tableText}\n` : `${tableText}\n`;
 }
 
+function tomlTableRange(existing: string, tableName: string) {
+  const tablePattern = new RegExp(
+    `(^|\\n)(\\[${escapeRegExp(tableName)}\\]\\s*\\n[\\s\\S]*?)(?=\\n\\[|$)`
+  );
+  const match = existing.match(tablePattern);
+  if (!match || match.index === undefined) return null;
+  const prefix = match[1] ?? "";
+  return {
+    start: match.index + prefix.length,
+    end: match.index + match[0].length,
+    text: match[2] ?? ""
+  };
+}
+
+function upsertTomlTableKey(
+  existingText: string | null,
+  tableName: string,
+  key: string,
+  renderedValue: string
+) {
+  const existing = existingText?.trimEnd() ?? "";
+  const range = tomlTableRange(existing, tableName);
+  if (!range) {
+    const table = `[${tableName}]\n${key} = ${renderedValue}`;
+    return existing ? `${existing}\n\n${table}\n` : `${table}\n`;
+  }
+  const keyPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=.*$`, "m");
+  const tableText = keyPattern.test(range.text)
+    ? range.text.replace(keyPattern, `${key} = ${renderedValue}`)
+    : `${range.text.trimEnd()}\n${key} = ${renderedValue}\n`;
+  return (
+    `${existing.slice(0, range.start)}${tableText}${existing.slice(range.end)}`.trimEnd() + "\n"
+  );
+}
+
+function removeTomlTableKey(existingText: string, tableName: string, key: string) {
+  const existing = existingText.trimEnd();
+  const range = tomlTableRange(existing, tableName);
+  if (!range) return `${existing}\n`;
+  const keyPattern = new RegExp(`^[ \\t]*${escapeRegExp(key)}[ \\t]*=.*(?:\\n|$)`, "m");
+  if (!keyPattern.test(range.text)) return `${existing}\n`;
+  const tableText = range.text.replace(keyPattern, "").trimEnd();
+  return (
+    `${existing.slice(0, range.start)}${tableText}${existing.slice(range.end)}`.trimEnd() + "\n"
+  );
+}
+
+function removeRootTomlKey(existingText: string, key: string) {
+  const keyPattern = new RegExp(`^[ \\t]*${escapeRegExp(key)}[ \\t]*=`);
+  let insideTable = false;
+  const lines = existingText.trimEnd().split("\n");
+  const next = lines.filter((line) => {
+    if (/^[ \\t]*\[/.test(line)) insideTable = true;
+    return insideTable || !keyPattern.test(line);
+  });
+  return `${next.join("\n").trimEnd()}\n`;
+}
+
+function upsertTomlInlineMapEntry(
+  existingText: string,
+  tableName: string,
+  mapKey: string,
+  entryKey: string,
+  entryValue: string
+) {
+  const existing = existingText.trimEnd();
+  const nestedTableName = `${tableName}.${mapKey}`;
+  if (tomlTableRange(existing, nestedTableName)) {
+    return upsertTomlTableKey(
+      existing,
+      nestedTableName,
+      tomlString(entryKey),
+      tomlString(entryValue)
+    );
+  }
+  const range = tomlTableRange(existing, tableName);
+  if (!range) {
+    return upsertTomlTableKey(
+      existing,
+      tableName,
+      mapKey,
+      `{ ${tomlString(entryKey)} = ${tomlString(entryValue)} }`
+    );
+  }
+  const mapPattern = new RegExp(
+    `^(\\s*${escapeRegExp(mapKey)}\\s*=\\s*)\\{([^}]*)\\}(\\s*(?:#.*)?)$`,
+    "m"
+  );
+  const mapMatch = range.text.match(mapPattern);
+  if (!mapMatch) {
+    const keyPattern = new RegExp(`^\\s*${escapeRegExp(mapKey)}\\s*=`, "m");
+    if (keyPattern.test(range.text)) {
+      throw new Error(`Cannot safely merge ${tableName}.${mapKey}; expected an inline TOML table.`);
+    }
+    return upsertTomlTableKey(
+      existing,
+      tableName,
+      mapKey,
+      `{ ${tomlString(entryKey)} = ${tomlString(entryValue)} }`
+    );
+  }
+  const renderedEntryKey = tomlString(entryKey);
+  const entryPattern = new RegExp(
+    `${escapeRegExp(renderedEntryKey)}\\s*=\\s*(?:"(?:\\\\.|[^"\\\\])*"|[A-Za-z0-9_-]+)`,
+    "g"
+  );
+  const currentBody = mapMatch[2] ?? "";
+  const nextEntry = `${renderedEntryKey} = ${tomlString(entryValue)}`;
+  const nextBody = entryPattern.test(currentBody)
+    ? currentBody.replace(entryPattern, nextEntry)
+    : currentBody.trim()
+      ? `${currentBody.trim()}, ${nextEntry}`
+      : ` ${nextEntry} `;
+  const nextTableText = range.text.replace(
+    mapPattern,
+    `${mapMatch[1] ?? `${mapKey} = `}{${nextBody}}${mapMatch[3] ?? ""}`
+  );
+  return (
+    `${existing.slice(0, range.start)}${nextTableText}${existing.slice(range.end)}`.trimEnd() + "\n"
+  );
+}
+
+function codexRemoteNetworkConfig(existingText: string, serverUrl: string) {
+  const hostname = new URL(serverUrl).hostname.toLowerCase();
+  if (!hostname) throw new Error("Remote MCP server URL does not contain a hostname.");
+  let rendered = removeRootTomlKey(existingText, "features.network_proxy");
+  rendered = removeTomlTableKey(rendered, "features", "network_proxy");
+  rendered = upsertTomlTableKey(rendered, "sandbox_workspace_write", "network_access", "true");
+  rendered = upsertTomlTableKey(rendered, "features.network_proxy", "enabled", "true");
+  return upsertTomlInlineMapEntry(rendered, "features.network_proxy", "domains", hostname, "allow");
+}
+
 export function renderClientTargetConfig(
   existingText: string | null,
   targetConfig: ClientTargetConfig
@@ -361,10 +493,14 @@ export function renderRemoteClientTargetConfig(
   targetConfig: RemoteClientTargetConfig
 ) {
   if (targetConfig.format === "codex_config_toml") {
-    return upsertTomlTable(
+    const rendered = upsertTomlTable(
       existingText,
       "mcp_servers.recallant",
       codexRemoteMcpServerToml(targetConfig.mcp_config)
+    );
+    return codexRemoteNetworkConfig(
+      rendered,
+      targetConfig.mcp_config.mcpServers.recallant.env.RECALLANT_REMOTE_MCP_URL
     );
   }
   const desiredConfig = targetConfig.merge_mcp_servers
@@ -456,7 +592,7 @@ export function remoteClientTargetConfig(
       client_specific: true,
       merge_mcp_servers: true,
       setup_hint:
-        "Codex reads this project-local .codex/config.toml in trusted projects. This remote config runs the Recallant bridge over HTTPS without local storage credentials.",
+        "Codex reads this project-local .codex/config.toml in trusted projects. This remote config runs the Recallant bridge over HTTPS without local storage credentials and allows sandboxed network access only to the configured Recallant host.",
       mcp_config,
       remote: true
     };

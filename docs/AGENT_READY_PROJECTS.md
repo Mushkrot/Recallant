@@ -45,6 +45,10 @@ proof and `memory_loop_ready` remain separate from `capture_active`, which stays
 automatic event arrives.
 The same remote flow prepares agent-ready thin files by default so the next agent sees startup
 instructions and a compact fallback log, not just raw MCP config.
+For Codex, the project config also enables workspace-sandbox networking and allowlists only the exact
+Recallant server hostname. The generated `AGENTS.md` requires session/context ids from the current
+CLI fallback and tells the agent to replay any classified transport failure through the configured
+remote MCP path after narrow network access is restored.
 
 Interrupted sessions remain visible as recovery context and should be reviewed by the next agent,
 but they are not a hard blocker for `memory_loop_ready` or fresh automatic capture.
@@ -151,6 +155,19 @@ secrets or asking maintainers to repeat known rules. It is not a full external r
 does not grant live access, and it does not make recalled text instruction-grade. Connector
 activation, remote resource ingestion, and broader registry workflows remain governed future work.
 
+Context packs are server-built and aggregate-bounded. The server may compact section text, omit lower
+priority items, and report the exact budget and omission categories; clients must treat an omitted
+section as unavailable rather than reconstructing it from unrelated history. Startup retrieval may
+favor task-specific working memories over older closeout records, while preserving the normal
+project, developer, audience, review, and retention boundaries.
+
+Generated starter instructions also include a compact delivery-verification rule. The owner is not
+the default QA: an agent should reproduce the actual consumed target when feasible, report whether
+the original scenario was `VERIFIED FIXED`, `IMPLEMENTED NOT VERIFIED`, `BLOCKED`, or `NOT FIXED`,
+and stop after one verification plus at most two evidence-driven repair/retest cycles. Repository
+tests and source inspection remain supporting evidence; they do not substitute for the user-visible
+target check.
+
 The Workbench now shows this as a dedicated documentation strategy surface with four choices:
 
 - **Keep current docs, add Recallant layer:** preserve the current documentation and add only the
@@ -215,7 +232,8 @@ trusted import path, explicit owner action, or review policy allows it.
 
 For a remote existing project, prove the connection before importing history:
 
-1. verify `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+1. verify `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` with returned
+   session and context-pack ids, proving the CLI remote startup path;
 2. verify the same JSON reports `readiness_contract.primary_state: "configured"` until proof exists,
    and recommends `memory_get_context_pack` and
    `memory_create_agent_memory` as the next startup/proof calls;
@@ -316,6 +334,11 @@ events onto that same loop:
 
 If MCP is unavailable, the CLI fallback can still record work and write local spool records for
 later sync; use `recallant agent-closeout` as the CLI fallback closeout path.
+
+The same delivery-verification rule applies to work performed through any client. The owner should
+not be treated as the default test operator, and an agent should not claim a user-visible fix from
+builds, mocks, or source inspection alone. When target verification is impossible, the agent must
+return a truthful non-success status and record the blocker or limitation.
 
 Future task handoff and receipt work should sit on top of this same loop rather than replace it. A
 handoff record may be portable enough to paste into another tool, but its authoritative state should

@@ -99,7 +99,8 @@ async function callToolError(id, name, args) {
     timeout: 30_000
   });
   const text = response.content?.[0]?.text ?? "";
-  if (response.isError !== true) throw new Error(`Expected ${name} to fail: ${JSON.stringify(response)}`);
+  if (response.isError !== true)
+    throw new Error(`Expected ${name} to fail: ${JSON.stringify(response)}`);
   return String(text);
 }
 
@@ -185,7 +186,9 @@ if (
   !forbiddenMemoryError.includes("VALIDATION_ERROR") ||
   !forbiddenMemoryError.includes("database URLs")
 ) {
-  throw new Error(`Forbidden governed memory payload was not rejected clearly: ${forbiddenMemoryError}`);
+  throw new Error(
+    `Forbidden governed memory payload was not rejected clearly: ${forbiddenMemoryError}`
+  );
 }
 
 const candidate = await callTool(6, "memory_create_agent_memory", {
@@ -279,9 +282,7 @@ if (
   stateOnlyCheckpoint.searchable_memory_created !== false ||
   stateOnlyCheckpoint.memory_id !== null
 ) {
-  throw new Error(
-    `State-only checkpoint output changed: ${JSON.stringify(stateOnlyCheckpoint)}`
-  );
+  throw new Error(`State-only checkpoint output changed: ${JSON.stringify(stateOnlyCheckpoint)}`);
 }
 
 const searchableCheckpoint = await callNextTool("memory_agent_checkpoint", {
@@ -625,6 +626,48 @@ if (
   !warningCloseout.warnings.some((warning) => warning.includes("provider/errors"))
 ) {
   throw new Error(`Closeout warning report failed: ${JSON.stringify(warningCloseout)}`);
+}
+if (
+  warningCloseout.needs_review_ids.length !== 1 ||
+  warningCloseout.lifecycle?.proof?.memory?.memory_status !== "accepted" ||
+  warningCloseout.lifecycle?.proof?.recall?.marker_found !== true ||
+  warningCloseout.lifecycle?.proof?.next_session_context?.marker_found !== true ||
+  warningCloseout.lifecycle?.next_agent_ready !== true
+) {
+  throw new Error(
+    `Governed candidate review incorrectly blocked lifecycle proof: ${JSON.stringify(warningCloseout)}`
+  );
+}
+
+const riskSession = await callNextTool("memory_start_session", {
+  client_kind: "codex",
+  client_version: "smoke",
+  project_path: projectPath,
+  session_label: "phase6-risk-closeout-smoke",
+  resume_policy: "normal"
+});
+const riskCloseout = await callNextTool("memory_closeout", {
+  session_id: riskSession.session_id,
+  closeout_intent: "task_complete",
+  summary: "Production deploy provider decision remains under review.",
+  checkpoint_payload: {
+    current_status: "review required",
+    current_focus: "production deploy provider decision",
+    next_step: "owner reviews the generated work log",
+    open_questions: []
+  },
+  governed_memory_candidates: [],
+  artifact_refs: []
+});
+if (
+  riskCloseout.lifecycle?.proof?.memory?.memory_status !== "needs_review" ||
+  riskCloseout.lifecycle?.proof?.memory?.needs_review_ids?.length !== 1 ||
+  riskCloseout.lifecycle?.next_agent_ready !== false ||
+  !riskCloseout.lifecycle?.failure_reasons?.includes("review_required") ||
+  !riskCloseout.lifecycle?.failure_reasons?.includes("recall_verification_failed") ||
+  !riskCloseout.lifecycle?.failure_reasons?.includes("next_session_context_failed")
+) {
+  throw new Error(`Risk closeout bypassed governed review: ${JSON.stringify(riskCloseout)}`);
 }
 
 await callNextTool("memory_create_agent_memory", {

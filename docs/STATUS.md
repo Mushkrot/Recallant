@@ -37,6 +37,11 @@ runs, pinned installation, update-channel, rollback, security, and route verific
   covered by focused smoke tests.
 - Local Ollama embeddings are fail-soft; embedding requests ask the runtime to retain the embedding
   model, while bounded recovery handles temporary unavailability.
+- Startup Context Packs are aggregate-bounded and expose omission metadata; task-specific working
+  memories can be ranked ahead of older closeout records without weakening project or review scope.
+- Generated starter instructions carry a client-neutral delivery-verification rule: the owner is not
+  the default QA, user-visible claims require target verification when feasible, and bounded retry
+  statuses remain explicit.
 
 ## Product Gap And Active Priority
 

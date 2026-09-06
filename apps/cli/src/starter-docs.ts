@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import {
   planStarterDocs,
   type DocumentationPosture,
@@ -13,6 +13,23 @@ async function readOptional(path: string) {
     return await readFile(path, "utf8");
   } catch {
     return null;
+  }
+}
+
+async function assertNoSymlinkPath(path: string) {
+  let current = resolve(path);
+  while (true) {
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`VALIDATION_ERROR: refusing to follow symlink ${current}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("VALIDATION_ERROR:")) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
   }
 }
 
@@ -41,6 +58,7 @@ export async function applyStarterDocs(input: {
       }
       continue;
     }
+    await assertNoSymlinkPath(targetPath);
     await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
     generatedFiles.push(file.path);
@@ -71,10 +89,14 @@ function remoteAgentReadyAgentsSection() {
 
 - This project uses a central Recallant server through remote MCP; do not set up local Postgres, Docker, or \`RECALLANT_DATABASE_URL\` just to work in this project.
 - Start each session through the configured remote Recallant MCP/client integration. Call \`memory_start_session\`, then \`memory_get_context_pack\` with the current task hint before making changes.
+- If this Codex client was already open when \`.codex/config.toml\` was written or updated, restart Codex (or use \`Restart extension\` in the IDE) before treating direct MCP as unavailable. Then retry \`memory_start_session\` and \`memory_get_context_pack\`; an already-open client can retain the earlier MCP tool snapshot.
 - During work, write concise non-secret decisions, actions, tests, and governed memories with \`memory_append_event\` or \`memory_create_agent_memory\` when useful.
 - Use \`memory_set_checkpoint\` only for checkpoint state; it is not semantic recall proof.
 - On pause or finish, call \`memory_closeout\`. This is the normal MCP closeout path and includes checkpoint state, searchable memory, recall verification, and next-session readiness semantics.
 - If MCP is unavailable, use the CLI fallback against the configured remote project: \`recallant agent-start --format json\`, \`recallant agent-event\`, and \`recallant agent-closeout\`. Use \`recallant agent-checkpoint\` only as an advanced pause/compaction state helper.
+- \`mode: "remote_mcp_ready"\` from a current \`recallant agent-start\` includes the remote session and context-pack ids; a classified transport failure is spooled for later remote replay.
+- If direct MCP or the CLI reports a DNS, fetch, or sandbox-network error, retry \`recallant remote-doctor --capture-proof\` through the client's narrow network-enabled or elevated execution path without asking the project owner to diagnose infrastructure. Keep the destination limited to the configured Recallant host.
+- Do not bypass an approval that the client requires for elevated execution; request only the narrow Recallant network check when approval is mandatory.
 - \`PROJECT_LOG.md\` is a compact current-state fallback. Durable session history belongs in Recallant memory.
 - Do not store secrets, credentials, tokens, private keys, raw customer data, or local deployment details in docs or memory.
 ${remoteAgentReadyAgentsEnd}`;
@@ -200,7 +222,10 @@ function remoteAgentReadyAlreadyPresent(path: string, existing: string) {
       existing.includes("recallant agent-start --format json") &&
       existing.includes("memory_get_context_pack") &&
       existing.includes("memory_start_session") &&
-      existing.includes("memory_closeout")
+      existing.includes("memory_closeout") &&
+      (existing.includes("does not prove that a session or context pack was loaded") ||
+        existing.includes("includes the remote session and context-pack ids")) &&
+      existing.includes("recallant remote-doctor --capture-proof")
     );
   }
   if (path === "PROJECT_LOG.md") {
@@ -291,6 +316,7 @@ export async function applyRemoteAgentReadyFiles(input: {
     const targetPath = join(input.projectDir, file.path);
     const existing = await readOptional(targetPath);
     if (existing === null) {
+      await assertNoSymlinkPath(targetPath);
       await mkdir(dirname(targetPath), { recursive: true });
       await writeFile(
         targetPath,
@@ -325,6 +351,7 @@ export async function applyRemoteAgentReadyFiles(input: {
       skip(file.path, "Remote MCP agent-ready section already exists.");
       continue;
     }
+    await assertNoSymlinkPath(targetPath);
     await writeFile(targetPath, updated.content);
     updatedFiles.push(file.path);
   }

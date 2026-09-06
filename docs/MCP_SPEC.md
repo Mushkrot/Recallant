@@ -61,6 +61,15 @@ No unauthenticated public route should expose remote MCP.
 - `Bearer` for agent runtime.
 - `Cloudflare-Access` or equivalent for protected human/admin/approval surfaces.
 
+### Remote project-path isolation
+
+Remote MCP requests are scoped by the authenticated project, developer, and optional client
+identity supplied by the request and credential. A remote request must use its explicit attached
+project path or the database path bound to that project; it must not inherit the Recallant server
+process's `RECALLANT_PROJECT_PATH` environment value. This prevents a remote client from writing
+project logs or derived local artifacts into the server host's ambient project. If no safe project
+path is available, the operation must return a visible bounded status rather than guessing.
+
 ## 3a) Remote Bridge Inputs
 
 The bridge is configured from the operator's local client config or environment. It requires:
@@ -479,6 +488,10 @@ Error responses use a stable machine-readable `{ code, message }` shape plus HTT
 - `MISSING_PROJECT_OR_DEVELOPER_SCOPE` -> `400`
 - `INVALID_SCOPE_TOKEN` -> `401`
 - `PROJECT_SCOPE_MISMATCH` -> `403`
+- `POLICY_BLOCKED` -> `403`: a project-scoped remote credential cannot perform owner review,
+  promotion, erasure, cross-project retrieval, or create developer-scoped memory. Use the
+  authenticated Workbench for owner operations. Remote resource IDs must belong to the
+  authenticated project; conflicting tool scope is rejected before execution.
 - `PROJECT_NOT_ATTACHED` -> `404`
 - `FORBIDDEN_HEADER` -> `400`
 - `RATE_LIMITED` -> `429` (retryable)

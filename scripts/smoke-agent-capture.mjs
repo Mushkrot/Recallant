@@ -490,7 +490,7 @@ try {
     `[mcp_servers.recallant]
 command = "recallant"
 args = ["remote-bridge"]
-env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PROJECT_ID = "remote-project-id", RECALLANT_DEVELOPER_ID = "remote-developer-id", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-client-id", RECALLANT_REMOTE_MCP_CREDENTIAL_REF = "rclcred_lookup" }
+env = { RECALLANT_REMOTE_MCP_URL = "http://127.0.0.1:65534", RECALLANT_PROJECT_ID = "remote-project-id", RECALLANT_DEVELOPER_ID = "remote-developer-id", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-client-id", RECALLANT_REMOTE_MCP_CREDENTIAL = "agent-capture-fixture-token" }
 `
   );
   const requiredSecretClasses = [
@@ -512,20 +512,24 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
     }
   );
   assert(
-    remoteStart.mode === "remote_mcp_ready",
-    `remote agent-start should use remote_mcp_ready, not local fallback: ${JSON.stringify(remoteStart)}`
+    remoteStart.mode === "offline_spool" && remoteStart.transport === "remote_mcp",
+    `unreachable remote agent-start should use remote spool, not local database fallback: ${JSON.stringify(remoteStart)}`
   );
   assert(
-    !remoteStart.spool_path && !remoteStart.local_id,
-    "remote agent-start should not create an offline spool record"
+    remoteStart.spool_path && remoteStart.local_id,
+    "unreachable remote agent-start did not create an ordered remote spool record"
   );
   assert(
     !String(remoteStart.warning ?? "").includes("Server database is unavailable"),
     "remote agent-start should not warn about local/server database availability"
   );
   assert(
-    remoteStart.destination?.server_url === "https://recallant.example.com",
+    remoteStart.destination?.server_url === "http://127.0.0.1:65534",
     "remote consent missing destination"
+  );
+  assert(
+    remoteStart.remote_failure?.code === "REMOTE_MCP_CONNECTION_REFUSED",
+    `remote transport failure was not classified: ${JSON.stringify(remoteStart.remote_failure)}`
   );
   assert(
     remoteStart.destination?.endpoint_path === "/api/mcp",
@@ -581,6 +585,10 @@ env = { RECALLANT_REMOTE_MCP_URL = "https://recallant.example.com", RECALLANT_PR
   assert(
     !JSON.stringify(remoteStart).includes("rcl_mcp_connect_secret"),
     "remote consent JSON leaked raw credential"
+  );
+  assert(
+    !JSON.stringify(remoteStart).includes("agent-capture-fixture-token"),
+    "remote consent JSON leaked fixture credential"
   );
 
   const remoteText = await cliRaw(

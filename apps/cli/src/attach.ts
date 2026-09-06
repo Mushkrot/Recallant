@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { createRecallantDbFromEnv, type RecallantDb } from "@recallant/db";
 import {
   type DiscoveryCandidate,
   detectImportCandidates,
   readImportTextForCandidate,
-  redactSecretValues
+  redactSecretValues,
+  shellQuote
 } from "./discovery.js";
 import {
   analyzeProjectDocumentationPosture,
@@ -18,6 +19,7 @@ import {
 } from "./documentation-posture.js";
 import { applyStarterDocs } from "./starter-docs.js";
 import { clientTargetConfig, renderClientTargetConfig } from "./client-targets.js";
+import { deliveryQaGuidance } from "./agent-guidance.js";
 
 type AttachMode = "manual" | "guided" | "autopilot";
 
@@ -81,6 +83,8 @@ const attachMemorySection = `## Memory (Recallant)
   only as an advanced pause/compaction state helper, not as closeout proof.
   \`recallant agent-closeout\` is the CLI fallback closeout path.
   If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
+
+${deliveryQaGuidance.trimEnd()}
 `;
 
 function parseFlag(argv: readonly string[], name: string) {
@@ -170,6 +174,27 @@ async function readOptional(path: string) {
     return await readFile(path, "utf8");
   } catch {
     return null;
+  }
+}
+
+async function assertNoSymlinkWithin(root: string, target: string) {
+  const relativeTarget = relative(root, target);
+  if (relativeTarget.startsWith("..") || isAbsolute(relativeTarget)) {
+    throw new Error("VALIDATION_ERROR: target path escapes the selected project directory");
+  }
+  const segments = relativeTarget.split(/[\\/]+/).filter(Boolean);
+  let current = root;
+  for (const segment of ["", ...segments]) {
+    current = segment ? join(current, segment) : current;
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`VALIDATION_ERROR: refusing to follow symlink ${relative(root, current)}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("VALIDATION_ERROR:")) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      break;
+    }
   }
 }
 
@@ -394,9 +419,12 @@ async function createLocalBackup(input: {
   if (input.changedExistingAgentFiles.length === 0) return null;
   const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
   const backupRoot = join(input.projectDir, ".recallant", "backups", `attach-${timestamp}`);
+  await assertNoSymlinkWithin(input.projectDir, backupRoot);
   for (const file of input.agentFiles) {
     const content = await readOptional(join(input.projectDir, file.path));
     if (content === null) continue;
+    await assertNoSymlinkWithin(input.projectDir, join(input.projectDir, file.path));
+    await assertNoSymlinkWithin(input.projectDir, join(backupRoot, file.path));
     await mkdir(join(backupRoot, file.path, ".."), { recursive: true });
     await writeFile(join(backupRoot, file.path), redactSecretValues(content));
   }
@@ -801,6 +829,7 @@ function textReport(result: Record<string, unknown>) {
 
 export async function runAttach(argv: readonly string[]) {
   const options = parseAttachOptions(argv);
+  await assertNoSymlinkWithin(options.projectDir, options.projectDir);
   const candidates = await detectImportCandidates(options.projectDir);
   const documentationPosture = await analyzeProjectDocumentationPosture(options.projectDir);
   const existingConfigResult = await readExistingConfig(options.projectDir);
@@ -975,8 +1004,8 @@ export async function runAttach(argv: readonly string[]) {
         effectiveMode === "manual"
           ? "Use lower-level init/discover/import commands for explicit manual work."
           : options.replaceProjectLog
-            ? `Run recallant attach ${options.projectDir} --replace-project-log --confirm after reviewing this plan.`
-            : `Run recallant attach ${options.projectDir} --confirm after reviewing this plan.`,
+            ? `Run recallant attach ${shellQuote(options.projectDir)} --replace-project-log --confirm after reviewing this plan.`
+            : `Run recallant attach ${shellQuote(options.projectDir)} --confirm after reviewing this plan.`,
       migration_summary: plannedMigrationSummary
     };
     process.stdout.write(
@@ -987,7 +1016,9 @@ export async function runAttach(argv: readonly string[]) {
   }
 
   try {
-    await mkdir(join(options.projectDir, ".recallant"), { recursive: true });
+    const recallantDir = join(options.projectDir, ".recallant");
+    await assertNoSymlinkWithin(options.projectDir, recallantDir);
+    await mkdir(recallantDir, { recursive: true });
     const backup = await createLocalBackup({
       projectDir: options.projectDir,
       mode: effectiveMode,
@@ -1006,27 +1037,26 @@ export async function runAttach(argv: readonly string[]) {
     const effectiveChangedFiles = Array.from(
       new Set([...changedFiles, ...starterDocsOutcome.generated_files])
     );
+    const configPath = join(options.projectDir, ".recallant", "config");
+    await assertNoSymlinkWithin(options.projectDir, configPath);
     await writeFile(
-      join(options.projectDir, ".recallant", "config"),
+      configPath,
       configJson(existingConfigResult.config, identity.projectId, options.serverUrl)
     );
-    await mkdir(
-      join(options.projectDir, targetConfig.config_file).split("/").slice(0, -1).join("/"),
-      {
-        recursive: true
-      }
-    );
+    const targetConfigPath = join(options.projectDir, targetConfig.config_file);
+    await assertNoSymlinkWithin(options.projectDir, targetConfigPath);
+    await mkdir(join(targetConfigPath, ".."), { recursive: true });
     await writeFile(
-      join(options.projectDir, targetConfig.config_file),
+      targetConfigPath,
       renderClientTargetConfig(
         await readOptional(join(options.projectDir, targetConfig.config_file)),
         targetConfig
       )
     );
-    await writeFile(
-      join(options.projectDir, ".gitignore"),
-      await upsertGitignore(options.projectDir)
-    );
+    const gitignorePath = join(options.projectDir, ".gitignore");
+    await assertNoSymlinkWithin(options.projectDir, gitignorePath);
+    await writeFile(gitignorePath, await upsertGitignore(options.projectDir));
+    await assertNoSymlinkWithin(options.projectDir, agentsPath);
     await writeFile(
       agentsPath,
       upsertMemorySection(
@@ -1038,6 +1068,7 @@ export async function runAttach(argv: readonly string[]) {
       )
     );
     if (changesProjectLog) {
+      await assertNoSymlinkWithin(options.projectDir, projectLogPath);
       await writeFile(
         projectLogPath,
         compactProjectLog({
@@ -1189,7 +1220,7 @@ export async function runAttach(argv: readonly string[]) {
             : "Nothing urgent.",
         how_to_check:
           "Open the Review UI or inspect .recallant/config, AGENTS.md, and PROJECT_LOG.md.",
-        next_step: `Run recallant connect ${options.target} --project-dir ${options.projectDir} --dry-run.`,
+        next_step: `Run recallant connect ${options.target} --project-dir ${shellQuote(options.projectDir)} --dry-run.`,
         migration_summary: {
           ...plannedMigrationSummary,
           imported_sources: imported.length,

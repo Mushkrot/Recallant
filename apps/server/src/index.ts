@@ -210,7 +210,11 @@ function parseCookies(request: IncomingMessage) {
   for (const part of header.split(";")) {
     const index = part.indexOf("=");
     if (index === -1) continue;
-    cookies.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()));
+    try {
+      cookies.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()));
+    } catch {
+      // Ignore malformed cookie values instead of rejecting the async HTTP listener.
+    }
   }
   return cookies;
 }
@@ -878,10 +882,7 @@ function write(
 }
 
 async function readJson(request: IncomingMessage) {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return readJsonWithLimit(request, 256 * 1024);
 }
 
 async function readJsonWithLimit(request: IncomingMessage, limitBytes: number) {
@@ -2132,6 +2133,104 @@ function remoteMcpToolList() {
   }));
 }
 
+const remoteOwnerTools = new Set([
+  "memory_review_agent_memory",
+  "memory_promote",
+  "memory_forget",
+  "memory_review_graph_candidate",
+  "memory_promote_graph_candidate"
+]);
+
+async function assertRemoteToolAuthority(
+  database: RecallantDb,
+  toolName: string,
+  args: Record<string, unknown>,
+  scope: { projectId: string; developerId: string; sessionId?: string | null },
+  id: RemoteMcpJsonRpcId
+) {
+  const blocked = () => {
+    throw new RemoteMcpRequestError(
+      "POLICY_BLOCKED",
+      "This operation requires owner authority through the Workbench.",
+      id
+    );
+  };
+  if (remoteOwnerTools.has(toolName)) blocked();
+  if (toolName === "memory_graph_maintenance" && args.mode === "apply") blocked();
+  if (toolName === "memory_cross_project_recall") blocked();
+  if (toolName === "memory_create_agent_memory") {
+    if (args.created_by !== "agent" || args.scope !== "project") blocked();
+    if (isRecord(args.metadata) && args.metadata.owner_confirmed_global_rule != null) blocked();
+  }
+  if (
+    toolName === "memory_create_graph_candidate" &&
+    (args.created_by !== "agent" ||
+      (args.lifecycle_state != null && args.lifecycle_state !== "candidate"))
+  )
+    blocked();
+  if (args.actor_kind != null && args.actor_kind !== "agent") blocked();
+  if (args.scope_kind != null && args.scope_kind !== "project") blocked();
+  if (args.scope_id != null && args.scope_id !== scope.projectId) blocked();
+  // Broader retrieval is an owner capability; accepted developer rules still arrive in context packs.
+  if (args.scope != null && args.scope !== "project") blocked();
+
+  const fields: Record<string, string> = {
+    session_id: "session",
+    memory_id: "memory",
+    chunk_id: "chunk",
+    source_id: "source",
+    from_source_id: "source",
+    source_event_id: "event",
+    graph_candidate_id: "graph_candidate",
+    target_graph_candidate_id: "graph_candidate"
+  };
+  const check = async (kind: string, value: unknown) => {
+    if (value != null) {
+      if (typeof value !== "string")
+        throw new RemoteMcpRequestError("VALIDATION_ERROR", "Invalid resource reference.", id);
+      await database.assertRemoteResourceScope(kind, value, scope.projectId, scope.developerId);
+    }
+  };
+  await check("session", scope.sessionId);
+  for (const [key, kind] of Object.entries(fields)) {
+    // Keeper's text source_id can be an external label, not a database resource.
+    if (key === "source_id" && toolName === "memory_keeper_candidates") continue;
+    await check(kind, args[key]);
+  }
+  if (toolName === "memory_link") {
+    await check(String(args.src_kind), args.src_id);
+    if (args.dst_kind !== "external") await check(String(args.dst_kind), args.dst_id);
+  }
+  if (toolName === "memory_report_recall_usage") {
+    await check("recall_trace", args.trace_id);
+    for (const key of ["used_memory_ids", "ignored_memory_ids", "used_chunk_ids"]) {
+      for (const value of (args[key] as string[] | undefined) ?? []) {
+        await check(key === "used_chunk_ids" ? "chunk" : "memory", value);
+      }
+    }
+  }
+  for (const key of ["payload", "checkpoint_payload"]) {
+    if (isRecord(args[key])) await check("event", args[key].last_event_id);
+  }
+  const checkRefs = async (refs: unknown) => {
+    if (!Array.isArray(refs)) return;
+    for (const ref of refs) {
+      if (!isRecord(ref) || ref.source_kind === "external") continue;
+      if (ref.source_kind === "checkpoint") {
+        if (ref.source_id !== scope.projectId) blocked();
+      } else {
+        await check(String(ref.source_kind), ref.source_id);
+      }
+    }
+  };
+  await checkRefs(args.source_refs);
+  if (Array.isArray(args.governed_memory_candidates)) {
+    for (const candidate of args.governed_memory_candidates) {
+      if (isRecord(candidate)) await checkRefs(candidate.source_refs);
+    }
+  }
+}
+
 async function dispatchRemoteMcpJsonRpc(input: {
   database: RecallantDb;
   body: unknown;
@@ -2170,6 +2269,8 @@ async function dispatchRemoteMcpJsonRpc(input: {
       sessionId: input.auth.scope.sessionId,
       traceId: input.auth.scope.traceId,
       projectPath: input.projectPath,
+      allowEnvironmentProjectPath: false,
+      enforceProjectScope: true,
       getDatabase: () => input.database
     }).find((candidate) => candidate.name === toolName);
     if (!tool) {
@@ -2180,7 +2281,23 @@ async function dispatchRemoteMcpJsonRpc(input: {
       );
     }
     const argumentsInput = isRecord(params.arguments) ? params.arguments : {};
+    for (const [key, expected] of Object.entries({
+      project_id: input.auth.scope.projectId,
+      developer_id: input.auth.scope.developerId,
+      client_id: input.auth.scope.clientId,
+      project_path: input.projectPath,
+      project_dir: input.projectPath
+    })) {
+      if (argumentsInput[key] != null && argumentsInput[key] !== expected) {
+        throw new RemoteMcpRequestError(
+          "VALIDATION_ERROR",
+          "Tool scope differs from authenticated scope.",
+          id
+        );
+      }
+    }
     const parsedArgs = tool.inputSchema.parse(argumentsInput);
+    await assertRemoteToolAuthority(input.database, toolName, parsedArgs, input.auth.scope, id);
     const payload = await tool.handler(parsedArgs);
     return remoteMcpJsonRpcResult(id, {
       content: [{ type: "text", text: JSON.stringify(payload) }],
@@ -9716,7 +9833,18 @@ function renderDashboard(
 
 export function createRecallantHttpServer(options: RecallantHttpServerOptions = {}) {
   return createServer(async (request, response) => {
-    const requestUrl = new URL(request.url ?? "/", "http://localhost");
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(request.url ?? "/", "http://localhost");
+    } catch (error) {
+      write(
+        response,
+        400,
+        JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
+        "application/json"
+      );
+      return;
+    }
     if (requestUrl.pathname === "/health") {
       write(
         response,
@@ -9735,7 +9863,18 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       return;
     }
     if (request.method === "GET" && requestUrl.pathname === remoteConnectBootstrapPath) {
-      const serverUrl = remoteInviteServerUrl({}, request);
+      let serverUrl: string;
+      try {
+        serverUrl = remoteInviteServerUrl({}, request);
+      } catch (error) {
+        write(
+          response,
+          400,
+          JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
+          "application/json"
+        );
+        return;
+      }
       write(response, 200, remoteConnectBootstrapScript(serverUrl), "text/x-shellscript");
       return;
     }
@@ -9754,7 +9893,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const result = await handleRemoteConnectStart(
           database,
           request,
-          (await readJson(request)) as RemoteConnectStartRequest
+          (await readJsonWithLimit(request, 16 * 1024)) as RemoteConnectStartRequest
         );
         write(response, 200, JSON.stringify(result), "application/json");
       } catch (error) {
@@ -9778,7 +9917,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const result = await handleRemoteConnectPoll(
           database,
           request,
-          (await readJson(request)) as RemoteConnectPollRequest
+          (await readJsonWithLimit(request, 16 * 1024)) as RemoteConnectPollRequest
         );
         write(response, 200, JSON.stringify(result), "application/json");
       } catch (error) {
@@ -9792,8 +9931,30 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       return;
     }
     if (request.method === "GET" && requestUrl.pathname.startsWith("/j/")) {
-      const token = decodeURIComponent(requestUrl.pathname.slice("/j/".length));
-      const serverUrl = remoteInviteServerUrl({}, request);
+      let token: string;
+      try {
+        token = decodeURIComponent(requestUrl.pathname.slice("/j/".length));
+      } catch {
+        write(
+          response,
+          400,
+          JSON.stringify({ ok: false, error: "Invalid invite token encoding" }),
+          "application/json"
+        );
+        return;
+      }
+      let serverUrl: string;
+      try {
+        serverUrl = remoteInviteServerUrl({}, request);
+      } catch (error) {
+        write(
+          response,
+          400,
+          JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
+          "application/json"
+        );
+        return;
+      }
       write(response, 200, remoteInviteScript(serverUrl, token), "text/x-shellscript");
       return;
     }
@@ -9807,7 +9968,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
         const result = await handleRemoteInviteRedeem(
           database,
           request,
-          (await readJson(request)) as RemoteInviteRedeemRequest
+          (await readJsonWithLimit(request, 16 * 1024)) as RemoteInviteRedeemRequest
         );
         write(response, 200, JSON.stringify(result), "application/json");
       } catch (error) {

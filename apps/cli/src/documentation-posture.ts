@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { deliveryQaGuidance } from "./agent-guidance.js";
 import { type DiscoveryCandidate, detectImportCandidates } from "./discovery.js";
 
 export type DocumentationPostureStatus =
@@ -342,6 +343,8 @@ function starterAgents(mode: StarterDocsAgentMode = "local_storage") {
 ## Memory (Recallant)
 
 ${memoryLines.join("\n")}
+
+${deliveryQaGuidance.trimEnd()}
 
 ## Project Docs
 

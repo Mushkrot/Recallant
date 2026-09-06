@@ -82,11 +82,11 @@ for (const marker of [
 
 const roadmap = await read("docs/ROADMAP.md");
 for (const marker of [
-  "Remote project access to a central Recallant server",
-  "first authenticated `POST /api/mcp`",
-  "`memory_set_checkpoint` state-only by default",
-  "checkpoint readback as semantic recall",
-  "`memory_agent_checkpoint` / CLI `agent-checkpoint`"
+  "authenticated remote MCP",
+  "keep local and authenticated remote paths within the same lifecycle contract.",
+  "Milestone 2: Human Document Memory MVP",
+  "explicit folder selection and consent",
+  "source-cited answers"
 ]) {
   mustInclude(roadmap, marker, "docs/ROADMAP.md");
 }
@@ -199,6 +199,13 @@ const agentMemories = [];
 const checkpointOnlyAt = "2026-06-27T00:00:00.000Z";
 
 const fakeDb = {
+  async assertRemoteResourceScope(kind, resourceId, requestedProjectId, requestedDeveloperId) {
+    assert(kind === "session" && resourceId === sessionId, "unexpected synthetic resource");
+    assert(
+      requestedProjectId === projectId && requestedDeveloperId === developerId,
+      "unexpected resource scope"
+    );
+  },
   async verifyRemoteMcpCredential(input) {
     if (input.bearerToken !== token) {
       return {

@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  boundContextPack,
   createRecallantDbFromEnv,
+  isContextPackPayload,
   redactSystemActivityValue,
   type RecallantDb,
   type SystemActivityRecord
@@ -159,7 +161,10 @@ function relatedIdsFromResult(payload: Record<string, unknown>) {
   return related;
 }
 
-function attachAuditStatus(payload: Record<string, unknown>, audit: McpAuditStatus) {
+function attachAuditStatus(
+  payload: Record<string, unknown>,
+  audit: McpAuditStatus
+): Record<string, unknown> & { audit: McpAuditStatus } {
   return { ...payload, audit };
 }
 
@@ -182,7 +187,10 @@ async function startMcpAudit(
     project_path:
       typeof args.project_path === "string"
         ? args.project_path
-        : (context.projectPath ?? process.env.RECALLANT_PROJECT_PATH ?? null)
+        : (context.projectPath ??
+          (context.allowEnvironmentProjectPath === false
+            ? null
+            : (process.env.RECALLANT_PROJECT_PATH ?? null)))
   };
   const unavailable: McpAuditStatus = {
     durable: false,
@@ -315,11 +323,21 @@ export function createRecallantMcpServer(context: RecallantToolsRuntimeContext =
           checkRateLimit(tool.name);
           const payload = await tool.handler(toolArgs);
           const auditStatus = await finishMcpAudit(audit, "success", payload);
+          const auditedPayload = attachAuditStatus(payload, auditStatus);
+          const responsePayload = isContextPackPayload(auditedPayload)
+            ? boundContextPack(
+                auditedPayload,
+                Number(
+                  (auditedPayload as { budget?: { max_chars_total?: unknown } }).budget
+                    ?.max_chars_total ?? 12_000
+                )
+              )
+            : auditedPayload;
           return {
             content: [
               {
                 type: "text",
-                text: JSON.stringify(attachAuditStatus(payload, auditStatus), null, 2)
+                text: JSON.stringify(responsePayload, null, 2)
               }
             ]
           };

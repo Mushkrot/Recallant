@@ -465,10 +465,10 @@ try {
         (SELECT count(*)::int FROM sessions WHERE project_id = $1 AND client_kind = 'recallant-attach' AND status = 'active') AS active_attach_sessions,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND created_by = 'system' AND metadata->>'attach_bootstrap' = 'true') AS starter_memories,
         (SELECT count(*)::int FROM agent_memories WHERE project_id = $1 AND use_policy = 'instruction_grade') AS instruction_grade,
-        (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND excerpt LIKE "%example-password%") AS leaked_raw_artifacts,
-        (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND text LIKE "%example-password%") AS leaked_chunks
+        (SELECT count(*)::int FROM raw_artifacts WHERE project_id = $1 AND excerpt LIKE $2) AS leaked_raw_artifacts,
+        (SELECT count(*)::int FROM chunks WHERE project_id = $1 AND text LIKE $2) AS leaked_chunks
     `,
-    [attach.project_id]
+    [attach.project_id, "%example-password%"]
   );
   const row = checks.rows[0];
   if (

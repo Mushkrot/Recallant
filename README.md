@@ -13,6 +13,13 @@ pull requests, and somebody's memory. Saving all of it as a transcript creates a
 Old guesses look authoritative, project boundaries blur, and nobody can explain why a rule exists.
 Recallant keeps evidence, governed memory, and active rules separate.
 
+Built with TypeScript, PostgreSQL/pgvector, a CLI, MCP, and a private browser Workbench.
+It is a development prerelease with a Codex-first workflow.
+
+To evaluate the core idea, [onboard one project](docs/QUICKSTART.md), record a decision,
+close the session, and retrieve its source-backed context in a new session. Review controls
+determine which memories can become active guidance.
+
 ## See It Working
 
 These screenshots come from the real private Workbench with deterministic synthetic data. The
@@ -169,6 +176,14 @@ npm run public-security:smoke
 
 Focused commands and the full contributor workflow are documented in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For code reviewers, start with [contracts](packages/contracts/src),
+[memory policy and redaction](packages/core/src), [MCP tools](packages/mcp/src/tools.ts),
+and the [storage schema](packages/db/migrations/0001_initial.sql).
+The [architecture guide](docs/ARCHITECTURE.md) connects those components to the CLI and Workbench.
+
+MCP can expose a skeleton mode when no database is configured. Its stub responses are intended
+for protocol development; evaluating durable memory requires the database-backed setup above.
 
 ## Documentation
 

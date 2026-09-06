@@ -310,7 +310,8 @@ if (
   pack.sections?.working_memories?.some((memory) => memory.memory_id === rule.memory_id) ||
   !Array.isArray(pack.sections?.recovery) ||
   pack.sections.recovery.length === 0 ||
-  !pack.sections?.evidence_excerpts?.some((hit) => hit.source_event_id === alpha.event_id)
+  pack.sections?.evidence_excerpts?.length !== 0 ||
+  pack.omissions?.items?.evidence_excerpts < 1
 ) {
   throw new Error(`Context pack composition failed: ${JSON.stringify(pack)}`);
 }

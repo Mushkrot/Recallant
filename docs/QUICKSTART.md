@@ -172,7 +172,10 @@ Expected remote readiness:
 - `recallant onboard . --server-url https://memory.example.com` or `recallant connect-cloud .`
   creates missing thin starter surfaces without overwriting existing project docs or requiring local
   storage setup; an existing `PROJECT_LOG.md` is preserved unchanged;
-- `recallant agent-start --format json` reports `mode: "remote_mcp_ready"`;
+- for Codex, the generated project config enables workspace-sandbox networking and allowlists only
+  the exact Recallant server hostname; it does not add a wildcard network rule;
+- `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` with session/context ids
+  after completing remote `memory_start_session` plus `memory_get_context_pack`;
 - the same JSON includes a bounded `readiness_contract`; before proof its primary state remains
   `configured`;
 - the same JSON includes a `startup_contract` with direct MCP calls and CLI fallback commands;
@@ -182,6 +185,9 @@ Expected remote readiness:
   instead of treating the remote-only project as a broken local attach;
 - session/context readiness is proven by `memory_start_session` plus `memory_get_context_pack`, or
   by `recallant remote-doctor --capture-proof`;
+- on sandbox network errors, CLI lifecycle commands report a classified remote failure and preserve
+  the pending operation in the ordered local spool; after restoring narrow access to the configured
+  host, `recallant sync-spool --project-dir .` replays it through remote MCP without local storage;
 - a checkpoint can be written and read back with `memory_set_checkpoint` and
   `memory_get_checkpoint`;
 - `memory_set_checkpoint` remains state-only; use `memory_agent_checkpoint` when the checkpoint

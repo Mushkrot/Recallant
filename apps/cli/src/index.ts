@@ -43,14 +43,21 @@ import {
 } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
-import { runRecallantRemoteBridge, runRecallantStdioServer } from "@recallant/mcp";
+import {
+  callRecallantRemoteTool,
+  RemoteMcpCallError,
+  remoteMcpFailure,
+  runRecallantRemoteBridge,
+  runRecallantStdioServer
+} from "@recallant/mcp";
 import pg from "pg";
 import {
   detectImportCandidates,
   discoveryCandidateForImport,
   discoveryResult,
   formatDiscoveryText,
-  readImportTextForCandidate
+  readImportTextForCandidate,
+  redactSecretValues
 } from "./discovery.js";
 import { optionalProjectLogMirror } from "./project-log-mirror.js";
 import {
@@ -62,6 +69,7 @@ import {
 } from "./documentation-posture.js";
 import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
 import { runAttach } from "./attach.js";
+import { deliveryQaGuidance } from "./agent-guidance.js";
 import {
   inspectCodexHookConfig,
   recallantCodexHookCommand,
@@ -84,8 +92,6 @@ import {
   agentObservationResolutionStatusValues,
   agentObservationStatusValues,
   remoteMcpEndpointPath,
-  remoteMcpBridgeEndpointUrl,
-  remoteMcpBridgeHeaders,
   recallantReadinessInvariant,
   resolveRemoteMcpStoredCredential,
   storeRemoteMcpCredential,
@@ -321,6 +327,8 @@ const memorySection = `## Memory (Recallant)
   only as an advanced pause/compaction state helper, not as closeout proof.
   \`recallant agent-closeout\` is the CLI fallback closeout path.
   If the server is unavailable, the CLI writes local spool for later \`recallant sync-spool\`.
+
+${deliveryQaGuidance.trimEnd()}
 `;
 
 function parseEnvValue(raw: string) {
@@ -747,9 +755,20 @@ async function readJsonl(path: string) {
 
 async function readSpoolManifest(argv: readonly string[]) {
   const content = await readOptional(spoolManifestPath(argv));
-  if (!content) return { synced: {} as Record<string, unknown> };
-  const parsed = JSON.parse(content) as { synced?: Record<string, unknown> };
-  return { synced: parsed.synced ?? {} };
+  if (!content) {
+    return {
+      synced: {} as Record<string, unknown>,
+      session_mappings: {} as Record<string, string>
+    };
+  }
+  const parsed = JSON.parse(content) as {
+    synced?: Record<string, unknown>;
+    session_mappings?: Record<string, string>;
+  };
+  return {
+    synced: parsed.synced ?? {},
+    session_mappings: parsed.session_mappings ?? {}
+  };
 }
 
 async function getLocalSpoolStatus(argv: readonly string[]) {
@@ -806,6 +825,22 @@ type AgentSessionState = {
     observation_count: number;
   };
 };
+
+class RemoteAgentContextStartError extends Error {
+  readonly state: AgentSessionState;
+  readonly localId: string;
+  readonly remoteError: unknown;
+
+  constructor(state: AgentSessionState, localId: string, remoteError: unknown) {
+    super("Remote MCP session started, but context loading was deferred to the local spool.", {
+      cause: remoteError
+    });
+    this.name = "RemoteAgentContextStartError";
+    this.state = state;
+    this.localId = localId;
+    this.remoteError = remoteError;
+  }
+}
 
 const remoteAgentSecretClasses = [
   ".env",
@@ -908,17 +943,6 @@ function remoteAgentReadinessContract(readiness: RemoteAgentReadinessStatus | nu
   return readiness?.readiness_contract ?? defaultRemoteAgentReadinessContract();
 }
 
-function remoteAgentReadinessSummary(readiness: RemoteAgentReadinessStatus | null) {
-  const contract = remoteAgentReadinessContract(readiness);
-  const semanticProofAt = contract.evidence.last_semantic_recall_proof_at;
-  if (contract.capture_active) return "capture_active";
-  if (contract.semantic_memory_ready && semanticProofAt) {
-    return `semantic_memory_ready; semantic proof evidence at ${semanticProofAt}.`;
-  }
-  if (contract.context_ready) return "context_ready; semantic memory proof is not proven yet.";
-  return "configured/access-ready only; semantic memory is not proven yet.";
-}
-
 function remoteAgentStartupContract() {
   return {
     primary_path: "configured_remote_mcp",
@@ -1009,59 +1033,6 @@ function remoteAgentConsentOutput(
     remote_readiness_warning: readiness?.warning ?? null,
     recommended_next_action: recommendedNextAction
   };
-}
-
-function remoteAgentStartReadyHumanReport(
-  scope: RemoteAgentConsentScope,
-  readiness: RemoteAgentReadinessStatus | null = null
-) {
-  const credentialScope = scope.credential_scope;
-  const readinessContract = remoteAgentReadinessContract(readiness);
-  const semanticProofAt = readinessContract.evidence.last_semantic_recall_proof_at;
-  return `${[
-    "Recallant agent-start",
-    "",
-    "Mode: remote_mcp_ready",
-    `Readiness: ${remoteAgentReadinessSummary(readiness)}`,
-    recallantReadinessInvariant,
-    `Readiness state: ${readinessContract.primary_state}`,
-    `remote_mcp_ready: ${readinessContract.remote_mcp_ready ? "yes" : "no"}`,
-    `context_ready: ${readinessContract.context_ready ? "yes" : "no"}`,
-    `semantic_memory_ready: ${readinessContract.semantic_memory_ready ? "yes" : "no"}`,
-    `memory_loop_ready: ${readinessContract.memory_loop_ready ? "yes" : "no"}`,
-    `capture_active: ${readinessContract.capture_active ? "yes" : "no"}`,
-    `Destination: ${scope.destination.server_url}${scope.destination.endpoint_path}`,
-    `Project scope: ${credentialScope.project_id ?? "unknown"}`,
-    `Developer scope: ${credentialScope.developer_id ?? "unknown"}`,
-    `Client scope: ${credentialScope.client_id ?? "unknown"}`,
-    `Credential prefix: ${credentialScope.credential_prefix ?? "unknown"}`,
-    "",
-    "Remote Recallant consent boundary",
-    "Allowed context:",
-    ...scope.allowed_context.map((item) => `  - ${item}`),
-    "Do not send:",
-    ...scope.not_sent.map((item) => `  - ${item}`),
-    "",
-    "Next: use memory_get_context_pack through the configured Recallant MCP startup flow.",
-    "",
-    "Agent startup contract:",
-    "  1. MCP: memory_start_session",
-    "  2. MCP: memory_get_context_pack with the current task hint",
-    "  3. MCP: memory_append_event or memory_create_agent_memory for concise non-secret work memory",
-    "  4. MCP: memory_set_checkpoint for state only; it is not semantic recall proof",
-    "  5. MCP: memory_closeout on pause or finish",
-    "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout.",
-    "Use recallant agent-checkpoint only for pause/compaction state, not normal closeout.",
-    "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory.",
-    semanticProofAt
-      ? `Proof: semantic governed-memory marker evidence was last seen at ${semanticProofAt}.`
-      : "Proof: create one safe governed marker with memory_create_agent_memory, then recall it with memory_recall_agent_memories.",
-    readiness?.warning ? `Readiness warning: ${readiness.warning}` : null,
-    "Do not call this capture-active until a fresh automatic agent event is observed; context, memory, and checkpoint evidence only establish memory_loop_ready.",
-    "Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth."
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n")}\n`;
 }
 
 function remoteAgentConfigValue(content: string, key: string) {
@@ -1155,6 +1126,86 @@ async function readRemoteAgentConsentScope(projectDir: string) {
   return (await readRemoteAgentConnection(projectDir))?.scope ?? null;
 }
 
+function remoteAgentMcpInput(connection: RemoteAgentConnection, sessionId?: string | null) {
+  const scope = connection.scope;
+  return {
+    serverUrl: scope.destination.server_url,
+    credential: connection.credential,
+    credentialRef: connection.credential_ref,
+    credentialStorePath: connection.credential_store_path,
+    projectId: scope.credential_scope.project_id,
+    developerId: scope.credential_scope.developer_id,
+    clientId: scope.credential_scope.client_id,
+    sessionId: sessionId ?? null
+  };
+}
+
+async function callRemoteAgentTool(
+  connection: RemoteAgentConnection,
+  toolName: string,
+  args: Record<string, unknown>,
+  sessionId?: string | null
+) {
+  const remoteArgs = { ...args };
+  if ("raw_artifacts" in remoteArgs) {
+    if (!Array.isArray(remoteArgs.raw_artifacts) || remoteArgs.raw_artifacts.length > 0) {
+      throw new RemoteMcpCallError(
+        "REMOTE_MCP_CONFIGURATION_ERROR",
+        "Raw artifacts cannot be sent through remote agent lifecycle. The record remains local."
+      );
+    }
+    delete remoteArgs.raw_artifacts;
+  }
+  const result = await callRecallantRemoteTool(
+    remoteAgentMcpInput(connection, sessionId),
+    toolName,
+    remoteArgs,
+    { id: `recallant-cli-${toolName}-${randomUUID()}`, timeoutMs: 5_000 }
+  );
+  if (!result.payload) {
+    throw new RemoteMcpCallError(
+      "REMOTE_MCP_INVALID_RESPONSE",
+      `Remote MCP ${toolName} returned no structured JSON payload.`
+    );
+  }
+  return result.payload;
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+function remoteEventKind(kind: string) {
+  const mapped = eventKindForAgentKind(kind);
+  return ["tool_call", "tool_result", "terminal_output", "file_change", "system", "other"].includes(
+    mapped
+  )
+    ? mapped
+    : "other";
+}
+
+async function appendRemoteToolSpoolRecord(
+  argv: readonly string[],
+  toolName: string,
+  args: Record<string, unknown>,
+  localSessionId: string | null,
+  dedupKey?: string
+) {
+  return appendSpoolRecord(
+    argv,
+    "remote_tool",
+    {
+      tool_name: toolName,
+      arguments: args,
+      local_session_id: localSessionId
+    },
+    dedupKey
+  );
+}
+
 function remoteAgentReadinessUnavailable(reason: string): RemoteAgentReadinessStatus {
   return {
     ok: false,
@@ -1189,67 +1240,26 @@ async function readRemoteAgentReadinessStatus(
       "Remote readiness status was not read because scoped credential or scope fields are unavailable; continuing with configured/access-ready state."
     );
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
   try {
-    const endpointUrl = remoteMcpBridgeEndpointUrl(scope.destination.server_url);
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: remoteMcpBridgeHeaders({
-        serverUrl: scope.destination.server_url,
-        credential: connection.credential,
-        projectId,
-        developerId,
-        clientId
-      }),
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `agent-start-readiness-${randomUUID()}`,
-        method: "tools/call",
-        params: {
-          name: "memory_get_readiness_status",
-          arguments: {}
-        }
-      }),
-      signal: controller.signal
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      return remoteAgentReadinessUnavailable(
-        `Remote readiness status was not read (HTTP ${response.status}); continuing with configured/access-ready state.`
-      );
-    }
-    const json = JSON.parse(text) as Record<string, unknown>;
-    const result = json.result && typeof json.result === "object" ? json.result : null;
-    const structuredContent =
-      result && "structuredContent" in result
-        ? (result as Record<string, unknown>).structuredContent
-        : null;
-    const contract = readinessContractFromRemotePayload(structuredContent);
+    const payload = await callRemoteAgentTool(connection, "memory_get_readiness_status", {}, null);
+    const contract = readinessContractFromRemotePayload(payload);
     if (!contract) {
       return remoteAgentReadinessUnavailable(
         "Remote readiness status response did not include a readiness contract; continuing with configured/access-ready state."
       );
     }
-    const status =
-      structuredContent && typeof structuredContent === "object"
-        ? String(
-            (structuredContent as Record<string, unknown>).readiness_status ??
-              contract.primary_state
-          )
-        : contract.primary_state;
+    const status = String(payload.readiness_status ?? contract.primary_state);
     return {
       ok: true,
       readiness_contract: contract,
       readiness_status: status,
       warning: null
     };
-  } catch {
+  } catch (error) {
+    const failure = remoteMcpFailure(error);
     return remoteAgentReadinessUnavailable(
-      "Remote readiness status was not read; continuing with configured/access-ready state."
+      `Remote readiness status was not read (${failure.code}); continuing with configured/access-ready state.`
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -1300,6 +1310,7 @@ function agentStartHumanReport(input: {
   previousUnclosedSession?: unknown;
   previousSessionRecovery?: unknown;
   consentScope: RemoteAgentConsentScope | null;
+  readiness?: RemoteAgentReadinessStatus | null;
 }) {
   const lines = [
     "Recallant agent-start",
@@ -1319,6 +1330,18 @@ function agentStartHumanReport(input: {
       ? `Previous unfinished session details: ${JSON.stringify(input.previousUnclosedSession)}`
       : null
   ];
+  if (input.readiness) {
+    const contract = remoteAgentReadinessContract(input.readiness);
+    lines.push(
+      `Readiness state: ${contract.primary_state}`,
+      `semantic_memory_ready: ${contract.semantic_memory_ready ? "yes" : "no"}`,
+      `memory_loop_ready: ${contract.memory_loop_ready ? "yes" : "no"}`,
+      `capture_active: ${contract.capture_active ? "yes" : "no"}`,
+      contract.evidence.last_semantic_recall_proof_at
+        ? `Semantic proof evidence: ${contract.evidence.last_semantic_recall_proof_at}`
+        : "Semantic proof evidence: not recorded"
+    );
+  }
   if (input.consentScope) {
     lines.push(
       "",
@@ -1581,16 +1604,33 @@ async function appendSpoolRecord(
   dedupKey?: string
 ) {
   const finalDedupKey = dedupKey ?? dedupHash("spool", payload);
+  const safePayload = redactSpoolValue({ ...payload, dedup_key: finalDedupKey });
   const record = {
     local_id: randomUUID(),
     created_at: new Date().toISOString(),
     record_kind: recordKind,
     dedup_key: finalDedupKey,
-    payload: { ...payload, dedup_key: finalDedupKey }
+    payload: safePayload
   };
   await mkdir(spoolDir(argv), { recursive: true });
   await appendFile(spoolPath(argv), `${JSON.stringify(record)}\n`);
   return record;
+}
+
+const spoolSensitiveKeyPattern =
+  /(?:authorization|bearer|cookie|database[_-]?url|password|passwd|api[_-]?key|secret|token|credential|private[_-]?key)/i;
+
+function redactSpoolValue(value: unknown, keyPath = "payload"): unknown {
+  if (spoolSensitiveKeyPattern.test(keyPath)) return "[REDACTED]";
+  if (typeof value === "string") return redactSecretValues(value);
+  if (Array.isArray(value))
+    return value.map((item, index) => redactSpoolValue(item, `${keyPath}[${index}]`));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactSpoolValue(item, `${keyPath}.${key}`)])
+    );
+  }
+  return value;
 }
 
 const auditedCliCommands = new Set([
@@ -1633,8 +1673,15 @@ function shouldAuditCliCommand(command: string | undefined) {
   return Boolean(command && auditedCliCommands.has(command));
 }
 
-function commandUsesRemoteOnlyBootstrap(command: string | undefined) {
-  return command === "remote-bridge" || command === "connect-remote" || command === "remote-doctor";
+async function commandUsesRemoteOnlyBootstrap(argv: readonly string[]) {
+  const command = argv[2];
+  if (command === "remote-bridge" || command === "connect-remote" || command === "remote-doctor") {
+    return true;
+  }
+  if (!["agent-start", "agent-event", "agent-closeout", "sync-spool"].includes(command ?? "")) {
+    return false;
+  }
+  return Boolean(await readRemoteAgentConnection(projectDir(argv)));
 }
 
 function createCliAuditDb() {
@@ -6319,6 +6366,77 @@ async function startAgentSession(
   return { state, pack, context_read: contextRead, start_result: started };
 }
 
+async function startRemoteAgentSession(connection: RemoteAgentConnection, argv: readonly string[]) {
+  const dir = projectDir(argv);
+  const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
+  const clientVersion = parseFlag(argv, "--client-version") ?? recallantCliVersion;
+  const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+  const started = await callRemoteAgentTool(connection, "memory_start_session", {
+    client_kind: clientKind,
+    client_version: clientVersion,
+    project_path: null,
+    session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
+    resume_policy: "normal"
+  });
+  const sessionId = typeof started.session_id === "string" ? started.session_id : null;
+  if (!sessionId) {
+    throw new RemoteMcpCallError(
+      "REMOTE_MCP_INVALID_RESPONSE",
+      "Remote MCP memory_start_session returned no session_id."
+    );
+  }
+  const projectId =
+    typeof started.project_id === "string"
+      ? started.project_id
+      : connection.scope.credential_scope.project_id;
+  const now = new Date().toISOString();
+  const baseState: AgentSessionState = {
+    schema_version: 1,
+    status: "offline",
+    session_id: sessionId,
+    project_id: projectId,
+    project_dir: dir,
+    client_kind: clientKind,
+    client_version: clientVersion,
+    task_hint: taskHint,
+    started_at: now,
+    updated_at: now,
+    context_pack_id: null,
+    last_context_read_at: null,
+    last_memory_write_at: now
+  };
+  const contextArgs = {
+    session_id: sessionId,
+    task_hint: taskHint,
+    project_id: projectId,
+    include_raw_evidence: "auto",
+    include_recovery: true,
+    local_spool_status: await getLocalSpoolStatus(argv)
+  };
+  let pack: Record<string, unknown>;
+  try {
+    pack = await callRemoteAgentTool(connection, "memory_get_context_pack", contextArgs, sessionId);
+  } catch (error) {
+    const record = await appendRemoteToolSpoolRecord(
+      argv,
+      "memory_get_context_pack",
+      contextArgs,
+      sessionId,
+      dedupHash("remote-agent-context", { session_id: sessionId, task_hint: taskHint })
+    );
+    await writeAgentSessionState(dir, baseState);
+    throw new RemoteAgentContextStartError(baseState, String(record.local_id), error);
+  }
+  const state: AgentSessionState = {
+    ...baseState,
+    status: "active",
+    context_pack_id: typeof pack.context_pack_id === "string" ? pack.context_pack_id : null,
+    last_context_read_at: now
+  };
+  await writeAgentSessionState(dir, state);
+  return { state, pack, start_result: started };
+}
+
 async function assertAgentStateProjectBinding(
   database: NonNullable<ReturnType<typeof createRecallantDbFromEnv>>,
   state: AgentSessionState,
@@ -6348,16 +6466,27 @@ function isHardProjectIdentityError(error: unknown) {
   ].some((marker) => message.includes(marker));
 }
 
-async function ensureOfflineAgentSession(argv: readonly string[], reason: string) {
+async function ensureOfflineAgentSession(
+  argv: readonly string[],
+  reason: string,
+  projectId: string | null = null
+) {
   const dir = projectDir(argv);
   const existing = await readAgentSessionState(dir);
-  if (existing?.status === "offline" || existing?.status === "active") return existing;
+  if (existing?.status === "offline" || existing?.status === "active") {
+    if (!existing.project_id && projectId) {
+      const updated = { ...existing, project_id: projectId, updated_at: new Date().toISOString() };
+      await writeAgentSessionState(dir, updated);
+      return updated;
+    }
+    return existing;
+  }
   const now = new Date().toISOString();
   const state: AgentSessionState = {
     schema_version: 1,
     status: "offline",
     session_id: `local-${randomUUID()}`,
-    project_id: null,
+    project_id: projectId,
     project_dir: dir,
     client_kind: parseFlag(argv, "--client-kind") ?? "codex",
     client_version: parseFlag(argv, "--client-version") ?? null,
@@ -6367,6 +6496,68 @@ async function ensureOfflineAgentSession(argv: readonly string[], reason: string
   };
   await writeAgentSessionState(dir, state);
   return state;
+}
+
+async function deferRemoteAgentStartup(
+  connection: RemoteAgentConnection,
+  argv: readonly string[],
+  error: unknown
+) {
+  const contextFailure = error instanceof RemoteAgentContextStartError ? error.remoteError : error;
+  const failure = remoteMcpFailure(contextFailure);
+  const state =
+    error instanceof RemoteAgentContextStartError
+      ? error.state
+      : await ensureOfflineAgentSession(
+          argv,
+          failure.message,
+          connection.scope.credential_scope.project_id
+        );
+  const record =
+    error instanceof RemoteAgentContextStartError
+      ? { local_id: error.localId }
+      : await appendRemoteToolSpoolRecord(
+          argv,
+          "memory_start_session",
+          {
+            client_kind: state.client_kind,
+            client_version: state.client_version,
+            project_path: null,
+            session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
+            resume_policy: "normal"
+          },
+          state.session_id,
+          dedupHash("remote-agent-start", {
+            local_session_id: state.session_id,
+            project_id: state.project_id
+          })
+        );
+  if (!(error instanceof RemoteAgentContextStartError)) {
+    const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+    await appendRemoteToolSpoolRecord(
+      argv,
+      "memory_get_context_pack",
+      {
+        session_id: state.session_id,
+        task_hint: taskHint,
+        project_id: state.project_id,
+        include_raw_evidence: "auto",
+        include_recovery: true,
+        local_spool_status: await getLocalSpoolStatus(argv)
+      },
+      state.session_id,
+      dedupHash("remote-agent-context", {
+        session_id: state.session_id,
+        task_hint: taskHint
+      })
+    );
+  }
+  return {
+    state,
+    local_id: record.local_id,
+    failure,
+    context_only: error instanceof RemoteAgentContextStartError
+  };
 }
 
 async function loadActiveAgentState(argv: readonly string[]) {
@@ -6386,21 +6577,73 @@ async function runAgentStart(argv: readonly string[]) {
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
   const remoteConnection = await readRemoteAgentConnection(projectDir(argv));
   const consentScope = remoteConnection?.scope ?? null;
-  if (consentScope) {
-    const remoteReadiness = await readRemoteAgentReadinessStatus(remoteConnection);
-    const consentOutput = remoteAgentConsentOutput(consentScope, remoteReadiness);
-    const output = {
-      ok: true,
-      action: "agent_start",
-      mode: "remote_mcp_ready",
-      ...consentOutput
-    };
-    process.stdout.write(
-      format === "json"
-        ? `${JSON.stringify(output, null, 2)}\n`
-        : remoteAgentStartReadyHumanReport(consentScope, remoteReadiness)
-    );
-    return;
+  if (remoteConnection && consentScope) {
+    try {
+      const result = await startRemoteAgentSession(remoteConnection, argv);
+      const remoteReadiness = await readRemoteAgentReadinessStatus(remoteConnection);
+      const consentOutput = remoteAgentConsentOutput(consentScope, remoteReadiness);
+      const output = {
+        ok: true,
+        action: "agent_start",
+        mode: "remote_mcp_ready",
+        transport: "remote_mcp",
+        project_id: result.state.project_id,
+        session_id: result.state.session_id,
+        context_pack_id: result.state.context_pack_id,
+        state_path: currentSessionPathFor(result.state.project_dir),
+        previous_unclosed_session: result.start_result.previous_unclosed_session ?? null,
+        previous_session_recovery: result.start_result.previous_session_recovery ?? null,
+        ...consentOutput
+      };
+      process.stdout.write(
+        format === "json"
+          ? `${JSON.stringify(output, null, 2)}\n`
+          : agentStartHumanReport({
+              mode: "remote_mcp",
+              projectId: result.state.project_id,
+              sessionId: result.state.session_id,
+              contextPackId: result.state.context_pack_id,
+              statePath: currentSessionPathFor(result.state.project_dir),
+              previousUnclosedSession: result.start_result.previous_unclosed_session,
+              previousSessionRecovery: result.start_result.previous_session_recovery,
+              consentScope,
+              readiness: remoteReadiness
+            })
+      );
+      return;
+    } catch (error) {
+      const deferred = await deferRemoteAgentStartup(remoteConnection, argv, error);
+      const output = {
+        ok: true,
+        action: "agent_start",
+        mode: "offline_spool",
+        transport: "remote_mcp",
+        project_id: deferred.state.project_id,
+        session_id: deferred.state.session_id,
+        state_path: currentSessionPathFor(deferred.state.project_dir),
+        spool_path: spoolPath(argv),
+        local_id: deferred.local_id,
+        remote_failure: deferred.failure,
+        warning: deferred.context_only
+          ? "Remote MCP session started, but context loading failed and was spooled for ordered replay."
+          : "Remote MCP start failed; the lifecycle start was spooled for ordered replay.",
+        ...remoteAgentConsentOutput(consentScope)
+      };
+      process.stdout.write(
+        format === "json"
+          ? `${JSON.stringify(output, null, 2)}\n`
+          : agentStartHumanReport({
+              mode: "offline_spool",
+              projectId: deferred.state.project_id,
+              sessionId: deferred.state.session_id,
+              statePath: currentSessionPathFor(deferred.state.project_dir),
+              spoolPath: spoolPath(argv),
+              warning: `${output.warning} ${deferred.failure.code}`,
+              consentScope
+            })
+      );
+      return;
+    }
   }
   const database = createRecallantDbFromEnv();
   const consentOutput = remoteAgentConsentOutput(consentScope);
@@ -6479,7 +6722,6 @@ async function runAgentEvent(argv: readonly string[]) {
   const text = parseFlag(argv, "--text") ?? positionalArgs(argv).join(" ");
   if (!text.trim()) throw new Error("VALIDATION_ERROR: agent-event requires --text");
   const dir = projectDir(argv);
-  const database = createRecallantDbFromEnv();
   let state = await loadActiveAgentState(argv);
   const title = parseFlag(argv, "--title") ?? summarizeText(text, 72);
   const clientKind = state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex";
@@ -6503,6 +6745,207 @@ async function runAgentEvent(argv: readonly string[]) {
       created_at: new Date().toISOString()
     });
 
+  const remoteConnection = await readRemoteAgentConnection(dir);
+  if (remoteConnection) {
+    if (!state) {
+      const existing = await readAgentSessionState(dir);
+      if (existing?.status === "offline") state = existing;
+      else {
+        try {
+          state = (await startRemoteAgentSession(remoteConnection, argv)).state;
+        } catch (error) {
+          state = (await deferRemoteAgentStartup(remoteConnection, argv, error)).state;
+        }
+      }
+    }
+    const eventArgs = {
+      session_id: state.session_id,
+      client_kind: clientKind,
+      event_kind: remoteEventKind(kind),
+      text,
+      metadata,
+      raw_artifacts: [],
+      dedup_key: dedupKey
+    };
+    const pending = await getLocalSpoolStatus(argv);
+    if (pending.unsynced_count > 0) {
+      const record = await appendRemoteToolSpoolRecord(
+        argv,
+        "memory_append_event",
+        eventArgs,
+        state.session_id,
+        dedupKey
+      );
+      await writeAgentSessionState(dir, {
+        ...state,
+        status: "offline",
+        updated_at: new Date().toISOString(),
+        last_event_id: String(record.local_id)
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_event",
+            mode: "offline_spool",
+            transport: "remote_mcp",
+            kind,
+            local_id: record.local_id,
+            spool_path: spoolPath(argv),
+            remote_failure: {
+              code: "REMOTE_MCP_PENDING_REPLAY",
+              message: "Earlier remote MCP records must replay before this event.",
+              retryable: true,
+              http_status: null,
+              rpc_code: null
+            },
+            warning: "Event was spooled behind earlier undelivered remote records."
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+    try {
+      const event = await callRemoteAgentTool(
+        remoteConnection,
+        "memory_append_event",
+        eventArgs,
+        state.session_id
+      );
+      let memory: Record<string, unknown> | null = null;
+      if (kind === "decision") {
+        const memoryArgs = {
+          memory_type: "decision",
+          title,
+          body: text,
+          confidence: 0.9,
+          source_refs: [
+            {
+              source_kind: "event",
+              source_id: String(event.event_id),
+              quote: summarizeText(text, 500),
+              metadata: { capture_kind: "agent_decision" }
+            }
+          ]
+        };
+        try {
+          memory = await callRemoteAgentTool(
+            remoteConnection,
+            "memory_create_agent_memory",
+            memoryArgs,
+            state.session_id
+          );
+        } catch (error) {
+          const record = await appendRemoteToolSpoolRecord(
+            argv,
+            "memory_create_agent_memory",
+            memoryArgs,
+            state.session_id,
+            dedupHash("remote-agent-decision-memory", {
+              event_id: event.event_id,
+              body: text
+            })
+          );
+          const now = new Date().toISOString();
+          await writeAgentSessionState(dir, {
+            ...state,
+            status: "offline",
+            updated_at: now,
+            last_memory_write_at: now,
+            last_event_id: String(event.event_id)
+          });
+          process.stdout.write(
+            `${JSON.stringify(
+              {
+                ok: true,
+                action: "agent_event",
+                mode: "remote_mcp_partial",
+                transport: "remote_mcp",
+                kind,
+                project_id: state.project_id,
+                session_id: state.session_id,
+                event_id: event.event_id,
+                memory: null,
+                local_id: record.local_id,
+                spool_path: spoolPath(argv),
+                remote_failure: remoteMcpFailure(error),
+                warning: "Event was delivered; decision-memory creation was spooled for replay."
+              },
+              null,
+              2
+            )}\n`
+          );
+          return;
+        }
+      }
+      const now = new Date().toISOString();
+      state = {
+        ...state,
+        status: "active",
+        updated_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(event.event_id ?? state.last_event_id ?? ""),
+        last_memory_id: memory?.memory_id ? String(memory.memory_id) : state.last_memory_id
+      };
+      await writeAgentSessionState(dir, state);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_event",
+            mode: "remote_mcp",
+            transport: "remote_mcp",
+            kind,
+            project_id: state.project_id,
+            session_id: state.session_id,
+            event_id: event.event_id,
+            memory
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    } catch (error) {
+      const record = await appendRemoteToolSpoolRecord(
+        argv,
+        "memory_append_event",
+        eventArgs,
+        state.session_id,
+        dedupKey
+      );
+      const now = new Date().toISOString();
+      await writeAgentSessionState(dir, {
+        ...state,
+        status: "offline",
+        updated_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(record.local_id)
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_event",
+            mode: "offline_spool",
+            transport: "remote_mcp",
+            kind,
+            local_id: record.local_id,
+            spool_path: spoolPath(argv),
+            remote_failure: remoteMcpFailure(error),
+            warning: "Remote MCP write failed; event was spooled for ordered replay."
+          },
+          null,
+          2
+        )}\n`
+      );
+      return;
+    }
+  }
+
+  const database = createRecallantDbFromEnv();
   if (database) {
     try {
       if (!state) {
@@ -7488,6 +7931,205 @@ async function runAgentCloseout(argv: readonly string[]) {
     argv,
     parseFlag(argv, "--summary") ?? "Session closeout"
   );
+  const remoteConnection = await readRemoteAgentConnection(dir);
+  if (remoteConnection) {
+    const summary = String(payload.summary ?? payload.current_focus ?? "Session closeout");
+    const lastEventId = isUuid(state.last_event_id) ? state.last_event_id : null;
+    const closeoutArgs = {
+      session_id: state.session_id,
+      closeout_intent: "task_complete",
+      summary,
+      checkpoint_payload: {
+        current_status: String(payload.status ?? "closed"),
+        current_focus: String(payload.current_focus ?? summary),
+        next_step: String(payload.next_step ?? "Continue from Recallant context."),
+        last_event_id: lastEventId,
+        open_questions: []
+      },
+      governed_memory_candidates: [],
+      artifact_refs: [],
+      closeout_diagnostics: null,
+      local_spool_status: await getLocalSpoolStatus(argv)
+    };
+    const pending = await getLocalSpoolStatus(argv);
+    if (pending.unsynced_count === 0) {
+      try {
+        const closeout = await callRemoteAgentTool(
+          remoteConnection,
+          "memory_closeout",
+          closeoutArgs,
+          state.session_id
+        );
+        const now = new Date().toISOString();
+        await writeAgentSessionState(dir, {
+          ...state,
+          status: "closed",
+          updated_at: now,
+          last_checkpoint_at: now,
+          last_memory_write_at: now,
+          last_event_id:
+            typeof closeout.lifecycle === "object" &&
+            closeout.lifecycle &&
+            typeof (closeout.lifecycle as Record<string, unknown>).closeout_event_id === "string"
+              ? String((closeout.lifecycle as Record<string, unknown>).closeout_event_id)
+              : state.last_event_id
+        });
+        process.stdout.write(
+          `${JSON.stringify(
+            {
+              ok: true,
+              action: "agent_closeout",
+              mode: "remote_mcp",
+              transport: "remote_mcp",
+              project_id: state.project_id,
+              session_id: state.session_id,
+              ...closeout
+            },
+            null,
+            2
+          )}\n`
+        );
+        return;
+      } catch (error) {
+        const record = await appendRemoteToolSpoolRecord(
+          argv,
+          "memory_closeout",
+          closeoutArgs,
+          state.session_id,
+          dedupHash("remote-agent-closeout", {
+            session_id: state.session_id,
+            checkpoint_payload: closeoutArgs.checkpoint_payload
+          })
+        );
+        await writeAgentSessionState(dir, {
+          ...state,
+          status: "offline",
+          updated_at: new Date().toISOString(),
+          last_event_id: String(record.local_id)
+        });
+        const lifecycle = buildAgentLifecycleCloseoutResult({
+          mode: "offline_spool",
+          project_id: state.project_id ?? null,
+          session_id: state.session_id,
+          closeout_event_id: null,
+          spool_sync_status: "unsynced",
+          proof: {
+            event: {
+              ok: false,
+              event_written: false,
+              local_id: String(record.local_id),
+              spooled: true
+            },
+            checkpoint: {
+              ok: false,
+              checkpoint_updated: false,
+              checkpoint_updated_at: null,
+              checkpoint_state_only: true
+            },
+            memory: {
+              ok: false,
+              searchable_memory_created: false,
+              memory_status: "missing",
+              memory_id: null,
+              memory_type: null
+            },
+            recall: partialRecallProof(),
+            next_session_context: partialNextSessionContextProof()
+          },
+          warnings: ["Remote MCP closeout failed; closeout was spooled for ordered replay."]
+        });
+        process.stdout.write(
+          `${JSON.stringify(
+            {
+              ok: true,
+              action: "agent_closeout",
+              mode: "offline_spool",
+              transport: "remote_mcp",
+              local_id: record.local_id,
+              spool_path: spoolPath(argv),
+              remote_failure: remoteMcpFailure(error),
+              lifecycle,
+              project_log_update: offlineProjectLogUpdate()
+            },
+            null,
+            2
+          )}\n`
+        );
+        return;
+      }
+    }
+
+    const record = await appendRemoteToolSpoolRecord(
+      argv,
+      "memory_closeout",
+      closeoutArgs,
+      state.session_id,
+      dedupHash("remote-agent-closeout", {
+        session_id: state.session_id,
+        checkpoint_payload: closeoutArgs.checkpoint_payload
+      })
+    );
+    await writeAgentSessionState(dir, {
+      ...state,
+      status: "offline",
+      updated_at: new Date().toISOString(),
+      last_event_id: String(record.local_id)
+    });
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          action: "agent_closeout",
+          mode: "offline_spool",
+          transport: "remote_mcp",
+          local_id: record.local_id,
+          spool_path: spoolPath(argv),
+          remote_failure: {
+            code: "REMOTE_MCP_PENDING_REPLAY",
+            message: "Earlier remote MCP records must replay before closeout.",
+            retryable: true,
+            http_status: null,
+            rpc_code: null
+          },
+          lifecycle: buildAgentLifecycleCloseoutResult({
+            mode: "offline_spool",
+            project_id: state.project_id ?? null,
+            session_id: state.session_id,
+            closeout_event_id: null,
+            spool_sync_status: "unsynced",
+            proof: {
+              event: {
+                ok: false,
+                event_written: false,
+                local_id: String(record.local_id),
+                spooled: true
+              },
+              checkpoint: {
+                ok: false,
+                checkpoint_updated: false,
+                checkpoint_updated_at: null,
+                checkpoint_state_only: true
+              },
+              memory: {
+                ok: false,
+                searchable_memory_created: false,
+                memory_status: "missing",
+                memory_id: null,
+                memory_type: null
+              },
+              recall: partialRecallProof(),
+              next_session_context: partialNextSessionContextProof()
+            },
+            warnings: ["Closeout was spooled behind earlier undelivered remote records."]
+          }),
+          project_log_update: offlineProjectLogUpdate()
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
   const database = createRecallantDbFromEnv();
   if (!database) {
     const record = await appendSpoolRecord(argv, "event", {
@@ -8022,6 +8664,207 @@ async function runSpoolStatus(argv: readonly string[]) {
   );
 }
 
+async function runRemoteSpoolSync(
+  argv: readonly string[],
+  connection: RemoteAgentConnection,
+  records: Record<string, unknown>[],
+  manifest: Awaited<ReturnType<typeof readSpoolManifest>>
+) {
+  const dir = projectDir(argv);
+  const synced = { ...manifest.synced };
+  const sessionMappings = { ...manifest.session_mappings };
+  const unsynced = records.filter((record) => !synced[String(record.local_id)]);
+  let syncedCount = 0;
+  let failedRecord: Record<string, unknown> | null = null;
+  let failure: ReturnType<typeof remoteMcpFailure> | null = null;
+  let closeoutSessionId: string | null = null;
+  let replayedContextPackId: string | null = null;
+
+  const persistManifest = async () => {
+    await mkdir(spoolDir(argv), { recursive: true });
+    await writeFile(
+      spoolManifestPath(argv),
+      `${JSON.stringify({ synced, session_mappings: sessionMappings }, null, 2)}\n`
+    );
+  };
+
+  const ensureReplaySession = async (localSessionId: string) => {
+    if (sessionMappings[localSessionId]) return sessionMappings[localSessionId];
+    const started = await callRemoteAgentTool(connection, "memory_start_session", {
+      client_kind: "generic",
+      client_version: recallantCliVersion,
+      project_path: null,
+      session_label: "remote-spool-replay",
+      resume_policy: "normal"
+    });
+    const remoteSessionId = typeof started.session_id === "string" ? started.session_id : null;
+    if (!remoteSessionId) {
+      throw new RemoteMcpCallError(
+        "REMOTE_MCP_INVALID_RESPONSE",
+        "Remote MCP spool replay start returned no session_id."
+      );
+    }
+    sessionMappings[localSessionId] = remoteSessionId;
+    await persistManifest();
+    return remoteSessionId;
+  };
+
+  for (const record of unsynced) {
+    try {
+      const payload =
+        record.payload && typeof record.payload === "object" && !Array.isArray(record.payload)
+          ? (record.payload as Record<string, unknown>)
+          : {};
+      const localSessionId = String(
+        payload.local_session_id ?? payload.session_id ?? `spool-${String(record.local_id)}`
+      );
+      let toolName: string;
+      let args: Record<string, unknown>;
+      if (record.record_kind === "remote_tool") {
+        toolName = String(payload.tool_name ?? "");
+        args =
+          payload.arguments &&
+          typeof payload.arguments === "object" &&
+          !Array.isArray(payload.arguments)
+            ? { ...(payload.arguments as Record<string, unknown>) }
+            : {};
+      } else if (record.record_kind === "observation") {
+        toolName = "memory_append_observation";
+        args = { ...payload };
+      } else if (record.record_kind === "event") {
+        const metadata =
+          payload.metadata &&
+          typeof payload.metadata === "object" &&
+          !Array.isArray(payload.metadata)
+            ? (payload.metadata as Record<string, unknown>)
+            : {};
+        const checkpoint =
+          metadata.checkpoint_payload &&
+          typeof metadata.checkpoint_payload === "object" &&
+          !Array.isArray(metadata.checkpoint_payload)
+            ? (metadata.checkpoint_payload as Record<string, unknown>)
+            : {};
+        if (metadata.capture_kind === "agent_closeout") {
+          toolName = "memory_closeout";
+          args = {
+            session_id: payload.session_id,
+            closeout_intent: "task_complete",
+            summary: String(
+              checkpoint.summary ?? checkpoint.current_focus ?? payload.text ?? "Session closeout"
+            ),
+            checkpoint_payload: {
+              current_status: String(checkpoint.status ?? checkpoint.current_status ?? "closed"),
+              current_focus: String(
+                checkpoint.current_focus ?? checkpoint.summary ?? payload.text ?? "Session closeout"
+              ),
+              next_step: String(checkpoint.next_step ?? "Continue from Recallant context."),
+              last_event_id: isUuid(checkpoint.last_event_id) ? checkpoint.last_event_id : null,
+              open_questions: Array.isArray(checkpoint.open_questions)
+                ? checkpoint.open_questions.map(String)
+                : []
+            },
+            governed_memory_candidates: [],
+            artifact_refs: [],
+            closeout_diagnostics: null,
+            local_spool_status: await getLocalSpoolStatus(argv)
+          };
+        } else {
+          toolName = "memory_append_event";
+          args = {
+            ...payload,
+            event_kind: remoteEventKind(String(payload.event_kind ?? "other"))
+          };
+        }
+      } else {
+        toolName = "memory_append_turn";
+        args = { ...payload };
+      }
+      if (!toolName) throw new Error("REMOTE_MCP_INVALID_RESPONSE: spool tool name is missing");
+
+      let remoteSessionId: string | null = null;
+      if (toolName === "memory_start_session") {
+        const started = await callRemoteAgentTool(connection, toolName, args);
+        remoteSessionId = typeof started.session_id === "string" ? started.session_id : null;
+        if (!remoteSessionId) {
+          throw new RemoteMcpCallError(
+            "REMOTE_MCP_INVALID_RESPONSE",
+            "Remote MCP replayed start returned no session_id."
+          );
+        }
+        sessionMappings[localSessionId] = remoteSessionId;
+        synced[String(record.local_id)] = {
+          server_session_id: remoteSessionId,
+          status: "created",
+          synced_at: new Date().toISOString()
+        };
+      } else {
+        const originalSessionId =
+          typeof args.session_id === "string" ? args.session_id : localSessionId;
+        remoteSessionId = isUuid(originalSessionId)
+          ? originalSessionId
+          : await ensureReplaySession(localSessionId);
+        if ("session_id" in args || toolName !== "memory_create_agent_memory") {
+          args.session_id = remoteSessionId;
+        }
+        const result = await callRemoteAgentTool(connection, toolName, args, remoteSessionId);
+        synced[String(record.local_id)] = {
+          server_event_id: typeof result.event_id === "string" ? result.event_id : null,
+          server_memory_id: typeof result.memory_id === "string" ? result.memory_id : null,
+          server_session_id: remoteSessionId,
+          status: typeof result.status === "string" ? result.status : "created",
+          synced_at: new Date().toISOString()
+        };
+        if (toolName === "memory_closeout") closeoutSessionId = remoteSessionId;
+        if (toolName === "memory_get_context_pack" && typeof result.context_pack_id === "string") {
+          replayedContextPackId = result.context_pack_id;
+        }
+      }
+      syncedCount += 1;
+      await persistManifest();
+    } catch (error) {
+      failedRecord = record;
+      failure = remoteMcpFailure(error);
+      break;
+    }
+  }
+
+  const state = await readAgentSessionState(dir);
+  if (state) {
+    const mappedSessionId = sessionMappings[state.session_id] ?? state.session_id;
+    await writeAgentSessionState(dir, {
+      ...state,
+      session_id: mappedSessionId,
+      project_id: state.project_id ?? connection.scope.credential_scope.project_id,
+      status: closeoutSessionId === mappedSessionId ? "closed" : failure ? "offline" : "active",
+      updated_at: new Date().toISOString(),
+      context_pack_id: replayedContextPackId ?? state.context_pack_id,
+      last_context_read_at: replayedContextPackId
+        ? new Date().toISOString()
+        : state.last_context_read_at
+    });
+  }
+
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        ok: failure === null,
+        action: "sync_spool",
+        dry_run: false,
+        transport: "remote_mcp",
+        synced_count: syncedCount,
+        remaining_count: unsynced.length - syncedCount,
+        failed_local_id: failedRecord ? String(failedRecord.local_id) : null,
+        remote_failure: failure,
+        manifest_path: spoolManifestPath(argv),
+        mappings: synced
+      },
+      null,
+      2
+    )}\n`
+  );
+  if (failure) process.exitCode = 1;
+}
+
 async function runSyncSpool(argv: readonly string[]) {
   const dir = projectDir(argv);
   const records = await readJsonl(spoolPath(argv));
@@ -8046,6 +8889,11 @@ async function runSyncSpool(argv: readonly string[]) {
         2
       )}\n`
     );
+    return;
+  }
+  const remoteConnection = await readRemoteAgentConnection(dir);
+  if (remoteConnection) {
+    await runRemoteSpoolSync(argv, remoteConnection, records, manifest);
     return;
   }
   const database = createRecallantDbFromEnv();
@@ -8734,9 +9582,11 @@ function remoteConnectHumanReport(result: {
 
 function remoteConnectNextAgentSteps() {
   return [
-    'Run `recallant agent-start --format json`; remote-only projects should report `mode: "remote_mcp_ready"`.',
-    "Use the configured remote MCP startup loop: `memory_start_session`, `memory_get_context_pack`, concise non-secret work memory, checkpoint state when needed, and `memory_closeout`.",
+    "If Codex or the IDE extension was already open when this project config was written or updated, Restart Codex (or use `Restart extension`) before calling `memory_start_session`; MCP config is loaded by a new or reloaded client session.",
+    'Run `recallant agent-start --format json`; remote-only projects should report `mode: "remote_mcp_ready"` with session and context-pack ids.',
+    "Use the configured remote MCP startup loop: `memory_start_session`, `memory_get_context_pack`, concise non-secret work memory, checkpoint state when needed, and `memory_closeout`. The CLI fallback performs the same remote lifecycle calls.",
     "If direct MCP is unavailable, use the CLI fallback: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`.",
+    "If remote transport fails, restore access and run `recallant sync-spool --project-dir .`; remote replay does not require local PostgreSQL or Docker.",
     "Keep checkpoint-only state separate from semantic memory proof; when proof is needed, create one safe marker with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`. `remote-doctor --semantic-proof` is an optional diagnostic shortcut.",
     "Use the local-storage attach path only when intentionally switching this project away from remote MCP."
   ];
@@ -9304,29 +10154,60 @@ async function runConnectRemote(argv: readonly string[]) {
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
   const writeConfig = argv.includes("--write");
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
+  const existingConnection = await readRemoteAgentConnection(projectDir);
+  const existingScope = existingConnection?.scope;
+  const existingCredentialScope = existingScope?.credential_scope;
+  const existingDestination = existingScope?.destination;
+  const serverUrl = parseFlag(argv, "--server-url") ?? existingDestination?.server_url ?? null;
+  const projectId = parseFlag(argv, "--project-id") ?? existingCredentialScope?.project_id ?? null;
+  const developerId =
+    parseFlag(argv, "--developer-id") ?? existingCredentialScope?.developer_id ?? null;
+  const clientId = parseFlag(argv, "--client-id") ?? existingCredentialScope?.client_id ?? null;
+  const credential = parseFlag(argv, "--credential");
+  const explicitCredentialRef = parseFlag(argv, "--credential-ref");
+  const credentialRef = explicitCredentialRef ?? existingConnection?.credential_ref;
+  const credentialStorePath =
+    parseFlag(argv, "--credential-store") ?? existingConnection?.credential_store_path;
+  const requireValue = (value: string | null, flag: string) => {
+    if (!value?.trim()) {
+      throw new Error(
+        `VALIDATION_ERROR: ${flag} is required or must be present in the existing remote config`
+      );
+    }
+    return value;
+  };
+  if (!credential && !credentialRef) {
+    throw new Error("VALIDATION_ERROR: --credential or --credential-ref is required");
+  }
+  if (credential && explicitCredentialRef) {
+    throw new Error("VALIDATION_ERROR: use --credential or --credential-ref, not both");
+  }
   const config = validateRemoteMcpBridgeConfig({
-    serverUrl: requiredFlag(argv, "--server-url"),
-    credential: requiredFlag(argv, "--credential"),
-    projectId: requiredFlag(argv, "--project-id"),
-    developerId: requiredFlag(argv, "--developer-id"),
-    clientId: requiredFlag(argv, "--client-id"),
+    serverUrl: requireValue(serverUrl, "--server-url"),
+    credential,
+    credentialRef,
+    credentialStorePath,
+    projectId: requireValue(projectId, "--project-id"),
+    developerId: requireValue(developerId, "--developer-id"),
+    clientId: requireValue(clientId, "--client-id"),
     sessionId: parseFlag(argv, "--session-id"),
     traceId: parseFlag(argv, "--trace-id")
   });
-  const credentialStore = writeConfig
-    ? storeRemoteMcpCredential({
-        credential: config.credential,
-        serverUrl: config.serverUrl,
-        projectId: config.projectId,
-        developerId: config.developerId,
-        clientId: config.clientId
-      })
-    : null;
+  const credentialStore =
+    writeConfig && credential
+      ? storeRemoteMcpCredential({
+          credential: config.credential,
+          serverUrl: config.serverUrl,
+          projectId: config.projectId,
+          developerId: config.developerId,
+          clientId: config.clientId
+        })
+      : null;
   const targetConfig = remoteClientTargetConfig(target, {
     ...config,
     credential: credentialStore ? null : config.credential,
-    credentialRef: credentialStore?.key ?? null,
-    credentialStorePath: credentialStore?.display_path ?? null
+    credentialRef: credentialStore?.key ?? config.credentialRef ?? null,
+    credentialStorePath: credentialStore?.display_path ?? config.credentialStorePath ?? null
   });
   const targetFile = resolve(projectDir, targetConfig.config_file);
   const existing = writeConfig ? await readOptional(targetFile) : null;
@@ -9342,9 +10223,9 @@ async function runConnectRemote(argv: readonly string[]) {
         projectId: config.projectId,
         developerId: config.developerId,
         clientId: config.clientId,
-        credentialRef: credentialStore?.key ?? null,
-        credentialPrefix: credentialStore?.credential_prefix ?? null,
-        credentialStorePath: credentialStore?.display_path ?? null,
+        credentialRef: credentialStore?.key ?? config.credentialRef ?? null,
+        credentialPrefix: credentialStore?.credential_prefix ?? config.credentialRef ?? null,
+        credentialStorePath: credentialStore?.display_path ?? config.credentialStorePath ?? null,
         approvalMode: "scoped_credential"
       })
     : null;
@@ -12538,10 +13419,10 @@ function usageText(command?: string) {
   }
   if (command === "connect-remote") {
     return [
-      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> --server-url <https-url> --credential <token> --project-id <id> --developer-id <id> --client-id <id> [--project-dir <path>] [--write] [--session-id <id>] [--trace-id <id>] [--format json|text]",
+      "Usage: recallant connect-remote <codex|cursor|claude-code|generic> [--server-url <https-url>] (--credential <token> | --credential-ref <ref> [--credential-store <path>]) [--project-id <id> --developer-id <id> --client-id <id>] [--project-dir <path>] [--write] [--session-id <id>] [--trace-id <id>] [--format json|text]",
       "",
       "Preview a supported agent client config that runs `recallant remote-bridge` against a scoped central /api/mcp endpoint without local database access.",
-      "Add --write --project-dir <path> to merge the remote MCP config into the project-local client config.",
+      "Add --write --project-dir <path> to merge the remote MCP config into the project-local client config. Existing remote configs supply omitted scope and credential-ref values, so their network policy can be repaired without re-entering the raw credential.",
       ""
     ].join("\n");
   }
@@ -12805,7 +13686,7 @@ async function main(argv: readonly string[]) {
   process.exitCode = 1;
 }
 
-const remoteOnlyBootstrap = commandUsesRemoteOnlyBootstrap(process.argv[2]);
+const remoteOnlyBootstrap = await commandUsesRemoteOnlyBootstrap(process.argv);
 if (!remoteOnlyBootstrap) {
   await loadDefaultEnv();
 }

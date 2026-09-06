@@ -199,7 +199,10 @@ env_vars = ["RECALLANT_DATABASE_URL"]
 ```
 
 Codex reads `.codex/config.toml` only for trusted projects, so onboarding writes the project-local
-config and then the next Codex session can launch the Recallant MCP server automatically. If your
+config and then the next Codex session can launch the Recallant MCP server automatically. If Codex
+was already open when Recallant wrote or updated that file, select **Restart** in the desktop app or
+**Restart extension** in the IDE before testing `memory_start_session`. A successful CLI or
+remote-doctor check does not refresh the MCP tool snapshot held by that already-open client. If your
 Codex build supports `codex mcp add`, global registration remains an advanced alternative rather
 than the beginner path.
 
@@ -323,6 +326,17 @@ recallant connect-remote codex \
 
 The generated MCP server uses `recallant remote-bridge` and these remote-only environment variables:
 
+If an existing project-local remote config already contains a credential reference, the client
+network policy can be repaired without re-entering the raw credential. Run this from the project
+root; the command infers the existing server, scope, credential reference, and credential store:
+
+```bash
+recallant connect-remote codex --project-dir . --write --format text
+```
+
+For Codex, start a new or reloaded client session after the config is written so the sandbox reads
+the exact-host network allow rule.
+
 - `RECALLANT_REMOTE_MCP_URL`
 - `RECALLANT_REMOTE_MCP_CREDENTIAL_REF`
 - optional `RECALLANT_REMOTE_MCP_CREDENTIAL_STORE`
@@ -362,27 +376,37 @@ Use these names consistently in client setup and diagnostics:
 - `ingestion_approved`: the owner separately approved import/summarization of existing files or
   history.
 
-Do not treat `remote_mcp_ready` as `capture_active`; it maps only to `configured`. Remote
-`agent-start` reads bounded readiness through `memory_get_readiness_status` when the project has
-remote consent/config. Before proof, the primary state remains `configured`; after
+`remote_mcp_ready` is the backward-compatible mode name for a configured remote project. Current
+clients make the real `memory_start_session` and `memory_get_context_pack` calls before reporting
+that mode, and return the resulting session and context-pack ids. A network or transport failure is
+reported with a specific `remote_failure.code`; the pending lifecycle operation is written to the
+ordered local spool instead of being mistaken for a successful context read. Remote `agent-start`
+also reads bounded readiness through `memory_get_readiness_status`. Before semantic proof, the
+primary state remains `configured`; after
 `recallant remote-doctor --semantic-proof`, a repeated `agent-start` should report
 `readiness_contract.primary_state: "semantic_memory_ready"` while `capture_active` remains false
 until fresh automatic agent telemetry arrives. Remote MCP proof alone does not claim automatic
 capture.
 
+The remote consent/config boundary remains the authorization prerequisite; it is not a substitute
+for the session/context ids returned by a successful startup.
+
 Safe remote existing-project sequence:
 
-1. reach `remote_mcp_ready` through the scoped remote MCP consent/config boundary;
-2. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
-   `recallant remote-doctor --capture-proof`;
+1. run `recallant agent-start --format json` and require returned session and context-pack ids, or
+   prove the same path directly with `memory_start_session` plus `memory_get_context_pack`;
+2. independently prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`,
+   or use `recallant remote-doctor --capture-proof` for the same diagnostic boundary;
 3. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`;
 4. prove governed semantic recall with one synthetic `memory_create_agent_memory` marker and
    `memory_recall_agent_memories`;
 5. run read-only migration inventory, classify risk, get owner approval, write concise governed
    memories/imports, and verify recall again.
 
-- `recallant agent-start --format json` returning `mode: "remote_mcp_ready"` proves the project has a
-  remote consent/config boundary and can use the scoped remote MCP bridge. It also reports
+- `recallant agent-start --format json` returning `mode: "remote_mcp_ready"` plus session and
+  context-pack ids proves that the CLI fallback completed the remote session/context startup. A
+  direct MCP session plus context call or `recallant remote-doctor --capture-proof` proves the same
+  boundary independently. The response also reports
   `recommended_next_call: "memory_get_context_pack"` and
   `recommended_next_proof_call: "memory_create_agent_memory"`.
   Those JSON field names are backward-compatible hints; for agents the behavior is mandatory by
@@ -780,9 +804,13 @@ default; it requires `project_log_sync: "managed_block"` plus the exact checkpoi
 offline/spool capture never edits user files.
 
 For an already connected remote project, use `recallant agent-start --format json` as the first
-refresh check. If it reports `remote_mcp_ready`, the existing scoped config is usable; no local
-`attach`, `onboard`, or import is needed. If the local client itself needs to be updated or the
-project config must be rewritten, rerun the central-server bootstrap (`curl -fsSL
+startup check. If it reports `remote_mcp_ready` with session/context ids, no local `attach`,
+`onboard`, or import is needed. On a DNS, fetch, or sandbox-network error, the command reports a
+classified transport failure and spools the pending remote operation. Repair network access, then
+run `recallant sync-spool --project-dir .`; remote projects replay through HTTPS MCP and do not need
+local PostgreSQL or Docker. `recallant remote-doctor --capture-proof` remains the independent
+diagnostic path. If the local client itself needs to be updated or the project config must be
+rewritten, rerun the central-server bootstrap (`curl -fsSL
 https://memory.example.com/connect | bash`) or the explicit remote flow:
 
 ```bash
@@ -822,8 +850,11 @@ external-context safety confirmation; that client-level prompt is separate from 
 should be answered only after reviewing the reported consent boundary.
 
 Remote-only projects must not report `mode: "offline_spool"` just because the external workstation
-does not have `RECALLANT_DATABASE_URL`. Offline spool remains a fail-soft fallback for local capture
-when no remote MCP consent/config is present; it is not the normal remote-connect startup mode.
+does not have `RECALLANT_DATABASE_URL`. They use remote MCP directly. `offline_spool` is valid only
+when the configured remote MCP operation actually fails or when local capture has no available
+storage. Remote spool records retain the exact safe tool operation and replay in order through
+`recallant sync-spool --project-dir .`; credentials are resolved from the configured credential
+reference and are never copied into the spool.
 
 If MCP tools are unavailable, use CLI fallback commands:
 
