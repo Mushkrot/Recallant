@@ -26,6 +26,8 @@ These screenshots come from the real private Workbench with deterministic synthe
 [generator](docs/assets/workbench/README.md) runs the same browser fixture used for Playwright
 acceptance testing.
 
+These previews use a documentation-only palette; the installed application's theme may differ.
+
 **Home shows whether capture and the governed memory loop are actually active.**
 
 ![Recallant Workbench Home with project readiness and next actions](docs/assets/workbench/home-readiness.png)
