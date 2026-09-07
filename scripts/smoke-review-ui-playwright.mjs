@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createRequire } from "node:module";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
@@ -395,23 +395,37 @@ async function saveScreenshotPair(page, standardPath, publicPath, label, forbidd
 
 async function savePortfolioScreenshot(page, outputPath, label, forbiddenText, focusLocator) {
   if (!outputPath) return;
-  const viewport = page.viewportSize();
-  assert(
-    viewport?.width === 1440 && viewport.height === 900,
-    `${label} must use the 1440 x 900 portfolio viewport: ${JSON.stringify(viewport)}`
-  );
-  if (focusLocator) {
-    const focusY = await focusLocator.evaluate(
-      (element) => element.getBoundingClientRect().top + globalThis.scrollY
+  // Apply the documentation presentation theme only while taking this preview.
+  const stylesheet = process.env.RECALLANT_PORTFOLIO_STYLESHEET;
+  const contentBefore = await page.locator("body").innerText();
+  const theme = stylesheet
+    ? await page.addStyleTag({ content: await readFile(stylesheet, "utf8") })
+    : null;
+  try {
+    const viewport = page.viewportSize();
+    assert(
+      viewport?.width === 1440 && viewport.height === 900,
+      `${label} must use the 1440 x 900 portfolio viewport: ${JSON.stringify(viewport)}`
     );
-    await page.evaluate((targetY) => globalThis.scrollTo(0, Math.max(0, targetY - 650)), focusY);
-  } else {
-    await page.evaluate(() => globalThis.scrollTo(0, 0));
+    if (focusLocator) {
+      const focusY = await focusLocator.evaluate(
+        (element) => element.getBoundingClientRect().top + globalThis.scrollY
+      );
+      await page.evaluate((targetY) => globalThis.scrollTo(0, Math.max(0, targetY - 650)), focusY);
+    } else {
+      await page.evaluate(() => globalThis.scrollTo(0, 0));
+    }
+    await assertPublicSafePage(page, label, forbiddenText);
+    await noHorizontalScroll(page, label);
+    await assertResponsiveBounds(page, label);
+    assert(
+      (await page.locator("body").innerText()) === contentBefore,
+      `${label} presentation theme changed visible content`
+    );
+    await page.screenshot({ path: outputPath, fullPage: false });
+  } finally {
+    if (theme) await theme.evaluate((element) => element.remove());
   }
-  await assertPublicSafePage(page, label, forbiddenText);
-  await noHorizontalScroll(page, label);
-  await assertResponsiveBounds(page, label);
-  await page.screenshot({ path: outputPath, fullPage: false });
 }
 
 async function run() {

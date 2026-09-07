@@ -4,6 +4,15 @@ The three PNG files in this directory come from the real Recallant Workbench and
 public-safe fixture in `scripts/smoke-review-ui-playwright.mjs`. They do not use a private Recallant
 service, private project data, or manual image editing.
 
+For these documentation previews, the generator temporarily applies
+`scripts/portfolio-screenshot-theme.css`: cool neutral surfaces, graphite text, and a restrained
+blue action accent. Status colors retain their meaning. This is a presentation study, not a claim
+that the installed application uses this theme.
+
+The stylesheet is loaded only while each portfolio image is captured and removed immediately
+afterward. It is not imported by the application. The capture checks that visible content stays
+unchanged; the existing browser fixture continues to check the real controls and workflows.
+
 From a clean checkout:
 
 ```bash
