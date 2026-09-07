@@ -1,0 +1,99 @@
+/* Documentation previews only. The application does not load this stylesheet. */
+:root {
+  --bg: #f3f5f8;
+  --bg-subtle: #e9edf3;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fc;
+  --surface-raised: #ffffff;
+  --surface-inset: #edf1f6;
+  --text: #202733;
+  --text-muted: #566274;
+  --text-faint: #687589;
+  --line: #dce2eb;
+  --line-strong: #b7c2d2;
+  --accent: #2859bd;
+  --accent-strong: #224eaa;
+  --accent-soft: #edf3ff;
+  --info: #2859bd;
+  --success: #27724f;
+  --warning: #95620c;
+  --danger: #b23b3b;
+  --neutral: #687589;
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+
+body {
+  background: var(--bg) !important;
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+body > header {
+  border-bottom: 1px solid var(--line);
+}
+
+.workbench-nav {
+  background: var(--surface-soft) !important;
+  border-color: var(--line);
+}
+
+.workbench-nav a.active {
+  background: var(--accent-soft) !important;
+  color: var(--accent-strong) !important;
+}
+
+.home-hero {
+  border-color: var(--line);
+}
+
+.home-hero-copy h2 {
+  font-size: 36px;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+
+.home-hero-copy .home-project-name {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.section-kicker {
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+}
+
+.home-action.primary-action {
+  color: #ffffff;
+}
+
+.home-action.primary-action span {
+  color: #ffffff;
+}
+
+.signal-strip span {
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+
+.section-head {
+  border-color: var(--line);
+}
+
+.review-guide {
+  border-color: var(--line);
+}
+
+.review-guide span,
+.readiness .summary-grid strong {
+  color: var(--text-muted);
+}
+
+.readiness .summary-grid > span {
+  border-color: var(--line);
+}
+
+a:hover {
+  color: var(--accent-strong);
+}
