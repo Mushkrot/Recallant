@@ -2,10 +2,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+const databaseUrl = process.env.RECALLANT_DATABASE_URL ?? smokeDatabaseUrl();
 
 const developerId = randomUUID();
 const projectDir = `/tmp/recallant-connect-smoke-${randomUUID()}`;
@@ -193,7 +192,7 @@ assert(
 assert(
   dryRun.mandatory_startup_layer?.status === "mcp_only" &&
     dryRun.mandatory_startup_layer?.capture_targets?.includes("user_prompt") &&
-    dryRun.mandatory_startup_layer?.proof_command?.includes("--require-agent-audit"),
+    dryRun.mandatory_startup_layer?.proof_command?.includes("--require-capture"),
   `Connect dry-run missing mandatory startup diagnostics: ${JSON.stringify(dryRun)}`
 );
 assert(dryRun.writes_files === false, `Dry-run should not write files: ${JSON.stringify(dryRun)}`);

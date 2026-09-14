@@ -4,10 +4,11 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const repoRoot = process.cwd();
 
 const spoolDir = await mkdtemp(join(tmpdir(), "recallant-spool-"));
@@ -20,13 +21,12 @@ const artifactSha = "3".repeat(64);
 function run(args, expectSuccess = true) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: repoRoot,
-    env: {
-      ...process.env,
+    env: smokeEnvironment({
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
       RECALLANT_PROJECT_ID: projectId,
       RECALLANT_PROJECT_PATH: projectPath
-    },
+    }),
     encoding: "utf8"
   });
   if (expectSuccess && result.status !== 0) {

@@ -7,10 +7,11 @@ import {
   supportedClientKinds
 } from "../packages/adapters/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const repoRoot = process.cwd();
 
 const developerId = randomUUID();
@@ -21,13 +22,12 @@ const token = `cross_client_token_${projectId.replaceAll("-", "_")}`;
 function createClient(name) {
   const child = spawn(process.execPath, ["apps/cli/dist/index.js", "mcp-server"], {
     cwd: repoRoot,
-    env: {
-      ...process.env,
+    env: smokeEnvironment({
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
       RECALLANT_PROJECT_ID: projectId,
       RECALLANT_PROJECT_PATH: projectPath
-    },
+    }),
     stdio: ["pipe", "pipe", "pipe"]
   });
   const lines = createInterface({ input: child.stdout });

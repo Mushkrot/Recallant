@@ -5,25 +5,25 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
 const execFileAsync = promisify(execFile);
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 const cliPath = resolve("apps/cli/dist/index.js");
 const missingEnvFile = join(tmpdir(), `recallant-missing-env-${randomUUID()}`);
 
 function env(extra = {}) {
-  return {
-    ...process.env,
+  return smokeEnvironment({
     RECALLANT_DATABASE_URL: databaseUrl,
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: "",
     RECALLANT_PROJECT_PATH: "",
     ...extra
-  };
+  });
 }
 
 async function cliRaw(cwd, args, extraEnv = {}) {

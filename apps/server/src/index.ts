@@ -4476,8 +4476,8 @@ function renderFirstScreenSnapshot(data: ReviewDashboardData) {
   const readinessWarning = String(
     readiness.readiness_warning ??
       (readiness.configured_but_not_capture_active
-        ? "Configured but not capture active."
-        : "Capture proof is not complete yet.")
+        ? "Project-wide capture is configured but not active."
+        : "Project-wide capture proof is not complete yet.")
   );
   const sourceLabel =
     sourceCounts.active === 0
@@ -4498,9 +4498,9 @@ function renderFirstScreenSnapshot(data: ReviewDashboardData) {
       <p>${escapeHtml(attention.note)}</p>
     </article>
     <article class="${captureReady ? "ready" : "needs-work"}">
-      <span>Automatic capture</span>
+      <span>Project-wide automatic capture</span>
       <strong>${escapeHtml(readinessStatus.replaceAll("_", " "))}</strong>
-      <p>${escapeHtml(captureReady ? "A fresh automatic agent event is present." : readinessWarning)}</p>
+      <p>${escapeHtml(captureReady ? "A fresh project-wide automatic agent event is present." : readinessWarning)}</p>
     </article>
     <article class="${semanticMemoryReady ? "ready" : "needs-work"}">
       <span>Semantic proof</span>
@@ -5436,10 +5436,10 @@ function renderReadiness(data: ReviewDashboardData) {
     : !registered
       ? "Project is not registered."
       : captureActive
-        ? "Automatic agent capture is active and fresh."
+        ? "Project-wide automatic agent capture is active and fresh."
         : lastAutomaticCaptureAt
-          ? `Automatic capture is stale; no fresh event was seen inside the ${String(contract.capture_freshness_hours ?? 24)}-hour window.`
-          : "No automatic agent event has been observed yet.";
+          ? `Project-wide automatic capture is stale; no fresh event was seen inside the ${String(contract.capture_freshness_hours ?? 24)}-hour window.`
+          : "No project-wide automatic agent event has been observed yet.";
   const note =
     activeSessions > 0
       ? `${activeSessions} active session${activeSessions === 1 ? "" : "s"} still open.`
@@ -7135,7 +7135,9 @@ function renderHome(data: ReviewDashboardData) {
   const sourceAttention = currentProjectSources(data).filter(
     (source) => sourceHealth(source).status !== "ready"
   ).length;
-  const headline = captureActive ? "Recallant is recording" : "Recallant needs a check";
+  const headline = captureActive
+    ? "Recallant is recording project activity"
+    : "Recallant needs a check";
   const detail = [
     pendingReview > 0
       ? `${pendingReview} memory item${pendingReview === 1 ? "" : "s"} need your review.`
@@ -9999,6 +10001,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       }
       const dashboardInput = {
         project_id: requestUrl.searchParams.get("project_id"),
+        project_search: requestUrl.searchParams.get("project_q"),
         selected_memory_id: requestUrl.searchParams.get("memory_id"),
         graph_candidate_id: requestUrl.searchParams.get("graph_candidate_id"),
         graph_lifecycle_state: requestUrl.searchParams.get("graph_lifecycle_state"),

@@ -83,7 +83,7 @@ assert(
 );
 assert(
   pilot.data.qa_summary?.copied_sandbox_original_untouched === true &&
-    pilot.data.qa_summary?.gutendocx_sandbox_original_untouched === true,
+    pilot.data.qa_summary?.sample_production_sandbox_original_untouched === true,
   "Original untouched proof is missing"
 );
 assert(
@@ -92,7 +92,7 @@ assert(
   "Later recall proof is missing from pilot report"
 );
 assert(
-  pilot.data.qa_summary?.gutendocx_production_dry_run_safe === true,
+  pilot.data.qa_summary?.sample_production_dry_run_safe === true,
   "Production-sensitive dry-run proof is missing"
 );
 

@@ -5,10 +5,11 @@ import pg from "pg";
 import { codexOtelLogsEndpointPath } from "../packages/contracts/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 import { createRecallantHttpServer } from "../apps/server/dist/index.js";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 const projectId = randomUUID();
 const projectPath = `/tmp/recallant-otel-control-${projectId}`;
@@ -199,20 +200,28 @@ try {
     [projectId]
   );
   assert(rows.rows.length === 2, `expected two deduplicated rows, got ${rows.rows.length}`);
-  assert(rows.rows.some((row) => row.match_status === "matched"), "matched row is missing");
-  assert(rows.rows.some((row) => row.match_status === "missing_hook"), "gap row is missing");
+  assert(
+    rows.rows.some((row) => row.match_status === "matched"),
+    "matched row is missing"
+  );
+  assert(
+    rows.rows.some((row) => row.match_status === "missing_hook"),
+    "gap row is missing"
+  );
   const serialized = JSON.stringify(rows.rows);
   assert(!serialized.includes("secret-tool-output"), "raw tool output leaked");
   assert(!serialized.includes("private user prompt"), "raw prompt leaked");
   const coverage = await db.getOtelControlCoverage(projectId);
   assert(coverage.configured === true, "real receipt did not mark OTel configured");
   assert(coverage.matched_count === 1, `matched count was ${coverage.matched_count}`);
-  assert(coverage.missing_hook_count === 1, `missing-hook count was ${coverage.missing_hook_count}`);
+  assert(
+    coverage.missing_hook_count === 1,
+    `missing-hook count was ${coverage.missing_hook_count}`
+  );
   const freshReadiness = await db.getProjectReadiness({ project_id: projectId });
   assert(
     freshReadiness.readiness_contract.capture_active === true &&
-      freshReadiness.readiness_contract.evidence.automatic_capture_source ===
-        "codex_native_hook",
+      freshReadiness.readiness_contract.evidence.automatic_capture_source === "codex_native_hook",
     `fresh native capture was not active: ${JSON.stringify(freshReadiness.readiness_contract)}`
   );
   await sql.query(

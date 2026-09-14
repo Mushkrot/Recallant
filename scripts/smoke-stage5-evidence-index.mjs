@@ -1,9 +1,15 @@
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const reportDir = join(tmpdir(), "recallant-pilot-reports");
-const indexPath = "stage_goals/stage_5/Stage 5 Pilot Evidence Index.md";
+const privateIndexPath = "stage_goals/stage_5/Stage 5 Pilot Evidence Index.md";
+const indexPath =
+  process.env.RECALLANT_STAGE5_EVIDENCE_INDEX_PATH ??
+  (existsSync(dirname(privateIndexPath))
+    ? privateIndexPath
+    : join(reportDir, "Stage 5 Pilot Evidence Index.md"));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -73,8 +79,8 @@ const lines = [
   "",
   `- Clean empty project public proof: ${yes(pilot.data.pilots?.clean_empty_project?.public_proof_flow?.later_recall_works)}`,
   `- Copied existing sandbox recall: ${yes(pilot.data.pilots?.copied_existing_sandbox?.capture?.recalled_in_later_session)}`,
-  `- GutenDocx sampled sandbox original untouched: ${yes(pilot.data.pilots?.gutendocx_sandbox?.untouched_original_key_files)}`,
-  `- GutenDocx production dry-run safe: ${yes(pilot.data.pilots?.gutendocx_production_dry_run?.writes_files === false && pilot.data.pilots?.gutendocx_production_dry_run?.writes_database === false && pilot.data.pilots?.gutendocx_production_dry_run?.service_restarts === 0)}`,
+  `- GutenDocx sampled sandbox original untouched: ${yes(pilot.data.qa_summary?.sample_production_sandbox_original_untouched)}`,
+  `- GutenDocx production dry-run safe: ${yes(pilot.data.qa_summary?.sample_production_dry_run_safe)}`,
   `- Cleanup matrix passed: ${yes(cleanup.data.ok)}`,
   `- Recallant dogfood later recall: ${yes(dogfood.data.proof?.later_recall_works)}`,
   `- Client matrix passed: ${yes(clients.data.ok)}`,

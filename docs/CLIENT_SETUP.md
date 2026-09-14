@@ -92,7 +92,7 @@ Changing channels is an explicit owner action, such as rerunning the trusted boo
 `--ref main`.
 
 After the CLI is installed or refreshed, `recallant --version` should report the CLI package version
-plus git build metadata, such as `recallant 0.1.0-dev.1+<git-sha>`. All monorepo workspace manifests
+plus git build metadata, such as `recallant 0.1.0-dev.2+<git-sha>`. All monorepo workspace manifests
 use the same prerelease identity; the Git revision identifies the exact installed checkout.
 
 When it asks for the central server URL, enter `https://memory.example.com` or the bare host name
@@ -167,13 +167,33 @@ and unrelated hook handlers are preserved; changed files are backed up under `.r
 It also installs fail-soft helper scripts for compatibility. The dry-run previews every file without
 writing it.
 
-After connect, open `/hooks` in Codex, review the Recallant command hook, and trust it. Codex project
-trust is deliberately user-controlled and Recallant cannot inspect or bypass it. Then perform one
-normal Codex action and verify the automatic path:
+After connect, open `/hooks` in Codex and complete the one required owner step for automatic
+capture:
+
+1. Open `/hooks` in Codex while the connected project is active.
+2. Find **Recallant command hook**, review the command `recallant codex-hook`, and choose **Trust**.
+3. Perform one normal Codex action so the hook can send a fresh event.
+
+Codex treats project commands as a security boundary. Recallant writes the hook configuration, but
+it cannot approve or bypass Codex trust on the owner's behalf. Until this approval is made, Recallant
+can still provide MCP memory tools and the governed memory loop, but automatic capture remains
+inactive and `capture_active` stays false. This is a configuration state, not a sign that existing
+memory was lost.
+
+Verify the automatic path:
 
 ```bash
 recallant doctor --project-dir . --require-capture --format json
 ```
+
+The result should show `capture_active: true` and a recent automatic capture timestamp. If it shows
+`configured_unobserved` or `capture_active: false`, return to `/hooks`, make sure the Recallant hook
+is trusted, perform one normal Codex action, and run the check again. Recallant cannot complete this
+approval automatically because the decision belongs to Codex and the project owner.
+
+This step applies only to native automatic Codex capture. Manual MCP use and other clients do not
+require a Codex hook; they simply do not provide `capture_active` evidence. The advanced
+`--no-local-hooks` option intentionally opts out of this capture path.
 
 After the MCP config and hook files already match, the same dry-run is a readiness check: JSON
 output should report `connection_status: "mcp_and_hooks_ready"`,

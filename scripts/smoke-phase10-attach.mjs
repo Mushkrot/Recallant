@@ -38,6 +38,31 @@ function runJson(args) {
   return JSON.parse(result.stdout);
 }
 
+function runFailure(args) {
+  const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: hostProjectId,
+      RECALLANT_PROJECT_PATH: repoRoot,
+      RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+      RECALLANT_EMBEDDING_DIMS: "8",
+      RECALLANT_SERVER_URL: "http://127.0.0.1:3005"
+    },
+    encoding: "utf8"
+  });
+  if (result.error) {
+    throw new Error(`Command failed to start: recallant ${args.join(" ")}\n${result.error}`);
+  }
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr
+  };
+}
+
 function runText(args) {
   const result = spawnSync(process.execPath, ["apps/cli/dist/index.js", ...args], {
     cwd: repoRoot,
@@ -81,7 +106,7 @@ async function writeFixture(projectDir) {
       "## Project Rules",
       "",
       "Always keep the fixture formatter deterministic.",
-      ("Temporary local token example: OPENAI_API_KEY=" + ['s', 'k-', 'syntheticfixture'].join('')),
+      "Temporary local token example: OPENAI_API_KEY=" + ["s", "k-", "syntheticfixture"].join(""),
       ""
     ].join("\n")
   );
@@ -269,9 +294,7 @@ const repeatedAttach = runJson([
   "--format",
   "json"
 ]);
-const repeatedConfig = JSON.parse(
-  await readFile(join(projectDir, ".recallant", "config"), "utf8")
-);
+const repeatedConfig = JSON.parse(await readFile(join(projectDir, ".recallant", "config"), "utf8"));
 if (
   repeatedAttach.project_id !== attach.project_id ||
   repeatedConfig.project_log_sync !== "managed_block" ||
@@ -302,11 +325,11 @@ if (
   !agents.includes("memory_start_session") ||
   !agents.includes("recallant agent-start") ||
   agents.includes("memory_promote") ||
-  agents.includes((['s', 'k-', 'syntheticfixture'].join(''))) ||
+  agents.includes(["s", "k-", "syntheticfixture"].join("")) ||
   !agents.includes("<redacted-token>") ||
   projectLog !== originalProjectLog ||
   !gitignore.includes(".recallant/") ||
-  backupAgents.includes((['s', 'k-', 'syntheticfixture'].join(''))) ||
+  backupAgents.includes(["s", "k-", "syntheticfixture"].join("")) ||
   !backupAgents.includes("<redacted-token>") ||
   !backupCursorRule.includes("deterministic fixture formatter") ||
   backupManifest.discovered_agent_files.length < 4
@@ -405,7 +428,7 @@ await writeFile(
   join(staleConfigDir, ".recallant", "config"),
   `${JSON.stringify({ project_id: hostProjectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
 );
-const staleAttach = runJson([
+const staleAttach = runFailure([
   "attach",
   staleConfigDir,
   "--target",
@@ -415,19 +438,26 @@ const staleAttach = runJson([
   "json"
 ]);
 if (
-  staleAttach.project_id === hostProjectId ||
-  staleAttach.project_id_source !== "database" ||
-  staleAttach.starter_memory?.status !== "accepted" ||
-  !String(staleAttach.existing_config_error ?? "").includes("Ignoring stale/foreign config")
+  staleAttach.status === 0 ||
+  !staleAttach.stderr.includes("PROJECT_ID_PATH_MISMATCH") ||
+  !staleAttach.stderr.includes(hostProjectId)
 ) {
-  throw new Error(`Attach reused stale foreign config: ${JSON.stringify(staleAttach)}`);
+  throw new Error(`Attach did not reject stale foreign config: ${JSON.stringify(staleAttach)}`);
+}
+if (
+  (await readFile(join(staleConfigDir, ".recallant", "config"), "utf8")) !==
+  `${JSON.stringify({ project_id: hostProjectId, recallant_server_url: "http://127.0.0.1:3005" }, null, 2)}\n`
+) {
+  throw new Error("Stale foreign config was modified before rejection");
 }
 
 const prodDir = await mkdtemp(join(tmpdir(), "recallant-phase10-prod-"));
 await writeFile(join(prodDir, "README.md"), "# Live Project\nProduction deploy uses Cloudflare.\n");
 await writeFile(
   join(prodDir, "AGENTS.md"),
-  ("# Live Agent Instructions\nProduction token example: OPENAI_API_KEY=" + ['s', 'k-', 'syntheticfixture'].join('') + "\n")
+  "# Live Agent Instructions\nProduction token example: OPENAI_API_KEY=" +
+    ["s", "k-", "syntheticfixture"].join("") +
+    "\n"
 );
 const prodPlan = runJson([
   "attach",
@@ -449,7 +479,7 @@ if (
   prodPlan.secret_findings?.raw_secret_count < 1 ||
   prodPlan.secret_findings?.findings?.some((finding) => finding.source_modified !== false) ||
   !prodPlan.secret_findings?.live_policy?.includes("never edits source files") ||
-  !prodAgentsAfter.includes((['s', 'k-', 'syntheticfixture'].join('')))
+  !prodAgentsAfter.includes(["s", "k-", "syntheticfixture"].join(""))
 ) {
   throw new Error(`Production-sensitive downgrade failed: ${JSON.stringify(prodPlan)}`);
 }

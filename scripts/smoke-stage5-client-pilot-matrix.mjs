@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +10,14 @@ const execFileAsync = promisify(execFile);
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+// The client pilot must not inherit a managed host profile. Keep the fixture
+// project and its report independent from service paths, backup locations and
+// credentials present in the shell that launches the smoke.
+for (const name of Object.keys(process.env)) {
+  if (name.startsWith("RECALLANT_")) delete process.env[name];
+}
+
 const developerId = randomUUID();
 const cliPath = resolve("apps/cli/dist/index.js");
 const reportDir = join(tmpdir(), "recallant-pilot-reports");
@@ -26,7 +34,8 @@ async function runCli(projectDir, args) {
       RECALLANT_DATABASE_URL: databaseUrl,
       RECALLANT_DEVELOPER_ID: developerId,
       RECALLANT_PROJECT_ID: "",
-      RECALLANT_PROJECT_PATH: ""
+      RECALLANT_PROJECT_PATH: "",
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true"
     },
     maxBuffer: 12 * 1024 * 1024
   }).catch((error) => error);
@@ -48,13 +57,17 @@ await writeFile(
 const marker = `CLIENT_STAGE5_${randomUUID().replaceAll("-", "_")}`;
 
 const attach = await runCli(projectDir, ["attach", ".", "--sandbox", "--format", "json"]);
-assert(attach.status === "attached" && attach.project_id, `attach failed: ${JSON.stringify(attach)}`);
+assert(
+  attach.status === "attached" && attach.project_id,
+  `attach failed: ${JSON.stringify(attach)}`
+);
 
 const codexConnect = await runCli(projectDir, [
   "connect",
   "codex",
   "--project-dir",
   ".",
+  "--install-local-hooks",
   "--format",
   "json"
 ]);
@@ -64,6 +77,38 @@ assert(
     codexConnect.writes_global_config === false,
   `codex connect did not report safe project-local status: ${JSON.stringify(codexConnect)}`
 );
+
+function runNativeCodexHook(projectPath, payload) {
+  const result = spawnSync(process.execPath, [cliPath, "codex-hook"], {
+    cwd: projectPath,
+    env: {
+      ...process.env,
+      RECALLANT_DATABASE_URL: databaseUrl,
+      RECALLANT_DEVELOPER_ID: developerId,
+      RECALLANT_PROJECT_ID: "",
+      RECALLANT_PROJECT_PATH: projectPath,
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
+      RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+      RECALLANT_EMBEDDING_DIMS: "8"
+    },
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    timeout: 10000
+  });
+  assert(
+    result.error === undefined &&
+      result.status === 0 &&
+      result.stdout === "" &&
+      result.stderr === "",
+    `native codex-hook canary failed: ${JSON.stringify({
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
+      stdout: result.stdout,
+      stderr: result.stderr
+    })}`
+  );
+}
 
 await writeFile(
   join(projectDir, ".cursor", "mcp.json"),
@@ -130,6 +175,17 @@ assert(
   `codex demo-capture proof failed: ${JSON.stringify(demo)}`
 );
 
+// demo-capture closes its helper session. Emit the native event afterwards so
+// the subsequent --require-capture check observes the installed Codex hook.
+runNativeCodexHook(projectDir, {
+  session_id: `stage5-client-${randomUUID()}`,
+  cwd: projectDir,
+  hook_event_name: "SessionStart",
+  source: "startup",
+  turn_id: `stage5-turn-${randomUUID()}`,
+  model: "gpt-5"
+});
+
 const doctor = await runCli(projectDir, [
   "doctor",
   "--project-dir",
@@ -140,7 +196,7 @@ const doctor = await runCli(projectDir, [
 ]);
 assert(
   doctor.capture_readiness?.ready === true &&
-    doctor.capture_readiness?.status === "capture_active" &&
+    doctor.readiness_contract?.capture_active === true &&
     doctor.owner_summary?.actually_recording === true,
   `doctor --require-capture did not prove codex capture: ${JSON.stringify(doctor)}`
 );
@@ -154,7 +210,8 @@ const ask = await runCli(projectDir, [
   "json"
 ]);
 assert(
-  ask.recalled === true && ask.memories?.some((memory) => String(memory.body ?? "").includes(marker)),
+  ask.recalled === true &&
+    ask.memories?.some((memory) => String(memory.body ?? "").includes(marker)),
   `ask did not recall client pilot marker: ${JSON.stringify(ask)}`
 );
 

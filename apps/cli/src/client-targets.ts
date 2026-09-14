@@ -468,7 +468,15 @@ function codexRemoteNetworkConfig(existingText: string, serverUrl: string) {
   rendered = removeTomlTableKey(rendered, "features", "network_proxy");
   rendered = upsertTomlTableKey(rendered, "sandbox_workspace_write", "network_access", "true");
   rendered = upsertTomlTableKey(rendered, "features.network_proxy", "enabled", "true");
-  return upsertTomlInlineMapEntry(rendered, "features.network_proxy", "domains", hostname, "allow");
+  rendered = upsertTomlInlineMapEntry(
+    rendered,
+    "features.network_proxy",
+    "domains",
+    hostname,
+    "allow"
+  );
+  // Keep the generated tables canonical so a reconnect is byte-idempotent.
+  return rendered.replace(/\n+(?=\[sandbox_workspace_write\])/g, "\n\n");
 }
 
 export function renderClientTargetConfig(

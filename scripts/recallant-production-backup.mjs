@@ -7,6 +7,7 @@ import {
   readFile,
   rename,
   stat,
+  unlink,
   writeFile
 } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -68,6 +69,60 @@ async function writeJsonAtomic(path, value, mode = 0o600) {
   await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode });
   await rename(temporaryPath, path);
   await chmod(path, mode);
+}
+
+function positiveHours(name, fallback = 30) {
+  const raw = process.env[name]?.trim();
+  const value = raw ? Number(raw) : fallback;
+  if (!Number.isFinite(value) || value <= 0 || value > 8760) {
+    throw new Error(`${name} must be a positive finite value no greater than 8760`);
+  }
+  return value;
+}
+
+function timestampSeconds(value, fieldName) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) throw new Error(`${fieldName} is not a valid timestamp`);
+  return timestamp / 1000;
+}
+
+async function writeBackupMetrics(report) {
+  const configuredPath = process.env.RECALLANT_BACKUP_METRICS_FILE?.trim();
+  if (!configuredPath) return null;
+  if (!configuredPath.startsWith("/")) {
+    throw new Error("RECALLANT_BACKUP_METRICS_FILE must be an absolute path");
+  }
+  const metricsPath = resolve(configuredPath);
+  const backupMaxAgeHours = positiveHours("RECALLANT_BACKUP_MAX_AGE_HOURS");
+  const restoreMaxAgeHours = positiveHours("RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS");
+  const temporaryPath = `${metricsPath}.tmp-${randomUUID()}`;
+  const content = [
+    "# HELP recallant_backup_report_present Whether a complete verified backup report is present.",
+    "# TYPE recallant_backup_report_present gauge",
+    "recallant_backup_report_present 1",
+    "# HELP recallant_backup_last_success_timestamp_seconds Unix timestamp of the latest verified backup artifact.",
+    "# TYPE recallant_backup_last_success_timestamp_seconds gauge",
+    `recallant_backup_last_success_timestamp_seconds ${timestampSeconds(report.backup_created_at, "backup_created_at")}`,
+    "# HELP recallant_backup_last_restore_verification_timestamp_seconds Unix timestamp of the latest passed restore rehearsal.",
+    "# TYPE recallant_backup_last_restore_verification_timestamp_seconds gauge",
+    `recallant_backup_last_restore_verification_timestamp_seconds ${timestampSeconds(report.restore_verified_at, "restore_verified_at")}`,
+    "# HELP recallant_backup_max_age_seconds Configured maximum age for a verified backup artifact.",
+    "# TYPE recallant_backup_max_age_seconds gauge",
+    `recallant_backup_max_age_seconds ${backupMaxAgeHours * 3600}`,
+    "# HELP recallant_backup_restore_max_age_seconds Configured maximum age for a passed restore rehearsal.",
+    "# TYPE recallant_backup_restore_max_age_seconds gauge",
+    `recallant_backup_restore_max_age_seconds ${restoreMaxAgeHours * 3600}`,
+    ""
+  ].join("\n");
+  try {
+    await writeFile(temporaryPath, content, { mode: 0o644 });
+    await chmod(temporaryPath, 0o644);
+    await rename(temporaryPath, metricsPath);
+  } finally {
+    await unlink(temporaryPath).catch(() => undefined);
+  }
+  await chmod(metricsPath, 0o644);
+  return metricsPath;
 }
 
 async function inventory(client) {
@@ -365,6 +420,7 @@ async function createBackup() {
     await writeJsonAtomic(join(backupDir, "verification.json"), report);
     await writeJsonAtomic(join(backupTarget, "latest-verification.json"), report);
     await writeJsonAtomic(join(backupTarget, "latest-manifest.json"), manifest);
+    await writeBackupMetrics(report);
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } finally {
     if (transactionOpen) await source.query("ROLLBACK").catch(() => undefined);

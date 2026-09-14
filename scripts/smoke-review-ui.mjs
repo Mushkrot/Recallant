@@ -3,10 +3,11 @@ import { once } from "node:events";
 import { URLSearchParams } from "node:url";
 import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 
 function htmlTextExcerpt(html, marker, length = 520) {
   const text = html
@@ -106,7 +107,10 @@ if (humanMemorySpace.memory_profile?.profile_key !== "personal_work_operations")
   );
 }
 const rawProviderSecret = `sk-review-ui-${randomUUID()}`;
-const rawDatabaseSecret = ['postgresql://', 'example-user:example-password@127.0.0.1:5432/example-db'].join('');
+const rawDatabaseSecret = [
+  "postgresql://",
+  "example-user:example-password@127.0.0.1:5432/example-db"
+].join("");
 const forbiddenGraphFixtureToken = `forbidden-graph-review-token-${randomUUID()}`;
 const expectedDocumentationStrategyOptions = [
   "keep_current_docs",
@@ -3306,7 +3310,8 @@ try {
     },
     body: JSON.stringify({
       project_id: projectId,
-      message: "\u00d0\u009f\u00d0\u00be\u00d0\u00b4\u00d0\u00ba\u00d0\u00bb\u00d1\u008e\u00d1\u0087\u00d0\u00b8 /srv/example-project \u00d1\u0087\u00d0\u00b5\u00d1\u0080\u00d0\u00b5\u00d0\u00b7 Cursor \u00d0\u00b8 mandatory startup layer"
+      message:
+        "\u00d0\u009f\u00d0\u00be\u00d0\u00b4\u00d0\u00ba\u00d0\u00bb\u00d1\u008e\u00d1\u0087\u00d0\u00b8 /srv/example-project \u00d1\u0087\u00d0\u00b5\u00d1\u0080\u00d0\u00b5\u00d0\u00b7 Cursor \u00d0\u00b8 mandatory startup layer"
     })
   });
   const onboardingConcreteJson = await onboardingConcreteChat.json();

@@ -33,7 +33,11 @@ cat >"$tmp_wrapper" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export RECALLANT_HOME="\${RECALLANT_HOME:-$RECALLANT_HOME}"
-if [[ -z "\${RECALLANT_ENV_FILE:-}" && -n "$CLI_ENV_FILE" ]]; then
+if [[ -n "$CLI_ENV_FILE" ]]; then
+  if [[ -n "\${RECALLANT_ENV_FILE:-}" && "\$RECALLANT_ENV_FILE" != "$CLI_ENV_FILE" ]]; then
+    echo "Recallant CLI profile conflict: RECALLANT_ENV_FILE does not match the installed profile" >&2
+    exit 2
+  fi
   export RECALLANT_ENV_FILE="$CLI_ENV_FILE"
 fi
 exec node "\$RECALLANT_HOME/apps/cli/dist/index.js" "\$@"

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { waitForStdioShutdown } from "./stdio-lifecycle.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   remoteMcpBridgeEnv,
@@ -269,12 +270,6 @@ export async function runRecallantRemoteBridge(
   };
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stdin.resume();
-  const keepAlive = setInterval(() => undefined, 60_000);
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  });
-  clearInterval(keepAlive);
+  await waitForStdioShutdown();
   await server.close();
 }

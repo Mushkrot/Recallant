@@ -11,10 +11,7 @@ const result = spawnSync(process.execPath, [smokeScript], {
   cwd: fileURLToPath(new URL("../", import.meta.url)),
   env: {
     ...process.env,
-    RECALLANT_PORTFOLIO_SCREENSHOT_DIR: outputDir,
-    RECALLANT_PORTFOLIO_STYLESHEET: fileURLToPath(
-      new URL("./portfolio-screenshot-theme.css", import.meta.url)
-    )
+    RECALLANT_PORTFOLIO_SCREENSHOT_DIR: outputDir
   },
   stdio: "inherit"
 });

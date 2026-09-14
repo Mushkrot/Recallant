@@ -11139,6 +11139,7 @@ export class RecallantDb {
     };
     return {
       ...readinessRow,
+      readiness_scope: "project",
       last_context_read_at: readinessRow.last_context_read_at,
       last_memory_write_at: readinessRow.last_memory_write_at,
       checkpoint_updated_at: readinessRow.checkpoint_updated_at,
@@ -11166,6 +11167,7 @@ export class RecallantDb {
 
   async getReviewDashboard(input?: {
     project_id?: string | null;
+    project_search?: string | null;
     selected_memory_id?: string | null;
     graph_candidate_id?: string | null;
     graph_lifecycle_state?: string | null;
@@ -11184,9 +11186,10 @@ export class RecallantDb {
   }) {
     const context = await this.ensureProject();
     let dashboardProjectId = input?.project_id ?? context.projectId;
+    const projectSearch = stringOrNull(input?.project_search)?.slice(0, 80) ?? null;
     const projects = await this.pool.query(
       `
-        WITH project_usage AS (
+        WITH project_usage_base AS (
           SELECT
             p.id,
             p.developer_id,
@@ -11230,24 +11233,45 @@ export class RecallantDb {
           WHERE p.developer_id = $1
             AND coalesce(lifecycle.value->>'visibility', 'active') <> 'hidden'
             AND coalesce(lifecycle.value->>'status', 'active') NOT IN ('detached', 'sandbox_cleaned')
+            AND (
+              $2::text IS NULL
+              OR p.name ILIKE '%' || $2::text || '%'
+              OR coalesce(p.primary_path, '') ILIKE '%' || $2::text || '%'
+              OR coalesce(p.memory_domain, '') ILIKE '%' || $2::text || '%'
+            )
+        ),
+        project_usage AS (
+          SELECT
+            project_usage_base.*,
+            GREATEST(
+              coalesce(last_memory_write_at, to_timestamp(0)),
+              coalesce(last_context_read_at, to_timestamp(0)),
+              coalesce(checkpoint_updated_at, to_timestamp(0)),
+              coalesce(updated_at, to_timestamp(0))
+            ) AS last_activity_at
+          FROM project_usage_base
         ),
         ranked AS (
           SELECT *,
             row_number() OVER (
               PARTITION BY coalesce(primary_path, id::text)
-              ORDER BY (session_count + event_count + memory_count) DESC, updated_at DESC
+              ORDER BY last_activity_at DESC,
+                       (session_count + event_count + memory_count) DESC,
+                       updated_at DESC
             ) AS rank
           FROM project_usage
         )
         SELECT id AS project_id, developer_id, name, primary_path, project_kind, memory_domain, updated_at,
                session_count, active_sessions, interrupted_sessions, event_count, memory_count,
-               checkpoint_updated_at, last_context_read_at, last_memory_write_at
+               checkpoint_updated_at, last_context_read_at, last_memory_write_at, last_activity_at
         FROM ranked
         WHERE rank = 1
-        ORDER BY updated_at DESC
+        ORDER BY last_activity_at DESC,
+                 (session_count + event_count + memory_count) DESC,
+                 updated_at DESC
         LIMIT 20
       `,
-      [context.developerId]
+      [context.developerId, projectSearch]
     );
     const projectIds = projects.rows.map((project) => project.project_id);
     const sourcesByProject = new Map<string, unknown[]>();

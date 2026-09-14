@@ -124,15 +124,15 @@ recallant doctor
 ```
 
 `recallant --version` should print the shared release version with git build metadata, for example
-`recallant 0.1.0-dev.1+<git-sha>` from a checkout install. The root and private workspace manifests,
+`recallant 0.1.0-dev.2+<git-sha>` from a checkout install. The root and private workspace manifests,
 runtime contract, and CLI use the same prerelease identity; the Git suffix identifies the exact
 installed checkout.
 
 For a published pinned prerelease, fetch the bootstrap script and source checkout from the same tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.1
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.2/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.2
 ```
 
 Onboarding leaves that tagged checkout pinned. Switching it to the moving development channel is an
@@ -212,11 +212,15 @@ status-only, logical-snapshot, or cleanup-unverified evidence fails closed with 
 operator action. Repair the job and run one successful native backup/rehearsal before retrying
 doctor; never edit the report to force readiness.
 
-For Prometheus installations that collect node-exporter systemd metrics, load
-`contrib/prometheus/recallant-backup.rules.yml`. Its portable `RecallantBackupFailed` alert fires
-when `recallant-backup.service` remains failed for one minute. Configure routing and receivers only
-in the protected deployment layer; do not add recipient, token, or private-origin details to the
-public rule. Validate the rule before reload with:
+For Prometheus installations that collect node-exporter systemd and textfile metrics, load
+`contrib/prometheus/recallant-backup.rules.yml`. Set `RECALLANT_BACKUP_METRICS_FILE` to a file in
+the node-exporter textfile collector directory; the installer detects the common collector
+directories when they already exist. Each successful native backup atomically publishes the
+artifact and restore timestamps plus their configured freshness limits. The portable rules then
+alert when the report is missing, either timestamp is overdue, or `recallant-backup.service`
+remains failed for one minute. Configure routing and receivers only in the protected deployment
+layer; do not add recipient, token, or private-origin details to the public rule. Validate the rule
+before reload with:
 
 ```bash
 promtool test rules contrib/prometheus/recallant-backup.rules.test.yml

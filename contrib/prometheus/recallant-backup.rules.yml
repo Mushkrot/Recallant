@@ -10,3 +10,24 @@ groups:
         annotations:
           summary: Recallant verified backup job failed
           description: Inspect recallant-backup.service, repair the failure, and run one successful verified backup.
+      - alert: RecallantBackupVerificationMissing
+        expr: absent(recallant_backup_report_present)
+        for: 5m
+        labels:
+          severity: critical
+          service: recallant
+        annotations:
+          summary: Recallant verified backup report is missing
+          description: Run recallant-backup.service successfully and confirm the node exporter textfile contains the latest verified report metric.
+      - alert: RecallantBackupVerificationOverdue
+        expr: |
+          (time() - recallant_backup_last_success_timestamp_seconds > recallant_backup_max_age_seconds)
+          or
+          (time() - recallant_backup_last_restore_verification_timestamp_seconds > recallant_backup_restore_max_age_seconds)
+        for: 5m
+        labels:
+          severity: critical
+          service: recallant
+        annotations:
+          summary: Recallant verified backup report is overdue
+          description: Run recallant-backup.service and verify that both the artifact and restore-rehearsal timestamps are within their configured freshness limits.

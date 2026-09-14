@@ -211,6 +211,53 @@ async function readExistingConfig(projectDir: string) {
   }
 }
 
+export async function validateExistingProjectBinding(input: {
+  database: RecallantDb | null;
+  existingConfig: AttachConfig | null;
+  projectDir: string;
+  expectedDeveloperId?: string | null;
+}) {
+  const projectId = input.existingConfig?.project_id;
+  if (!projectId) return { status: "not_configured" as const };
+  if (!input.database) {
+    throw new Error(
+      "PROJECT_BINDING_UNVERIFIED: existing .recallant/config cannot be validated without Recallant storage"
+    );
+  }
+
+  let binding: Awaited<ReturnType<RecallantDb["getProjectBinding"]>>;
+  try {
+    binding = await input.database.getProjectBinding(projectId);
+  } catch {
+    throw new Error("PROJECT_BINDING_UNVERIFIED: existing project binding could not be read");
+  }
+  if (!binding) {
+    throw new Error(
+      `PROJECT_BINDING_MISSING: existing .recallant/config points to project ${projectId}, but that project is not registered`
+    );
+  }
+
+  const expectedPath = resolve(input.projectDir);
+  const boundPath = binding.primary_path ? resolve(binding.primary_path) : null;
+  if (boundPath !== expectedPath) {
+    throw new Error(
+      `PROJECT_ID_PATH_MISMATCH: existing .recallant/config project ${projectId} is bound to ${binding.primary_path ?? "no path"}, not ${expectedPath}`
+    );
+  }
+
+  const expectedDeveloperId =
+    input.expectedDeveloperId?.trim() || process.env.RECALLANT_DEVELOPER_ID?.trim() || null;
+  if (expectedDeveloperId && binding.developer_id !== expectedDeveloperId) {
+    throw new Error("PROJECT_OWNER_MISMATCH: existing project belongs to another developer");
+  }
+  return {
+    status: "verified" as const,
+    projectId: binding.project_id,
+    developerId: binding.developer_id,
+    primaryPath: binding.primary_path
+  };
+}
+
 function upsertMemorySection(existing: string | null) {
   if (!existing) return `# Agent Instructions\n\n${attachMemorySection}`;
   const pattern = /## Memory \(Recallant\)[\s\S]*?(?=\n## |\n# |$)/;
@@ -459,27 +506,17 @@ async function resolveProjectIdentity(input: {
 }) {
   const developerId = process.env.RECALLANT_DEVELOPER_ID ?? randomUUID();
   if (input.existingConfig?.project_id) {
-    if (!input.database) {
-      return { projectId: input.existingConfig.project_id, developerId, source: "existing_config" };
-    }
-    const binding = await input.database.getProjectBinding(input.existingConfig.project_id);
-    if (binding?.primary_path === input.projectDir) {
+    const binding = await validateExistingProjectBinding({
+      database: input.database,
+      existingConfig: input.existingConfig,
+      projectDir: input.projectDir,
+      expectedDeveloperId: process.env.RECALLANT_DEVELOPER_ID
+    });
+    if (binding.status === "verified") {
       return {
-        projectId: input.existingConfig.project_id,
-        developerId: binding.developer_id,
+        projectId: binding.projectId,
+        developerId: binding.developerId,
         source: "existing_config"
-      };
-    }
-    const issue = binding
-      ? `Existing .recallant/config points to project ${input.existingConfig.project_id} bound to ${binding.primary_path ?? "no path"}, not ${input.projectDir}. Ignoring stale/foreign config.`
-      : `Existing .recallant/config points to missing project ${input.existingConfig.project_id}. Ignoring stale config.`;
-    if (input.database) {
-      const context = await input.database.ensureProject(input.projectDir);
-      return {
-        projectId: context.projectId,
-        developerId: context.developerId,
-        source: "database",
-        existingConfigIssue: issue
       };
     }
   }
