@@ -11,6 +11,15 @@ const repoRoot = process.cwd();
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
   "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+// The quickstart must be reproducible when it runs on a host that also has a
+// managed Recallant service. Do not let host-specific RECALLANT_* settings
+// (data paths, backup paths, service profiles or credentials) leak into the
+// fresh-project process or its public output.
+for (const name of Object.keys(process.env)) {
+  if (name.startsWith("RECALLANT_")) delete process.env[name];
+}
+
 const developerId = randomUUID();
 const cleanRoot = await mkdtemp(join(tmpdir(), "recallant-public-quickstart-"));
 const home = join(cleanRoot, "home");
@@ -43,6 +52,7 @@ function run(command, args, options = {}) {
       RECALLANT_PROJECT_ID: "",
       RECALLANT_PROJECT_PATH: "",
       RECALLANT_ENV_FILE: envFile,
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
       RECALLANT_EMBEDDING_PROVIDER: "deterministic",
       RECALLANT_EMBEDDING_DIMS: "8",
       RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
@@ -81,6 +91,7 @@ async function runJsonAsync(command, args, options = {}) {
       RECALLANT_PROJECT_ID: "",
       RECALLANT_PROJECT_PATH: "",
       RECALLANT_ENV_FILE: envFile,
+      RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY: "true",
       RECALLANT_EMBEDDING_PROVIDER: "deterministic",
       RECALLANT_EMBEDDING_DIMS: "8",
       RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
@@ -207,6 +218,7 @@ async function workbenchNavigationProof(projectId) {
     RECALLANT_AUTH_TOKEN: token,
     RECALLANT_SESSION_SECRET: `quickstart-session-${randomUUID()}`
   });
+  process.env.RECALLANT_DISABLE_SYSTEMD_ENV_DISCOVERY = "true";
   delete process.env.RECALLANT_CLOUDFLARE_MODE;
   delete process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH;
   delete process.env.RECALLANT_ADMIN_EMAILS;

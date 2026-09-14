@@ -18,8 +18,8 @@ self-host evaluation.
 For an immutable prerelease install, use the versioned command after the tag is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.1
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.2/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.2
 ```
 
 That checkout stays pinned to the prerelease tag. It does not silently move to `main` during
@@ -43,11 +43,11 @@ Verify the CLI:
 
 ```bash
 recallant --version
-# recallant 0.1.0-dev.1+<git-sha>
+# recallant 0.1.0-dev.2+<git-sha>
 ```
 
 `recallant --version` reports the shared release version with git build metadata when installed from
-a checkout. It should report `0.1.0-dev.1` plus the exact source revision for this prerelease.
+a checkout. It should report `0.1.0-dev.2` plus the exact source revision for this prerelease.
 
 ## 2. Make A Project Agent-Ready
 
@@ -92,8 +92,31 @@ The one-command flow selects only a reachable local route or an explicitly confi
 attaches the project, analyzes documentation posture, prepares thin local agent configuration for
 Codex, installs automatic native Codex hooks plus compatibility helpers, proves capture and recall,
 and prints the private Workbench outcome.
-Codex still requires the owner to review and trust the project command hook in `/hooks`. Advanced flags can opt out of automatic hooks with
-`--no-local-hooks`, but that is not part of the beginner path.
+
+### Required owner step for automatic Codex capture
+
+Onboarding installs the hook, but Codex will not run a new project command until the owner trusts
+it. Complete this short security step after onboarding:
+
+1. Open Codex in the project and enter `/hooks`.
+2. Find **Recallant command hook** (the command is `recallant codex-hook`), review it, and choose
+   **Trust**.
+3. Perform one normal Codex action.
+4. Confirm the result:
+
+   ```bash
+   recallant doctor --project-dir /path/to/project --require-capture --format json
+   ```
+
+The command should report `capture_active: true` after the trusted hook sends its first fresh event.
+This approval is required for automatic Codex capture because Codex protects project commands from
+being enabled silently. Recallant cannot inspect or bypass that protection. Until the approval is
+made, the memory loop may be ready while automatic capture remains inactive; this is shown as
+`capture_active=false`, not as data loss.
+
+If you intentionally use Recallant through manual MCP calls or another client, this Codex approval
+is not needed. In that setup, `capture_active` remains false by design. The advanced
+`--no-local-hooks` option has the same effect and is not part of the beginner path.
 
 Before changing project files, onboarding also checks version-control safety. If Git is available
 but the project is not a usable Git work tree, onboarding offers to initialize Git first or continue

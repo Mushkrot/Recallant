@@ -3,10 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 const projectId = randomUUID();
 const projectPath = await mkdtemp(join(tmpdir(), "recallant-diagnostic-conflicts-"));
@@ -113,8 +114,7 @@ try {
     `${JSON.stringify(
       {
         diagnostic_memory_conflicts_smoke: "passed",
-        diagnostic_markers_excluded:
-          diagnosticIds.length + legacyRemoteAcceptanceIds.length,
+        diagnostic_markers_excluded: diagnosticIds.length + legacyRemoteAcceptanceIds.length,
         genuine_conflicts_reported: genuineIds.length
       },
       null,

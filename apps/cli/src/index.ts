@@ -13,14 +13,16 @@ import {
   appendFile,
   chmod,
   mkdir,
+  open,
   readFile,
   realpath,
   rename,
   stat,
+  unlink,
   writeFile
 } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   codexHookEventNames,
@@ -68,7 +70,7 @@ import {
   type StarterDocsPlan
 } from "./documentation-posture.js";
 import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
-import { runAttach } from "./attach.js";
+import { runAttach, validateExistingProjectBinding } from "./attach.js";
 import { deliveryQaGuidance } from "./agent-guidance.js";
 import {
   inspectCodexHookConfig,
@@ -112,6 +114,7 @@ import { runLocalCleanup } from "./local-cleanup.js";
 import { runProjectSanitize } from "./project-sanitize.js";
 import { buildRemoteDoctorReport, runRemoteDoctor } from "./remote-doctor.js";
 import { runRemoteCleanup } from "./remote-cleanup.js";
+import { mergeDoctorReadinessContract } from "./readiness.js";
 import {
   buildVaultCandidatePlan,
   buildVaultMarkdownExportPlan,
@@ -797,6 +800,51 @@ async function getLocalSpoolStatus(argv: readonly string[]) {
   };
 }
 
+const spoolSyncLockStaleAfterMs = 120_000;
+
+async function withSpoolSyncLock<T>(argv: readonly string[], work: () => Promise<T>) {
+  const lockPath = join(spoolDir(argv), "sync.lock");
+  await mkdir(spoolDir(argv), { recursive: true });
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    try {
+      handle = await open(lockPath, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const lockStat = await stat(lockPath).catch(() => null);
+      const stale = lockStat && Date.now() - lockStat.mtimeMs > spoolSyncLockStaleAfterMs;
+      if (!stale) return { acquired: false as const, value: null as T | null };
+      await unlink(lockPath).catch(() => undefined);
+      handle = await open(lockPath, "wx");
+    }
+    await handle.writeFile(
+      `${JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() })}\n`
+    );
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      await handle?.close().catch(() => undefined);
+      await unlink(lockPath).catch(() => undefined);
+    };
+    const onSigterm = () => {
+      void release().finally(() => process.exit(143));
+    };
+    process.once("SIGTERM", onSigterm);
+    try {
+      return { acquired: true as const, value: await work() };
+    } finally {
+      process.off("SIGTERM", onSigterm);
+      await release();
+    }
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+      await unlink(lockPath).catch(() => undefined);
+    }
+  }
+}
+
 type AgentSessionState = {
   schema_version: 1;
   status: "active" | "closed" | "offline";
@@ -822,6 +870,7 @@ type AgentSessionState = {
     last_event_name: string;
     last_turn_id?: string | null;
     last_mode: "server" | "offline_spool";
+    transport?: "local_database" | "remote_mcp";
     observation_count: number;
   };
 };
@@ -1144,7 +1193,8 @@ async function callRemoteAgentTool(
   connection: RemoteAgentConnection,
   toolName: string,
   args: Record<string, unknown>,
-  sessionId?: string | null
+  sessionId?: string | null,
+  timeoutMs = 5_000
 ) {
   const remoteArgs = { ...args };
   if ("raw_artifacts" in remoteArgs) {
@@ -1160,7 +1210,7 @@ async function callRemoteAgentTool(
     remoteAgentMcpInput(connection, sessionId),
     toolName,
     remoteArgs,
-    { id: `recallant-cli-${toolName}-${randomUUID()}`, timeoutMs: 5_000 }
+    { id: `recallant-cli-${toolName}-${randomUUID()}`, timeoutMs }
   );
   if (!result.payload) {
     throw new RemoteMcpCallError(
@@ -1176,6 +1226,36 @@ function isUuid(value: unknown): value is string {
     typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
   );
+}
+
+function remoteAgentScopeIdentity(connection: RemoteAgentConnection) {
+  const scope = connection.scope.credential_scope;
+  const serverUrl = connection.scope.destination.server_url;
+  if (
+    !serverUrl ||
+    !isUuid(scope.project_id) ||
+    !isUuid(scope.developer_id) ||
+    typeof scope.client_id !== "string" ||
+    !scope.client_id.trim()
+  ) {
+    return null;
+  }
+  return {
+    project_id: scope.project_id,
+    developer_id: scope.developer_id,
+    client_id: scope.client_id.trim(),
+    server_url: serverUrl
+  };
+}
+
+function requireRemoteAgentScopeIdentity(connection: RemoteAgentConnection) {
+  const identity = remoteAgentScopeIdentity(connection);
+  if (!identity) {
+    throw new Error(
+      "VALIDATION_ERROR: remote consent must contain a scoped HTTPS endpoint, project_id, developer_id, and client_id"
+    );
+  }
+  return identity;
 }
 
 function remoteEventKind(kind: string) {
@@ -1678,6 +1758,14 @@ async function commandUsesRemoteOnlyBootstrap(argv: readonly string[]) {
   if (command === "remote-bridge" || command === "connect-remote" || command === "remote-doctor") {
     return true;
   }
+  if (command === "doctor") {
+    const dir = projectDir(argv);
+    const [connection, config] = await Promise.all([
+      readRemoteAgentConnection(dir),
+      readProjectConfig(dir)
+    ]);
+    return connection !== null && !config?.project_id;
+  }
   if (!["agent-start", "agent-event", "agent-closeout", "sync-spool"].includes(command ?? "")) {
     return false;
   }
@@ -1789,8 +1877,18 @@ async function appendCliAuditSpool(
     record_kind: "cli_audit",
     payload: redactSystemActivityValue(payload)
   };
-  await mkdir(spoolDir(argv), { recursive: true });
-  await appendFile(auditSpoolPath(argv), `${JSON.stringify(record)}\n`);
+  try {
+    await mkdir(spoolDir(argv), { recursive: true });
+    await appendFile(auditSpoolPath(argv), `${JSON.stringify(record)}\n`);
+  } catch {
+    return {
+      durable: false,
+      surface: "cli",
+      operation: String(payload.operation ?? argv[2] ?? "unknown"),
+      status: "failed",
+      reason: "Local CLI audit spool is unavailable; continuing without durable audit."
+    };
+  }
   return {
     durable: false,
     surface: "cli",
@@ -2229,7 +2327,7 @@ async function codexNativeHookReadiness(projectDir: string) {
       ? "not_programmatically_verifiable"
       : "review_required_before_first_native_run",
     trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
-    proof_command: `recallant doctor --project-dir ${projectDir} --require-agent-audit --format json`,
+    proof_command: `recallant doctor --project-dir ${projectDir} --require-capture --format json`,
     fail_soft: true,
     writes_global_config: false
   };
@@ -3011,19 +3109,26 @@ async function checkMemoryLoopReadiness(input: {
   let databaseError: string | null = null;
   if (config?.project_id && input.database) {
     try {
-      const dashboard = await input.database.getReviewDashboard({ project_id: config.project_id });
-      const readiness = objectValue(dashboard.project_readiness);
+      // Read readiness directly for the configured project. The review dashboard may
+      // intentionally fall back to another visible project when its requested project
+      // is unavailable; that fallback must never become this project's readiness proof.
+      const readiness = objectValue(
+        await input.database.getProjectReadiness({ project_id: config.project_id })
+      );
       const dbReady = Boolean(
         readiness.last_context_read_at &&
         readiness.last_memory_write_at &&
         readiness.checkpoint_updated_at
       );
       databaseReadiness = {
+        scope: "project",
         ready: dbReady,
         project_registered: Boolean(readiness.project_registered),
         last_context_read_at: readiness.last_context_read_at ?? null,
         last_memory_write_at: readiness.last_memory_write_at ?? null,
         checkpoint_updated_at: readiness.checkpoint_updated_at ?? null,
+        last_automatic_capture_at: readiness.last_automatic_capture_at ?? null,
+        automatic_capture_source: readiness.automatic_capture_source ?? null,
         capture_event_count: readiness.capture_event_count ?? 0,
         captured_decision_count: readiness.captured_decision_count ?? 0,
         active_sessions: readiness.active_sessions ?? 0,
@@ -3058,6 +3163,7 @@ async function checkMemoryLoopReadiness(input: {
     },
     local_state: localState
       ? {
+          scope: "client_session",
           status: localState.status,
           capture_status: localStatus,
           session_id: localState.session_id,
@@ -3066,7 +3172,7 @@ async function checkMemoryLoopReadiness(input: {
           last_checkpoint_at: localState.last_checkpoint_at ?? null,
           updated_at: localState.updated_at
         }
-      : { status: "missing", capture_status: "not_observed" },
+      : { scope: "client_session", status: "missing", capture_status: "not_observed" },
     database_readiness: databaseReadiness,
     database_error: databaseError
   };
@@ -3117,50 +3223,6 @@ function readinessContractForDoctor(input: {
     automatic_capture_source: automaticAgentAudit.observed === true ? "codex_native_hook" : null,
     capture_freshness_hours: Number(automaticAgentAudit.capture_freshness_hours ?? 24),
     ingestion_approval_ref: null
-  });
-}
-
-function readinessContractFromPersistentStatus(
-  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
-) {
-  const contract = readiness?.readiness_contract;
-  return contract && typeof contract === "object"
-    ? (contract as ReturnType<typeof buildRecallantReadinessContract>)
-    : null;
-}
-
-function mergeDoctorReadinessContract(
-  fallback: ReturnType<typeof buildRecallantReadinessContract>,
-  readiness: Awaited<ReturnType<RecallantDb["getProjectReadiness"]>> | null
-) {
-  const persistent = readinessContractFromPersistentStatus(readiness);
-  if (!persistent) return fallback;
-  return buildRecallantReadinessContract({
-    configured: persistent.configured || fallback.configured,
-    remote_mcp_ready: persistent.remote_mcp_ready || fallback.remote_mcp_ready,
-    context_ready: persistent.context_ready || fallback.context_ready,
-    semantic_memory_ready: persistent.semantic_memory_ready || fallback.semantic_memory_ready,
-    memory_loop_ready: persistent.memory_loop_ready || fallback.memory_loop_ready,
-    ingestion_approved: persistent.ingestion_approved || fallback.ingestion_approved,
-    last_context_read_at:
-      persistent.evidence.last_context_read_at ?? fallback.evidence.last_context_read_at,
-    last_memory_write_at:
-      persistent.evidence.last_memory_write_at ?? fallback.evidence.last_memory_write_at,
-    last_checkpoint_at:
-      persistent.evidence.last_checkpoint_at ?? fallback.evidence.last_checkpoint_at,
-    last_semantic_recall_proof_at:
-      persistent.evidence.last_semantic_recall_proof_at ??
-      fallback.evidence.last_semantic_recall_proof_at,
-    last_automatic_capture_at:
-      persistent.evidence.last_automatic_capture_at ?? fallback.evidence.last_automatic_capture_at,
-    automatic_capture_source:
-      persistent.evidence.automatic_capture_source ?? fallback.evidence.automatic_capture_source,
-    capture_freshness_hours: Math.max(
-      persistent.capture_freshness_hours,
-      fallback.capture_freshness_hours
-    ),
-    ingestion_approval_ref:
-      persistent.evidence.ingestion_approval_ref ?? fallback.evidence.ingestion_approval_ref
   });
 }
 
@@ -3439,7 +3501,7 @@ function doctorOwnerSummary(input: {
     ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
       ? `Run recallant connect codex --project-dir ${input.projectDir}, then review the command hook in /hooks.`
       : automaticAgentAuditConfigured && !automaticAgentAuditActive
-        ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-agent-audit."
+        ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-capture."
         : "No startup-layer action is required. Continue normal work and close out the session when done."
     : remoteOnly
       ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
@@ -3472,6 +3534,7 @@ function doctorOwnerSummary(input: {
       "Open /hooks in Codex, review the Recallant command hook, and trust it.",
     connection_status: connectionStatus,
     configured,
+    scope: "client_session",
     actually_recording: automaticAgentAuditActive,
     memory_loop_ready: memoryLoopReady,
     require_capture_gate: input.requireCapture,
@@ -3490,7 +3553,7 @@ function okNo(value: boolean) {
 function doctorHumanReport(result: {
   owner_summary: ReturnType<typeof doctorOwnerSummary>;
   readiness_contract: ReturnType<typeof readinessContractForDoctor>;
-  postgres: { configured: boolean; reachable: boolean };
+  postgres: { configured: boolean; reachable: boolean; scope?: string; probe?: string };
   project_config: { path: string; present: boolean };
   capture_readiness: Awaited<ReturnType<typeof checkMemoryLoopReadiness>> & {
     required: boolean;
@@ -3538,6 +3601,9 @@ function doctorHumanReport(result: {
     "Checks:",
     `- Recallant CLI: installed`,
     `- Database: ${databaseStatus}`,
+    ...(result.postgres.probe === "skipped" && result.postgres.scope === "remote_only"
+      ? ["- Database probe: skipped (remote-only project; remote MCP is the configured target)"]
+      : []),
     `- Local model: ${localModelStatus}`,
     `- Pending embeddings: ${result.pending_embeddings.pending_chunks ?? "unknown"}`,
     `- Semantic indexing: ${semanticIndexingStatus}`,
@@ -3545,6 +3611,7 @@ function doctorHumanReport(result: {
     `- Backup job: ${result.production_readiness.backup_job.ok ? "ready" : `not ready (${result.production_readiness.backup_job.reason})`}`,
     `- Backup artifact: ${result.production_readiness.latest_backup_verification.backup.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.backup.reason})`}`,
     `- Restore rehearsal: ${result.production_readiness.latest_backup_verification.restore.fresh ? "fresh" : `not fresh (${result.production_readiness.latest_backup_verification.restore.reason})`}`,
+    `- Physical PostgreSQL target: ${result.production_readiness.physical_target.status}`,
     `- Current project: ${summary.local_storage_status}`,
     `- Remote MCP: ${summary.remote_mcp_ready ? "ready" : "not configured"}`,
     `- Agent capture configured: ${okNo(captureConfigured)}`,
@@ -4328,6 +4395,12 @@ type DatabaseUrlProfile = {
 };
 
 const productionReadinessEnvKeys = [
+  "RECALLANT_DATA_DIR",
+  "RECALLANT_BACKUP_TARGET",
+  "RECALLANT_POSTGRES_CONTAINER_NAME",
+  "RECALLANT_EXPECTED_POSTGRES_SYSTEM_IDENTIFIER",
+  "RECALLANT_EXPECTED_POSTGRES_MOUNT_SOURCE",
+  "RECALLANT_EXPECTED_POSTGRES_MOUNT_DESTINATION",
   "RECALLANT_PUBLIC_WORKBENCH_URL",
   "RECALLANT_PUBLIC_URL",
   "RECALLANT_WORKBENCH_ORIGIN_URL",
@@ -4560,6 +4633,60 @@ function productionEnvValue(values: ProductionReadinessEnvValues, key: Productio
   return envValueIsSet(value) ? value : undefined;
 }
 
+function canonicalBackupProfile(env: ProductionReadinessEnvValues) {
+  const configuredDataDir = productionEnvValue(env, "RECALLANT_DATA_DIR");
+  const configuredBackupTarget = productionEnvValue(env, "RECALLANT_BACKUP_TARGET");
+  const dataDir = configuredDataDir ?? "/var/lib/recallant";
+  const backupTarget = configuredBackupTarget ?? join(dataDir, "backups");
+  const valid = isAbsolute(dataDir) && isAbsolute(backupTarget);
+  const canonicalDataDir = normalize(dataDir);
+  const canonicalBackupTarget = normalize(backupTarget);
+  return {
+    valid,
+    data_dir: canonicalDataDir,
+    backup_target: canonicalBackupTarget,
+    verification_file: join(canonicalBackupTarget, "latest-verification.json"),
+    manifest_file: join(canonicalBackupTarget, "latest-manifest.json"),
+    configured_data_dir: configuredDataDir ? normalize(configuredDataDir) : null,
+    configured_backup_target: configuredBackupTarget ? normalize(configuredBackupTarget) : null
+  };
+}
+
+function backupProfileStatus(env: ProductionReadinessEnvValues | Record<string, string>) {
+  const profile = canonicalBackupProfile(env);
+  const configuredVerification = productionEnvValue(
+    env as ProductionReadinessEnvValues,
+    "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE"
+  );
+  const configuredManifest = productionEnvValue(
+    env as ProductionReadinessEnvValues,
+    "RECALLANT_LATEST_BACKUP_MANIFEST"
+  );
+  const differences: string[] = [];
+  if (!profile.valid) differences.push("relative_backup_path");
+  if (
+    configuredVerification &&
+    normalize(configuredVerification) !== normalize(profile.verification_file)
+  ) {
+    differences.push("latest_verification_file");
+  }
+  if (configuredManifest && normalize(configuredManifest) !== normalize(profile.manifest_file)) {
+    differences.push("latest_manifest");
+  }
+  return {
+    configured: Boolean(
+      configuredVerification ||
+      configuredManifest ||
+      profile.configured_data_dir ||
+      profile.configured_backup_target
+    ),
+    status: differences.length === 0 ? "aligned" : "mismatch",
+    ok: differences.length === 0,
+    differences,
+    profile
+  };
+}
+
 function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrlProfile) {
   const differences: string[] = [];
   if (!cli.components || !service.components) return differences;
@@ -4571,6 +4698,170 @@ function serviceProfileDifferences(cli: DatabaseUrlProfile, service: DatabaseUrl
   if (cli.components.database !== service.components.database) differences.push("database");
   if (cli.credential !== service.credential) differences.push("credential");
   return differences;
+}
+
+type PhysicalTargetStatus = "matched" | "mismatch" | "unknown" | "not_configured";
+
+function physicalTargetOperatorAction(status: PhysicalTargetStatus) {
+  if (status === "matched")
+    return "The configured PostgreSQL physical target matches the observed runtime.";
+  if (status === "mismatch") {
+    return "Stop before treating this database as production: align the expected PostgreSQL system identifier and container mount with the selected profile.";
+  }
+  if (status === "unknown") {
+    return "Do not claim physical-target readiness until the expected PostgreSQL identity and container mount can be observed.";
+  }
+  return "Configure expected PostgreSQL system identity and mount fields before claiming physical-target readiness.";
+}
+
+function physicalTargetReadinessConfig(env: ProductionReadinessEnvValues) {
+  const profile = canonicalBackupProfile(env);
+  const containerName = productionEnvValue(env, "RECALLANT_POSTGRES_CONTAINER_NAME") ?? null;
+  const expectedSystemIdentifier =
+    productionEnvValue(env, "RECALLANT_EXPECTED_POSTGRES_SYSTEM_IDENTIFIER") ?? null;
+  const expectedMountSource =
+    productionEnvValue(env, "RECALLANT_EXPECTED_POSTGRES_MOUNT_SOURCE") ??
+    (containerName && profile.configured_data_dir
+      ? join(profile.configured_data_dir, "postgres")
+      : null);
+  const expectedMountDestination =
+    productionEnvValue(env, "RECALLANT_EXPECTED_POSTGRES_MOUNT_DESTINATION") ??
+    (containerName ? "/var/lib/postgresql/data" : null);
+  return {
+    container_name: containerName,
+    system_identifier: expectedSystemIdentifier,
+    mount_source: expectedMountSource ? normalize(expectedMountSource) : null,
+    mount_destination: expectedMountDestination ? normalize(expectedMountDestination) : null
+  };
+}
+
+function inspectPostgresContainerMount(containerName: string) {
+  const result = spawnSync(
+    "docker",
+    ["inspect", "--format", "{{json .Mounts}}\n{{.State.Status}}", containerName],
+    { encoding: "utf8" }
+  );
+  if (result.error || result.status !== 0) {
+    return {
+      status: "unknown" as const,
+      mounts: [],
+      container_status: null,
+      error: result.error?.message ?? String(result.stderr ?? "docker inspect failed").trim()
+    };
+  }
+  const lines = String(result.stdout ?? "")
+    .trim()
+    .split("\n");
+  try {
+    const mounts = JSON.parse(lines[0] ?? "[]");
+    return {
+      status: "observed" as const,
+      mounts: Array.isArray(mounts) ? mounts : [],
+      container_status: lines[1] || null,
+      error: null
+    };
+  } catch {
+    return {
+      status: "unknown" as const,
+      mounts: [],
+      container_status: lines[1] || null,
+      error: "docker_inspect_mounts_invalid"
+    };
+  }
+}
+
+async function checkPhysicalPostgresTarget(input: {
+  env: ProductionReadinessEnvValues;
+  databaseIdentity: { observed: string | null; error: string | null };
+}) {
+  const expected = physicalTargetReadinessConfig(input.env);
+  const databaseConfigured = expected.system_identifier !== null;
+  const mountConfigured =
+    expected.container_name !== null &&
+    expected.mount_source !== null &&
+    expected.mount_destination !== null;
+  if (!databaseConfigured && !mountConfigured) {
+    return {
+      status: "not_configured" as const,
+      ok: null,
+      differences: [],
+      expected,
+      observed: {
+        system_identifier: input.databaseIdentity.observed,
+        container_name: null,
+        container_status: null,
+        mount_source: null,
+        mount_destination: null
+      },
+      sources: { database: "not_configured", container: "not_configured" },
+      errors: { database: input.databaseIdentity.error, container: null },
+      operator_action: physicalTargetOperatorAction("not_configured")
+    };
+  }
+
+  const differences: string[] = [];
+  const databaseMatch =
+    databaseConfigured && input.databaseIdentity.observed !== null
+      ? input.databaseIdentity.observed === expected.system_identifier
+      : null;
+  if (databaseConfigured && databaseMatch !== true) {
+    differences.push(
+      input.databaseIdentity.observed === null
+        ? "database_system_identifier_unobserved"
+        : "database_system_identifier"
+    );
+  }
+
+  let containerStatus: string | null = null;
+  let observedMountSource: string | null = null;
+  let observedMountDestination: string | null = null;
+  let containerError: string | null = null;
+  let containerObserved = false;
+  if (mountConfigured) {
+    const inspected = inspectPostgresContainerMount(expected.container_name as string);
+    containerStatus = inspected.container_status;
+    containerError = inspected.error;
+    containerObserved = inspected.status === "observed";
+    const matchingMount = inspected.mounts.find(
+      (mount: Record<string, unknown>) =>
+        normalize(String(mount.Source ?? "")) === expected.mount_source &&
+        normalize(String(mount.Destination ?? "")) === expected.mount_destination
+    );
+    if (matchingMount) {
+      observedMountSource = normalize(String(matchingMount.Source));
+      observedMountDestination = normalize(String(matchingMount.Destination));
+    } else {
+      differences.push(
+        containerObserved ? "postgres_container_mount" : "postgres_container_mount_unobserved"
+      );
+    }
+  }
+
+  const status: PhysicalTargetStatus =
+    differences.length > 0
+      ? differences.some((difference) => difference.endsWith("_unobserved"))
+        ? "unknown"
+        : "mismatch"
+      : "matched";
+  return {
+    status,
+    ok: status === "matched",
+    differences,
+    expected,
+    observed: {
+      system_identifier: input.databaseIdentity.observed,
+      container_name: mountConfigured ? expected.container_name : null,
+      container_status: containerStatus,
+      mount_source: observedMountSource,
+      mount_destination: observedMountDestination
+    },
+    sources: {
+      database: databaseConfigured ? "pg_control_system" : "not_configured",
+      container: mountConfigured ? "docker_inspect" : "not_configured"
+    },
+    errors: { database: input.databaseIdentity.error, container: containerError },
+    operator_action: physicalTargetOperatorAction(status)
+  };
 }
 
 async function checkServiceEnvProfile() {
@@ -4587,6 +4878,7 @@ async function checkServiceEnvProfile() {
       service_database: null,
       differences: [] as string[],
       credential_match: null,
+      backup_profile: null,
       ok: true,
       warnings: [] as string[]
     };
@@ -4603,12 +4895,14 @@ async function checkServiceEnvProfile() {
       service_database: null,
       differences: [] as string[],
       credential_match: null,
+      backup_profile: null,
       ok: false,
       warnings: ["Configured service env file is missing or unreadable."]
     };
   }
 
   const serviceEnv = loaded.values;
+  const backupProfile = backupProfileStatus(serviceEnv);
   const serviceProfile = parseDatabaseUrlProfile(serviceEnv.RECALLANT_DATABASE_URL);
   if (cliProfile.status !== "parsed" || serviceProfile.status !== "parsed") {
     const status =
@@ -4625,6 +4919,7 @@ async function checkServiceEnvProfile() {
       service_database: publicDatabaseProfile(serviceProfile),
       differences: [] as string[],
       credential_match: null,
+      backup_profile: backupProfile,
       ok: false,
       warnings: [
         cliProfile.status !== "parsed"
@@ -4635,7 +4930,8 @@ async function checkServiceEnvProfile() {
   }
 
   const differences = serviceProfileDifferences(cliProfile, serviceProfile);
-  const aligned = differences.length === 0;
+  const aligned = differences.length === 0 && backupProfile.ok;
+  const allDifferences = [...differences, ...backupProfile.differences];
   return {
     configured: true,
     status: aligned ? "aligned" : "mismatch",
@@ -4644,13 +4940,23 @@ async function checkServiceEnvProfile() {
     production_env: { configured_keys: configuredProductionEnvKeys(serviceEnv) },
     cli_database: publicDatabaseProfile(cliProfile),
     service_database: publicDatabaseProfile(serviceProfile),
-    differences,
+    differences: allDifferences,
     credential_match: cliProfile.credential === serviceProfile.credential,
+    backup_profile: backupProfile,
     ok: aligned,
     warnings: aligned
       ? ([] as string[])
       : [
-          "CLI and service env database profiles differ; align them before treating the public Workbench origin as production-ready."
+          ...(differences.length > 0
+            ? [
+                "CLI and service env database profiles differ; align them before treating the public Workbench origin as production-ready."
+              ]
+            : []),
+          ...(backupProfile.differences.length > 0
+            ? [
+                "Backup reader and writer paths differ; align RECALLANT_LATEST_BACKUP_* with the canonical backup target before treating backup evidence as production-ready."
+              ]
+            : [])
         ]
   };
 }
@@ -4746,6 +5052,30 @@ function backupOperatorAction(reason: string | null) {
     return "Set a positive backup freshness maximum no greater than 8760 hours.";
   }
   return "Create and verify a native PostgreSQL backup with a successful disposable restore rehearsal.";
+}
+
+function backupArtifactIdentity(value: unknown) {
+  const record = objectValue(value);
+  const artifact = objectValue(record.artifact);
+  return {
+    backup_id: stringValue(record.backup_id) ?? null,
+    artifact_path: stringValue(artifact.path) ?? null,
+    artifact_sha256: stringValue(artifact.sha256) ?? null
+  };
+}
+
+function backupIdentitiesMatch(
+  left: ReturnType<typeof backupArtifactIdentity>,
+  right: ReturnType<typeof backupArtifactIdentity>
+) {
+  return (
+    left.backup_id !== null &&
+    left.backup_id === right.backup_id &&
+    left.artifact_path !== null &&
+    left.artifact_path === right.artifact_path &&
+    left.artifact_sha256 !== null &&
+    left.artifact_sha256 === right.artifact_sha256
+  );
 }
 
 function systemdBackupJobStatus() {
@@ -5061,26 +5391,63 @@ async function latestBackupVerificationStatus(
   backupMaximum = positiveHoursSetting(env, "RECALLANT_BACKUP_MAX_AGE_HOURS"),
   restoreMaximum = positiveHoursSetting(env, "RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS")
 ) {
-  const verificationPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE");
-  if (!verificationPath) {
-    const legacyStatus = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_VERIFICATION_STATUS");
+  const profile = canonicalBackupProfile(env);
+  const configuredVerificationPath = productionEnvValue(
+    env,
+    "RECALLANT_LATEST_BACKUP_VERIFICATION_FILE"
+  );
+  const configuredManifestPath = productionEnvValue(env, "RECALLANT_LATEST_BACKUP_MANIFEST");
+  const profileMismatch =
+    !profile.valid ||
+    (configuredVerificationPath !== undefined &&
+      normalize(configuredVerificationPath) !== normalize(profile.verification_file)) ||
+    (configuredManifestPath !== undefined &&
+      normalize(configuredManifestPath) !== normalize(profile.manifest_file));
+  const profileOutput = {
+    path_match: !profileMismatch,
+    data_dir_configured: profile.configured_data_dir !== null,
+    backup_target_configured: profile.configured_backup_target !== null,
+    verification_file_configured: configuredVerificationPath !== undefined,
+    manifest_file_configured: configuredManifestPath !== undefined
+  };
+  if (profileMismatch) {
+    const reason = profile.valid ? "backup_profile_path_mismatch" : "backup_profile_invalid_path";
     return {
-      status: legacyStatus ?? "unknown",
+      status: "unknown",
       ok: false,
-      reason: legacyStatus
-        ? "legacy_status_without_evidence"
-        : "backup_verification_not_configured",
-      source: legacyStatus ? "legacy-env-insufficient" : "not_configured",
-      file_configured: false,
-      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
-      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
-      operator_action: backupOperatorAction(
-        legacyStatus ? "legacy_status_without_evidence" : "backup_verification_not_configured"
-      )
+      reason,
+      source: "profile",
+      file_configured: configuredVerificationPath !== undefined,
+      manifest_configured: configuredManifestPath !== undefined,
+      profile: profileOutput,
+      backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "profile" },
+      restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "profile" },
+      operator_action:
+        "Align RECALLANT_DATA_DIR, RECALLANT_BACKUP_TARGET, and RECALLANT_LATEST_BACKUP_* with one canonical backup target, then retry doctor."
     };
   }
+  const verificationPath = profile.verification_file;
   try {
     const parsed = JSON.parse(await readFile(verificationPath, "utf8")) as Record<string, unknown>;
+    const latestManifest = JSON.parse(await readFile(profile.manifest_file, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const reportManifestPath = stringValue(parsed.manifest_path);
+    let reportManifest: Record<string, unknown> | null = null;
+    if (reportManifestPath && isAbsolute(reportManifestPath)) {
+      const relativeManifestPath = relative(profile.backup_target, reportManifestPath);
+      const insideBackupTarget =
+        relativeManifestPath !== "" &&
+        !relativeManifestPath.startsWith("..") &&
+        !isAbsolute(relativeManifestPath);
+      if (insideBackupTarget) {
+        reportManifest = JSON.parse(await readFile(reportManifestPath, "utf8")) as Record<
+          string,
+          unknown
+        >;
+      }
+    }
     const status = String(parsed.restore_verification ?? "unknown");
     const backup = timestampFreshness(parsed.backup_created_at, backupMaximum, "backup");
     const restore = timestampFreshness(
@@ -5089,7 +5456,8 @@ async function latestBackupVerificationStatus(
       "restore"
     );
     let reason: string | null = null;
-    if (parsed.backup_kind !== "postgresql_custom") reason = "backup_kind_not_restorable";
+    if (!reportManifest) reason = "backup_manifest_missing_or_invalid";
+    else if (parsed.backup_kind !== "postgresql_custom") reason = "backup_kind_not_restorable";
     else if (status !== "passed") reason = "restore_not_passed";
     else if (parsed.artifact_sha256_verified !== true) reason = "backup_artifact_hash_unverified";
     else if (parsed.production_overwritten !== false) reason = "production_overwrite_not_disproved";
@@ -5105,6 +5473,19 @@ async function latestBackupVerificationStatus(
       parsed.row_count_mismatches.length > 0
     )
       reason = "restore_inventory_mismatch";
+    else if (
+      !backupIdentitiesMatch(
+        backupArtifactIdentity(reportManifest),
+        backupArtifactIdentity(latestManifest)
+      )
+    )
+      reason = "backup_manifest_association_mismatch";
+    else if (
+      parsed.backup_id !== undefined &&
+      parsed.backup_id !== null &&
+      parsed.backup_id !== backupArtifactIdentity(reportManifest).backup_id
+    )
+      reason = "backup_report_manifest_mismatch";
     else if (!backup.fresh) reason = backup.reason;
     else if (!restore.fresh) reason = restore.reason;
     return {
@@ -5117,7 +5498,8 @@ async function latestBackupVerificationStatus(
       restore: { ...restore, source: "latest-verification-file" },
       artifact_sha256_verified: parsed.artifact_sha256_verified === true,
       production_overwritten: parsed.production_overwritten,
-      manifest_configured: Boolean(parsed.manifest_path),
+      manifest_configured: reportManifest !== null,
+      profile: profileOutput,
       operator_action: backupOperatorAction(reason)
     };
   } catch {
@@ -5129,6 +5511,7 @@ async function latestBackupVerificationStatus(
       file_configured: true,
       backup: { ...timestampFreshness(null, backupMaximum, "backup"), source: "none" },
       restore: { ...timestampFreshness(null, restoreMaximum, "restore"), source: "none" },
+      profile: profileOutput,
       operator_action: backupOperatorAction("backup_verification_missing_or_invalid")
     };
   }
@@ -5360,8 +5743,10 @@ async function checkProductionReadiness(
   postgresReachable: boolean,
   projectDir: string,
   serviceEnvProfile: Awaited<ReturnType<typeof checkServiceEnvProfile>>,
-  deploymentProfile: Awaited<ReturnType<typeof checkDeploymentProfile>>
+  deploymentProfile: Awaited<ReturnType<typeof checkDeploymentProfile>>,
+  options: { skipDatabaseProbe?: boolean } = {}
 ) {
+  const skipDatabaseProbe = options.skipDatabaseProbe === true;
   const productionEnv = await productionReadinessEnvSnapshot();
   const env = productionEnv.values;
   const bindHost = productionEnvValue(env, "RECALLANT_HOST") ?? "127.0.0.1";
@@ -5392,13 +5777,15 @@ async function checkProductionReadiness(
   );
   let deploymentProjectRows: number | null = null;
   let unintendedPaidApiSuccessCalls30d: number | null = null;
+  let databaseSystemIdentifier: string | null = null;
+  let databaseIdentityError: string | null = null;
   const readinessProjectPath =
     productionEnvValue(env, "RECALLANT_PRODUCTION_PROJECT_PATH") ?? projectDir;
-  if (process.env.RECALLANT_DATABASE_URL) {
+  if (!skipDatabaseProbe && process.env.RECALLANT_DATABASE_URL) {
     const client = new pg.Client({ connectionString: process.env.RECALLANT_DATABASE_URL });
     const developerId = process.env.RECALLANT_DEVELOPER_ID ?? null;
-    await client.connect();
     try {
+      await client.connect();
       const checks = await client.query(
         `
           SELECT
@@ -5423,11 +5810,21 @@ async function checkProductionReadiness(
       );
       deploymentProjectRows = Number(checks.rows[0]?.recallant_project_rows ?? 0);
       unintendedPaidApiSuccessCalls30d = Number(checks.rows[0]?.paid_api_success_calls ?? 0);
+      try {
+        const identity = await client.query(
+          "SELECT system_identifier::text AS system_identifier FROM pg_control_system()"
+        );
+        databaseSystemIdentifier = stringValue(identity.rows[0]?.system_identifier);
+        if (databaseSystemIdentifier === null)
+          databaseIdentityError = "database_system_identifier_missing";
+      } catch (error) {
+        databaseIdentityError = error instanceof Error ? error.message : String(error);
+      }
     } catch {
       deploymentProjectRows = null;
       unintendedPaidApiSuccessCalls30d = null;
     } finally {
-      await client.end();
+      await client.end().catch(() => undefined);
     }
   }
   const localhostOnlyOrigin = bindHostIsPrivate(bindHost);
@@ -5437,6 +5834,13 @@ async function checkProductionReadiness(
     bindHost,
     serviceEnvProfile,
     publicWorkbenchReadiness
+  });
+  const physicalTarget = await checkPhysicalPostgresTarget({
+    env,
+    databaseIdentity: {
+      observed: databaseSystemIdentifier,
+      error: databaseIdentityError
+    }
   });
   return {
     doctor_ok: postgresReachable,
@@ -5460,6 +5864,7 @@ async function checkProductionReadiness(
     backup_freshness_sla: backupMaximum,
     restore_freshness_sla: restoreMaximum,
     latest_backup_verification: latestBackupVerification,
+    physical_target: physicalTarget,
     deployment_project_path: readinessProjectPath,
     deployment_project_rows: deploymentProjectRows,
     no_duplicate_deployment_project_rows:
@@ -5467,6 +5872,11 @@ async function checkProductionReadiness(
     unintended_paid_api_success_calls_30d: unintendedPaidApiSuccessCalls30d,
     no_unintended_paid_api_use:
       unintendedPaidApiSuccessCalls30d === null ? null : unintendedPaidApiSuccessCalls30d === 0,
+    database_probe: {
+      attempted: !skipDatabaseProbe,
+      skipped: skipDatabaseProbe,
+      reason: skipDatabaseProbe ? "remote_only_project" : null
+    },
     service_env_profile: {
       required_when_configured: true,
       status: serviceEnvProfile.status,
@@ -5490,6 +5900,7 @@ async function checkProductionReadiness(
       backupTimer.enabled &&
       backupJob.ok &&
       latestBackupVerification.ok &&
+      physicalTarget.ok !== false &&
       deploymentProjectRows !== null &&
       deploymentProjectRows <= 1 &&
       unintendedPaidApiSuccessCalls30d !== null &&
@@ -5498,16 +5909,23 @@ async function checkProductionReadiness(
 }
 
 async function runDoctor(argv: readonly string[]) {
-  const database = createRecallantDbFromEnv();
   const projectDir = resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
   const projectConfig = await readProjectConfig(projectDir);
+  const remoteConsentScope = await readRemoteAgentConsentScope(projectDir);
+  const remoteOnly = remoteConsentScope !== null && !projectConfig?.project_id;
+  const database = remoteOnly ? null : createRecallantDbFromEnv();
   const requireCapture = argv.includes("--require-capture");
   const requireMemoryLoop = argv.includes("--require-memory-loop");
   const requireAgentAudit = argv.includes("--require-agent-audit");
   const semanticProofRequested = argv.includes("--semantic-proof");
   const format = argv.includes("--json") ? "json" : (parseFlag(argv, "--format") ?? "text");
   if (format !== "text" && format !== "json") throw new Error(`Invalid --format: ${format}`);
-  let postgres = { configured: Boolean(process.env.RECALLANT_DATABASE_URL), reachable: false };
+  let postgres = {
+    configured: remoteOnly ? false : Boolean(process.env.RECALLANT_DATABASE_URL),
+    reachable: false,
+    scope: remoteOnly ? "remote_only" : "local_project",
+    probe: remoteOnly ? "skipped" : "pending"
+  };
   try {
     if (database) {
       try {
@@ -5516,13 +5934,12 @@ async function runDoctor(argv: readonly string[]) {
         } else {
           await database.ensureProject(process.env.RECALLANT_PROJECT_PATH ?? projectDir);
         }
-        postgres = { configured: true, reachable: true };
+        postgres = { ...postgres, configured: true, reachable: true, probe: "completed" };
       } catch {
-        postgres = { configured: true, reachable: false };
+        postgres = { ...postgres, configured: true, reachable: false, probe: "failed" };
       }
     }
     const clientConnection = await clientConnectionReadiness(projectDir);
-    const remoteConsentScope = await readRemoteAgentConsentScope(projectDir);
     const semanticProof = semanticProofRequested
       ? database
         ? await runLocalDoctorSemanticProof({ database, argv, projectDir })
@@ -5572,7 +5989,7 @@ async function runDoctor(argv: readonly string[]) {
         requireCapture,
         requireMemoryLoop
       }),
-      readiness_contract: readinessContract,
+      readiness_contract: { ...readinessContract, scope: "client_session" },
       postgres,
       project_config: {
         path: join(projectDir, ".recallant", "config"),
@@ -5672,7 +6089,8 @@ async function runDoctor(argv: readonly string[]) {
         postgres.reachable,
         projectDir,
         serviceEnvProfile,
-        deploymentProfile
+        deploymentProfile,
+        { skipDatabaseProbe: remoteOnly }
       ),
       deployment_notes: [
         "Set RECALLANT_SERVER_INVENTORY_FILE before service start.",
@@ -6371,13 +6789,19 @@ async function startRemoteAgentSession(connection: RemoteAgentConnection, argv: 
   const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
   const clientVersion = parseFlag(argv, "--client-version") ?? recallantCliVersion;
   const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
-  const started = await callRemoteAgentTool(connection, "memory_start_session", {
-    client_kind: clientKind,
-    client_version: clientVersion,
-    project_path: null,
-    session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
-    resume_policy: "normal"
-  });
+  const started = await callRemoteAgentTool(
+    connection,
+    "memory_start_session",
+    {
+      client_kind: clientKind,
+      client_version: clientVersion,
+      project_path: null,
+      session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
+      resume_policy: "normal"
+    },
+    null,
+    codexHookConnectionTimeoutMs
+  );
   const sessionId = typeof started.session_id === "string" ? started.session_id : null;
   if (!sessionId) {
     throw new RemoteMcpCallError(
@@ -6578,6 +7002,7 @@ async function runAgentStart(argv: readonly string[]) {
   const remoteConnection = await readRemoteAgentConnection(projectDir(argv));
   const consentScope = remoteConnection?.scope ?? null;
   if (remoteConnection && consentScope) {
+    const spoolReplay = await replayRemoteSpoolIfPending(argv, remoteConnection, "startup");
     try {
       const result = await startRemoteAgentSession(remoteConnection, argv);
       const remoteReadiness = await readRemoteAgentReadinessStatus(remoteConnection);
@@ -6593,6 +7018,7 @@ async function runAgentStart(argv: readonly string[]) {
         state_path: currentSessionPathFor(result.state.project_dir),
         previous_unclosed_session: result.start_result.previous_unclosed_session ?? null,
         previous_session_recovery: result.start_result.previous_session_recovery ?? null,
+        spool_replay: spoolReplay,
         ...consentOutput
       };
       process.stdout.write(
@@ -6624,6 +7050,7 @@ async function runAgentStart(argv: readonly string[]) {
         spool_path: spoolPath(argv),
         local_id: deferred.local_id,
         remote_failure: deferred.failure,
+        spool_replay: spoolReplay,
         warning: deferred.context_only
           ? "Remote MCP session started, but context loading failed and was spooled for ordered replay."
           : "Remote MCP start failed; the lifecycle start was spooled for ordered replay.",
@@ -6723,6 +7150,13 @@ async function runAgentEvent(argv: readonly string[]) {
   if (!text.trim()) throw new Error("VALIDATION_ERROR: agent-event requires --text");
   const dir = projectDir(argv);
   let state = await loadActiveAgentState(argv);
+  const remoteConnection = await readRemoteAgentConnection(dir);
+  let spoolReplay = null;
+  if (remoteConnection) {
+    spoolReplay = await replayRemoteSpoolIfPending(argv, remoteConnection, "next_event");
+    state = (await readAgentSessionState(dir)) ?? state;
+    if (state?.status === "closed") state = null;
+  }
   const title = parseFlag(argv, "--title") ?? summarizeText(text, 72);
   const clientKind = state?.client_kind ?? parseFlag(argv, "--client-kind") ?? "codex";
   const metadata = {
@@ -6745,7 +7179,6 @@ async function runAgentEvent(argv: readonly string[]) {
       created_at: new Date().toISOString()
     });
 
-  const remoteConnection = await readRemoteAgentConnection(dir);
   if (remoteConnection) {
     if (!state) {
       const existing = await readAgentSessionState(dir);
@@ -6792,6 +7225,7 @@ async function runAgentEvent(argv: readonly string[]) {
             kind,
             local_id: record.local_id,
             spool_path: spoolPath(argv),
+            spool_replay: spoolReplay,
             remote_failure: {
               code: "REMOTE_MCP_PENDING_REPLAY",
               message: "Earlier remote MCP records must replay before this event.",
@@ -6870,6 +7304,7 @@ async function runAgentEvent(argv: readonly string[]) {
                 memory: null,
                 local_id: record.local_id,
                 spool_path: spoolPath(argv),
+                spool_replay: spoolReplay,
                 remote_failure: remoteMcpFailure(error),
                 warning: "Event was delivered; decision-memory creation was spooled for replay."
               },
@@ -6901,7 +7336,8 @@ async function runAgentEvent(argv: readonly string[]) {
             project_id: state.project_id,
             session_id: state.session_id,
             event_id: event.event_id,
-            memory
+            memory,
+            spool_replay: spoolReplay
           },
           null,
           2
@@ -6934,6 +7370,7 @@ async function runAgentEvent(argv: readonly string[]) {
             kind,
             local_id: record.local_id,
             spool_path: spoolPath(argv),
+            spool_replay: spoolReplay,
             remote_failure: remoteMcpFailure(error),
             warning: "Remote MCP write failed; event was spooled for ordered replay."
           },
@@ -7228,12 +7665,25 @@ async function findRecallantProjectRoot(startPath: string) {
   let current = resolve(startPath);
   const currentStat = await stat(current).catch(() => null);
   if (currentStat && !currentStat.isDirectory()) current = dirname(current);
-  while (true) {
-    if (await readOptional(join(current, ".recallant", "config"))) return current;
-    const parent = dirname(current);
-    if (parent === current) return null;
-    current = parent;
+
+  // Native hooks are project-boundary sensitive. A hook invoked from a nested
+  // directory must not inherit an unrelated parent project's config, database,
+  // or remote credential. The generated Codex hook runs with the project cwd;
+  // callers that need a different boundary pass --project-dir explicitly.
+  if (await readOptional(join(current, ".recallant", "config"))) return current;
+  if (await readOptional(join(current, ".recallant", "remote-consent.json"))) return current;
+  for (const candidate of [
+    ".codex/config.toml",
+    ".cursor/mcp.json",
+    ".mcp.json",
+    ".recallant/generic-remote-mcp.json"
+  ]) {
+    const content = await readOptional(join(current, candidate));
+    if (content?.includes("RECALLANT_REMOTE_MCP_URL") && content.includes("remote-bridge")) {
+      return current;
+    }
   }
+  return null;
 }
 
 async function codexHookArgv(argv: readonly string[]) {
@@ -7267,7 +7717,8 @@ function nativeHookState(
   prior: AgentSessionState["native_hook"],
   event: CodexHookEvent,
   mode: "server" | "offline_spool",
-  observationCount: number
+  observationCount: number,
+  transport: "local_database" | "remote_mcp" = prior?.transport ?? "local_database"
 ): NonNullable<AgentSessionState["native_hook"]> {
   const now = new Date().toISOString();
   return {
@@ -7279,6 +7730,7 @@ function nativeHookState(
     last_event_name: event.hook_event_name,
     last_turn_id: event.turn_id,
     last_mode: mode,
+    transport,
     observation_count:
       (prior?.external_session_id === event.session_id ? prior.observation_count : 0) +
       observationCount
@@ -7367,7 +7819,13 @@ async function persistCodexHookCheckpoint(
   state: AgentSessionState,
   action: Extract<CodexHookCaptureAction, { type: "checkpoint" }>
 ) {
-  const payload = {
+  return database.setCheckpoint(state.project_id, codexHookCheckpointPayload(action));
+}
+
+function codexHookCheckpointPayload(
+  action: Extract<CodexHookCaptureAction, { type: "checkpoint" }>
+) {
+  return {
     schema_version: 1,
     status: "in_progress",
     current_focus: action.summary,
@@ -7378,7 +7836,6 @@ async function persistCodexHookCheckpoint(
     external_session_id: action.external_session_id,
     external_turn_id: action.turn_id
   };
-  return database.setCheckpoint(state.project_id, payload);
 }
 
 async function persistCodexHookServerActions(
@@ -7426,7 +7883,11 @@ function codexHookOfflineObservationPayload(
   return payload as Omit<AppendAgentObservationInput, "session_id">;
 }
 
-async function ensureCodexHookOfflineState(argv: readonly string[], event: CodexHookEvent) {
+async function ensureCodexHookOfflineState(
+  argv: readonly string[],
+  event: CodexHookEvent,
+  transport: "local_database" | "remote_mcp" = "local_database"
+) {
   const dir = projectDir(argv);
   const existing = await readAgentSessionState(dir);
   const now = new Date().toISOString();
@@ -7445,7 +7906,7 @@ async function ensureCodexHookOfflineState(argv: readonly string[], event: Codex
     updated_at: now,
     last_checkpoint_at: matching?.last_checkpoint_at ?? null,
     last_event_id: matching?.last_event_id ?? null,
-    native_hook: nativeHookState(matching?.native_hook, event, "offline_spool", 0)
+    native_hook: nativeHookState(matching?.native_hook, event, "offline_spool", 0, transport)
   };
   await writeAgentSessionState(dir, state);
   return state;
@@ -7502,6 +7963,170 @@ async function spoolCodexHookActions(
     native_hook: nativeHookState(state.native_hook, event, "offline_spool", observationCount)
   };
   await writeAgentSessionState(projectDir(argv), state);
+}
+
+async function ensureCodexHookRemoteState(
+  connection: RemoteAgentConnection,
+  argv: readonly string[],
+  event: CodexHookEvent
+) {
+  const dir = projectDir(argv);
+  const existing = await readAgentSessionState(dir);
+  if (
+    existing &&
+    isUuid(existing.session_id) &&
+    existing.native_hook?.client === "codex" &&
+    existing.native_hook.external_session_id === event.session_id &&
+    existing.native_hook.transport === "remote_mcp"
+  ) {
+    return existing;
+  }
+
+  const identity = requireRemoteAgentScopeIdentity(connection);
+  const started = await callRemoteAgentTool(
+    connection,
+    "memory_start_session",
+    {
+      client_kind: "codex",
+      client_version: recallantCliVersion,
+      project_path: null,
+      session_label: "codex-native-hook",
+      resume_policy: "normal"
+    },
+    null,
+    codexHookConnectionTimeoutMs
+  );
+  const sessionId = typeof started.session_id === "string" ? started.session_id : null;
+  if (!sessionId || !isUuid(sessionId)) {
+    throw new RemoteMcpCallError(
+      "REMOTE_MCP_INVALID_RESPONSE",
+      "Remote MCP native hook session start returned no valid session_id."
+    );
+  }
+  const remoteProjectId = typeof started.project_id === "string" ? started.project_id : null;
+  if (remoteProjectId && remoteProjectId !== identity.project_id) {
+    throw new RemoteMcpCallError(
+      "REMOTE_MCP_SCOPE_ERROR",
+      "Remote MCP native hook session returned a different project scope."
+    );
+  }
+  const now = new Date().toISOString();
+  const state: AgentSessionState = {
+    schema_version: 1,
+    status: "active",
+    session_id: sessionId,
+    project_id: remoteProjectId ?? identity.project_id,
+    project_dir: dir,
+    client_kind: "codex",
+    client_version: recallantCliVersion,
+    task_hint: "Automatic Codex audit capture",
+    started_at: now,
+    updated_at: now,
+    last_memory_write_at: now,
+    native_hook: nativeHookState(undefined, event, "server", 0, "remote_mcp")
+  };
+  await writeAgentSessionState(dir, state);
+  return state;
+}
+
+async function spoolCodexHookRemoteActions(
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  let state = await ensureCodexHookOfflineState(argv, event, "remote_mcp");
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    const args =
+      action.type === "observation"
+        ? codexHookObservationInput(action, state)
+        : {
+            payload: codexHookCheckpointPayload(action)
+          };
+    const record = await appendRemoteToolSpoolRecord(
+      argv,
+      action.type === "observation" ? "memory_append_observation" : "memory_set_checkpoint",
+      args,
+      state.session_id,
+      action.dedup_key
+    );
+    lastEventId = String(record.local_id);
+    if (action.type === "observation") observationCount += 1;
+    else checkpointAt = new Date().toISOString();
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "offline",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(
+      state.native_hook,
+      event,
+      "offline_spool",
+      observationCount,
+      "remote_mcp"
+    )
+  };
+  await writeAgentSessionState(projectDir(argv), state);
+  return state;
+}
+
+async function persistCodexHookRemoteActions(
+  connection: RemoteAgentConnection,
+  argv: readonly string[],
+  event: CodexHookEvent,
+  actions: readonly CodexHookCaptureAction[]
+) {
+  const dir = projectDir(argv);
+  const pending = await getLocalSpoolStatus(argv);
+  if (pending.unsynced_count > 0) {
+    await spoolCodexHookRemoteActions(argv, event, actions);
+    return { mode: "offline_spool" as const, state: await readAgentSessionState(dir) };
+  }
+  let state = await ensureCodexHookRemoteState(connection, argv, event);
+  let lastEventId = state.last_event_id ?? null;
+  let checkpointAt = state.last_checkpoint_at ?? null;
+  let observationCount = 0;
+  for (const action of actions) {
+    if (action.type === "observation") {
+      const result = await callRemoteAgentTool(
+        connection,
+        "memory_append_observation",
+        codexHookObservationInput(action, state),
+        state.session_id,
+        codexHookConnectionTimeoutMs
+      );
+      if (typeof result.id === "string") lastEventId = result.id;
+      observationCount += 1;
+    } else {
+      const payload = codexHookCheckpointPayload(action);
+      await callRemoteAgentTool(
+        connection,
+        "memory_set_checkpoint",
+        { payload },
+        state.session_id,
+        codexHookConnectionTimeoutMs
+      );
+      checkpointAt = new Date().toISOString();
+    }
+  }
+  const now = new Date().toISOString();
+  state = {
+    ...state,
+    status: "active",
+    updated_at: now,
+    last_memory_write_at: now,
+    last_checkpoint_at: checkpointAt,
+    last_event_id: lastEventId,
+    native_hook: nativeHookState(state.native_hook, event, "server", observationCount, "remote_mcp")
+  };
+  await writeAgentSessionState(dir, state);
+  return { mode: "remote_mcp" as const, state };
 }
 
 function debugCodexHook(argv: readonly string[], value: Record<string, unknown>) {
@@ -7600,6 +8225,37 @@ async function runCodexHook(argv: readonly string[]) {
       return;
     }
     const actions = mapCodexHookEvent(event);
+    const remoteConnection = await readRemoteAgentConnection(projectDir(hookArgv));
+    if (remoteConnection) {
+      try {
+        const remoteResult = await persistCodexHookRemoteActions(
+          remoteConnection,
+          hookArgv,
+          event,
+          actions
+        );
+        debugCodexHook(argv, {
+          ok: true,
+          mode: remoteResult.mode,
+          transport: "remote_mcp",
+          event: event.hook_event_name,
+          actions: actions.length
+        });
+        return;
+      } catch (error) {
+        const state = await spoolCodexHookRemoteActions(hookArgv, event, actions);
+        debugCodexHook(argv, {
+          ok: true,
+          mode: "offline_spool",
+          transport: "remote_mcp",
+          event: event.hook_event_name,
+          actions: actions.length,
+          session_id: state.session_id,
+          remote_failure: remoteMcpFailure(error)
+        });
+        return;
+      }
+    }
     const database = createCodexHookDatabase();
     if (database) {
       try {
@@ -8664,12 +9320,51 @@ async function runSpoolStatus(argv: readonly string[]) {
   );
 }
 
+function closeoutReplayFallbackArgs(args: Record<string, unknown>, error: unknown) {
+  if (
+    !(error instanceof RemoteMcpCallError) ||
+    error.code !== "REMOTE_MCP_JSON_RPC_ERROR" ||
+    error.httpStatus !== 400 ||
+    error.rpcCode !== -32600
+  ) {
+    return null;
+  }
+  const checkpoint =
+    args.checkpoint_payload &&
+    typeof args.checkpoint_payload === "object" &&
+    !Array.isArray(args.checkpoint_payload)
+      ? (args.checkpoint_payload as Record<string, unknown>)
+      : null;
+  if (!checkpoint || checkpoint.last_event_id == null) return null;
+  const diagnostics =
+    args.closeout_diagnostics &&
+    typeof args.closeout_diagnostics === "object" &&
+    !Array.isArray(args.closeout_diagnostics)
+      ? (args.closeout_diagnostics as Record<string, unknown>)
+      : {};
+  return {
+    ...args,
+    checkpoint_payload: {
+      ...checkpoint,
+      last_event_id: null
+    },
+    closeout_diagnostics: {
+      ...diagnostics,
+      replay_sanitization: {
+        last_event_id: "cleared_after_remote_validation"
+      }
+    }
+  } satisfies Record<string, unknown>;
+}
+
 async function runRemoteSpoolSync(
   argv: readonly string[],
   connection: RemoteAgentConnection,
   records: Record<string, unknown>[],
-  manifest: Awaited<ReturnType<typeof readSpoolManifest>>
+  manifest: Awaited<ReturnType<typeof readSpoolManifest>>,
+  options: { emitOutput?: boolean } = {}
 ) {
+  const emitOutput = options.emitOutput !== false;
   const dir = projectDir(argv);
   const synced = { ...manifest.synced };
   const sessionMappings = { ...manifest.session_mappings };
@@ -8806,7 +9501,15 @@ async function runRemoteSpoolSync(
         if ("session_id" in args || toolName !== "memory_create_agent_memory") {
           args.session_id = remoteSessionId;
         }
-        const result = await callRemoteAgentTool(connection, toolName, args, remoteSessionId);
+        let result: Record<string, unknown>;
+        try {
+          result = await callRemoteAgentTool(connection, toolName, args, remoteSessionId);
+        } catch (error) {
+          const fallbackArgs =
+            toolName === "memory_closeout" ? closeoutReplayFallbackArgs(args, error) : null;
+          if (!fallbackArgs) throw error;
+          result = await callRemoteAgentTool(connection, toolName, fallbackArgs, remoteSessionId);
+        }
         synced[String(record.local_id)] = {
           server_event_id: typeof result.event_id === "string" ? result.event_id : null,
           server_memory_id: typeof result.memory_id === "string" ? result.memory_id : null,
@@ -8844,25 +9547,80 @@ async function runRemoteSpoolSync(
     });
   }
 
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        ok: failure === null,
-        action: "sync_spool",
-        dry_run: false,
-        transport: "remote_mcp",
-        synced_count: syncedCount,
-        remaining_count: unsynced.length - syncedCount,
-        failed_local_id: failedRecord ? String(failedRecord.local_id) : null,
-        remote_failure: failure,
-        manifest_path: spoolManifestPath(argv),
-        mappings: synced
-      },
-      null,
-      2
-    )}\n`
-  );
-  if (failure) process.exitCode = 1;
+  const result = {
+    ok: failure === null,
+    action: "sync_spool" as const,
+    dry_run: false as const,
+    transport: "remote_mcp" as const,
+    synced_count: syncedCount,
+    remaining_count: unsynced.length - syncedCount,
+    failed_local_id: failedRecord ? String(failedRecord.local_id) : null,
+    remote_failure: failure,
+    manifest_path: spoolManifestPath(argv),
+    mappings: synced
+  };
+  if (emitOutput) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (failure) process.exitCode = 1;
+  }
+  return result;
+}
+
+async function replayRemoteSpoolIfPending(
+  argv: readonly string[],
+  connection: RemoteAgentConnection,
+  trigger: "startup" | "next_event"
+) {
+  try {
+    const locked = await withSpoolSyncLock(argv, async () => {
+      const records = await readJsonl(spoolPath(argv));
+      const manifest = await readSpoolManifest(argv);
+      const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+      if (unsynced.length === 0) {
+        return {
+          attempted: false,
+          trigger,
+          reason: "no_pending_records" as const,
+          synced_count: 0,
+          remaining_count: 0,
+          remote_failure: null
+        };
+      }
+      const result = await runRemoteSpoolSync(argv, connection, records, manifest, {
+        emitOutput: false
+      });
+      return {
+        attempted: true,
+        trigger,
+        reason: result.ok ? ("replayed" as const) : ("replay_failed" as const),
+        synced_count: result.synced_count,
+        remaining_count: result.remaining_count,
+        remote_failure: result.remote_failure
+      };
+    });
+    if (!locked.acquired) {
+      const pending = await getLocalSpoolStatus(argv);
+      return {
+        attempted: false,
+        trigger,
+        reason: "replay_already_running" as const,
+        synced_count: 0,
+        remaining_count: pending.unsynced_count,
+        remote_failure: null
+      };
+    }
+    return locked.value;
+  } catch (error) {
+    const pending = await getLocalSpoolStatus(argv).catch(() => ({ unsynced_count: null }));
+    return {
+      attempted: true,
+      trigger,
+      reason: "replay_failed" as const,
+      synced_count: 0,
+      remaining_count: pending.unsynced_count,
+      remote_failure: remoteMcpFailure(error)
+    };
+  }
 }
 
 async function runSyncSpool(argv: readonly string[]) {
@@ -8893,7 +9651,38 @@ async function runSyncSpool(argv: readonly string[]) {
   }
   const remoteConnection = await readRemoteAgentConnection(dir);
   if (remoteConnection) {
-    await runRemoteSpoolSync(argv, remoteConnection, records, manifest);
+    const locked = await withSpoolSyncLock(argv, async () => {
+      const currentRecords = await readJsonl(spoolPath(argv));
+      const currentManifest = await readSpoolManifest(argv);
+      return runRemoteSpoolSync(argv, remoteConnection, currentRecords, currentManifest);
+    });
+    if (!locked.acquired) {
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: false,
+            action: "sync_spool",
+            dry_run: false,
+            transport: "remote_mcp",
+            synced_count: 0,
+            remaining_count: unsynced.length,
+            failed_local_id: null,
+            remote_failure: {
+              code: "REMOTE_MCP_SYNC_IN_PROGRESS",
+              message: "Another spool replay is already running; retry after it finishes.",
+              retryable: true,
+              http_status: null,
+              rpc_code: null
+            },
+            manifest_path: spoolManifestPath(argv),
+            mappings: manifest.synced
+          },
+          null,
+          2
+        )}\n`
+      );
+      process.exitCode = 1;
+    }
     return;
   }
   const database = createRecallantDbFromEnv();
@@ -11079,15 +11868,44 @@ async function runConnect(argv: readonly string[]) {
     throw new Error("Use either --install-local-hooks or --no-local-hooks, not both.");
   }
   const config = await readProjectConfig(dir);
-  if (!config?.project_id) {
-    throw new Error(
-      "VALIDATION_ERROR: connect requires an attached project with .recallant/config"
-    );
+  const remoteConnection = config?.project_id ? null : await readRemoteAgentConnection(dir);
+  const remoteOnly = config?.project_id === undefined && remoteConnection !== null;
+  let projectId = config?.project_id ?? null;
+  let developerId = "";
+  let targetConfig:
+    ReturnType<typeof connectClientTargetConfig> | ReturnType<typeof remoteClientTargetConfig>;
+  if (remoteOnly) {
+    const identity = requireRemoteAgentScopeIdentity(remoteConnection);
+    if (globalConfigRequested) {
+      throw new Error(
+        "POLICY_BLOCKED: remote-only connect supports project-local configuration only"
+      );
+    }
+    if (!remoteConnection.credential_ref) {
+      throw new Error(
+        "VALIDATION_ERROR: remote-only connect requires a protected credential reference; use connect-remote to provision one"
+      );
+    }
+    projectId = identity.project_id;
+    developerId = identity.developer_id;
+    targetConfig = remoteClientTargetConfig(target, {
+      serverUrl: identity.server_url,
+      projectId: identity.project_id,
+      developerId: identity.developer_id,
+      clientId: identity.client_id,
+      credential: null,
+      credentialRef: remoteConnection.credential_ref,
+      credentialStorePath: remoteConnection.credential_store_path
+    });
+  } else {
+    if (!projectId) {
+      throw new Error(
+        "VALIDATION_ERROR: connect requires an attached project or a valid remote consent scope"
+      );
+    }
+    developerId = await resolveConnectDeveloperId({ projectId });
+    targetConfig = connectClientTargetConfig(target, projectId, developerId, dir);
   }
-  const developerId = await resolveConnectDeveloperId({
-    projectId: config.project_id
-  });
-  const targetConfig = connectClientTargetConfig(target, config.project_id, developerId, dir);
   const installLocalHooks =
     !installHooksDisabled && (targetConfig.target === "codex" || installHooksRequested);
   if (
@@ -11101,7 +11919,15 @@ async function runConnect(argv: readonly string[]) {
   }
   const targetPath = join(dir, targetConfig.config_file);
   const existing = await readOptional(targetPath);
-  const desired = renderClientTargetConfig(existing, targetConfig);
+  const desired = remoteOnly
+    ? renderRemoteClientTargetConfig(
+        existing,
+        targetConfig as ReturnType<typeof remoteClientTargetConfig>
+      )
+    : renderClientTargetConfig(
+        existing,
+        targetConfig as ReturnType<typeof connectClientTargetConfig>
+      );
   const same = existing === desired;
   const hookFiles = installLocalHooks ? localHookKitFiles() : [];
   const hookFilePlans = [];
@@ -11156,7 +11982,7 @@ async function runConnect(argv: readonly string[]) {
     ? String(
         globalClientConfigDryRunPlan({
           target: targetConfig.target,
-          targetConfig
+          targetConfig: targetConfig as ReturnType<typeof connectClientTargetConfig>
         }).target_file
       )
     : null;
@@ -11165,7 +11991,7 @@ async function runConnect(argv: readonly string[]) {
     ? {
         ...globalClientConfigDryRunPlan({
           target: targetConfig.target,
-          targetConfig,
+          targetConfig: targetConfig as ReturnType<typeof connectClientTargetConfig>,
           existingText: existingGlobal
         }),
         backup_path:
@@ -11342,7 +12168,7 @@ async function runConnect(argv: readonly string[]) {
     dry_run: dryRun,
     client: targetConfig.target,
     project_dir: dir,
-    project_id: config.project_id,
+    project_id: projectId,
     developer_id: developerId,
     connection_status: mandatoryStartupLayerStatus,
     hook_status: hookStatus,
@@ -11361,7 +12187,7 @@ async function runConnect(argv: readonly string[]) {
       writes_global_config: false,
       capture_targets: captureTargetNames,
       automatic_capture_events: codexHookEventNames,
-      proof_command: `recallant doctor --project-dir ${dir} --require-agent-audit --format json`,
+      proof_command: `recallant doctor --project-dir ${dir} --require-capture --format json`,
       ready_definition:
         "MCP and native Codex hooks can be configured before capture is active; active automatic audit requires an observed codex-hook invocation."
     },
@@ -11663,11 +12489,12 @@ async function resolveOnboardWorkbenchOutcome(
     const projectVisible = dashboard.projects.some(
       (project) => project.project_id === config.project_id
     );
-    const importCandidateCount = Array.isArray(dashboard.import_candidates)
-      ? dashboard.import_candidates.length
-      : null;
+    const importCandidateCount =
+      projectVisible && Array.isArray(dashboard.import_candidates)
+        ? dashboard.import_candidates.length
+        : null;
     const pendingReview =
-      typeof dashboard.critical?.pending_review === "number"
+      projectVisible && typeof dashboard.critical?.pending_review === "number"
         ? dashboard.critical.pending_review
         : null;
     return {
@@ -11955,6 +12782,22 @@ async function runLocalOnboard(argv: readonly string[]) {
     process.exitCode = 2;
   };
 
+  if (existingConfig?.project_id) {
+    try {
+      const database = createRecallantDbFromEnv();
+      await validateExistingProjectBinding({
+        database,
+        existingConfig,
+        projectDir: options.projectDir,
+        expectedDeveloperId: process.env.RECALLANT_DEVELOPER_ID
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emitVerifyFailure("readiness", `existing project binding was not verified: ${message}`);
+      return;
+    }
+  }
+
   if (needAttach) {
     const attachCommand = [
       "attach",
@@ -12130,6 +12973,15 @@ async function runLocalOnboard(argv: readonly string[]) {
       emitVerifyFailure("capture", "capture proof did not complete");
       return;
     }
+    const demoPayload = objectValue(demoResult.json);
+    if (demoPayload.marker !== marker || demoPayload.recalled !== true) {
+      verifyResult.proof.demo = "failed";
+      verifyResult.stages.capture.status = "failed";
+      verifyResult.stages.capture.detail =
+        "capture proof did not recall the fresh onboarding marker";
+      emitVerifyFailure("capture", "capture proof did not recall the fresh onboarding marker");
+      return;
+    }
     verifyResult.proof.demo = "done";
     verifyResult.stages.capture.status = "done";
     verifyResult.stages.capture.detail = "context read, memory write, and checkpoint were written";
@@ -12191,18 +13043,29 @@ async function runLocalOnboard(argv: readonly string[]) {
     }
     verifyResult.proof.ask = "done";
     const memories = objectValue(askResult.json).memories;
-    const firstMemory =
+    const verifiedConfig = await readProjectConfig(options.projectDir);
+    const expectedProjectId = verifiedConfig?.project_id ?? null;
+    const matchingMemory =
       Array.isArray(memories) && memories.length > 0
-        ? (memories[0] as Record<string, unknown>)
+        ? memories.find((memory) => {
+            const candidate = objectValue(memory);
+            if (typeof candidate.body !== "string" || !candidate.body.includes(marker)) {
+              return false;
+            }
+            const memoryProjectId = candidate.project_id;
+            return typeof memoryProjectId !== "string" || memoryProjectId === expectedProjectId;
+          })
         : null;
-    const answer = firstMemory && typeof firstMemory.body === "string" ? firstMemory.body : null;
+    const answer =
+      matchingMemory && typeof matchingMemory.body === "string" ? matchingMemory.body : null;
     verifyResult.ask_answer = answer;
-    verifyResult.status = answer ? "passed" : "failed";
+    const recalledFreshMarker = Boolean(answer && answer.includes(marker));
+    verifyResult.status = recalledFreshMarker ? "passed" : "failed";
     if (verifyResult.status === "failed") {
       verifyResult.proof.ask = "failed";
       verifyResult.stages.recall.status = "failed";
-      verifyResult.stages.recall.detail = "recall proof did not return the captured memory";
-      emitVerifyFailure("recall", "recall proof did not return the captured memory");
+      verifyResult.stages.recall.detail = "recall proof did not return the fresh onboarding marker";
+      emitVerifyFailure("recall", "recall proof did not return the fresh onboarding marker");
       return;
     }
     verifyResult.evidence = { ...verifyResult.evidence, recall: true };

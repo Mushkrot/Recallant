@@ -43,7 +43,9 @@ try {
   if (result.status !== 0) {
     throw new Error(`Backup alert rule tests failed:\n${result.stderr}\n${result.stdout}`);
   }
-  process.stdout.write("Backup alert rules passed: failed -> firing; healthy -> no alert\n");
+  process.stdout.write(
+    "Backup alert rules passed: failed, missing, overdue -> firing; healthy -> no alert\n"
+  );
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

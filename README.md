@@ -26,8 +26,6 @@ These screenshots come from the real private Workbench with deterministic synthe
 [generator](docs/assets/workbench/README.md) runs the same browser fixture used for Playwright
 acceptance testing.
 
-These previews use a documentation-only palette; the installed application's theme may differ.
-
 **Home shows whether capture and the governed memory loop are actually active.**
 
 ![Recallant Workbench Home with project readiness and next actions](docs/assets/workbench/home-readiness.png)
@@ -122,8 +120,8 @@ recallant onboard /path/to/project
 For a pinned prerelease, use the versioned command after the tag is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.1/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.1
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.2/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.2
 ```
 
 Tagged installs remain on that prerelease channel during onboarding. Switching to the moving
@@ -139,9 +137,29 @@ Onboarding aims to prove more than configuration. A healthy run distinguishes ac
 semantic recall, memory-loop readiness, and fresh automatic capture. It prints the exact missing
 proof when one of those states is incomplete.
 
+### One Codex approval is required for automatic capture
+
+After connecting a project, Codex requires the owner to approve Recallant's project command hook:
+
+1. Open Codex in the connected project and enter `/hooks`.
+2. Find the **Recallant command hook**, review that it runs `recallant codex-hook`, and choose
+   **Trust**.
+3. Perform one normal Codex action, then run:
+
+   ```bash
+   recallant doctor --project-dir /path/to/project --require-capture
+   ```
+
+This approval is a Codex security boundary. Recallant can install the hook, but it cannot approve
+project commands on the owner's behalf. Until the hook is trusted, Recallant's memory tools can
+still work, but automatic Codex capture remains inactive (`capture_active=false`).
+
+This step is required only for automatic Codex capture. Projects using Recallant through manual MCP
+calls or another client do not need a Codex hook, but they should not expect `capture_active=true`.
+
 ## Current Scope and Limits
 
-Recallant `v0.1.0-dev.1` is a **development prerelease**, not stable production software. It is
+Recallant `v0.1.0-dev.2` is a **development prerelease**, not stable production software. It is
 suitable for local evaluation and controlled development use. Broader project pilots, native
 cross-client parity, and stable support guarantees are still open work.
 

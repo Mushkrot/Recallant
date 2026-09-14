@@ -117,6 +117,7 @@ export type ManagementChatResponse = {
     pending_paid_approvals: number;
     interrupted_sessions: number;
     capture_ready: boolean;
+    capture_scope: "project";
     memory_loop_ready: boolean;
     semantic_memory_ready: boolean;
     readiness_status: string;
@@ -1274,6 +1275,7 @@ function dashboardFacts(
     pending_paid_approvals: asNumber(critical.pending_paid_approvals),
     interrupted_sessions: asNumber(critical.interrupted_sessions),
     capture_ready: captureReady,
+    capture_scope: "project",
     memory_loop_ready: memoryLoopReady,
     semantic_memory_ready: semanticMemoryReady,
     readiness_status: readinessStatus,
@@ -2175,11 +2177,11 @@ function answerRu(
     case "connection_check":
       return `${baseline}\n\nПроверка подключения: ${
         facts.capture_ready
-          ? "проект имеет свежее автоматическое событие агента: capture_active=true."
+          ? "проект имеет свежее автоматическое событие агента по всему проекту: capture_active=true."
           : facts.memory_loop_ready
-            ? "memory loop завершен, но свежего автоматического события нет: capture_active=false."
-            : "проект зарегистрирован, но автоматический захват и memory loop еще не доказаны."
-      }\n\nПоследний автоматический захват: ${facts.last_automatic_capture_at}. Последний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
+            ? "memory loop по всему проекту завершен, но свежего автоматического события нет: capture_active=false."
+            : "проект зарегистрирован, но автоматический захват по всему проекту и memory loop еще не доказаны."
+      }\n\nПоследний автоматический захват по всему проекту: ${facts.last_automatic_capture_at}. Последний context read: ${facts.last_context_read_at}. Последняя запись памяти: ${facts.last_memory_write_at}. Последний checkpoint: ${facts.last_checkpoint_at}. Последний semantic proof: ${facts.last_semantic_recall_proof_at}. Событий capture: ${facts.capture_events}, решений: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nВот что Recallant нашел в governed memory по запросу “${memoryLookupResult.query}”:\n\n${formatMemoryLookupRu(memoryLookupResult)}`;
@@ -2302,11 +2304,11 @@ function answerEn(
     case "connection_check":
       return `${baseline}\n\nConnection check: ${
         facts.capture_ready
-          ? "this project has a fresh automatic agent event: capture_active=true."
+          ? "this project has a fresh project-wide automatic agent event: capture_active=true."
           : facts.memory_loop_ready
-            ? "the memory loop is complete, but no fresh automatic event exists: capture_active=false."
-            : "this project is configured, but automatic capture and the memory loop are not proven yet."
-      }\n\nLast automatic capture: ${facts.last_automatic_capture_at}. Last context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
+            ? "the project-wide memory loop is complete, but no fresh automatic event exists: capture_active=false."
+            : "this project is configured, but project-wide automatic capture and the memory loop are not proven yet."
+      }\n\nLast project-wide automatic capture: ${facts.last_automatic_capture_at}. Last context read: ${facts.last_context_read_at}. Last memory write: ${facts.last_memory_write_at}. Last checkpoint: ${facts.last_checkpoint_at}. Last semantic proof: ${facts.last_semantic_recall_proof_at}. Capture events: ${facts.capture_events}, decisions: ${facts.captured_decisions}.`;
     case "memory_summary":
       if (memoryLookupResult?.status === "found") {
         return `${baseline}\n\nHere is what Recallant found in governed memory for “${memoryLookupResult.query}”:\n\n${formatMemoryLookupEn(memoryLookupResult)}`;

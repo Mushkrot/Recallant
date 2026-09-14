@@ -7,22 +7,23 @@ import { resolve } from "node:path";
 import pg from "pg";
 
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
 const cliPath = resolve("apps/cli/dist/index.js");
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 const projectId = randomUUID();
 const projectDir = `/tmp/recallant-codex-hook-${randomUUID()}`;
 const offlineDir = `${projectDir}-offline`;
+const remoteOnlyDir = `${projectDir}-remote-only`;
 const smokeHome = `${projectDir}-home`;
 const db = new RecallantDb({ databaseUrl, developerId, projectId, projectPath: projectDir });
 const client = new pg.Client({ connectionString: databaseUrl });
 const fakeSecret = `sk-codex-hook-${randomUUID().replaceAll("-", "")}`;
 
-const onlineEnv = {
-  ...process.env,
+const onlineEnv = smokeEnvironment({
   HOME: smokeHome,
   RECALLANT_DATABASE_URL: databaseUrl,
   RECALLANT_DEVELOPER_ID: developerId,
@@ -30,18 +31,22 @@ const onlineEnv = {
   RECALLANT_PROJECT_PATH: projectDir,
   RECALLANT_EMBEDDING_PROVIDER: "deterministic",
   RECALLANT_EMBEDDING_DIMS: "8"
-};
+});
 
 function runHook(projectPath, payload, env = onlineEnv) {
   const startedAt = Date.now();
   const debug = process.env.RECALLANT_CODEX_HOOK_SMOKE_DEBUG === "1";
-  const result = spawnSync(process.execPath, [cliPath, "codex-hook", ...(debug ? ["--debug"] : [])], {
-    cwd: projectPath,
-    env,
-    input: JSON.stringify(payload),
-    encoding: "utf8",
-    timeout: 10_000
-  });
+  const result = spawnSync(
+    process.execPath,
+    [cliPath, "codex-hook", ...(debug ? ["--debug"] : [])],
+    {
+      cwd: projectPath,
+      env,
+      input: JSON.stringify(payload),
+      encoding: "utf8",
+      timeout: 10_000
+    }
+  );
   assert.equal(result.status, 0, `hook failed: ${result.stderr}`);
   assert.equal(result.signal, null, `hook timed out: ${result.error?.message ?? ""}`);
   assert.equal(result.stdout, "", `hook wrote to stdout: ${result.stdout}`);
@@ -63,9 +68,11 @@ function common(eventName, turnId = "turn-1") {
 
 await rm(projectDir, { recursive: true, force: true });
 await rm(offlineDir, { recursive: true, force: true });
+await rm(remoteOnlyDir, { recursive: true, force: true });
 await rm(smokeHome, { recursive: true, force: true });
 await mkdir(`${projectDir}/.recallant`, { recursive: true });
 await mkdir(`${offlineDir}/.recallant`, { recursive: true });
+await mkdir(`${remoteOnlyDir}/.recallant`, { recursive: true });
 await mkdir(smokeHome, { recursive: true });
 await client.connect();
 
@@ -132,9 +139,7 @@ try {
   runHook(projectDir, payloads[1]);
   runHook(projectDir, payloads[3]);
 
-  const state = JSON.parse(
-    await readFile(`${projectDir}/.recallant/current-session.json`, "utf8")
-  );
+  const state = JSON.parse(await readFile(`${projectDir}/.recallant/current-session.json`, "utf8"));
   assert.equal(state.status, "active");
   assert.equal(state.native_hook.external_session_id, "external-codex-session");
   assert.equal(state.native_hook.last_event_name, "PostToolUse");
@@ -170,20 +175,19 @@ try {
   assert.equal(prompt?.trace_id, response?.trace_id, "turn correlation was lost");
 
   const successfulCall = observations.find(
-    (item) => item.kind === "tool_call" && item.redacted_metadata.external_tool_use_id === "tool-success"
+    (item) =>
+      item.kind === "tool_call" && item.redacted_metadata.external_tool_use_id === "tool-success"
   );
   const successfulResult = observations.find(
     (item) =>
-      item.kind === "tool_result" &&
-      item.redacted_metadata.external_tool_use_id === "tool-success"
+      item.kind === "tool_result" && item.redacted_metadata.external_tool_use_id === "tool-success"
   );
   assert.equal(successfulCall?.trace_id, successfulResult?.trace_id, "tool correlation was lost");
   assert.equal(successfulResult?.status, "success");
 
   const failedResult = observations.find(
     (item) =>
-      item.kind === "tool_result" &&
-      item.redacted_metadata.external_tool_use_id === "tool-failure"
+      item.kind === "tool_result" && item.redacted_metadata.external_tool_use_id === "tool-failure"
   );
   const error = observations.find(
     (item) => item.kind === "error" && item.trace_id === failedResult?.trace_id
@@ -238,6 +242,57 @@ try {
   assert.equal(offlineState.native_hook.last_mode, "offline_spool");
   assert.ok(offlineDurationMs < 5_000, `offline hook was too slow: ${offlineDurationMs}ms`);
 
+  const remoteOnlySecret = `sk-remote-only-${randomUUID().replaceAll("-", "")}`;
+  await writeFile(
+    `${remoteOnlyDir}/.recallant/remote-consent.json`,
+    `${JSON.stringify(
+      {
+        schema_version: 1,
+        project_id: project.projectId,
+        server_url: "https://recallant.example.test",
+        endpoint_path: "/api/mcp",
+        credential_ref: "local_file_v1:remote-only-test",
+        developer_id: developerId,
+        client_id: "remote-only-codex-hook"
+      },
+      null,
+      2
+    )}\n`
+  );
+  runHook(
+    remoteOnlyDir,
+    {
+      session_id: "remote-only-codex-session",
+      cwd: remoteOnlyDir,
+      hook_event_name: "UserPromptSubmit",
+      turn_id: "remote-only-turn",
+      prompt: `Remote-only native capture api_key=${remoteOnlySecret}`
+    },
+    {
+      ...onlineEnv,
+      HOME: `${remoteOnlyDir}/home`,
+      RECALLANT_DATABASE_URL: "",
+      RECALLANT_ENV_FILE: `${remoteOnlyDir}/missing.env`,
+      RECALLANT_PROJECT_PATH: remoteOnlyDir
+    }
+  );
+  const remoteOnlySpool = await readFile(
+    `${remoteOnlyDir}/.recallant/spool/spool.jsonl`,
+    "utf8"
+  );
+  assert.equal(
+    remoteOnlySpool.includes(remoteOnlySecret),
+    false,
+    "remote-only spool leaked a secret"
+  );
+  assert.equal(JSON.parse(remoteOnlySpool.trim()).record_kind, "observation");
+  const remoteOnlyState = JSON.parse(
+    await readFile(`${remoteOnlyDir}/.recallant/current-session.json`, "utf8")
+  );
+  assert.equal(remoteOnlyState.status, "offline");
+  assert.equal(remoteOnlyState.native_hook.last_mode, "offline_spool");
+  assert.equal(remoteOnlyState.native_hook.observation_count, 1);
+
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -253,6 +308,7 @@ try {
         transcript_parsing: false,
         silent_stdout: true,
         offline_spool: "pass",
+        remote_only_root_discovery: "pass",
         offline_duration_ms: offlineDurationMs
       },
       null,
@@ -265,5 +321,6 @@ try {
   await client.end();
   await rm(projectDir, { recursive: true, force: true });
   await rm(offlineDir, { recursive: true, force: true });
+  await rm(remoteOnlyDir, { recursive: true, force: true });
   await rm(smokeHome, { recursive: true, force: true });
 }

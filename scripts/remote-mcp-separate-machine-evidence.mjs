@@ -169,9 +169,17 @@ async function projectSnapshot(projectDir) {
     ? await readFile(codexConfigPath, "utf8")
     : "";
   const recallantConfigCount = (codexConfig.match(/\[mcp_servers\.recallant\]/g) ?? []).length;
+  const recallantDir = join(projectDir, ".recallant");
+  const recallantEntries = (await exists(recallantDir))
+    ? (await readdir(recallantDir, { withFileTypes: true })).map((entry) => entry.name).sort()
+    : [];
+  const remoteConsentOnly =
+    recallantEntries.length === 1 && recallantEntries[0] === "remote-consent.json";
   const names = entries.map((entry) => entry.name);
   const forbidden = {
-    recallant_local_storage: names.includes(".recallant"),
+    // Remote clients may retain the non-secret consent receipt. Any other
+    // project-local Recallant state would be a local-storage installation.
+    recallant_local_storage: names.includes(".recallant") && !remoteConsentOnly,
     docker_compose: names.some((name) => /^docker-compose(?:\..+)?\.ya?ml$/i.test(name)),
     postgres_hint: /postgres|pgvector|recallant-postgres/i.test(
       `${names.join("\n")}\n${codexConfig}`
@@ -184,6 +192,7 @@ async function projectSnapshot(projectDir) {
     codex_config_present: codexConfig !== "",
     recallant_codex_config_entries: recallantConfigCount,
     recallant_remote_bridge_configured: /remote-bridge/.test(codexConfig),
+    remote_consent_receipt: remoteConsentOnly,
     forbidden
   };
 }
@@ -285,7 +294,10 @@ async function runCleanup(input) {
 }
 
 function assertCleanSnapshot(snapshot, label) {
-  assert(!snapshot.forbidden.recallant_local_storage, `${label}: project contains .recallant`);
+  assert(
+    !snapshot.forbidden.recallant_local_storage,
+    `${label}: project contains local Recallant storage beyond the remote consent receipt`
+  );
   assert(!snapshot.forbidden.docker_compose, `${label}: project contains docker compose artifact`);
   assert(!snapshot.forbidden.postgres_hint, `${label}: project contains Postgres artifact`);
   assert(!snapshot.forbidden.database_url_hint, `${label}: project config contains database URL`);

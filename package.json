@@ -1,6 +1,6 @@
 {
   "name": "recallant",
-  "version": "0.1.0-dev.1",
+  "version": "0.1.0-dev.2",
   "private": true,
   "description": "Governed memory for AI agents.",
   "license": "Apache-2.0",
@@ -87,6 +87,8 @@
     "codex-otel-control:smoke": "npm run build && node scripts/smoke-codex-otel-control.mjs",
     "capture-readiness:smoke": "npm run build --workspace @recallant/contracts && node scripts/smoke-capture-readiness.mjs",
     "codex-hook-runtime:smoke": "npm run build && node scripts/smoke-codex-hook-runtime.mjs",
+    "r2:remote-hook:smoke": "npm run build && node scripts/smoke-r2-remote-hook.mjs",
+    "mcp-stdio-lifecycle:smoke": "npm run build --workspace @recallant/mcp && npm run build --workspace @recallant/cli && node scripts/smoke-mcp-stdio-lifecycle.mjs",
     "demo-capture:smoke": "node scripts/smoke-demo-capture.mjs",
     "product-acceptance:smoke": "node scripts/smoke-agent-capture.mjs",
     "pilot-report:smoke": "node scripts/smoke-pilot-report.mjs",
@@ -101,6 +103,7 @@
     "remote-client-cleanup:smoke": "node scripts/smoke-remote-client-cleanup.mjs",
     "project-sanitize:smoke": "node scripts/smoke-project-sanitize.mjs",
     "onboarding:smoke": "node scripts/smoke-onboarding-cli.mjs",
+    "onboard-contract:smoke": "npm run build && node scripts/smoke-onboard-contract.mjs",
     "onboarding-temp-cleanup:smoke": "node scripts/smoke-onboarding-temp-cleanup.mjs",
     "connect:smoke": "node scripts/smoke-connect-cli.mjs",
     "installer:smoke": "node scripts/smoke-installer.mjs",
@@ -138,6 +141,8 @@
     "remote-live-external-canary": "node scripts/remote-live-external-canary.mjs",
     "remote-live-external-canary:smoke": "node scripts/smoke-remote-live-external-canary.mjs",
     "service-env-profile:smoke": "node scripts/smoke-service-env-profile.mjs",
+    "r1:diagnostics:smoke": "npm run build && node scripts/smoke-r1-diagnostics.mjs",
+    "r2:remote-only-connect:smoke": "npm run build && node scripts/smoke-r2-remote-only-connect.mjs",
     "public-security:smoke": "node scripts/smoke-public-security.mjs",
     "security-review:smoke": "node scripts/smoke-security-review.mjs",
     "cross-client:smoke": "node scripts/smoke-cross-client.mjs",
@@ -149,7 +154,7 @@
     "phase10:smoke": "node scripts/smoke-phase10-attach.mjs && node scripts/smoke-phase10-detach.mjs && node scripts/smoke-phase10-cross-project.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
-    "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run codex-otel-contract:smoke && npm run codex-otel-control:smoke && npm run capture-readiness:smoke && npm run agent-observability:smoke && npm run security-hardening:smoke && npm run review-ui:smoke",
+    "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run codex-otel-contract:smoke && npm run codex-otel-control:smoke && npm run capture-readiness:smoke && npm run agent-observability:smoke && npm run mcp-stdio-lifecycle:smoke && npm run security-hardening:smoke && npm run review-ui:smoke",
     "test": "npm run test:product-gates"
   },
   "devDependencies": {

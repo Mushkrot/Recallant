@@ -5,10 +5,11 @@ import {
   deriveAgentRecoveryChains
 } from "../packages/core/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 const projectId = randomUUID();
 const projectPath = `/tmp/recallant-observability-${projectId}`;
@@ -19,7 +20,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const fakeSecret = `${['s', 'k-', 'syntheticfixture'].join('')}-${randomUUID().replaceAll("-", "")}`;
+const fakeSecret = `${["s", "k-", "syntheticfixture"].join("")}-${randomUUID().replaceAll("-", "")}`;
 const fakePassword = `example-password-${randomUUID().slice(0, 8)}`;
 const fakePrivateKeyLabel = ["PRIVATE", "KEY"].join(" ");
 const fakePrivateKey = [

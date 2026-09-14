@@ -5,16 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
 import { createManagedSmokeTempRoot } from "./lib/smoke-temp-root.mjs";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
 const repoRoot = process.cwd();
-const databaseUrl =
-  process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+
+const databaseUrl = smokeDatabaseUrl();
+
 const developerId = randomUUID();
 
 function runRaw(command, args, options = {}) {
-  const env = {
-    ...process.env,
+  const env = smokeEnvironment({
     RECALLANT_DEVELOPER_ID: developerId,
     RECALLANT_PROJECT_ID: "",
     RECALLANT_PROJECT_PATH: "",
@@ -22,7 +22,7 @@ function runRaw(command, args, options = {}) {
     RECALLANT_EMBEDDING_DIMS: "8",
     RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
     ...(options.env ?? {})
-  };
+  });
   if (options.omitDatabaseUrl) {
     delete env.RECALLANT_DATABASE_URL;
   } else {

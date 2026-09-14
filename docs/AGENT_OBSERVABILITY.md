@@ -38,8 +38,11 @@ recallant connect codex --project-dir .
 
 Recallant safely merges its command handlers into `.codex/hooks.json`, preserves unrelated hooks,
 and backs up an existing file before changing it. The same command is idempotent. It never writes
-global Codex configuration and it does not bypass Codex trust: open `/hooks`, review the Recallant
-command hook, and trust it before expecting the first native invocation.
+global Codex configuration and it does not bypass Codex trust. After connecting a project, the owner
+must open `/hooks`, review the **Recallant command hook** (`recallant codex-hook`), and choose
+**Trust**. This is required because Codex protects project commands from silent activation; Recallant
+can prepare the hook but cannot approve it for the owner. Until it is trusted, the memory loop may
+still work, while native automatic capture remains inactive and `capture_active` stays false.
 
 All installed handlers call one silent, fail-soft command: `recallant codex-hook`. Recallant maps
 the native Codex events as follows:

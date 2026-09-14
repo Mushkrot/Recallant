@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 const databaseUrl =
   process.env.RECALLANT_DATABASE_URL ??
-  "postgres://example-user:example-password@127.0.0.1:5432/example-db";
+  "postgres://recallant:example-password@127.0.0.1:15433/recallant_agent_work";
 const developerId = randomUUID();
 const cliPath = resolve("apps/cli/dist/index.js");
 const tempRoots = [];
@@ -108,6 +108,28 @@ function runProjectHook(projectDir, hookEnv, name, args = [], input = "") {
   );
 }
 
+function runNativeCodexHook(projectDir, hookEnv, marker) {
+  const payload = {
+    session_id: `stage4-native-${marker}`,
+    cwd: projectDir,
+    hook_event_name: "SessionStart",
+    model: "gpt-5",
+    turn_id: null,
+    source: "startup"
+  };
+  const result = spawnSync(process.execPath, [cliPath, "codex-hook"], {
+    cwd: projectDir,
+    env: hookEnv,
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert(result.status === 0, `native Codex hook should fail soft: ${result.stderr}`);
+  assert(result.signal === null, `native Codex hook timed out: ${result.error?.message ?? ""}`);
+  assert(result.stdout === "", `native Codex hook wrote to stdout: ${result.stdout}`);
+  assert(result.stderr === "", `native Codex hook wrote to stderr: ${result.stderr}`);
+}
+
 function assertStartupMatrix(doctor, label) {
   const connection = doctor.client_connection;
   const nativeHooks = connection?.native_hooks ?? [];
@@ -120,11 +142,13 @@ function assertStartupMatrix(doctor, label) {
     ["codex", "cursor", "claude_code", "generic"].every((client) => clients.has(client)),
     `${label}: native hook matrix missing clients: ${JSON.stringify(nativeHooks)}`
   );
+  const codexHook = nativeHooks.find((entry) => entry.client === "codex");
   assert(
-    nativeHooks.some(
-      (entry) => entry.client === "codex" && entry.status === "local_hook_kit_supported"
-    ),
-    `${label}: Codex hook-kit status missing: ${JSON.stringify(nativeHooks)}`
+    codexHook &&
+      typeof codexHook.status === "string" &&
+      codexHook.command === "recallant codex-hook" &&
+      codexHook.proof_command?.includes("--require-capture"),
+    `${label}: Codex native-hook readiness status missing: ${JSON.stringify(nativeHooks)}`
   );
   assert(
     nativeHooks.some(
@@ -153,13 +177,14 @@ function assertStartupMatrix(doctor, label) {
   assert(doctor.local_spool_status?.status, `${label}: local spool status missing`);
   assert(
     typeof doctor.owner_summary?.proof === "string" &&
-      doctor.owner_summary.proof.includes("context read") &&
+      doctor.owner_summary.proof.includes("context-read") &&
       typeof doctor.owner_summary?.headline === "string",
     `${label}: owner summary does not distinguish configured from recording`
   );
 }
 
-async function runLifecycle(projectDir, marker, label) {
+async function runLifecycle(projectDir, marker, label, options = {}) {
+  const { beforeDoctor = null, requireCapture = true } = options;
   const started = await cli(projectDir, ["agent-start", "--task-hint", `${label} ${marker}`]);
   assert(started.session_id, `${label}: session did not start`);
 
@@ -238,12 +263,18 @@ async function runLifecycle(projectDir, marker, label) {
     `${label}: ask did not recall memory ${marker}: ${JSON.stringify(ask)}`
   );
 
-  const doctor = await cli(projectDir, ["doctor", "--require-capture", "--format", "json"]);
+  if (beforeDoctor) await beforeDoctor();
+  const doctorArgs = ["doctor", ...(requireCapture ? ["--require-capture"] : []), "--format", "json"];
+  const doctor = await cli(projectDir, doctorArgs);
   assert(
     doctor.capture_readiness?.ready === true &&
-      doctor.capture_readiness?.status === "capture_active" &&
-      doctor.owner_summary?.actually_recording === true,
-    `${label}: doctor --require-capture did not prove capture active: ${JSON.stringify(doctor)}`
+      (requireCapture
+        ? doctor.readiness_contract?.capture_active === true &&
+          doctor.agent_audit?.capture_active === true &&
+          doctor.owner_summary?.actually_recording === true
+        : doctor.readiness_contract?.memory_loop_ready === true &&
+          doctor.owner_summary?.actually_recording === false),
+    `${label}: doctor did not prove the requested lifecycle readiness: ${JSON.stringify(doctor)}`
   );
   assertStartupMatrix(doctor, `${label} after capture`);
 
@@ -254,7 +285,7 @@ async function runLifecycle(projectDir, marker, label) {
     checkpoint_exists: true,
     later_context_recalled: true,
     ask_recalled: true,
-    doctor_status: doctor.capture_readiness.status,
+    doctor_status: doctor.readiness_contract.primary_state,
     client_connection_status: doctor.client_connection.status,
     owner_summary_status: doctor.owner_summary.status
   };
@@ -307,7 +338,8 @@ async function runCodexControlledPath() {
   ]);
   assert(
     connect.hook_status === "local_hook_kit_installed" &&
-      connect.client_connection?.hook_installation_status === "local_hook_kit_ready" &&
+      connect.client_connection?.hook_kit?.status === "installed" &&
+      connect.client_connection?.automatic_agent_audit?.status === "configured_unobserved" &&
       connect.writes_global_config === false,
     `Codex connect did not install local hook kit safely: ${JSON.stringify(connect)}`
   );
@@ -339,7 +371,10 @@ async function runCodexControlledPath() {
     "Codex hook-captured memory was not recalled"
   );
 
-  const lifecycle = await runLifecycle(projectDir, marker, "Codex controlled path");
+  const lifecycle = await runLifecycle(projectDir, marker, "Codex controlled path", {
+    beforeDoctor: () => runNativeCodexHook(projectDir, hookEnv, marker),
+    requireCapture: true
+  });
   const after = await hashTree(projectDir);
 
   return {
@@ -428,7 +463,9 @@ async function runCursorEquivalentPath() {
     `Cursor project config did not preserve existing server and add Recallant: ${JSON.stringify(cursorConfig)}`
   );
 
-  const lifecycle = await runLifecycle(projectDir, marker, "Cursor equivalent path");
+  const lifecycle = await runLifecycle(projectDir, marker, "Cursor equivalent path", {
+    requireCapture: false
+  });
   const after = await hashTree(projectDir);
   const originalAfter = await hashTree(originalDir);
   assert(
@@ -671,7 +708,8 @@ try {
       report.evidence.cursor_equivalent_path.lifecycle.ask_recalled === true,
     startup_readiness_matrix:
       report.evidence.codex_controlled_path.lifecycle.owner_summary_status === "recording" &&
-      report.evidence.cursor_equivalent_path.lifecycle.owner_summary_status === "recording",
+      report.evidence.cursor_equivalent_path.lifecycle.owner_summary_status ===
+        "configured_not_recording",
     no_unrelated_global_config_modified:
       report.evidence.codex_controlled_path.no_global_config_modified === true &&
       report.evidence.cursor_equivalent_path.no_global_config_modified === true &&

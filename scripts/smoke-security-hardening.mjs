@@ -12,10 +12,11 @@ import {
 } from "../apps/cli/dist/vault-bridge.js";
 import { discoveryCandidateForImport } from "../apps/cli/dist/discovery.js";
 import { createRecallantHttpServer } from "../apps/server/dist/index.js";
+import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
 
-const databaseUrl = process.env.RECALLANT_DATABASE_URL;
-if (!databaseUrl)
-  throw new Error("RECALLANT_DATABASE_URL is required for security hardening smoke");
+
+const databaseUrl = smokeDatabaseUrl();
+
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -90,7 +91,10 @@ try {
     "vault inventory leaked a generic credential or anchor"
   );
   const exportPlan = buildVaultMarkdownExportPlan(inventory, join(vaultRoot, "export"));
-  assert(!JSON.stringify(exportPlan).includes(opaqueCredential), "vault export leaked a credential");
+  assert(
+    !JSON.stringify(exportPlan).includes(opaqueCredential),
+    "vault export leaked a credential"
+  );
   const exportRoot = join(vaultRoot, "export-link");
   await symlink(vaultOutside, exportRoot);
   let exportBlocked = false;

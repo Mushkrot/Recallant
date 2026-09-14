@@ -141,7 +141,8 @@ try {
     POSTGRES_USER: postgresUser,
     RECALLANT_POSTGRES_CONTAINER_NAME: containerName,
     RECALLANT_BACKUP_TARGET: backupRoot,
-    RECALLANT_DATA_DIR: dirname(backupRoot)
+    RECALLANT_DATA_DIR: dirname(backupRoot),
+    RECALLANT_BACKUP_METRICS_FILE: join(backupRoot, "recallant_backup.prom")
   };
   const beforeRehearsals = await admin.query(
     "SELECT count(*)::int AS count FROM pg_database WHERE datname LIKE 'recallant_rehearsal_%'"
@@ -153,6 +154,16 @@ try {
   assert(report.production_overwritten === false, "Production overwrite safety flag failed");
   assert(report.production_fingerprint_unchanged === true, "Production fingerprint changed");
   assert(report.disposable_database_removed === true, "Disposable database was not removed");
+  const backupMetrics = await readFile(env.RECALLANT_BACKUP_METRICS_FILE, "utf8");
+  for (const metric of [
+    "recallant_backup_report_present 1",
+    "recallant_backup_last_success_timestamp_seconds ",
+    "recallant_backup_last_restore_verification_timestamp_seconds ",
+    "recallant_backup_max_age_seconds 108000",
+    "recallant_backup_restore_max_age_seconds 108000"
+  ]) {
+    assert(backupMetrics.includes(metric), `Backup metrics omitted ${metric}`);
+  }
   assert(report.missing_tables.length === 0, "Restored database is missing source tables");
   assert(report.unexpected_tables.length === 0, "Restored database has unexpected tables");
   assert(report.row_count_mismatches.length === 0, "Restored row counts differ from source");
@@ -185,7 +196,10 @@ try {
   assert(backupDirMode === 0o700, `Backup directory mode is ${backupDirMode.toString(8)}`);
   const manifestText = JSON.stringify(manifest);
   assert(!manifestText.includes(baseDatabaseUrl), "Manifest leaked database URL");
-  assert(!manifestText.includes(decodeURIComponent(baseUrl.password)), "Manifest leaked credential");
+  assert(
+    !manifestText.includes(decodeURIComponent(baseUrl.password)),
+    "Manifest leaked credential"
+  );
   const canonicalTables = [
     ...migration.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)
   ]
@@ -193,7 +207,10 @@ try {
     .sort();
   const coveredTables = manifest.source_table_inventory.map((entry) => entry.table).sort();
   const missingCanonicalTables = canonicalTables.filter((table) => !coveredTables.includes(table));
-  assert(missingCanonicalTables.length === 0, `Missing canonical tables: ${missingCanonicalTables}`);
+  assert(
+    missingCanonicalTables.length === 0,
+    `Missing canonical tables: ${missingCanonicalTables}`
+  );
   for (const table of [
     "project_sources",
     "graph_candidates",
@@ -241,9 +258,19 @@ try {
       `RECALLANT_DATABASE_URL=${databaseUrl}`,
       `POSTGRES_DB=${testDatabase}`,
       `POSTGRES_USER=${postgresUser}`,
+
+      `POSTGRES_PASSWORD=${decodeURIComponent(baseUrl.password)}`,
+      `RECALLANT_POSTGRES_HOST=${baseUrl.hostname}`,
+      `RECALLANT_POSTGRES_PORT=${baseUrl.port}`,
       `RECALLANT_POSTGRES_CONTAINER_NAME=${containerName}`,
+      `RECALLANT_COMPOSE_PROJECT_NAME=recallant-backup-smoke`,
+      `RECALLANT_DATA_DIR=${dirname(backupRoot)}`,
+
       `RECALLANT_BACKUP_TARGET=${backupRoot}`,
-      `RECALLANT_DATA_DIR=${dirname(backupRoot)}`
+      `RECALLANT_POSTGRES_HOST=${baseUrl.hostname}`,
+      `RECALLANT_POSTGRES_PORT=${baseUrl.port || "5432"}`,
+      `RECALLANT_POSTGRES_CONTAINER_NAME=${containerName}`,
+      "RECALLANT_COMPOSE_PROJECT_NAME=recallant"
     ].join("\n") + "\n",
     { mode: 0o600 }
   );
@@ -254,7 +281,11 @@ try {
       RECALLANT_DATABASE_URL: "",
       POSTGRES_DB: "",
       POSTGRES_USER: "",
+      POSTGRES_PASSWORD: "",
+      RECALLANT_POSTGRES_HOST: "",
+      RECALLANT_POSTGRES_PORT: "",
       RECALLANT_POSTGRES_CONTAINER_NAME: "",
+      RECALLANT_COMPOSE_PROJECT_NAME: "",
       RECALLANT_BACKUP_TARGET: "",
       RECALLANT_DATA_DIR: "",
       RECALLANT_ENV_FILE: explicitEnvFile
@@ -350,6 +381,7 @@ try {
     `${JSON.stringify(
       {
         native_restore: "passed",
+        backup_metrics: "passed",
         dump_format_header: dumpHeader,
         postgresql_tool_version: manifest.postgresql_tool_version,
         artifact_sha256_verified: report.artifact_sha256_verified,

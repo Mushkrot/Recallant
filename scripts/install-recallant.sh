@@ -253,12 +253,36 @@ ensure_env_default() {
   fi
 }
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*$|${key}=${value}|" "$ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
+  fi
+}
+
 ensure_env_default RECALLANT_DATA_DIR "$DATA_DIR"
 ensure_env_default RECALLANT_BACKUP_TARGET "$DATA_DIR/backups"
-ensure_env_default RECALLANT_LATEST_BACKUP_VERIFICATION_FILE "$DATA_DIR/backups/latest-verification.json"
-ensure_env_default RECALLANT_LATEST_BACKUP_MANIFEST "$DATA_DIR/backups/latest-manifest.json"
+set_env_value RECALLANT_LATEST_BACKUP_VERIFICATION_FILE "$DATA_DIR/backups/latest-verification.json"
+set_env_value RECALLANT_LATEST_BACKUP_MANIFEST "$DATA_DIR/backups/latest-manifest.json"
+ensure_env_default RECALLANT_POSTGRES_HOST "$POSTGRES_HOST"
+ensure_env_default RECALLANT_POSTGRES_PORT "$POSTGRES_PORT"
+ensure_env_default RECALLANT_POSTGRES_CONTAINER_NAME "$POSTGRES_CONTAINER_NAME"
+ensure_env_default RECALLANT_EXPECTED_POSTGRES_MOUNT_SOURCE "$DATA_DIR/postgres"
+ensure_env_default RECALLANT_EXPECTED_POSTGRES_MOUNT_DESTINATION "/var/lib/postgresql/data"
+ensure_env_default RECALLANT_COMPOSE_PROJECT_NAME "$COMPOSE_PROJECT_NAME"
 ensure_env_default RECALLANT_BACKUP_MAX_AGE_HOURS "30"
 ensure_env_default RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS "30"
+if ! grep -q '^RECALLANT_BACKUP_METRICS_FILE=' "$ENV_FILE"; then
+  for metrics_dir in /var/lib/prometheus/node-exporter /var/lib/node_exporter/textfile_collector; do
+    if [[ -d "$metrics_dir" ]]; then
+      ensure_env_default RECALLANT_BACKUP_METRICS_FILE "$metrics_dir/recallant_backup.prom"
+      break
+    fi
+  done
+fi
 chmod 600 "$ENV_FILE"
 
 if [[ ! -d node_modules ]]; then
@@ -287,6 +311,20 @@ else
   echo "Recallant database schema already present"
 fi
 
+if ! grep -q '^RECALLANT_EXPECTED_POSTGRES_SYSTEM_IDENTIFIER=' "$ENV_FILE"; then
+  postgres_system_identifier="$(
+    prod_compose exec -T postgres psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -c 'SELECT system_identifier::text FROM pg_control_system()' 2>/dev/null |
+      tr -d '[:space:]' || true
+  )"
+  if [[ "$postgres_system_identifier" =~ ^[0-9]+$ ]]; then
+    ensure_env_default RECALLANT_EXPECTED_POSTGRES_SYSTEM_IDENTIFIER "$postgres_system_identifier"
+  else
+    echo "Could not record PostgreSQL system identifier; doctor will report physical-target identity as unknown." >&2
+  fi
+fi
+chmod 600 "$ENV_FILE"
+
 unit_file="/etc/systemd/system/recallant.service"
 backup_service_file="/etc/systemd/system/recallant-backup.service"
 backup_timer_file="/etc/systemd/system/recallant-backup.timer"
@@ -303,6 +341,7 @@ User=$RUN_USER
 WorkingDirectory=$RECALLANT_HOME
 EnvironmentFile=$ENV_FILE
 Environment="RECALLANT_ENV_FILE=$ENV_FILE"
+ExecStartPre=/usr/bin/bash $RECALLANT_HOME/scripts/recallant-profile.sh assert-service
 ExecStart=/usr/bin/env npm run server:start
 Restart=on-failure
 RestartSec=3
@@ -322,8 +361,7 @@ User=$RUN_USER
 WorkingDirectory=$RECALLANT_HOME
 EnvironmentFile=$ENV_FILE
 Environment="RECALLANT_ENV_FILE=$ENV_FILE"
-Environment="RECALLANT_DATA_DIR=$DATA_DIR"
-Environment="RECALLANT_BACKUP_TARGET=$DATA_DIR/backups"
+ExecStartPre=/usr/bin/bash $RECALLANT_HOME/scripts/recallant-profile.sh assert-backup
 ExecStart=$RECALLANT_HOME/scripts/recallant-production-backup.sh
 Nice=10
 IOSchedulingClass=best-effort

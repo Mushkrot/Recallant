@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { URL } from "node:url";
 import { RecallantDb } from "../packages/db/dist/index.js";
 import { createRecallantMcpServer, createRecallantTools } from "../packages/mcp/dist/index.js";
+import { smokeDatabaseUrl, smokeEnvironment } from "./smoke-database-env.mjs";
 
 const validModes = new Set(["inventory", "strict"]);
 const forbiddenOutputNeedles = [
@@ -18,17 +19,9 @@ const forbiddenOutputNeedles = [
   ["oauth", "token"].join("_"),
   ["customer", "@example.invalid"].join("")
 ];
-const defaultDatabaseUrl = [
-  "postgres",
-  "://",
-  "recallant",
-  ":",
-  "example-password",
-  "@127.0.0.1:15433/recallant_agent_work"
-].join("");
 const forbiddenSourceNeedles = [
-  ['example', 'service'].join('-'),
-  ['/srv', 'example-project', 'data'].join('/'),
+  ["example", "service"].join("-"),
+  ["/srv", "example-project", "data"].join("/"),
   ["BEGIN", "PRIVATE", "KEY"].join(" "),
   ["postgres", "://"].join("")
 ];
@@ -84,7 +77,7 @@ function safeSummary(input) {
 }
 
 function databaseUrl() {
-  return process.env.RECALLANT_DATABASE_URL ?? defaultDatabaseUrl;
+  return smokeDatabaseUrl();
 }
 
 async function withTempProject(label, callback) {
@@ -145,9 +138,7 @@ async function writeProjectConfig(projectDir, projectId) {
 }
 
 function cliEnvironment(developerId) {
-  const env = { ...process.env };
-  env.RECALLANT_DATABASE_URL = databaseUrl();
-  env.RECALLANT_DEVELOPER_ID = developerId;
+  const env = smokeEnvironment({ RECALLANT_DEVELOPER_ID: developerId });
   delete env.RECALLANT_PROJECT_ID;
   delete env.RECALLANT_PROJECT_PATH;
   return env;
@@ -941,7 +932,9 @@ async function runForeignProjectPathPreflightCase() {
           "foreign project capture must fail before spool"
         ]);
         const afterCli = await countSessions();
-        const stateWritten = await pathExists(join(foreignDir, ".recallant", "current-session.json"));
+        const stateWritten = await pathExists(
+          join(foreignDir, ".recallant", "current-session.json")
+        );
         const foreignSpoolWritten = await pathExists(join(foreignSpoolDir, "spool.jsonl"));
 
         const staleDir = await mkdtemp(join(tmpdir(), "recallant-binding-stale-config-"));

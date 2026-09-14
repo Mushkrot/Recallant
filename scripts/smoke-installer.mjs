@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,7 @@ const prodComposeSource = readFileSync(
   join(repoRoot, "scripts", "recallant-prod-compose.sh"),
   "utf8"
 );
+const profileSource = readFileSync(join(repoRoot, "scripts", "recallant-profile.sh"), "utf8");
 const prodComposeYaml = readFileSync(join(repoRoot, "docker-compose.production.yml"), "utf8");
 const devComposeYaml = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
 const devMakefileSource = readFileSync(join(repoRoot, "Makefile"), "utf8");
@@ -404,19 +405,17 @@ assert(
     !bootstrapSource.includes('clone_dir="$(mktemp -d)"'),
   "Bootstrap must keep a persistent checkout and resolve exact SHA or tagged release refs"
 );
+
 assert(
-  prodComposeSource.includes("ENV_FILE=${RECALLANT_ENV_FILE:-/etc/recallant/recallant.env}") &&
-    prodComposeSource.includes("DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}") &&
-    prodComposeSource.includes("POSTGRES_PORT=${RECALLANT_POSTGRES_PORT:-15432}") &&
-    prodComposeSource.includes(
-      "POSTGRES_CONTAINER_NAME=${RECALLANT_POSTGRES_CONTAINER_NAME:-recallant-postgres}"
-    ) &&
-    prodComposeSource.includes(
-      "COMPOSE_PROJECT_NAME=${RECALLANT_COMPOSE_PROJECT_NAME:-recallant}"
-    ) &&
+  prodComposeSource.includes("RECALLANT_PROFILE_LIBRARY_ONLY=1") &&
+    prodComposeSource.includes("recallant_profile_load") &&
+    prodComposeSource.includes("recallant_profile_assert_storage") &&
+    profileSource.includes("authoritative env file") &&
+    profileSource.includes("conflicts with the authoritative env file") &&
     prodComposeSource.includes('docker compose -p "$COMPOSE_PROJECT_NAME"') &&
-    prodComposeSource.includes('export RECALLANT_DATA_DIR="$DATA_DIR"'),
-  "Production compose wrapper must honor selected env/data/Postgres/Compose settings"
+    !prodComposeSource.includes("DATA_DIR=${RECALLANT_DATA_DIR:-/var/lib/recallant}"),
+  "Production compose wrapper must resolve one authoritative profile before Compose"
+
 );
 assert(
   prodComposeYaml.includes("${RECALLANT_DATA_DIR:-/var/lib/recallant}/postgres") &&
@@ -426,13 +425,15 @@ assert(
     ),
   "Production compose must use profile-driven Postgres data, container, and port settings"
 );
+
 assert(
-  !backupSource.includes("RECALLANT_ENV_FILE:-/etc/recallant/recallant.env") &&
-    backupSource.includes('if [ -n "${RECALLANT_ENV_FILE:-}" ]') &&
-    backupSource.includes('if [ -z "${RECALLANT_DATABASE_URL:-}" ]') &&
+  backupSource.includes("RECALLANT_PROFILE_LIBRARY_ONLY=1") &&
+    backupSource.includes("recallant_profile_load") &&
+    backupSource.includes("recallant_profile_assert_storage") &&
     backupSource.includes(
       'RECALLANT_HOME=${RECALLANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}'
     ) &&
+
     backupEngineSource.includes('backup_kind: "postgresql_custom"') &&
     backupEngineSource.includes('"--format=custom"') &&
     backupEngineSource.includes('"--no-owner"') &&
@@ -455,11 +456,27 @@ assert(
   count(installerSource, "OnCalendar=*-*-* 03:15:00") === 1 &&
     count(installerSource, "EnvironmentFile=$ENV_FILE") === 2 &&
     count(installerSource, 'Environment="RECALLANT_ENV_FILE=$ENV_FILE"') === 2 &&
+    installerSource.includes(
+      "ExecStartPre=/usr/bin/bash $RECALLANT_HOME/scripts/recallant-profile.sh assert-service"
+    ) &&
+    installerSource.includes(
+      "ExecStartPre=/usr/bin/bash $RECALLANT_HOME/scripts/recallant-profile.sh assert-backup"
+    ) &&
+    !installerSource.includes('Environment="RECALLANT_DATA_DIR=$DATA_DIR"') &&
+    !installerSource.includes('Environment="RECALLANT_BACKUP_TARGET=$DATA_DIR/backups"') &&
     installerSource.includes("RECALLANT_BACKUP_MAX_AGE_HOURS") &&
     installerSource.includes("RECALLANT_RESTORE_VERIFICATION_MAX_AGE_HOURS") &&
+    installerSource.includes("RECALLANT_BACKUP_METRICS_FILE") &&
+    installerSource.includes("/var/lib/prometheus/node-exporter") &&
     installerSource.includes("recallant-backup.service") &&
     installerSource.includes("recallant-backup.timer"),
   "Installer must generate one backup schedule and use the selected env authority for both services"
+);
+assert(
+  cliInstallSource.includes("CLI profile conflict") &&
+    cliInstallSource.includes('if [[ -n "$CLI_ENV_FILE" ]]; then') &&
+    cliInstallSource.includes('export RECALLANT_ENV_FILE="$CLI_ENV_FILE"'),
+  "CLI launcher must reject an ambient env file that differs from its installed profile"
 );
 assert(
   rollbackSource.includes('rm -f "$SYSTEMD_UNIT" "$BACKUP_SYSTEMD_UNIT" "$BACKUP_SYSTEMD_TIMER"') &&
@@ -469,11 +486,15 @@ assert(
 );
 assert(
   backupRuleSource.includes("alert: RecallantBackupFailed") &&
+    backupRuleSource.includes("alert: RecallantBackupVerificationMissing") &&
+    backupRuleSource.includes("alert: RecallantBackupVerificationOverdue") &&
     backupRuleSource.includes(
       'node_systemd_unit_state{name="recallant-backup.service",state="failed"} == 1'
     ) &&
     backupRuleTestSource.includes("values: '1 1 1'") &&
     backupRuleTestSource.includes("values: '0 0 0'") &&
+    backupRuleTestSource.includes("RecallantBackupVerificationMissing") &&
+    backupRuleTestSource.includes("RecallantBackupVerificationOverdue") &&
     backupRuleTestSource.includes("exp_alerts: []"),
   "Backup alert fixtures must cover failed and healthy systemd metric series"
 );
@@ -601,7 +622,7 @@ assert(
   "Remote client bootstrap missing-input failure reached clone/install work"
 );
 
-const badUrlCredential = ['synthetic', 'credential'].join('-');
+const badUrlCredential = ["synthetic", "credential"].join("-");
 for (const [index, badUrl] of ["not-a-url", "http://recallant.example.com"].entries()) {
   const badUrlResult = runClientBootstrap(
     [
@@ -637,7 +658,7 @@ for (const [index, badUrl] of ["not-a-url", "http://recallant.example.com"].entr
   );
 }
 
-const bootstrapSecret = ['synthetic', 'secret'].join('-');
+const bootstrapSecret = ["synthetic", "secret"].join("-");
 const commonBootstrapArgs = [
   "--server-url",
   "https://recallant.example.com",
@@ -709,9 +730,139 @@ for (const [mode, markers] of [
   );
 }
 
+const profileFixtureRoot = await mkdtemp(join(tmpdir(), "recallant-profile-precedence-"));
+const profileDataRoot = join(profileFixtureRoot, "data");
+await mkdir(join(profileDataRoot, "postgres"), { recursive: true });
+await mkdir(join(profileDataRoot, "backups"), { recursive: true });
+const profileEnvFile = join(profileFixtureRoot, "recallant.env");
+await writeFile(
+  profileEnvFile,
+  [
+    "POSTGRES_DB=recallant_agent_work",
+    "POSTGRES_USER=recallant",
+    "POSTGRES_PASSWORD=fixture-password",
+    "RECALLANT_DATABASE_URL=postgres://recallant:fixture-password@127.0.0.1:15432/recallant_agent_work",
+    `RECALLANT_DATA_DIR=${profileDataRoot}`,
+    `RECALLANT_BACKUP_TARGET=${join(profileDataRoot, "backups")}`,
+    "RECALLANT_POSTGRES_HOST=127.0.0.1",
+    "RECALLANT_POSTGRES_PORT=15432",
+    "RECALLANT_POSTGRES_CONTAINER_NAME=recallant-profile-smoke",
+    "RECALLANT_COMPOSE_PROJECT_NAME=recallant-profile-smoke"
+  ].join("\n") + "\n"
+);
+
+function profileEnv(overrides = {}) {
+  const env = { ...process.env };
+  for (const key of [
+    "RECALLANT_ENV_FILE",
+    "RECALLANT_DATABASE_URL",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "RECALLANT_DATA_DIR",
+    "RECALLANT_BACKUP_TARGET",
+    "RECALLANT_POSTGRES_HOST",
+    "RECALLANT_POSTGRES_PORT",
+    "RECALLANT_POSTGRES_CONTAINER_NAME",
+    "RECALLANT_COMPOSE_PROJECT_NAME"
+  ]) {
+    delete env[key];
+  }
+  return { ...env, ...overrides };
+}
+
+const alignedProfile = spawnSync("/bin/sh", ["scripts/recallant-profile.sh", "assert-service"], {
+  cwd: repoRoot,
+  env: profileEnv({ RECALLANT_ENV_FILE: profileEnvFile }),
+  encoding: "utf8"
+});
+assert(alignedProfile.status === 0, `Aligned profile was rejected: ${alignedProfile.stderr}`);
+
+const incompleteProfileEnvFile = join(profileFixtureRoot, "incomplete.env");
+await writeFile(
+  incompleteProfileEnvFile,
+  readFileSync(profileEnvFile, "utf8").replace(/^RECALLANT_DATA_DIR=.*\n/m, "")
+);
+const incompleteProfile = spawnSync("/bin/sh", ["scripts/recallant-profile.sh", "assert-service"], {
+  cwd: repoRoot,
+  env: profileEnv({ RECALLANT_ENV_FILE: incompleteProfileEnvFile }),
+  encoding: "utf8"
+});
+assert(incompleteProfile.status !== 0, "Incomplete authoritative profile was accepted");
+assert(
+  incompleteProfile.stderr.includes("authoritative env file is missing RECALLANT_DATA_DIR"),
+  "Incomplete authoritative profile did not identify the missing data root"
+);
+
+const wrongDataProfile = spawnSync("/bin/sh", ["scripts/recallant-profile.sh", "assert-compose"], {
+  cwd: repoRoot,
+  env: profileEnv({
+    RECALLANT_ENV_FILE: profileEnvFile,
+    RECALLANT_DATA_DIR: join(profileFixtureRoot, "wrong-data")
+  }),
+  encoding: "utf8"
+});
+assert(wrongDataProfile.status !== 0, "Wrong data-root override was accepted");
+assert(
+  wrongDataProfile.stderr.includes("RECALLANT_DATA_DIR conflicts"),
+  "Wrong data-root override did not report a profile conflict"
+);
+
+const wrongBackupProfile = spawnSync(
+  "/bin/sh",
+  [
+    "scripts/recallant-production-backup.sh",
+    "--verify-manifest",
+    join(profileFixtureRoot, "missing.json")
+  ],
+  {
+    cwd: repoRoot,
+    env: profileEnv({
+      RECALLANT_ENV_FILE: profileEnvFile,
+      RECALLANT_BACKUP_TARGET: join(profileFixtureRoot, "wrong-backups")
+    }),
+    encoding: "utf8"
+  }
+);
+assert(wrongBackupProfile.status !== 0, "Wrong backup-target override was accepted");
+assert(
+  wrongBackupProfile.stderr.includes("RECALLANT_BACKUP_TARGET conflicts"),
+  "Wrong backup-target override did not report a profile conflict"
+);
+
+const missingStorageEnvFile = join(profileFixtureRoot, "missing-storage.env");
+await writeFile(
+  missingStorageEnvFile,
+  [
+    "POSTGRES_DB=recallant_agent_work",
+    "POSTGRES_USER=recallant",
+    "POSTGRES_PASSWORD=fixture-password",
+    "RECALLANT_DATABASE_URL=postgres://recallant:fixture-password@127.0.0.1:15432/recallant_agent_work",
+    `RECALLANT_DATA_DIR=${join(profileFixtureRoot, "unavailable")}`,
+    `RECALLANT_BACKUP_TARGET=${join(profileFixtureRoot, "unavailable", "backups")}`,
+    "RECALLANT_POSTGRES_HOST=127.0.0.1",
+    "RECALLANT_POSTGRES_PORT=15432",
+    "RECALLANT_POSTGRES_CONTAINER_NAME=recallant-profile-smoke",
+    "RECALLANT_COMPOSE_PROJECT_NAME=recallant-profile-smoke"
+  ].join("\n") + "\n"
+);
+const unavailableStorage = spawnSync("/bin/sh", ["scripts/recallant-profile.sh", "assert-backup"], {
+  cwd: repoRoot,
+  env: profileEnv({ RECALLANT_ENV_FILE: missingStorageEnvFile }),
+  encoding: "utf8"
+});
+assert(unavailableStorage.status !== 0, "Unavailable profile storage was accepted");
+assert(
+  unavailableStorage.stderr.includes("data root is unavailable"),
+  "Unavailable profile storage did not fail closed"
+);
+
 process.stdout.write(
   [
     "Installer dry-run/profile smoke passed",
+    "Profile precedence: aligned settings accepted; wrong data/backup settings rejected",
+    "Profile completeness: missing authoritative data root rejected",
+    "Profile storage: unavailable target rejected before Compose/backup",
     "Backup units: recallant-backup.service + recallant-backup.timer",
     "Env authority: selected EnvironmentFile + explicit RECALLANT_ENV_FILE",
     "Schedule: daily 03:15 persistent; backup SLA: 30h; restore SLA: 30h",

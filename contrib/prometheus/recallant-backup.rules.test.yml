@@ -29,3 +29,56 @@ tests:
       - eval_time: 2m
         alertname: RecallantBackupFailed
         exp_alerts: []
+
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RecallantBackupVerificationMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: recallant
+            exp_annotations:
+              summary: Recallant verified backup report is missing
+              description: Run recallant-backup.service successfully and confirm the node exporter textfile contains the latest verified report metric.
+
+  - interval: 1m
+    input_series:
+      - series: 'recallant_backup_last_success_timestamp_seconds'
+        values: '0 0 0 0 0 0 0 0 0'
+      - series: 'recallant_backup_last_restore_verification_timestamp_seconds'
+        values: '0 0 0 0 0 0 0 0 0'
+      - series: 'recallant_backup_max_age_seconds'
+        values: '60 60 60 60 60 60 60 60 60'
+      - series: 'recallant_backup_restore_max_age_seconds'
+        values: '60 60 60 60 60 60 60 60 60'
+      - series: 'recallant_backup_report_present'
+        values: '1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: RecallantBackupVerificationOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: recallant
+            exp_annotations:
+              summary: Recallant verified backup report is overdue
+              description: Run recallant-backup.service and verify that both the artifact and restore-rehearsal timestamps are within their configured freshness limits.
+
+  - interval: 1m
+    input_series:
+      - series: 'recallant_backup_last_success_timestamp_seconds'
+        values: '0 60 120'
+      - series: 'recallant_backup_last_restore_verification_timestamp_seconds'
+        values: '0 60 120'
+      - series: 'recallant_backup_max_age_seconds'
+        values: '3600 3600 3600'
+      - series: 'recallant_backup_restore_max_age_seconds'
+        values: '3600 3600 3600'
+      - series: 'recallant_backup_report_present'
+        values: '1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RecallantBackupVerificationOverdue
+        exp_alerts: []
