@@ -8,6 +8,17 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function bootstrapConnectUrl(script) {
+  const match = script.match(/--connect-url '([^']+)'/u);
+  assert(match, "bootstrap output omitted the quoted --connect-url argument");
+  const parsed = new URL(match[1]);
+  assert(
+    parsed.username === "" && parsed.password === "" && parsed.search === "" && parsed.hash === "",
+    "bootstrap connect URL contained unexpected authority or suffix data"
+  );
+  return parsed;
+}
+
 function rawRequest({ hostname, port, path, method = "GET", headers = {}, body = "" }) {
   return new Promise((resolve, reject) => {
     const request = httpRequest({ hostname, port, path, method, headers }, (response) => {
@@ -159,9 +170,11 @@ try {
     trustedForwarded.status === 200,
     `trusted proxy bootstrap returned ${trustedForwarded.status}`
   );
+  const trustedForwardedUrl = bootstrapConnectUrl(trustedForwardedText);
   assert(
-    trustedForwardedText.includes("https://proxy.example.com"),
-    "trusted proxy bootstrap did not use the forwarded public origin"
+    trustedForwardedUrl.origin === "https://proxy.example.com" &&
+      trustedForwardedUrl.pathname === "/",
+    "trusted proxy bootstrap did not use the exact forwarded public origin"
   );
 
   process.env.RECALLANT_PUBLIC_SERVER_URL = "https://configured.example.com";
@@ -172,9 +185,9 @@ try {
     headers: { host: "attacker.example" }
   });
   assert(configured.status === 200, `configured bootstrap origin returned ${configured.status}`);
+  const configuredUrl = bootstrapConnectUrl(configured.text);
   assert(
-    configured.text.includes("https://configured.example.com") &&
-      !configured.text.includes("attacker.example"),
+    configuredUrl.origin === "https://configured.example.com" && configuredUrl.pathname === "/",
     "configured public origin was overridden by the request Host"
   );
   delete process.env.RECALLANT_PUBLIC_SERVER_URL;
@@ -186,11 +199,12 @@ try {
     path: "/connect",
     headers: { host: "attacker.example" }
   });
+  assert(workbenchConfigured.status === 200, "configured Workbench bootstrap failed");
+  const workbenchConfiguredUrl = bootstrapConnectUrl(workbenchConfigured.text);
   assert(
-    workbenchConfigured.status === 200 &&
-      workbenchConfigured.text.includes("https://workbench.example.com") &&
-      !workbenchConfigured.text.includes("https://workbench.example.com/review"),
-    "public Workbench URL was not reduced to its server origin"
+    workbenchConfiguredUrl.origin === "https://workbench.example.com" &&
+      workbenchConfiguredUrl.pathname === "/",
+    "public Workbench URL was not reduced to its exact server origin"
   );
   delete process.env.RECALLANT_PUBLIC_WORKBENCH_URL;
   delete process.env.RECALLANT_SERVER_URL;
