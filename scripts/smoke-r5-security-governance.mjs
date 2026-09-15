@@ -11,7 +11,7 @@ function assert(condition, message) {
 function bootstrapConnectUrl(script) {
   const match = script.match(/--connect-url '([^']+)'/u);
   assert(match, "bootstrap output omitted the quoted --connect-url argument");
-  const parsed = new URL(match[1]);
+  const parsed = new globalThis.URL(match[1]);
   assert(
     parsed.username === "" && parsed.password === "" && parsed.search === "" && parsed.hash === "",
     "bootstrap connect URL contained unexpected authority or suffix data"
