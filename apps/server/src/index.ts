@@ -203,6 +203,28 @@ function getHeaderValue(request: IncomingMessage, name: string) {
   return value;
 }
 
+function isLoopbackAddress(address: string | undefined) {
+  const normalized = String(address ?? "")
+    .trim()
+    .toLowerCase();
+  const addressOnly = normalized.split("%", 1)[0] ?? "";
+  if (addressOnly === "::1") return true;
+  const ipv4 = addressOnly.startsWith("::ffff:")
+    ? addressOnly.slice("::ffff:".length)
+    : addressOnly;
+  return /^127(?:\.\d{1,3}){3}$/.test(ipv4);
+}
+
+function requestCameFromTrustedLocalProxy(request: IncomingMessage) {
+  return isLoopbackAddress(request.socket.remoteAddress);
+}
+
+function trustedForwardedHeader(request: IncomingMessage, name: string) {
+  return requestCameFromTrustedLocalProxy(request)
+    ? optionalInput(getHeaderValue(request, name))
+    : null;
+}
+
 function parseCookies(request: IncomingMessage) {
   const header = getHeaderValue(request, "cookie");
   const cookies = new Map<string, string>();
@@ -369,6 +391,7 @@ function verifySessionCookie(request: IncomingMessage) {
 function getCloudflareIdentity(request: IncomingMessage) {
   if (process.env.RECALLANT_CLOUDFLARE_MODE !== "enabled") return undefined;
   if (process.env.RECALLANT_CLOUDFLARE_EDGE_AUTH !== "required") return undefined;
+  if (!requestCameFromTrustedLocalProxy(request)) return undefined;
   const email = getHeaderValue(request, "cf-access-authenticated-user-email")?.toLowerCase();
   const jwt = getHeaderValue(request, "cf-access-jwt-assertion");
   if (!email || !jwt) return undefined;
@@ -738,6 +761,7 @@ function summarizeHttpHeaders(request: IncomingMessage) {
 }
 
 function httpAuditErrorCode(error: unknown) {
+  if (error instanceof RemoteMcpRequestError) return error.contractCode;
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith("VALIDATION_ERROR:")) return "VALIDATION_ERROR";
   if (message.startsWith("POLICY_BLOCKED:")) return "POLICY_BLOCKED";
@@ -757,9 +781,21 @@ function publicHttpErrorMessage(error: unknown) {
       return "POLICY_BLOCKED: The request is not allowed.";
     case "RATE_LIMITED":
       return "RATE_LIMITED: Too many requests. Try again later.";
+    case "PAYLOAD_TOO_LARGE":
+      return "PAYLOAD_TOO_LARGE: The request body is too large.";
     default:
       return "The request could not be completed.";
   }
+}
+
+function publicHttpErrorStatus(error: unknown, fallback = 409) {
+  if (error instanceof RemoteMcpRequestError) {
+    return remoteMcpErrorStatus(error.contractCode);
+  }
+  const code = httpAuditErrorCode(error);
+  if (code === "RATE_LIMITED") return 429;
+  if (code === "VALIDATION_ERROR") return 400;
+  return fallback;
 }
 
 function createHttpAuditDb() {
@@ -885,7 +921,25 @@ async function readJson(request: IncomingMessage) {
   return readJsonWithLimit(request, 256 * 1024);
 }
 
+function rejectOversizedContentLength(
+  request: IncomingMessage,
+  limitBytes: number,
+  message: string
+) {
+  const raw = getHeaderValue(request, "content-length");
+  if (!raw) return;
+  const contentLength = Number(raw);
+  if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+    throw new RemoteMcpRequestError("VALIDATION_ERROR", "Content-Length is invalid.");
+  }
+  if (contentLength > limitBytes) {
+    request.resume();
+    throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", message);
+  }
+}
+
 async function readJsonWithLimit(request: IncomingMessage, limitBytes: number) {
+  rejectOversizedContentLength(request, limitBytes, "Remote MCP request body is too large.");
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   for await (const chunk of request) {
@@ -938,8 +992,17 @@ async function readOtelJsonWithLimit(request: IncomingMessage, limitBytes: numbe
 }
 
 async function readForm(request: IncomingMessage) {
+  rejectOversizedContentLength(request, 256 * 1024, "Form request body is too large.");
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > 256 * 1024) {
+      throw new RemoteMcpRequestError("PAYLOAD_TOO_LARGE", "Form request body is too large.");
+    }
+    chunks.push(buffer);
+  }
   const params = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
   return Object.fromEntries(params.entries());
 }
@@ -1096,22 +1159,8 @@ function remoteCredentialServerUrl(
   request: IncomingMessage
 ) {
   const explicit = optionalInput(input.server_url);
-  if (explicit) {
-    const parsed = new URL(explicit);
-    if (parsed.protocol !== "https:") {
-      throw new Error("VALIDATION_ERROR: remote credential provisioning server_url must use https");
-    }
-    parsed.hash = "";
-    parsed.search = "";
-    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-    return parsed.toString().replace(/\/$/, "");
-  }
-  const forwardedProto = optionalInput(getHeaderValue(request, "x-forwarded-proto"));
-  const forwardedHost =
-    optionalInput(getHeaderValue(request, "x-forwarded-host")) ??
-    optionalInput(getHeaderValue(request, "host"));
-  if (forwardedProto === "https" && forwardedHost) return `https://${forwardedHost}`;
-  return "https://recallant.example.com";
+  if (explicit) return validatedCopyableServerUrl(explicit, "remote credential server_url");
+  return requestCopyableServerUrl(request);
 }
 
 function remoteCredentialBridgeClientId(
@@ -1133,19 +1182,66 @@ function normalizedRemoteServerUrl(raw: string) {
   return parsed.toString().replace(/\/$/, "");
 }
 
-function remoteInviteServerUrl(input: RemoteInviteRequest, request: IncomingMessage) {
-  const explicit = optionalInput(input.server_url);
-  if (explicit) return normalizedRemoteServerUrl(explicit);
-  const forwardedProto = optionalInput(getHeaderValue(request, "x-forwarded-proto"));
-  const forwardedHost =
-    optionalInput(getHeaderValue(request, "x-forwarded-host")) ??
-    optionalInput(getHeaderValue(request, "host"));
-  if (forwardedHost) {
-    return normalizedRemoteServerUrl(
-      `${forwardedProto === "http" ? "http" : "https"}://${forwardedHost}`
+function isLoopbackServerUrl(raw: string) {
+  const parsed = new URL(raw);
+  return parsed.hostname === "localhost" || isLoopbackAddress(parsed.hostname);
+}
+
+function validatedCopyableServerUrl(raw: string, label: string) {
+  const normalized = normalizedRemoteServerUrl(raw);
+  const parsed = new URL(normalized);
+  if (parsed.username || parsed.password) {
+    throw new Error(`VALIDATION_ERROR: ${label} must not contain URL credentials`);
+  }
+  if (
+    parsed.protocol !== "https:" &&
+    !(parsed.protocol === "http:" && isLoopbackServerUrl(normalized))
+  ) {
+    throw new Error(`VALIDATION_ERROR: ${label} must use https or loopback http`);
+  }
+  return normalized;
+}
+
+function configuredPublicServerUrl() {
+  const candidates: Array<[string | undefined, boolean]> = [
+    [process.env.RECALLANT_PUBLIC_SERVER_URL, false],
+    [process.env.RECALLANT_PUBLIC_WORKBENCH_URL, true],
+    [process.env.RECALLANT_SERVER_URL, false]
+  ];
+  for (const [candidate, useOriginOnly] of candidates) {
+    const value = optionalInput(candidate);
+    if (value) {
+      const normalized = validatedCopyableServerUrl(value, "configured public server URL");
+      return useOriginOnly ? new URL(normalized).origin : normalized;
+    }
+  }
+  return null;
+}
+
+function requestCopyableServerUrl(request: IncomingMessage) {
+  const configured = configuredPublicServerUrl();
+  if (configured) return configured;
+  if (!requestCameFromTrustedLocalProxy(request)) {
+    throw new Error(
+      "VALIDATION_ERROR: copyable remote commands require a configured public server URL or a trusted local proxy"
     );
   }
-  return "https://recallant.example.com";
+  const forwardedProto = trustedForwardedHeader(request, "x-forwarded-proto");
+  const host =
+    trustedForwardedHeader(request, "x-forwarded-host") ??
+    optionalInput(getHeaderValue(request, "host"));
+  if (!host) {
+    throw new Error("VALIDATION_ERROR: copyable remote commands require a server host");
+  }
+  const loopbackHost = isLoopbackServerUrl(`http://${host}`);
+  const protocol = forwardedProto === "http" && loopbackHost ? "http" : "https";
+  return validatedCopyableServerUrl(`${protocol}://${host}`, "request server URL");
+}
+
+function remoteInviteServerUrl(input: RemoteInviteRequest, request: IncomingMessage) {
+  const explicit = optionalInput(input.server_url);
+  if (explicit) return validatedCopyableServerUrl(explicit, "remote invite server_url");
+  return requestCopyableServerUrl(request);
 }
 
 function remoteConnectRateLimitMax() {
@@ -1154,9 +1250,10 @@ function remoteConnectRateLimitMax() {
 }
 
 function remoteConnectRateLimitKey(request: IncomingMessage, pathname: string) {
-  const forwardedFor = optionalInput(getHeaderValue(request, "x-forwarded-for"));
+  const cloudflareClient = trustedForwardedHeader(request, "cf-connecting-ip");
+  const forwardedFor = trustedForwardedHeader(request, "x-forwarded-for");
   const remoteAddress = request.socket.remoteAddress ?? "unknown";
-  const actor = forwardedFor?.split(",")[0]?.trim() || remoteAddress;
+  const actor = cloudflareClient || forwardedFor?.split(",")[0]?.trim() || remoteAddress;
   return `${pathname}:${actor}`;
 }
 
@@ -1176,7 +1273,7 @@ function enforceRemoteConnectRateLimit(request: IncomingMessage, pathname: strin
     }
   }
   if (bucket.count > remoteConnectRateLimitMax()) {
-    throw new Error("RATE_LIMITED: remote connect route rate limit exceeded");
+    throw new RemoteMcpRequestError("RATE_LIMITED", "Remote connect route rate limit exceeded.");
   }
 }
 
@@ -9901,7 +9998,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       } catch (error) {
         write(
           response,
-          409,
+          publicHttpErrorStatus(error),
           JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
           "application/json"
         );
@@ -9925,7 +10022,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       } catch (error) {
         write(
           response,
-          409,
+          publicHttpErrorStatus(error),
           JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
           "application/json"
         );
@@ -9976,7 +10073,7 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       } catch (error) {
         write(
           response,
-          409,
+          publicHttpErrorStatus(error),
           JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
           "application/json"
         );
@@ -10361,9 +10458,18 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
           }
           return;
         }
+        const requested = body as ReviewAgentMemoryInput;
         const result = await database.reviewAgentMemory({
-          ...(body as ReviewAgentMemoryInput),
-          actor_kind: (body as ReviewAgentMemoryInput).actor_kind ?? "user"
+          memory_id: requested.memory_id,
+          action: requested.action,
+          actor_kind: "user",
+          note: requested.note,
+          superseded_by: requested.superseded_by,
+          merge_memory_ids: requested.merge_memory_ids,
+          patch:
+            requested.action === "edit"
+              ? { title: requested.patch?.title, body: requested.patch?.body }
+              : undefined
         });
         write(
           response,
@@ -10715,7 +10821,15 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
       write(response, 404, "Not found", "text/plain");
     } catch (error) {
       routeError = error;
-      throw error;
+      if (!response.writableEnded) {
+        const statusCode = error instanceof SyntaxError ? 400 : publicHttpErrorStatus(error, 500);
+        write(
+          response,
+          statusCode,
+          JSON.stringify({ ok: false, error: publicHttpErrorMessage(error) }),
+          "application/json"
+        );
+      }
     } finally {
       await finishHttpAudit(audit, response, routeError);
     }

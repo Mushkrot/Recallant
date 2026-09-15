@@ -1,5 +1,13 @@
 import type { RecallantDb } from "@recallant/db";
 
+function shellCommandArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function shellCommand(argv: string[]) {
+  return argv.map((value) => shellCommandArg(value)).join(" ");
+}
+
 type DashboardRow = Record<string, unknown>;
 
 type DashboardLike = {
@@ -165,7 +173,6 @@ type SourceRequestAnalysis = {
   source_label: string;
   source_uri: string;
   space_name: string;
-  command?: string;
 };
 
 type MemoryLookupHit = {
@@ -631,7 +638,11 @@ function detectGlobalRuleRequest(message: string) {
     "правило",
     "rule",
     "remember",
-    "save"
+    "save",
+    "должен",
+    "должны",
+    "must",
+    "should always"
   ]);
   const wantsGlobal = includesAny(normalized, [
     "для всех проектов",
@@ -641,7 +652,10 @@ function detectGlobalRuleRequest(message: string) {
     "global",
     "all projects",
     "every project",
-    "developer-wide"
+    "developer-wide",
+    "all workspaces",
+    "every workspace",
+    "во всех воркспейсах"
   ]);
   return wantsRule && wantsGlobal;
 }
@@ -722,10 +736,16 @@ function policyGuardedIntent(
   deterministicIntent: ManagementChatIntent
 ): ManagementChatIntent {
   if (aiIntent === deterministicIntent) return aiIntent;
+  const policyControlledIntents: ManagementChatIntent[] = [
+    "cleanup",
+    "global_rule",
+    "project_onboarding",
+    "source_management",
+    "pilot_qa"
+  ];
   if (
-    ["cleanup", "global_rule", "project_onboarding", "source_management", "pilot_qa"].includes(
-      deterministicIntent
-    )
+    policyControlledIntents.includes(deterministicIntent) ||
+    policyControlledIntents.includes(aiIntent)
   ) {
     return deterministicIntent;
   }
@@ -1465,13 +1485,45 @@ function analyzeWorkflowRequest(
   const missing = wantsAttach && !explicitPath ? ["project folder path"] : [];
   const commands = wantsAttach
     ? [
-        `recallant attach ${projectDir} --sandbox --dry-run`,
-        `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture --require-memory-loop --semantic-proof`
+        shellCommand(["recallant", "attach", projectDir, "--sandbox", "--dry-run"]),
+        shellCommand([
+          "recallant",
+          "connect",
+          client,
+          "--project-dir",
+          projectDir,
+          "--install-local-hooks",
+          "--dry-run"
+        ]),
+        shellCommand([
+          "recallant",
+          "doctor",
+          "--project-dir",
+          projectDir,
+          "--require-capture",
+          "--require-memory-loop",
+          "--semantic-proof"
+        ])
       ]
     : [
-        `recallant connect ${client} --project-dir ${projectDir} --install-local-hooks --dry-run`,
-        `recallant doctor --project-dir ${projectDir} --require-capture --require-memory-loop --semantic-proof`
+        shellCommand([
+          "recallant",
+          "connect",
+          client,
+          "--project-dir",
+          projectDir,
+          "--install-local-hooks",
+          "--dry-run"
+        ]),
+        shellCommand([
+          "recallant",
+          "doctor",
+          "--project-dir",
+          projectDir,
+          "--require-capture",
+          "--require-memory-loop",
+          "--semantic-proof"
+        ])
       ];
   return {
     operation: wantsAttach ? "attach_project" : "connect_capture",
@@ -1552,12 +1604,6 @@ function analyzeSourceRequest(
   if (operation === "detach_source" && facts.selected_source_name === "all sources") {
     missing.push("exact source to detach");
   }
-  const command =
-    operation === "attach_source" && sourceUri
-      ? `recallant source attach --project-id ${facts.current_project_id} --source-kind ${sourceKind} --label "${sourceLabel}" --uri "${sourceUri}"`
-      : operation === "detach_source" && facts.selected_source_name !== "all sources"
-        ? "Use the Sources workspace detach button for the selected source."
-        : undefined;
   return {
     operation,
     project_id: facts.current_project_id,
@@ -1565,8 +1611,7 @@ function analyzeSourceRequest(
     source_kind: sourceKind,
     source_label: sourceLabel,
     source_uri: sourceUri,
-    space_name: spaceName,
-    command
+    space_name: spaceName
   };
 }
 
@@ -1592,6 +1637,13 @@ async function maybeCreateGlobalRule(input: {
   interpretation: ChatInterpretation;
   database?: RecallantDb;
 }): Promise<ManagementChatResponse["global_rule_result"]> {
+  if (!detectGlobalRuleRequest(input.message)) {
+    return {
+      status: "skipped",
+      scope: "developer",
+      reason: "The owner message did not explicitly request a developer-wide rule."
+    };
+  }
   const ruleText = (
     input.interpretation.rule_text?.trim() || extractRuleText(input.message)
   ).trim();
@@ -2149,9 +2201,6 @@ function answerRu(
       if (sourceRequest?.missing.length) {
         return `${baseline}\n\nЯ понял это как управление источниками, но мне не хватает данных: ${sourceRequest.missing.join(", ")}. Уточни имя memory space и/или точный путь, repo, connector reference или document collection. Я не буду угадывать источник, потому что это может привязать память не туда.`;
       }
-      if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
-        return `${baseline}\n\nЯ понял это как подключение источника к текущему memory space. Это безопасная операция записи в Recallant, но я не выполняю ее прямо из чата. Используй широкий Sources workspace или выполни команду из предложенного шага. Источник будет показан в provenance, а память проекта не смешается с другими spaces.`;
-      }
       return `${baseline}\n\nВ этом memory space сейчас подключено источников: ${facts.source_count}. Готовых источников: ${facts.source_ready_count}; требуют внимания: ${facts.source_needs_attention_count}; отцеплены: ${facts.source_detached_count}. Источники управляются в Sources workspace: можно создать виртуальное пространство, подключить папку/репозиторий/документы/ручной источник и отцепить один source без удаления памяти проекта. Для connector/server-path источников Recallant должен показывать health/status и не хранить raw secrets.`;
     case "provenance":
       if (memoryLookupResult?.status === "found") {
@@ -2276,9 +2325,6 @@ function answerEn(
       if (sourceRequest?.missing.length) {
         return `${baseline}\n\nI understood this as source management, but I need more detail: ${sourceRequest.missing.join(", ")}. Name the memory space and/or provide the exact path, repo, connector reference, or document collection. I will not guess the source because that could bind memory to the wrong place.`;
       }
-      if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
-        return `${baseline}\n\nI understood this as attaching a source to the current memory space. This is a safe Recallant write, but I will not execute it directly from chat. Use the wide Sources workspace or run the proposed command. The source will appear in provenance, and project memory will stay isolated from other spaces.`;
-      }
       return `${baseline}\n\nThis memory space currently has ${facts.source_count} attached source(s). Ready sources: ${facts.source_ready_count}; need attention: ${facts.source_needs_attention_count}; detached: ${facts.source_detached_count}. Manage them in the Sources workspace: create a virtual space, attach a folder/repo/doc/manual source, or detach one source without deleting project memory. Connector/server-path sources should show health/status and must not store raw secrets.`;
     case "provenance":
       if (memoryLookupResult?.status === "found") {
@@ -2390,11 +2436,29 @@ function actionsForIntent(
     const detachCommand =
       targetProject.project_id === facts.current_project_id
         ? stringValue(cleanup.sanitize_detach_command) || stringValue(cleanup.detach_command)
-        : `recallant project-sanitize --project-id ${targetProject.project_id} --mode detach --detach-mode sandbox --dry-run`;
+        : shellCommand([
+            "recallant",
+            "project-sanitize",
+            "--project-id",
+            targetProject.project_id,
+            "--mode",
+            "detach",
+            "--detach-mode",
+            "sandbox",
+            "--dry-run"
+          ]);
     const purgeCommand =
       targetProject.project_id === facts.current_project_id
         ? stringValue(cleanup.purge_command)
-        : `recallant project-sanitize --project-id ${targetProject.project_id} --mode purge --dry-run`;
+        : shellCommand([
+            "recallant",
+            "project-sanitize",
+            "--project-id",
+            targetProject.project_id,
+            "--mode",
+            "purge",
+            "--dry-run"
+          ]);
     return [
       {
         label:
@@ -2525,30 +2589,6 @@ function actionsForIntent(
               : "Use governed source workflow",
           kind: destructiveOrSensitive ? "confirmation_required" : "read_only",
           reason: sourceActionResult.reason
-        }
-      ];
-    }
-    if (sourceRequest?.operation === "attach_source" && sourceRequest.command) {
-      return [
-        {
-          label:
-            language === "ru"
-              ? "Подключить source через Recallant"
-              : "Attach source through Recallant",
-          kind: "read_only",
-          command: sourceRequest.command,
-          reason:
-            language === "ru"
-              ? "Эта команда добавляет источник к текущему memory space. Она не удаляет память и не меняет файлы проекта."
-              : "This command adds a source to the current memory space. It does not delete memory or change project files."
-        },
-        {
-          label: language === "ru" ? "Открыть Sources workspace" : "Open Sources workspace",
-          kind: "read_only",
-          reason:
-            language === "ru"
-              ? "Широкая панель Sources показывает health/status и provenance для выбранного memory space."
-              : "The wide Sources workspace shows health/status and provenance for the selected memory space."
         }
       ];
     }

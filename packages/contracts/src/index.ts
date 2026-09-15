@@ -1,4 +1,4 @@
-export const recallantContractVersion = "0.1.0-dev.2";
+export const recallantContractVersion = "0.1.0-dev.3";
 
 export type ClientKind = "codex" | "cursor" | "claude_code" | "windsurf" | "generic" | "other";
 

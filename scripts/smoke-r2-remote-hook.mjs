@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const cliPath = resolve("apps/cli/dist/index.js");
-const projectId = "755417eb-08e5-4fe7-a27b-31037a85ec89";
-const developerId = "7ebb3031-7926-4102-9ebd-540c76eebd27";
+const projectId = "11111111-1111-4111-8111-111111111111";
+const developerId = "22222222-2222-4222-8222-222222222222";
 const clientId = "remote-r2-hook-fixture";
 const credential = "synthetic-r2-hook-credential";
 const remoteSessionId = randomUUID();

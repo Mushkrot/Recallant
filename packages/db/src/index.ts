@@ -140,6 +140,10 @@ export {
 
 export const recallantDatabasePackage = "recallant-db";
 
+function shellCommandArg(value: string) {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
 function sqlStringList(values: readonly string[]) {
   return values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
 }
@@ -9596,6 +9600,62 @@ export class RecallantDb {
       if (!previous) throw new Error(`Unknown memory_id: ${input.memory_id}`);
 
       const action = input.action === "approve" ? "accept" : input.action;
+      const allowedActions = new Set([
+        "accept",
+        "reject",
+        "archive",
+        "unarchive",
+        "mark_stale",
+        "promote_instruction",
+        "demote_instruction",
+        "supersede",
+        "edit",
+        "merge"
+      ]);
+      if (!allowedActions.has(action)) {
+        throw new Error(`VALIDATION_ERROR: unsupported memory review action ${action}`);
+      }
+      if (action === "edit") {
+        const patch = input.patch ?? {};
+        if (
+          patch.scope !== undefined ||
+          patch.scope_kind !== undefined ||
+          patch.scope_id !== undefined ||
+          patch.audience !== undefined ||
+          patch.memory_type !== undefined
+        ) {
+          throw new Error("VALIDATION_ERROR: memory review edits may change only title and body");
+        }
+        const title = patch.title === undefined ? String(previous.title ?? "") : patch.title;
+        const body = patch.body === undefined ? String(previous.body ?? "") : patch.body;
+        if (
+          typeof title !== "string" ||
+          !title.trim() ||
+          typeof body !== "string" ||
+          !body.trim()
+        ) {
+          throw new Error("VALIDATION_ERROR: memory review title and body must be non-empty text");
+        }
+        if (
+          hasForbiddenAgentMemoryPayload({
+            memory_type: String(previous.memory_type ?? "work_log"),
+            scope: previous.scope === "developer" ? "developer" : "project",
+            title,
+            body,
+            created_by: "user",
+            metadata:
+              previous.metadata &&
+              typeof previous.metadata === "object" &&
+              !Array.isArray(previous.metadata)
+                ? (previous.metadata as JsonObject)
+                : undefined
+          })
+        ) {
+          throw new Error(
+            "VALIDATION_ERROR: memory review edits must not introduce raw secrets, credentials, database URLs, provider secrets, customer data, raw artifacts, backups, or private keys"
+          );
+        }
+      }
       if (action === "promote_instruction") {
         const sourceRefs = await client.query<{ count: string }>(
           "SELECT count(*) AS count FROM agent_memory_source_refs WHERE memory_id = $1",
@@ -9647,12 +9707,6 @@ export class RecallantDb {
       } else if (action === "edit") {
         if (input.patch?.title !== undefined) set("title", input.patch.title);
         if (input.patch?.body !== undefined) set("body", input.patch.body);
-        if (input.patch?.scope !== undefined) set("scope", input.patch.scope);
-        if (input.patch?.scope_kind !== undefined) set("scope_kind", input.patch.scope_kind);
-        if (input.patch?.scope_id !== undefined) set("scope_id", input.patch.scope_id);
-        if (input.patch?.audience !== undefined)
-          set("audience", JSON.stringify(input.patch.audience));
-        if (input.patch?.memory_type !== undefined) set("memory_type", input.patch.memory_type);
       } else if (action === "merge") {
         for (const mergeId of input.merge_memory_ids ?? []) {
           await client.query(
@@ -10921,7 +10975,7 @@ export class RecallantDb {
     );
     const row = status.rows[0] ?? {};
     const pendingChunks = Number(row.pending_chunks ?? 0);
-    const recoveryCommand = `recallant recover-embeddings --project-id ${context.projectId} --limit 50`;
+    const recoveryCommand = `recallant recover-embeddings --project-id ${shellCommandArg(context.projectId)} --limit 50`;
     return {
       project_id: context.projectId,
       active_chunks: Number(row.active_chunks ?? 0),
@@ -11975,12 +12029,12 @@ export class RecallantDb {
       project_cleanup: {
         dry_run_first: true,
         permanent_erasure_separate: true,
-        detach_command: `recallant detach --project-id ${dashboardProjectId} --dry-run`,
-        sanitize_detach_command: `recallant project-sanitize --project-id ${dashboardProjectId} --mode detach --dry-run`,
-        purge_command: `recallant project-sanitize --project-id ${dashboardProjectId} --mode purge --dry-run`,
-        sandbox_cleanup_command: `recallant detach --project-id ${dashboardProjectId} --mode sandbox --dry-run`,
+        detach_command: `recallant detach --project-id ${shellCommandArg(dashboardProjectId)} --dry-run`,
+        sanitize_detach_command: `recallant project-sanitize --project-id ${shellCommandArg(dashboardProjectId)} --mode detach --dry-run`,
+        purge_command: `recallant project-sanitize --project-id ${shellCommandArg(dashboardProjectId)} --mode purge --dry-run`,
+        sandbox_cleanup_command: `recallant detach --project-id ${shellCommandArg(dashboardProjectId)} --mode sandbox --dry-run`,
         local_cleanup_command: localProjectPath
-          ? `recallant local-cleanup --project-dir ${JSON.stringify(localProjectPath)} --dry-run`
+          ? `recallant local-cleanup --project-dir ${shellCommandArg(localProjectPath)} --dry-run`
           : null
       },
       chat: {

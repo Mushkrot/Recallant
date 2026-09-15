@@ -28,6 +28,13 @@ bounded by design, and conservative about secrets.
 - Cloudflare Access or an equivalent edge gate protects human/admin/approval surfaces such as the
   Workbench, `/connect/approve`, credential-management, backup, provider, and raw-artifact routes.
   Agent runtime does not use a Cloudflare browser session; it uses scoped machine credentials.
+- Recallant trusts Cloudflare identity, `CF-Connecting-IP`, and `X-Forwarded-*` headers only when
+  the TCP peer is the local loopback reverse proxy. Direct-origin callers cannot authenticate or
+  select a rate-limit identity with forwarded headers. Keep the application origin loopback-only;
+  do not place another untrusted hop between the proxy and Recallant.
+- Set `RECALLANT_PUBLIC_SERVER_URL` to the canonical HTTPS origin used in copied bootstrap and
+  remote-client commands. Without that setting, Recallant derives an origin only from a local
+  trusted proxy request. A direct request `Host` header is never used to generate commands.
 - Public agent routes are limited to the universal connect bootstrap/start/poll/cancel path,
   bootstrap-token redemption through `/api/connect/start`, invite redemption, `/api/mcp`, and the
   content-free `/api/otel/v1/logs` control endpoint with scoped Bearer credentials. They must not

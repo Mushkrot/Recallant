@@ -201,6 +201,13 @@ For a managed deployment with Cloudflare Access:
 
 may be exposed as path-scoped agent routes.
 
+The Recallant origin should remain bound to loopback, with Cloudflare Tunnel or the selected
+reverse proxy connecting locally. Recallant accepts Cloudflare identity and forwarded client
+headers only from a loopback TCP peer. Configure `RECALLANT_PUBLIC_SERVER_URL` with the canonical
+HTTPS public origin used by `/connect` and other copied commands; request `Host` headers cannot
+override it. If the configured URL is absent, origin derivation is allowed only through that local
+proxy boundary.
+
 The browser approval route and Workbench remain protected:
 
 - `/connect/approve`
