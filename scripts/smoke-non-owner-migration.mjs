@@ -13,6 +13,12 @@ const developerId = randomUUID();
 const hostProjectId = randomUUID();
 const openAiProviderTokenFixture = String.fromCharCode(115, 107, 45) + "nonownerfixture123456";
 const githubTokenFixture = "github-token-fixture-value";
+const pemFixtures = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "OPENSSH PRIVATE KEY"].map(
+  (label, index) => ({
+    label,
+    marker: `non-owner-pem-body-${index}-${randomUUID().replaceAll("-", "")}`
+  })
+);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -112,6 +118,11 @@ async function writeExistingProjectFixture(projectDir) {
       "Keep release notes deterministic.",
       "Never deploy fixture builds without review.",
       `Temporary local token example: OPENAI_API_KEY=${openAiProviderTokenFixture}`,
+      ...pemFixtures.flatMap(({ label, marker }) => [
+        `-----BEGIN ${label}-----`,
+        marker,
+        `-----END ${label}-----`
+      ]),
       ""
     ].join("\n")
   );
@@ -204,7 +215,8 @@ function assertNoRawSecrets(value, label) {
     openAiProviderTokenFixture,
     "example-password",
     "example-password",
-    githubTokenFixture
+    githubTokenFixture,
+    ...pemFixtures.map(({ marker }) => marker)
   ]) {
     assert(!text.includes(marker), `${label} leaked raw secret marker ${marker}`);
   }
@@ -402,6 +414,14 @@ assert(!agents.includes(openAiProviderTokenFixture), "AGENTS.md still contains r
 assert(projectLog === originalProjectLog, "Attach changed the owner-authored PROJECT_LOG.md");
 assert(backupAgents.includes("<redacted-token>"), "Backup AGENTS.md was not redacted");
 assert(!backupAgents.includes(openAiProviderTokenFixture), "Backup AGENTS.md leaked raw token");
+for (const { marker } of pemFixtures) {
+  assert(!agents.includes(marker), `AGENTS.md leaked multiline PEM body ${marker}`);
+  assert(!backupAgents.includes(marker), `Backup AGENTS.md leaked multiline PEM body ${marker}`);
+  assert(
+    !JSON.stringify(backupManifest).includes(marker),
+    `Backup manifest leaked PEM body ${marker}`
+  );
+}
 assert(
   backupManifest.discovered_agent_files.length >= 4,
   `Backup manifest did not record discovered agent files: ${JSON.stringify(backupManifest)}`

@@ -124,15 +124,15 @@ recallant doctor
 ```
 
 `recallant --version` should print the shared release version with git build metadata, for example
-`recallant 0.1.0-dev.2+<git-sha>` from a checkout install. The root and private workspace manifests,
+`recallant 0.1.0-dev.3+<git-sha>` from a checkout install. The root and private workspace manifests,
 runtime contract, and CLI use the same prerelease identity; the Git suffix identifies the exact
 installed checkout.
 
 For a published pinned prerelease, fetch the bootstrap script and source checkout from the same tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.2/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.2
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.3
 ```
 
 Onboarding leaves that tagged checkout pinned. Switching it to the moving development channel is an
@@ -154,10 +154,14 @@ Cloudflare Access profile is configured. A ready public UI means the private ori
 auth-required Workbench response and edge auth is required at the public access layer; an anonymous
 origin response or disabled edge auth is not public-ready.
 
-Public Workbench readiness does not imply remote project access. The current agent path remains local
-stdio MCP on an installed host. Supporting projects from another server or workstation through one
-central Recallant instance is planned remote-client work and must use authenticated agent access
-without exposing Postgres, backups, raw artifacts, or unauthenticated MCP/admin routes.
+Set `RECALLANT_PUBLIC_SERVER_URL` to the canonical HTTPS origin for copied connection and bootstrap
+commands. Recallant trusts Cloudflare identity and forwarded client headers only from a loopback
+reverse-proxy connection. Direct-origin request headers cannot authenticate a user, bypass the
+per-client abuse guard, or replace the configured public origin.
+
+Public Workbench readiness does not imply remote project access. Remote projects use separately
+scoped machine credentials through `/api/mcp`; they do not receive Postgres, backup, raw-artifact,
+or Workbench/admin access. Local stdio MCP remains supported for an installed host.
 
 `recallant doctor --format json` also reports
 `production_readiness.service_runtime` when production service signals are available from the

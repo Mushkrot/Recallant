@@ -327,7 +327,7 @@ assert(
   )}`
 );
 assert(
-  String(universalMissingPayload.remote_command).includes("--server-url <https-url>") &&
+  String(universalMissingPayload.remote_command).includes("--server-url '<https-url>'") &&
     String(universalMissingPayload.local_command).includes("--local"),
   `universal missing storage did not print both route commands: ${JSON.stringify(
     universalMissingPayload

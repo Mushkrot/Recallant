@@ -115,7 +115,7 @@ try {
     { project_display_name: "security project", bootstrap_token: "rcl_boot_security_token" },
     { "x-forwarded-for": "198.51.100.10" }
   );
-  assert(startThree.status === 409, "rate-limited start did not fail");
+  assert(startThree.status === 429, "rate-limited start did not return HTTP 429");
   assert(startThree.text.includes("RATE_LIMITED"), "rate limit error did not name RATE_LIMITED");
   assert(
     !startThree.text.includes(startOne.body.device_code),
@@ -129,7 +129,7 @@ try {
     { poll_token: oversizedSecret },
     { "x-forwarded-for": "192.0.2.10" }
   );
-  assert(oversized.status === 409, "oversized poll did not fail");
+  assert(oversized.status === 413, "oversized poll did not return HTTP 413");
   assert(!oversized.text.includes(oversizedSecret), "oversized error echoed raw poll token");
 
   const wrongPoll = await postJson(

@@ -814,7 +814,7 @@ try {
       configuredOnly.facts.semantic_memory_ready === false &&
       configuredOnly.facts.readiness_status === "configured" &&
       String(configuredOnly.answer).includes(
-        "configured, but automatic capture and the memory loop are not proven yet"
+        "automatic capture and the memory loop are not proven yet"
       ),
     `Configured-only connection check overclaimed readiness: ${JSON.stringify(configuredOnly)}`
   );

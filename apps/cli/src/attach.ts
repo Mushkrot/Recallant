@@ -198,8 +198,15 @@ async function assertNoSymlinkWithin(root: string, target: string) {
   }
 }
 
+async function readOptionalWithin(root: string, target: string) {
+  await assertNoSymlinkWithin(root, target);
+  const content = await readOptional(target);
+  await assertNoSymlinkWithin(root, target);
+  return content;
+}
+
 async function readExistingConfig(projectDir: string) {
-  const content = await readOptional(join(projectDir, ".recallant", "config"));
+  const content = await readOptionalWithin(projectDir, join(projectDir, ".recallant", "config"));
   if (!content) return { config: null as AttachConfig | null, error: null as string | null };
   try {
     return { config: JSON.parse(content) as AttachConfig, error: null };
@@ -302,7 +309,7 @@ Next step: start the next agent session with \`recallant agent-start --task-hint
 
 async function upsertGitignore(projectDir: string) {
   const path = join(projectDir, ".gitignore");
-  const existing = await readOptional(path);
+  const existing = await readOptionalWithin(projectDir, path);
   if (existing === null) return ".recallant/\n";
   const lines = existing.split("\n").map((line) => line.trim());
   if (lines.includes(".recallant/") || lines.includes(".recallant")) return existing;
@@ -334,7 +341,7 @@ function candidateImportable(candidate: DiscoveryCandidate) {
 }
 
 async function generatedBootstrapCandidate(projectDir: string, candidate: DiscoveryCandidate) {
-  const content = await readOptional(join(projectDir, candidate.path));
+  const content = await readOptionalWithin(projectDir, join(projectDir, candidate.path));
   if (!content) return false;
   if (candidate.path === "AGENTS.md" && content.includes("## Memory (Recallant)")) return true;
   if (candidate.path === "PROJECT_LOG.md" && content.includes("Status: attached to Recallant")) {
@@ -385,7 +392,7 @@ async function discoverAgentFiles(projectDir: string, candidates: readonly Disco
   const files: AgentFile[] = [];
   for (const relativePath of Array.from(paths).sort()) {
     const absolutePath = join(projectDir, relativePath);
-    const content = await readOptional(absolutePath);
+    const content = await readOptionalWithin(projectDir, absolutePath);
     if (content === null) continue;
     const redacted = redactSecretValues(content);
     let sizeBytes = Buffer.byteLength(content);
@@ -468,9 +475,8 @@ async function createLocalBackup(input: {
   const backupRoot = join(input.projectDir, ".recallant", "backups", `attach-${timestamp}`);
   await assertNoSymlinkWithin(input.projectDir, backupRoot);
   for (const file of input.agentFiles) {
-    const content = await readOptional(join(input.projectDir, file.path));
+    const content = await readOptionalWithin(input.projectDir, join(input.projectDir, file.path));
     if (content === null) continue;
-    await assertNoSymlinkWithin(input.projectDir, join(input.projectDir, file.path));
     await assertNoSymlinkWithin(input.projectDir, join(backupRoot, file.path));
     await mkdir(join(backupRoot, file.path, ".."), { recursive: true });
     await writeFile(join(backupRoot, file.path), redactSecretValues(content));
@@ -924,8 +930,8 @@ export async function runAttach(argv: readonly string[]) {
 
   const agentsPath = join(options.projectDir, "AGENTS.md");
   const projectLogPath = join(options.projectDir, "PROJECT_LOG.md");
-  const existingAgents = await readOptional(agentsPath);
-  const existingProjectLog = await readOptional(projectLogPath);
+  const existingAgents = await readOptionalWithin(options.projectDir, agentsPath);
+  const existingProjectLog = await readOptionalWithin(options.projectDir, projectLogPath);
   const starterDocsPlan = planStarterDocs({
     projectName: projectName(options.projectDir),
     posture: documentationPosture,
@@ -1086,7 +1092,10 @@ export async function runAttach(argv: readonly string[]) {
     await writeFile(
       targetConfigPath,
       renderClientTargetConfig(
-        await readOptional(join(options.projectDir, targetConfig.config_file)),
+        await readOptionalWithin(
+          options.projectDir,
+          join(options.projectDir, targetConfig.config_file)
+        ),
         targetConfig
       )
     );
@@ -1100,7 +1109,7 @@ export async function runAttach(argv: readonly string[]) {
         maskChangedBootstrapSecrets && existingAgents !== null
           ? redactSecretValues(existingAgents)
           : starterDocsOutcome.generated_files.includes("AGENTS.md")
-            ? await readOptional(agentsPath)
+            ? await readOptionalWithin(options.projectDir, agentsPath)
             : existingAgents
       )
     );

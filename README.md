@@ -120,8 +120,8 @@ recallant onboard /path/to/project
 For a pinned prerelease, use the versioned command after the tag is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.2/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.2
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.3
 ```
 
 Tagged installs remain on that prerelease channel during onboarding. Switching to the moving
@@ -159,7 +159,7 @@ calls or another client do not need a Codex hook, but they should not expect `ca
 
 ## Current Scope and Limits
 
-Recallant `v0.1.0-dev.2` is a **development prerelease**, not stable production software. It is
+Recallant `v0.1.0-dev.3` is a **development prerelease**, not stable production software. It is
 suitable for local evaluation and controlled development use. Broader project pilots, native
 cross-client parity, and stable support guarantees are still open work.
 

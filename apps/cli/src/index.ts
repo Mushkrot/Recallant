@@ -793,9 +793,30 @@ async function getLocalSpoolStatus(argv: readonly string[]) {
           ? lastRecord.createdAt
           : null,
     last_unsynced_local_id: lastUnsynced ? String(lastUnsynced.local_id ?? "") : null,
-    replay_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)} --dry-run`,
-    sync_command: `recallant sync-spool --project-dir ${projectDir(argv)} --spool-dir ${spoolDir(argv)}`,
-    prune_command: `recallant prune-spool --spool-dir ${spoolDir(argv)} --synced`,
+    replay_command: formatCommandHint([
+      "recallant",
+      "sync-spool",
+      "--project-dir",
+      projectDir(argv),
+      "--spool-dir",
+      spoolDir(argv),
+      "--dry-run"
+    ]),
+    sync_command: formatCommandHint([
+      "recallant",
+      "sync-spool",
+      "--project-dir",
+      projectDir(argv),
+      "--spool-dir",
+      spoolDir(argv)
+    ]),
+    prune_command: formatCommandHint([
+      "recallant",
+      "prune-spool",
+      "--spool-dir",
+      spoolDir(argv),
+      "--synced"
+    ]),
     checked_at: new Date().toISOString()
   };
 }
@@ -2327,7 +2348,15 @@ async function codexNativeHookReadiness(projectDir: string) {
       ? "not_programmatically_verifiable"
       : "review_required_before_first_native_run",
     trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
-    proof_command: `recallant doctor --project-dir ${projectDir} --require-capture --format json`,
+    proof_command: formatCommandHint([
+      "recallant",
+      "doctor",
+      "--project-dir",
+      projectDir,
+      "--require-capture",
+      "--format",
+      "json"
+    ]),
     fail_soft: true,
     writes_global_config: false
   };
@@ -2372,7 +2401,13 @@ async function clientConnectionReadiness(projectDir: string) {
       client: "codex",
       ...codexNativeHook,
       ready: codexNativeHook.configured,
-      install_command: `recallant connect codex --project-dir ${projectDir}`,
+      install_command: formatCommandHint([
+        "recallant",
+        "connect",
+        "codex",
+        "--project-dir",
+        projectDir
+      ]),
       note: codexNativeHook.capture_active
         ? "Recallant has observed the installed native Codex hook command. Codex trust remains external and is not read from private client state."
         : codexNativeHook.configured
@@ -2492,7 +2527,7 @@ function summarizeSubcommandFailure(result: ReturnType<typeof runLocalCliSubcomm
 }
 
 function formatCommandHint(input: readonly string[]) {
-  return input.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
+  return input.map((arg) => shellCliArg(arg)).join(" ");
 }
 
 function formatOnboardRerunCommand(options: OnboardOptions, targetClient: string) {
@@ -2887,7 +2922,9 @@ function remoteConnectHint(): OnboardStorageStep["remote_connect"] {
   return {
     available: true,
     server_url: serverUrl,
-    command: serverUrl ? `curl -fsSL ${serverUrl}/connect | bash` : null,
+    command: serverUrl
+      ? `${formatCommandHint(["curl", "-fsSL", `${serverUrl}/connect`])} | bash`
+      : null,
     description:
       "If this project should connect to an existing central Recallant server, use the remote client flow instead of creating local single-user storage."
   };
@@ -3499,19 +3536,19 @@ function doctorOwnerSummary(input: {
           : "Project is not attached to Recallant yet.";
   const nextStep = automaticAgentAuditActive
     ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
-      ? `Run recallant connect codex --project-dir ${input.projectDir}, then review the command hook in /hooks.`
+      ? `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, then review the command hook in /hooks.`
       : automaticAgentAuditConfigured && !automaticAgentAuditActive
         ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-capture."
         : "No startup-layer action is required. Continue normal work and close out the session when done."
     : remoteOnly
       ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
       : !attached
-        ? `Run recallant attach ${input.projectDir} --sandbox --dry-run first.`
+        ? `Run ${formatCommandHint(["recallant", "attach", input.projectDir, "--sandbox", "--dry-run"])} first.`
         : input.clientConnection.status !== "mcp_and_hooks_ready"
-          ? `Run recallant connect codex --project-dir ${input.projectDir} --dry-run, then install after review.`
+          ? `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir, "--dry-run"])}, then install after review.`
           : automaticAgentAuditConfigured
             ? "Perform one normal Codex action, then rerun doctor --require-capture."
-            : `Run recallant connect codex --project-dir ${input.projectDir}, review the command hook in /hooks, then perform one normal Codex action.`;
+            : `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, review the command hook in /hooks, then perform one normal Codex action.`;
   return {
     status,
     headline,
@@ -9090,7 +9127,7 @@ async function runDemoCapture(argv: readonly string[]) {
       schema_version: 1,
       status: "demo_capture_complete",
       current_focus: `Demo capture for ${marker}`,
-      next_step: `Run recallant ask "what did the agent remember?" --project-dir ${dir}`,
+      next_step: `Run ${formatCommandHint(["recallant", "ask", "what did the agent remember?", "--project-dir", dir])}`,
       summary: `Demo capture wrote and checkpointed ${marker}.`,
       updated_at: new Date().toISOString(),
       source: "recallant-demo-capture"
@@ -9152,8 +9189,14 @@ async function runDemoCapture(argv: readonly string[]) {
         later_recall_works: recalled
       },
       next_commands: [
-        `recallant doctor --project-dir ${dir} --require-memory-loop`,
-        `recallant ask "what did the agent remember?" --project-dir ${dir}`
+        formatCommandHint(["recallant", "doctor", "--project-dir", dir, "--require-memory-loop"]),
+        formatCommandHint([
+          "recallant",
+          "ask",
+          "what did the agent remember?",
+          "--project-dir",
+          dir
+        ])
       ]
     };
     if (format === "json") {
@@ -9175,7 +9218,7 @@ async function runDemoCapture(argv: readonly string[]) {
           `- ${result.next_commands[0]}`,
           `- ${result.next_commands[1]}`,
           "",
-          `JSON output: recallant demo-capture --project-dir ${dir} --format json`
+          `JSON output: ${formatCommandHint(["recallant", "demo-capture", "--project-dir", dir, "--format", "json"])}`
         ].join("\n") + "\n"
       );
     }
@@ -9243,9 +9286,15 @@ async function runAsk(argv: readonly string[]) {
       }
       lines.push(
         "",
-        `JSON output: recallant ask ${JSON.stringify(query)} ${
-          explicitProjectId ? `--project-id ${projectId}` : `--project-dir ${dir}`
-        } --format json`
+        `JSON output: ${formatCommandHint([
+          "recallant",
+          "ask",
+          query,
+          explicitProjectId ? "--project-id" : "--project-dir",
+          explicitProjectId ? String(projectId) : dir,
+          "--format",
+          "json"
+        ])}`
       );
       process.stdout.write(`${lines.join("\n")}\n`);
     }
@@ -9315,7 +9364,7 @@ async function runSpoolStatus(argv: readonly string[]) {
       `Replay now: ${status.sync_command}`,
       `Prune synced records: ${status.prune_command}`,
       "",
-      `JSON output: recallant spool-status --project-dir ${projectDir(argv)} --format json`
+      `JSON output: ${formatCommandHint(["recallant", "spool-status", "--project-dir", projectDir(argv), "--format", "json"])}`
     ].join("\n") + "\n"
   );
 }
@@ -10283,7 +10332,7 @@ function connectHumanReport(result: Record<string, unknown>) {
           : hookStatus;
   const proofCommand = String(
     (result.mandatory_startup_layer as Record<string, unknown> | undefined)?.proof_command ??
-      `recallant doctor --project-dir ${projectDir} --require-capture`
+      formatCommandHint(["recallant", "doctor", "--project-dir", projectDir, "--require-capture"])
   );
   const captureState = String(
     automaticAgentAudit.capture_active === true
@@ -10297,7 +10346,7 @@ function connectHumanReport(result: Record<string, unknown>) {
             : "not_configured"
   );
   const installCommand = dryRun
-    ? `recallant connect ${client} --project-dir ${projectDir}`
+    ? formatCommandHint(["recallant", "connect", client, "--project-dir", projectDir])
     : proofCommand;
   return (
     [
@@ -11741,17 +11790,29 @@ function emitUniversalConnectChoiceRequired(input: {
       {
         id: "existing_central_server",
         label: "Connect to an existing Recallant server",
-        command: `recallant connect ${input.projectDir} --server-url <https-url>`
+        command: formatCommandHint([
+          "recallant",
+          "connect",
+          input.projectDir,
+          "--server-url",
+          "<https-url>"
+        ])
       },
       {
         id: "local_storage",
         label: "Set up or use local Recallant storage on this machine",
-        command: `recallant connect ${input.projectDir} --local`
+        command: formatCommandHint(["recallant", "connect", input.projectDir, "--local"])
       }
     ],
-    next_command: `recallant connect ${input.projectDir}`,
-    remote_command: `recallant connect ${input.projectDir} --server-url <https-url>`,
-    local_command: `recallant connect ${input.projectDir} --local`,
+    next_command: formatCommandHint(["recallant", "connect", input.projectDir]),
+    remote_command: formatCommandHint([
+      "recallant",
+      "connect",
+      input.projectDir,
+      "--server-url",
+      "<https-url>"
+    ]),
+    local_command: formatCommandHint(["recallant", "connect", input.projectDir, "--local"]),
     message:
       "Run the same command in an interactive terminal to choose, or pass --server-url for an existing central Recallant server."
   };
@@ -12005,11 +12066,30 @@ async function runConnect(argv: readonly string[]) {
             : null,
         restore_command:
           existingGlobal && targetConfig.target === "cursor"
-            ? `recallant connect cursor --project-dir ${dir} --global --restore-global-backup <backup-path>`
+            ? formatCommandHint([
+                "recallant",
+                "connect",
+                "cursor",
+                "--project-dir",
+                dir,
+                "--global",
+                "--restore-global-backup",
+                "<backup-path>"
+              ])
             : null,
         confirmation_command:
           targetConfig.target === "cursor"
-            ? `recallant connect cursor --project-dir ${dir} --global --confirm-global-write --previewed-global-target ${globalTargetPath}`
+            ? formatCommandHint([
+                "recallant",
+                "connect",
+                "cursor",
+                "--project-dir",
+                dir,
+                "--global",
+                "--confirm-global-write",
+                "--previewed-global-target",
+                String(globalTargetPath)
+              ])
             : null
       }
     : null;
@@ -12187,7 +12267,15 @@ async function runConnect(argv: readonly string[]) {
       writes_global_config: false,
       capture_targets: captureTargetNames,
       automatic_capture_events: codexHookEventNames,
-      proof_command: `recallant doctor --project-dir ${dir} --require-capture --format json`,
+      proof_command: formatCommandHint([
+        "recallant",
+        "doctor",
+        "--project-dir",
+        dir,
+        "--require-capture",
+        "--format",
+        "json"
+      ]),
       ready_definition:
         "MCP and native Codex hooks can be configured before capture is active; active automatic audit requires an observed codex-hook invocation."
     },
@@ -12633,7 +12721,7 @@ async function runLocalOnboard(argv: readonly string[]) {
   const needAttach = !existingConfig?.project_id;
   if (options.verify && !options.client) {
     throw new Error(
-      `onboard --verify requires a client. Run the beginner flow with: recallant onboard ${options.projectDir}`
+      `onboard --verify requires a client. Run the beginner flow with: ${formatCommandHint(["recallant", "onboard", options.projectDir])}`
     );
   }
   const verifyResult: OnboardVerifyPayload = {

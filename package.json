@@ -1,6 +1,6 @@
 {
   "name": "recallant",
-  "version": "0.1.0-dev.2",
+  "version": "0.1.0-dev.3",
   "private": true,
   "description": "Governed memory for AI agents.",
   "license": "Apache-2.0",
@@ -82,6 +82,8 @@
     "agent-capture:smoke": "node scripts/smoke-agent-capture.mjs",
     "agent-observability:smoke": "node scripts/smoke-agent-observability.mjs",
     "security-hardening:smoke": "node scripts/smoke-security-hardening.mjs",
+    "r5-security-governance:smoke": "node scripts/smoke-r5-security-governance.mjs",
+    "copyable-command-safety:smoke": "node scripts/smoke-copyable-command-safety.mjs",
     "codex-hook-adapter:smoke": "npm run build --workspace @recallant/adapters && node scripts/smoke-codex-hook-adapter.mjs",
     "codex-otel-contract:smoke": "npm run build --workspace @recallant/core && node scripts/smoke-codex-otel-contract.mjs",
     "codex-otel-control:smoke": "npm run build && node scripts/smoke-codex-otel-control.mjs",
@@ -154,7 +156,7 @@
     "phase10:smoke": "node scripts/smoke-phase10-attach.mjs && node scripts/smoke-phase10-detach.mjs && node scripts/smoke-phase10-cross-project.mjs",
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
-    "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run codex-otel-contract:smoke && npm run codex-otel-control:smoke && npm run capture-readiness:smoke && npm run agent-observability:smoke && npm run mcp-stdio-lifecycle:smoke && npm run security-hardening:smoke && npm run review-ui:smoke",
+    "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run codex-otel-contract:smoke && npm run codex-otel-control:smoke && npm run capture-readiness:smoke && npm run agent-observability:smoke && npm run mcp-stdio-lifecycle:smoke && npm run r5-security-governance:smoke && npm run copyable-command-safety:smoke && npm run security-hardening:smoke && npm run review-ui:smoke",
     "test": "npm run test:product-gates"
   },
   "devDependencies": {
