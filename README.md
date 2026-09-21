@@ -20,6 +20,31 @@ To evaluate the core idea, [onboard one project](docs/QUICKSTART.md), record a d
 close the session, and retrieve its source-backed context in a new session. Review controls
 determine which memories can become active guidance.
 
+## 30-Second Demo
+
+Run this against a temporary project after checking the [prerelease scope and limits](#current-scope-and-limits):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.3
+```
+
+```bash
+mkdir -p /tmp/recallant-demo
+recallant onboard /tmp/recallant-demo
+recallant agent-start --project-dir /tmp/recallant-demo \
+  --task-hint "Demonstrate governed project memory" --format json
+recallant agent-event --project-dir /tmp/recallant-demo --kind decision \
+  --text "Keep the demo project context source-backed"
+recallant agent-closeout --project-dir /tmp/recallant-demo \
+  --summary "Recorded a decision for the next session"
+```
+
+The onboarding output should include `Memory loop ready: yes`. The JSON output should contain
+session and context-pack identifiers; the final command should report a recorded event and closeout.
+Start `recallant agent-start` once more with a new task hint to see the bounded context from the
+previous session returned to the next agent.
+
 ## See It Working
 
 These screenshots come from the real private Workbench with deterministic synthetic data. The
@@ -139,12 +164,10 @@ proof when one of those states is incomplete.
 
 ### One Codex approval is required for automatic capture
 
-After connecting a project, Codex requires the owner to approve Recallant's project command hook:
-
-1. Open Codex in the connected project and enter `/hooks`.
-2. Find the **Recallant command hook**, review that it runs `recallant codex-hook`, and choose
-   **Trust**.
-3. Perform one normal Codex action, then run:
+After connecting a project, Codex requires the owner to approve Recallant's project command hook
+through the project trust or command-approval surface presented by the actual Codex client. Codex
+Desktop does not guarantee a `/hooks` slash command; if the composer says `No commands`, that route
+is unavailable. Perform one normal Codex action, then run:
 
    ```bash
    recallant doctor --project-dir /path/to/project --require-capture

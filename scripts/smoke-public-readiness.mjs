@@ -108,6 +108,7 @@ const publicDocs = [
   "docs/research/REFERENCE_PROJECTS.md",
   "docs/research/JARVIS_OBSIDIAN_COMPARISON.md",
   "docs/releases/v0.1.0-dev.3.md",
+  "docs/MANAGEMENT_CHAT_ROUTING.md",
   "docs/WORKBENCH_UI.md",
   "docs/GRAPH_TREE_CONTRACT.md",
   "docs/ARCHITECTURE.md",
@@ -264,8 +265,9 @@ mustInclude(
     "recallant connect /path/to/project",
     "Memory loop ready: yes",
     "Required owner step for automatic Codex capture",
-    "Open Codex in the project and enter `/hooks`",
-    "choose\n   **Trust**",
+    "Codex Desktop does",
+    "`/hooks` slash command",
+    "project trust or command-approval surface",
     "capture_active=false",
     "documentation posture summary",
     "Documentation posture: empty | healthy |",
@@ -319,7 +321,8 @@ mustInclude(
     "v0.1.0-dev.3",
     "production_readiness.ready: true",
     "Required Verification",
-    "trust the Recallant command hook in `/hooks`",
+    "Codex Desktop does",
+    "`/hooks` slash command",
     "Documentation Authority",
     "Operations Runbook",
     "Product Contract Status"
@@ -381,10 +384,11 @@ mustInclude(
     "recallant connect codex --project-dir . --dry-run",
     "recallant doctor --project-dir . --require-capture --format json",
     "configured_unobserved",
-    "After connect, open `/hooks` in Codex",
-    "the one required owner step for automatic\ncapture",
-    "choose **Trust**",
-    "Recallant cannot complete this\napproval automatically",
+    "After connect, complete the one required owner step for automatic capture",
+    "Codex Desktop does",
+    "`/hooks` slash command",
+    "project trust or\ncommand-approval surface",
+    "Recallant cannot\ncomplete this approval automatically",
     "recallant codex-hook",
     "--no-local-hooks"
   ],
@@ -417,8 +421,8 @@ mustInclude(
     "configured_unobserved",
     "observed_server",
     "observed_offline_spool",
-    "owner\nmust open `/hooks`",
-    "choose\n**Trust**",
+    "owner must approve the\nproject-local command hook",
+    "Codex Desktop UI does not guarantee a `/hooks` slash command",
     "The native adapter intentionally ignores `transcript_path`",
     "Codex `Stop` is turn-scoped"
   ],
@@ -573,7 +577,7 @@ mustInclude(
     "automatic safe agent-authored decisions, actions, tests, checkpoints, and closeouts are the",
     "Beginner Onboarding Contract",
     "one explicit owner step after onboarding",
-    "review the **Recallant command hook**",
+    "approve the\nproject-local command hook",
     "capture_active` remains false",
     "recallant onboard <project>",
     "Database not configured",
@@ -639,7 +643,8 @@ mustInclude(
     "Database not configured",
     "Existing-project migration",
     "capture-active proof",
-    "Codex owners must review and trust the project command hook through `/hooks`",
+    "Codex owners must approve the project command hook through the actual client's trust surface",
+    "Codex Desktop does not guarantee a `/hooks` slash command",
     "Documentation posture + context routing",
     "System activity ledger and audit reports",
     "Redacted `system_activity_events` schema",
@@ -1592,11 +1597,11 @@ process.stdout.write(
 );
 
 const forbiddenPrivateMarkers = [
-  ['synthetic', 'boundary', 'path'].join('/'),
-  ['synthetic', 'boundary', 'domain'].join('.'),
-  ['synthetic', 'boundary', 'service'].join('-'),
-  ['synthetic', 'boundary', 'identifier'].join(':'),
-  ['synthetic', 'boundary', 'fixture'].join('_')
+  ["synthetic", "boundary", "path"].join("/"),
+  ["synthetic", "boundary", "domain"].join("."),
+  ["synthetic", "boundary", "service"].join("-"),
+  ["synthetic", "boundary", "identifier"].join(":"),
+  ["synthetic", "boundary", "fixture"].join("_")
 ];
 for (const path of publicDocs) {
   const content = await read(path);

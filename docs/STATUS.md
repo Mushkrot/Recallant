@@ -29,8 +29,9 @@ runs, pinned installation, update-channel, rollback, security, and route verific
 - Activity now provides run-oriented agent observability: bounded replay, grouped errors and
   recovery, completeness checks, and adapter coverage. Local Codex connection now installs a native
   project hook adapter by default, safely preserving user hooks and reporting configured versus
-  fresh observed capture truthfully. Automatic Codex capture also requires the owner to review and
-  trust the Recallant command hook in `/hooks`; Recallant cannot bypass that Codex security gate.
+  fresh observed capture truthfully. Automatic Codex capture also requires the owner to approve the
+  Recallant command hook through the actual Codex client's project trust surface; Codex Desktop does
+  not guarantee a `/hooks` slash command, and Recallant cannot bypass that security gate.
   An optional, separately transported Codex OpenTelemetry lane
   reconciles safe control facts with native hooks, exposes gaps without storing another transcript,
   and retains/purges/restores its project-scoped evidence. Errors now show automatically correlated
@@ -81,6 +82,10 @@ npm test
 npm run public-readiness:smoke
 npm run public-security:smoke
 ```
+
+Database-backed smoke gates must receive an explicit disposable PostgreSQL target through
+`RECALLANT_SMOKE_DATABASE_URL`. They must not inherit a service or production database URL, and a
+missing disposable target leaves those gates blocked rather than proving a product failure.
 
 Managed runtime changes also require install, service restart, live `doctor`, and the relevant
 consumer smoke. Production dependency checks use `npm audit --omit=dev` without advisory

@@ -673,7 +673,7 @@ assert(
     hookDryRun.hook_integration?.mode === "codex_native_hooks_with_helper_kit" &&
     hookDryRun.native_hook_config?.status === "configured_planned" &&
     hookDryRun.native_hook_config?.preserved_handler_count === 2 &&
-    hookDryRun.native_hook_config?.trust_action?.includes("/hooks") &&
+    hookDryRun.native_hook_config?.trust_action?.includes("project command-approval") &&
     hookDryRun.hook_integration?.native_hooks?.some(
       (entry) => entry.client === "claude_code" && entry.ready === false
     ),
@@ -749,7 +749,7 @@ assert(
     requireAgentAuditBefore.json?.agent_audit?.status === "configured_unobserved" &&
     requireAgentAuditBefore.json?.agent_audit?.configured === true &&
     requireAgentAuditBefore.json?.agent_audit?.capture_active === false &&
-    requireAgentAuditBefore.json?.agent_audit?.trust_action?.includes("/hooks"),
+    requireAgentAuditBefore.json?.agent_audit?.trust_action?.includes("project command-approval"),
   `Agent audit must remain unobserved until codex-hook runs: ${requireAgentAuditBefore.stdout} ${requireAgentAuditBefore.stderr}`
 );
 const hookIdempotentDryRun = runCli([

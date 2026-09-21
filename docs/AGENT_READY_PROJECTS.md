@@ -87,11 +87,13 @@ That command should behave like a guided setup program, not a list of commands t
   automatic capture independently;
 - show the Workbench outcome or a single clear blocker.
 
-For a Codex project, automatic capture has one explicit owner step after onboarding: open `/hooks`,
-review the **Recallant command hook** (`recallant codex-hook`), and choose **Trust**. Codex protects
-project commands from silent activation, so Recallant can install the hook but cannot approve it for
-the owner. Until this is done, the memory loop may be ready while `capture_active` remains false.
-After trusting the hook, perform one normal Codex action and run
+For a Codex project, automatic capture has one explicit owner step after onboarding: approve the
+project-local command hook in the actual Codex client when Codex presents its project trust or
+command-approval surface. Codex Desktop builds do not necessarily expose a `/hooks` slash command;
+if the composer reports `No commands`, that route is unavailable and must not be treated as a
+failure of the Recallant hook. Recallant can install `.codex/hooks.json` but cannot approve project
+execution for the owner. Until approval and a real native invocation occur, the memory loop may be
+ready while `capture_active` remains false. Perform one normal Codex action and run
 `recallant doctor --project-dir . --require-capture` to confirm a fresh automatic event. Manual MCP
 use and other clients do not require a Codex hook and do not provide `capture_active` evidence.
 

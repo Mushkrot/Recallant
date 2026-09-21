@@ -634,6 +634,7 @@ type HttpAuditContext = {
   database: RecallantDb | null;
   activity: SystemActivityRecord | null;
   route: HttpAuditRoute;
+  metadata: Record<string, unknown>;
 };
 
 const httpAuditSkipRoutes = [
@@ -819,7 +820,7 @@ async function startHttpAudit(
   if (isSkippedHttpAuditRoute(method, requestUrl.pathname)) return null;
   const route = classifyHttpAuditRoute(method, requestUrl.pathname);
   const database = createHttpAuditDb();
-  if (!database) return { database: null, activity: null, route };
+  if (!database) return { database: null, activity: null, route, metadata: {} };
   try {
     const activity = await database.startSystemActivity({
       surface: "workbench_http",
@@ -846,10 +847,10 @@ async function startHttpAudit(
       }
     });
     response.setHeader("x-recallant-audit-trace-id", activity.trace_id);
-    return { database, activity, route };
+    return { database, activity, route, metadata: {} };
   } catch {
     await database.close().catch(() => undefined);
-    return { database: null, activity: null, route };
+    return { database: null, activity: null, route, metadata: {} };
   }
 }
 
@@ -881,7 +882,8 @@ async function finishHttpAudit(
         route_template: audit.route.route_template,
         operation_group: audit.route.group,
         status_code: statusCode,
-        response_finished: response.writableEnded
+        response_finished: response.writableEnded,
+        ...audit.metadata
       }
     });
   } catch (finishError) {
@@ -894,6 +896,29 @@ async function finishHttpAudit(
   } finally {
     await audit.database.close().catch(() => undefined);
   }
+}
+
+function publicManagementChatResponse(
+  result: ManagementChatResponse,
+  audit: HttpAuditContext | null
+): Omit<ManagementChatResponse, "telemetry"> {
+  if (result.telemetry && audit) {
+    audit.metadata = {
+      ...audit.metadata,
+      management_chat_source: result.telemetry.source,
+      management_chat_model: result.telemetry.model ?? null,
+      management_chat_intent: result.telemetry.intent,
+      management_chat_language: result.telemetry.language,
+      management_chat_confidence: result.telemetry.confidence,
+      management_chat_result_type: result.telemetry.result_type,
+      management_chat_destructive_or_sensitive: result.telemetry.destructive_or_sensitive,
+      management_chat_failure_reason: result.telemetry.failure_reason ?? null,
+      management_chat_classification_latency_ms: result.telemetry.classification_latency_ms
+    };
+  }
+  const publicResult = { ...result };
+  delete publicResult.telemetry;
+  return publicResult;
 }
 
 function write(
@@ -2435,6 +2460,7 @@ async function handleRemoteMcpRequest(
     assertRemoteMcpBodyIsAllowed(body, id);
     const auth = await authorizeRemoteMcpRequest(request, database);
     activity = await startRemoteMcpAudit({ database, auth, method, request });
+    if (activity?.trace_id) response.setHeader("x-recallant-audit-trace-id", activity.trace_id);
     if (!auth.ok) {
       statusCode = auth.httpStatus;
       errorCode = auth.code;
@@ -2461,6 +2487,7 @@ async function handleRemoteMcpRequest(
         "Remote MCP request failed before authorization completed."
       );
       activity = await startRemoteMcpAudit({ database, auth, method, request }).catch(() => null);
+      if (activity?.trace_id) response.setHeader("x-recallant-audit-trace-id", activity.trace_id);
     }
     writeRemoteMcpJson(response, statusCode, remoteError.body);
   } finally {
@@ -7645,9 +7672,9 @@ function renderManagementChat(
   ${
     chat?.response
       ? `<article class="chat-answer">
-          <h3>${chat.response.language === "ru" ? "Ответ Recallant" : "Recallant Answer"}</h3>
+          <h3>${chat.response.language !== "en" ? "Ответ Recallant" : "Recallant Answer"}</h3>
           <p class="chat-understanding">${escapeHtml(
-            chat.response.language === "ru"
+            chat.response.language !== "en"
               ? chat.response.understanding.source === "local_ai"
                 ? "Понято локальной AI-моделью."
                 : "Понято безопасными локальными правилами; AI-модель недоступна."
@@ -7658,7 +7685,7 @@ function renderManagementChat(
           ${renderTextBlock(chat.response.answer)}
           ${
             chat.response.confirmation_required
-              ? `<p class="warning">${escapeHtml(chat.response.language === "ru" ? "Перед рискованным действием требуется подтверждение." : "Confirmation required before any risky action can run.")}</p>`
+              ? `<p class="warning">${escapeHtml(chat.response.language !== "en" ? "Перед рискованным действием требуется подтверждение." : "Confirmation required before any risky action can run.")}</p>`
               : ""
           }
           ${renderChatActions(chat.response.proposed_actions, chat.response.language)}
@@ -7738,7 +7765,7 @@ function resultTypeLabel(
   resultType: ManagementChatResponse["result_type"],
   language: ManagementChatResponse["language"]
 ) {
-  if (language === "ru") {
+  if (language !== "en") {
     const labels: Record<ManagementChatResponse["result_type"], string> = {
       read_only_answer: "Результат: безопасный ответ",
       safe_action: "Результат: безопасное действие выполнено",
@@ -10401,12 +10428,15 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
               dashboardInput.selected_memory_id
           })
         );
-        const result = await buildManagementChatResponse({
-          message: String(body.message ?? ""),
-          dashboard: chatDashboard,
-          database,
-          clarification_context: parseOptionalJsonObject(body.clarification_context)
-        });
+        const result = publicManagementChatResponse(
+          await buildManagementChatResponse({
+            message: String(body.message ?? ""),
+            dashboard: chatDashboard,
+            database,
+            clarification_context: parseOptionalJsonObject(body.clarification_context)
+          }),
+          audit
+        );
         write(response, 200, JSON.stringify(result), "application/json");
         return;
       }
@@ -10420,12 +10450,15 @@ export function createRecallantHttpServer(options: RecallantHttpServerOptions = 
           })
         );
         const question = String(body.message ?? "");
-        const result = await buildManagementChatResponse({
-          message: question,
-          dashboard: chatDashboard,
-          database,
-          clarification_context: parseOptionalJsonObject(body.clarification_context)
-        });
+        const result = publicManagementChatResponse(
+          await buildManagementChatResponse({
+            message: question,
+            dashboard: chatDashboard,
+            database,
+            clarification_context: parseOptionalJsonObject(body.clarification_context)
+          }),
+          audit
+        );
         write(
           response,
           200,

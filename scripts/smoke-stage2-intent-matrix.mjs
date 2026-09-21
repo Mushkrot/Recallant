@@ -6,6 +6,13 @@ function assert(condition, message) {
 
 const currentProjectId = "11111111-1111-4111-8111-111111111111";
 const sandboxProjectId = "22222222-2222-4222-8222-222222222222";
+const criticalIntents = new Set([
+  "cleanup",
+  "global_rule",
+  "source_management",
+  "project_onboarding",
+  "pilot_qa"
+]);
 
 const dashboard = {
   current_project_id: currentProjectId,
@@ -145,6 +152,20 @@ const scenarios = [
     expectedResult: "read_only_answer"
   },
   {
+    name: "mixed status",
+    message: "Покажи current status",
+    ai: {
+      language: "mixed",
+      intent: "status",
+      summary: "Owner asks for the current status in mixed-language text.",
+      target_hint: "current",
+      destructive_or_sensitive: false,
+      global_rule_request: false
+    },
+    expectedIntent: "status",
+    expectedResult: "read_only_answer"
+  },
+  {
     name: "review triage ru",
     message: "Что нужно разобрать в Review?",
     ai: {
@@ -214,10 +235,10 @@ try {
         headers: { "content-type": "application/json" }
       });
     }
-    return new globalThis.Response(
-      JSON.stringify({ message: { content: JSON.stringify(next) } }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
+    return new globalThis.Response(JSON.stringify({ message: { content: JSON.stringify(next) } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
   };
   for (const scenario of scenarios) {
     const result = await buildManagementChatResponse({
@@ -241,8 +262,11 @@ try {
       database: scenario.database
     });
     assert(result.understanding.source === "rules", `${scenario.name}: fallback not used`);
+    const expectedFallbackResult = criticalIntents.has(scenario.expectedIntent)
+      ? "needs_clarification"
+      : scenario.expectedResult;
     assert(
-      result.intent === scenario.expectedIntent && result.result_type === scenario.expectedResult,
+      result.intent === scenario.expectedIntent && result.result_type === expectedFallbackResult,
       `${scenario.name}: fallback matrix mismatch: ${JSON.stringify(result)}`
     );
   }
@@ -270,11 +294,16 @@ try {
     dashboard
   });
   assert(
-    guarded.understanding.source === "local_ai" &&
+      guarded.understanding.source === "local_ai" &&
       guarded.intent === "cleanup" &&
-      guarded.result_type === "dry_run_required" &&
-      guarded.confirmation_required === true,
+      guarded.result_type === "needs_clarification" &&
+      guarded.confirmation_required === false,
     `Server policy did not override unsafe AI misclassification: ${JSON.stringify(guarded)}`
+  );
+  assert(
+    guarded.proposed_actions.length === 0 &&
+      guarded.clarification_context?.missing?.includes("unambiguous request intent"),
+    `Unsafe AI misclassification did not fail closed: ${JSON.stringify(guarded)}`
   );
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);

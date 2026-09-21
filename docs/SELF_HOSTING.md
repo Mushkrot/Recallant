@@ -249,8 +249,10 @@ recallant doctor --project-dir /path/to/project --require-memory-loop
 ```
 
 `--require-capture` exits non-zero while hooks are missing, only configured, or stale. After Codex
-invokes the trusted project hook, it reports observed server or offline-spool evidence. Review and
-trust the command hook through `/hooks`; Recallant does not inspect or bypass Codex trust.
+invokes the approved project hook, it reports observed server or offline-spool evidence. Approve the
+command hook through the project trust or command-approval surface provided by the actual Codex
+client; Recallant does not inspect or bypass Codex trust, and Codex Desktop does not guarantee a
+`/hooks` slash command.
 
 Maintainers can also run the public clean-host smoke before release work:
 

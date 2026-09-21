@@ -10,7 +10,32 @@ const databaseUrl =
   "postgres://example-user:example-password@127.0.0.1:5432/example-db";
 
 const previousAi = process.env.RECALLANT_MANAGEMENT_CHAT_AI;
-process.env.RECALLANT_MANAGEMENT_CHAT_AI = "off";
+const previousUrl = process.env.RECALLANT_OLLAMA_URL;
+const previousModel = process.env.RECALLANT_MANAGEMENT_CHAT_MODEL;
+const previousFetch = globalThis.fetch;
+process.env.RECALLANT_MANAGEMENT_CHAT_AI = "on";
+process.env.RECALLANT_OLLAMA_URL = "http://mock-ollama.local";
+process.env.RECALLANT_MANAGEMENT_CHAT_MODEL = "mock-global-rule:latest";
+globalThis.fetch = async (_url, init) => {
+  const request = JSON.parse(String(init?.body ?? "{}"));
+  const message = String(request.messages?.[1]?.content ?? "");
+  const risky = /paid api/i.test(message);
+  return new globalThis.Response(
+    JSON.stringify({
+      message: {
+        content: JSON.stringify({
+          language: "en",
+          intent: "global_rule",
+          confidence: 0.95,
+          summary: "Owner asks for a developer-wide rule.",
+          destructive_or_sensitive: risky,
+          global_rule_request: true
+        })
+      }
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+};
 
 const developerId = randomUUID();
 const projectId = randomUUID();
@@ -118,6 +143,9 @@ try {
   await db.close();
   await rm(projectPath, { recursive: true, force: true });
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
+  restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);
+  restoreEnv("RECALLANT_MANAGEMENT_CHAT_MODEL", previousModel);
+  globalThis.fetch = previousFetch;
 }
 
 process.stdout.write("Stage 2 developer-wide rule smoke passed\n");

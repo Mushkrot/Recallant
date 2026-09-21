@@ -77,6 +77,7 @@ import {
   recallantCodexHookCommand,
   renderCodexHookConfig
 } from "./codex-hook-config.js";
+
 import {
   clientTargetConfig,
   codexConfigHasRecallantMcp,
@@ -129,6 +130,9 @@ import {
   checkRecallantCliUpdate,
   renderRecallantCliUpdateAvailable
 } from "./cli-update.js";
+
+const codexHookTrustAction =
+  "Review the generated project hook through the Codex client's project command-approval or trust controls, if available; otherwise automatic capture remains unobserved. Perform one normal action and rerun doctor --require-capture.";
 
 const fallbackRecallantCliVersion = recallantContractVersion;
 
@@ -2347,7 +2351,7 @@ async function codexNativeHookReadiness(projectDir: string) {
     trust_status: observed
       ? "not_programmatically_verifiable"
       : "review_required_before_first_native_run",
-    trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+    trust_action: codexHookTrustAction,
     proof_command: formatCommandHint([
       "recallant",
       "doctor",
@@ -2411,7 +2415,7 @@ async function clientConnectionReadiness(projectDir: string) {
       note: codexNativeHook.capture_active
         ? "Recallant has observed the installed native Codex hook command. Codex trust remains external and is not read from private client state."
         : codexNativeHook.configured
-          ? "Native project hooks are configured but no hook invocation has been observed yet. Review them in /hooks."
+          ? `Native project hooks are configured but no hook invocation has been observed yet. ${codexHookTrustAction}`
           : "Native project hooks are not configured. The helper hook kit alone is not automatic Codex capture."
     },
     {
@@ -3536,9 +3540,9 @@ function doctorOwnerSummary(input: {
           : "Project is not attached to Recallant yet.";
   const nextStep = automaticAgentAuditActive
     ? input.clientConnection.mcp_configured === true && !automaticAgentAuditConfigured
-      ? `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, then review the command hook in /hooks.`
+      ? `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, then ${codexHookTrustAction}`
       : automaticAgentAuditConfigured && !automaticAgentAuditActive
-        ? "Open /hooks in Codex, review and trust the Recallant command hook, then perform one normal Codex action and rerun doctor --require-capture."
+        ? codexHookTrustAction
         : "No startup-layer action is required. Continue normal work and close out the session when done."
     : remoteOnly
       ? "Use memory_get_context_pack through the configured remote MCP bridge, then prove semantic memory with memory_create_agent_memory followed by memory_recall_agent_memories; use the local-storage attach path only if switching this project away from remote MCP is intentional."
@@ -3548,7 +3552,7 @@ function doctorOwnerSummary(input: {
           ? `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir, "--dry-run"])}, then install after review.`
           : automaticAgentAuditConfigured
             ? "Perform one normal Codex action, then rerun doctor --require-capture."
-            : `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, review the command hook in /hooks, then perform one normal Codex action.`;
+            : `Run ${formatCommandHint(["recallant", "connect", "codex", "--project-dir", input.projectDir])}, then ${codexHookTrustAction}`;
   return {
     status,
     headline,
@@ -3566,9 +3570,7 @@ function doctorOwnerSummary(input: {
     automatic_agent_audit_active: automaticAgentAuditActive,
     automatic_agent_audit_status: automaticAgentAudit.status ?? "not_configured",
     automatic_agent_audit_last_seen_at: automaticAgentAudit.last_observed_at ?? null,
-    codex_hook_trust_action:
-      automaticAgentAudit.trust_action ??
-      "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+    codex_hook_trust_action: automaticAgentAudit.trust_action ?? codexHookTrustAction,
     connection_status: connectionStatus,
     configured,
     scope: "client_session",
@@ -10364,7 +10366,7 @@ function connectHumanReport(result: Record<string, unknown>) {
         ? `Codex hook review: ${String(
             nativeHookConfig.trust_action ??
               automaticAgentAudit.trust_action ??
-              "Open /hooks in Codex."
+              codexHookTrustAction
           )}`
         : null,
       "",
@@ -12262,7 +12264,7 @@ async function runConnect(argv: readonly string[]) {
         : String(automaticAgentAudit.status ?? "not_configured"),
       native_hook_configured_or_planned: nativeHookWillExist,
       automatic_agent_audit_active: automaticAgentAudit.capture_active === true,
-      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+      trust_action: codexHookTrustAction,
       fail_soft: true,
       writes_global_config: false,
       capture_targets: captureTargetNames,
@@ -12333,7 +12335,7 @@ async function runConnect(argv: readonly string[]) {
       command: recallantCodexHookCommand,
       events: codexHookEventNames,
       preserved_handler_count: codexHookRender?.ok ? codexHookRender.preserved_handler_count : 0,
-      trust_action: "Open /hooks in Codex, review the Recallant command hook, and trust it.",
+      trust_action: codexHookTrustAction,
       writes_global_config: false
     },
     mcp_config: targetConfig.mcp_config,
