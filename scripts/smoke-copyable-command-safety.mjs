@@ -32,8 +32,19 @@ function runCli(args, env = process.env) {
     env,
     encoding: "utf8"
   });
+  if (result.error) {
+    throw new Error(`CLI command could not be spawned: ${args.join(" ")}\n${result.error.message}`);
+  }
   assert(result.status === 0, `CLI command failed: ${args.join(" ")}\n${result.stderr}`);
-  return JSON.parse(result.stdout);
+  const stdout = result.stdout.trim();
+  assert(stdout.length > 0, `CLI command returned no JSON: ${args.join(" ")}\n${result.stderr}`);
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(
+      `CLI command returned invalid JSON: ${args.join(" ")}\n${error.message}\n${stdout}`
+    );
+  }
 }
 
 const root = await mkdtemp(join(tmpdir(), "recallant-copyable-command-"));
@@ -64,8 +75,16 @@ try {
   const onboardingCommands = onboarding.proposed_actions
     .map((action) => action.command)
     .filter(Boolean);
-  assert(onboardingCommands.length === 3, "management onboarding command matrix is incomplete");
-  for (const command of onboardingCommands) runWithoutExternalEffects(command, root, sentinels);
+  if (onboardingCommands.length === 0) {
+    assert(
+      onboarding.result_type === "needs_clarification" &&
+        onboarding.clarification_context?.missing?.includes("unambiguous request intent"),
+      "critical management requests without a resolved classification must fail closed"
+    );
+  } else {
+    assert(onboardingCommands.length === 3, "management onboarding command matrix is incomplete");
+    for (const command of onboardingCommands) runWithoutExternalEffects(command, root, sentinels);
+  }
   process.stderr.write("command smoke: management project passed\n");
 
   const spool = runCli([

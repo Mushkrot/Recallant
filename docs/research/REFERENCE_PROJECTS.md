@@ -19,6 +19,8 @@ The 2026-08-01 strategic refresh assigns each major reference a bounded role:
 - Open Engine: later Task Handoff Record process reference;
 - OpenHuman, Odysseus, MF0, Kortex/Eden, and the LLM Wiki pattern: human memory and Workbench UX
   references;
+- Omnara (added 2026-09-16): primary durable-agent runtime, control-plane, and Cross-Client
+  Continuity reference;
 - Plane: optional later human task-board adapter, not a memory dependency.
 
 Recallant remains the authoritative core. These roles describe patterns to evaluate and adapt, not
@@ -243,6 +245,104 @@ What not to copy:
 - Do not bypass Recallant's review, retention, or erasure policy.
 - Do not adopt fallback project identity based only on a Git repository or working-directory
   basename; same-name projects must remain isolated by durable Recallant identity.
+
+## Omnara
+
+Snapshot date: 2026-09-16. Refresh before major continuity, runtime, or remote-execution decisions.
+
+Public sources inspected:
+
+- Current repository: [omnara-ai/omnara](https://github.com/omnara-ai/omnara)
+- Documentation: [Omnara docs](https://docs.omnara.com/)
+- API contract: [OpenAPI specification](https://github.com/omnara-ai/omnara/blob/main/api/openapi/openapi.yaml)
+- Self-host stack: [compose.yaml](https://github.com/omnara-ai/omnara/blob/main/compose.yaml)
+- Event persistence: [events migration](https://github.com/omnara-ai/omnara/blob/main/migrations/000004_events_messages_turns.sql)
+
+### Role For Recallant
+
+Omnara is the strongest fresh reference for a durable agent runtime and control plane. It is not
+a memory database: its center of gravity is keeping an agent run alive, observable, resumable, and
+controllable across API clients, dashboards, Slack, machines, and model providers. Recallant can
+use this reference to sharpen Cross-Client Continuity while keeping governed memory and evidence
+as its own authority.
+
+### Current Read
+
+The current main branch presents a self-hostable platform around a Go API, worker, maintenance
+process, web UI, Postgres, Redis/Valkey, and S3-compatible blob storage. The public contract is
+exposed through OpenAPI, a CLI, a TypeScript SDK, and HTTP APIs. A developer defines an immutable
+YAML/JSON agent configuration, launches a durable agent, sends inputs, streams its event timeline,
+answers questions or permission requests, and archives the agent when it is no longer needed.
+
+The important design move is that execution is a product object rather than an in-process loop:
+
+- A durable event timeline records inputs, model outputs, tool results, and context checkpoints in
+  order. Each saved event has a sequence/cursor position, while streaming deltas are explicitly
+  treated as best-effort previews rather than authoritative history.
+- Agent inputs have their own lifecycle, delivery mode, interaction linkage, and idempotency
+  semantics. The event table rejects updates and deletes, protecting the execution record from
+  accidental rewriting.
+- Configurations are immutable and resource names resolve to immutable IDs. A stable profile points
+  to a configuration version, so existing agents keep their original behavior while new launches
+  can move forward safely.
+- Human-in-the-loop is a generic interaction primitive for approvals and questions, with structured
+  context, selectable options, free text where allowed, and explicit resolution/cancellation.
+- Organization/project ownership, explicit resource grants, and role-based access control are
+  applied to machines, model providers, skills, and secrets rather than relying on a single global
+  namespace.
+- Skills are versioned and loaded lazily; secrets are referenced by ID, encrypted at rest, and
+  rotatable without putting values into normal API responses.
+- Machines can be a user's own laptop/VM or pooled ephemeral capacity. The outbound machine daemon
+  lets the control plane operate remote execution without requiring inbound access to the machine.
+
+### Strong Patterns To Keep In The Design Loop
+
+- Make the run/timeline a first-class durable object with stable sequence numbers, cursors, and
+  reconnect/replay semantics.
+- Separate authoritative saved events from temporary streaming deltas. Recallant should never use a
+  preview as evidence or as the only source for a later context pack.
+- Give inputs, cancellation, steering, approval, and retry explicit state machines with idempotency
+  keys instead of hiding them inside a chat transcript.
+- Keep agent/task configuration versioned and immutable, with a stable named pointer and an
+  expected-current guard for concurrent changes.
+- Provide one generic, auditable interaction surface for human questions and approvals across CLI,
+  Workbench, and integrations.
+- Keep resource ownership, project grants, execution permissions, memory visibility, retention, and
+  erasure as separate policy dimensions.
+- Test the real disconnect/reconnect, replay, pause/resume, and stale-client journeys; a green local
+  model call is not proof of continuity.
+
+### What Not To Copy
+
+- Do not turn Recallant into a hosted-agent platform that owns arbitrary machines, model billing, or
+  broad autonomous execution. Adopt only the continuity primitives required by governed memory.
+- Do not equate an execution event or a context checkpoint with accepted memory, a project rule, or a
+  source-backed fact. Those still require Recallant provenance, scope, review, conflict handling, and
+  lifecycle policy.
+- Do not let a machine grant or project role silently grant access to all project memory. Runtime
+  capability and memory audience are related but distinct permissions.
+- Do not make remote shell/tool execution a default capability. It needs the same identity binding,
+  confirmation, audit, and safety gates as every other privileged Recallant action.
+- Do not copy the API or implementation directly. The repository is Apache-2.0 licensed, but any
+  reuse still needs dependency, license, and public/private-boundary review.
+
+### How Recallant Can Use This Reference
+
+Near-term continuity checklist:
+
+- Define a Recallant-owned Task Handoff Record that can survive client, process, and machine changes.
+- Model a durable run timeline separately from memory records, while preserving links to source
+  evidence, capture events, reviews, and resulting context packs.
+- Add reconnect/replay acceptance journeys to Cross-Client Continuity, including an interrupted turn,
+  a pending approval, a stale client, and a duplicate retry.
+- Reuse the generic question/approval shape for Workbench actions, but keep promotion into durable
+  memory behind Recallant's review policy.
+- Keep configuration/profile version IDs and expected-current checks when multiple clients can alter
+  the same project setup.
+
+Omnara should therefore be tracked as a runtime/control-plane reference alongside AgentMemory's
+native client integration focus and Open Engine's handoff-record focus. It informs how work remains
+alive and accountable; it does not redefine what Recallant is allowed to remember.
 
 ## Journey / Journey Kits
 

@@ -183,16 +183,19 @@ try {
     dashboard: baseDashboard
   });
   assert(
-    guardedCleanup.understanding.source === "local_ai" &&
+      guardedCleanup.understanding.source === "local_ai" &&
       guardedCleanup.intent === "cleanup" &&
-      guardedCleanup.result_type === "dry_run_required" &&
-      guardedCleanup.confirmation_required === true &&
-      guardedCleanup.destructive_or_sensitive === true,
+      guardedCleanup.result_type === "needs_clarification" &&
+      guardedCleanup.confirmation_required === false &&
+      guardedCleanup.destructive_or_sensitive === true &&
+      guardedCleanup.proposed_actions.length === 0 &&
+      guardedCleanup.clarification_context?.missing?.includes("unambiguous request intent"),
     `Deterministic policy did not guard misclassified cleanup: ${JSON.stringify(guardedCleanup)}`
   );
   assert(
     guardedCleanup.facts.target_project_id === sandboxProjectId &&
-      String(guardedCleanup.proposed_actions[0]?.command).includes(sandboxProjectId),
+      guardedCleanup.proposed_actions.length === 0 &&
+      guardedCleanup.clarification_context?.missing?.includes("unambiguous request intent"),
     `Guarded cleanup targeted the wrong project: ${JSON.stringify(guardedCleanup)}`
   );
 
@@ -378,17 +381,17 @@ try {
   assert(
     guardedGlobalRule.understanding.source === "local_ai" &&
       guardedGlobalRule.intent === "global_rule" &&
-      guardedGlobalRule.result_type === "safe_action" &&
-      guardedGlobalRule.global_rule_result?.status === "created",
+      guardedGlobalRule.result_type === "needs_clarification" &&
+      guardedGlobalRule.global_rule_result === undefined &&
+      guardedGlobalRule.proposed_actions.length === 0,
     `Deterministic policy did not guard misclassified global rule: ${JSON.stringify(
       guardedGlobalRule
     )}`
   );
   assert(
-    guardedSavedRule?.scope === "developer" &&
-      guardedSavedRule?.audience?.some((audience) => audience.kind === "all_agents") &&
-      guardedGlobalRule.global_rule_result?.use_policy === "instruction_grade",
-    `Guarded global rule wrote wrong DB input: ${JSON.stringify(guardedSavedRule)}`
+    guardedSavedRule === null &&
+      guardedGlobalRule.clarification_context?.missing?.includes("unambiguous request intent"),
+    `Guarded global rule executed before clarification: ${JSON.stringify(guardedSavedRule)}`
   );
 
   queuedResponses.push({
@@ -977,7 +980,80 @@ try {
     `Provenance answer did not explain source refs: ${JSON.stringify(provenance)}`
   );
 
-  assert(seenRequests.length === 20, `Unexpected mock AI call count: ${seenRequests.length}`);
+  seenRequests.length = 0;
+  let failureCalls = 0;
+  globalThis.fetch = async () => {
+    failureCalls += 1;
+    return new globalThis.Response(JSON.stringify({ message: { content: "not-json" } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const invalidCleanup = await buildManagementChatResponse({
+    message: "Удали sandbox проект из Recallant",
+    dashboard: baseDashboard
+  });
+  assert(
+    failureCalls === 1 &&
+      invalidCleanup.understanding.source === "rules" &&
+      invalidCleanup.intent === "cleanup" &&
+      invalidCleanup.result_type === "needs_clarification" &&
+      invalidCleanup.proposed_actions.length === 0 &&
+      invalidCleanup.telemetry?.failure_reason === "invalid_json" &&
+      !("error" in invalidCleanup.understanding),
+    `Invalid JSON did not fail closed after one model call: ${JSON.stringify(invalidCleanup)}`
+  );
+
+  failureCalls = 0;
+  globalThis.fetch = async () => {
+    failureCalls += 1;
+    return new globalThis.Response(
+      JSON.stringify({ message: { content: JSON.stringify({ intent: "status" }) } }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+  const invalidSafe = await buildManagementChatResponse({
+    message: "What is the current status?",
+    dashboard: baseDashboard
+  });
+  assert(
+    failureCalls === 1 &&
+      invalidSafe.understanding.source === "rules" &&
+      invalidSafe.intent === "status" &&
+      invalidSafe.result_type === "read_only_answer" &&
+      invalidSafe.telemetry?.failure_reason === "schema_violation",
+    `Safe schema violation did not use deterministic fallback: ${JSON.stringify(invalidSafe)}`
+  );
+
+  const previousConfiguredModel = process.env.RECALLANT_MANAGEMENT_CHAT_MODEL;
+  delete process.env.RECALLANT_MANAGEMENT_CHAT_MODEL;
+  const baselineRequests = [];
+  globalThis.fetch = async (_url, init) => {
+    baselineRequests.push(JSON.parse(String(init?.body ?? "{}")));
+    return new globalThis.Response(
+      JSON.stringify({
+        message: {
+          content: JSON.stringify({
+            language: "en",
+            intent: "status",
+            confidence: 0.9,
+            summary: "Status request.",
+            destructive_or_sensitive: false
+          })
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+  await buildManagementChatResponse({
+    message: "What is the current status?",
+    dashboard: baseDashboard
+  });
+  assert(
+    baselineRequests.length === 1 && baselineRequests[0]?.model === "mistral-small3.2:24b",
+    `Missing configured model did not use the baseline model: ${JSON.stringify(baselineRequests)}`
+  );
+  restoreEnv("RECALLANT_MANAGEMENT_CHAT_MODEL", previousConfiguredModel);
 } finally {
   restoreEnv("RECALLANT_MANAGEMENT_CHAT_AI", previousAi);
   restoreEnv("RECALLANT_OLLAMA_URL", previousUrl);

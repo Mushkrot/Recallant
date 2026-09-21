@@ -4,10 +4,7 @@ import { URLSearchParams } from "node:url";
 import { createRecallantHttpServer, getRecallantHttpConfig } from "../apps/server/dist/index.js";
 import { RecallantDb } from "../packages/db/dist/index.js";
 import { smokeDatabaseUrl } from "./smoke-database-env.mjs";
-
-
 const databaseUrl = smokeDatabaseUrl();
-
 
 function htmlTextExcerpt(html, marker, length = 520) {
   const text = html
@@ -2966,20 +2963,15 @@ try {
   if (
     globalRuleChat.status !== 200 ||
     globalRuleChatJson.intent !== "global_rule" ||
-    globalRuleChatJson.result_type !== "safe_action" ||
+    globalRuleChatJson.result_type !== "needs_clarification" ||
     globalRuleChatJson.confirmation_required !== false ||
-    globalRuleChatJson.global_rule_result?.status !== "created" ||
-    globalRuleChatJson.global_rule_result?.scope !== "developer"
+    globalRuleChatJson.global_rule_result !== undefined ||
+    globalRuleChatJson.proposed_actions.length !== 0 ||
+    !globalRuleChatJson.clarification_context?.missing?.includes("unambiguous request intent")
   ) {
-    throw new Error(`Global rule chat smoke failed: ${JSON.stringify(globalRuleChatJson)}`);
-  }
-  const globalRuleMemory = await db.getAgentMemory(globalRuleChatJson.global_rule_result.memory_id);
-  if (
-    globalRuleMemory.memory?.scope !== "developer" ||
-    globalRuleMemory.memory?.use_policy !== "instruction_grade" ||
-    globalRuleMemory.memory?.status !== "accepted"
-  ) {
-    throw new Error(`Global rule was not binding: ${JSON.stringify(globalRuleMemory)}`);
+    throw new Error(
+      `Global rule fallback did not ask for clarification: ${JSON.stringify(globalRuleChatJson)}`
+    );
   }
   const globalRuleChatView = await fetch(`${baseUrl}/management-chat`, {
     method: "POST",
@@ -2997,12 +2989,12 @@ try {
   const globalRuleChatHtml = await globalRuleChatView.text();
   if (
     globalRuleChatView.status !== 200 ||
-    !globalRuleChatHtml.includes("chat-action--read_only") ||
-    !globalRuleChatHtml.includes("Правило активно для всех проектов") ||
-    !globalRuleChatHtml.includes("Результат: безопасное действие выполнено")
+    !globalRuleChatHtml.includes("Результат: нужно уточнение") ||
+    !globalRuleChatHtml.includes("Я не буду выполнять потенциально чувствительное действие") ||
+    globalRuleChatHtml.includes("Правило активно для всех проектов")
   ) {
     throw new Error(
-      `Safe-action rule card did not render as completed read-only guidance: ${globalRuleChatView.status}; ${globalRuleChatHtml.slice(0, 900)}`
+      `Global rule clarification card failed: ${globalRuleChatView.status}; ${globalRuleChatHtml.slice(0, 900)}`
     );
   }
 
@@ -3020,15 +3012,14 @@ try {
   const destructiveChatJson = await destructiveChat.json();
   if (
     destructiveChat.status !== 200 ||
-    destructiveChatJson.result_type !== "dry_run_required" ||
-    destructiveChatJson.confirmation_required !== true ||
-    destructiveChatJson.proposed_actions.length < 1 ||
+    destructiveChatJson.result_type !== "needs_clarification" ||
+    destructiveChatJson.confirmation_required !== false ||
+    destructiveChatJson.proposed_actions.length !== 0 ||
     destructiveChatJson.facts.target_project_id !== projectId ||
-    !String(destructiveChatJson.proposed_actions[0]?.command).includes(projectId) ||
-    !String(destructiveChatJson.answer).includes("предварительная проверка")
+    !destructiveChatJson.clarification_context?.missing?.includes("unambiguous request intent")
   ) {
     throw new Error(
-      `Destructive management chat was not confirmation-gated: ${JSON.stringify(destructiveChatJson)}`
+      `Destructive management chat did not fail closed: ${JSON.stringify(destructiveChatJson)}`
     );
   }
   const destructiveChatView = await fetch(`${baseUrl}/management-chat`, {
@@ -3046,14 +3037,12 @@ try {
   const destructiveChatHtml = await destructiveChatView.text();
   if (
     destructiveChatView.status !== 200 ||
-    !destructiveChatHtml.includes("chat-action--dry_run") ||
-    !destructiveChatHtml.includes("dry-run без изменений") ||
-    !destructiveChatHtml.includes("Запустить dry-run в интерфейсе") ||
-    !destructiveChatHtml.includes(`name="project_id" value="${projectId}"`) ||
-    !destructiveChatHtml.includes("/project-sanitize#ask-recallant")
+    !destructiveChatHtml.includes("Результат: нужно уточнение") ||
+    !destructiveChatHtml.includes("Я не буду выполнять потенциально чувствительное действие") ||
+    destructiveChatHtml.includes("Запустить dry-run в интерфейсе")
   ) {
     throw new Error(
-      `Dry-run action card did not render safe UI controls: ${destructiveChatView.status}; ${destructiveChatHtml.slice(0, 900)}`
+      `Destructive clarification card failed: ${destructiveChatView.status}; ${destructiveChatHtml.slice(0, 900)}`
     );
   }
 
@@ -3191,19 +3180,16 @@ try {
   const sandboxDestructiveChatJson = await sandboxDestructiveChat.json();
   if (
     sandboxDestructiveChat.status !== 200 ||
-    sandboxDestructiveChatJson.result_type !== "dry_run_required" ||
-    sandboxDestructiveChatJson.confirmation_required !== true ||
+    sandboxDestructiveChatJson.result_type !== "needs_clarification" ||
+    sandboxDestructiveChatJson.confirmation_required !== false ||
     sandboxDestructiveChatJson.facts.target_project_id !== sandboxProjectId ||
-    sandboxDestructiveChatJson.proposed_actions.length < 1 ||
-    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(sandboxProjectId) ||
-    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes("--mode detach") ||
-    !String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(
-      "--detach-mode sandbox"
-    ) ||
-    String(sandboxDestructiveChatJson.proposed_actions[0]?.command).includes(projectId)
+    sandboxDestructiveChatJson.proposed_actions.length !== 0 ||
+    !sandboxDestructiveChatJson.clarification_context?.missing?.includes(
+      "unambiguous request intent"
+    )
   ) {
     throw new Error(
-      `Sandbox management chat targeted the wrong project: ${JSON.stringify(sandboxDestructiveChatJson)}`
+      `Sandbox management chat did not fail closed: ${JSON.stringify(sandboxDestructiveChatJson)}`
     );
   }
 
@@ -3295,7 +3281,9 @@ try {
     onboardingMissingPathJson.intent !== "project_onboarding" ||
     onboardingMissingPathJson.result_type !== "needs_clarification" ||
     onboardingMissingPathJson.proposed_actions.some((action) => action.command) ||
-    !String(onboardingMissingPathJson.answer).includes("путь к папке проекта")
+    !onboardingMissingPathJson.clarification_context?.missing?.includes(
+      "unambiguous request intent"
+    )
   ) {
     throw new Error(
       `Onboarding missing path chat failed: ${JSON.stringify(onboardingMissingPathJson)}`
@@ -3318,18 +3306,13 @@ try {
   if (
     onboardingConcreteChat.status !== 200 ||
     onboardingConcreteJson.intent !== "project_onboarding" ||
-    onboardingConcreteJson.result_type !== "dry_run_required" ||
-    !String(onboardingConcreteJson.proposed_actions[0]?.command).includes(
-      "recallant attach /srv/example-project --sandbox --dry-run"
-    ) ||
-    !String(onboardingConcreteJson.proposed_actions[1]?.command).includes(
-      "recallant connect cursor --project-dir /srv/example-project --install-local-hooks --dry-run"
-    ) ||
-    !String(onboardingConcreteJson.proposed_actions[2]?.command).includes(
-      "recallant doctor --project-dir /srv/example-project --require-capture --require-memory-loop --semantic-proof"
-    )
+    onboardingConcreteJson.result_type !== "needs_clarification" ||
+    onboardingConcreteJson.proposed_actions.length !== 0 ||
+    !onboardingConcreteJson.clarification_context?.missing?.includes("unambiguous request intent")
   ) {
-    throw new Error(`Concrete onboarding chat failed: ${JSON.stringify(onboardingConcreteJson)}`);
+    throw new Error(
+      `Concrete onboarding fallback did not fail closed: ${JSON.stringify(onboardingConcreteJson)}`
+    );
   }
 
   const pilotQaChat = await fetch(`${baseUrl}/api/management-chat`, {
@@ -3347,15 +3330,11 @@ try {
   if (
     pilotQaChat.status !== 200 ||
     pilotQaJson.intent !== "pilot_qa" ||
-    pilotQaJson.result_type !== "read_only_answer" ||
-    !pilotQaJson.proposed_actions.some((action) =>
-      String(action.command).includes("npm run pilot-report:smoke")
-    ) ||
-    !pilotQaJson.proposed_actions.some((action) =>
-      String(action.command).includes("npm run review-ui:playwright")
-    )
+    pilotQaJson.result_type !== "needs_clarification" ||
+    pilotQaJson.proposed_actions.length !== 0 ||
+    !pilotQaJson.clarification_context?.missing?.includes("unambiguous request intent")
   ) {
-    throw new Error(`Pilot QA chat failed: ${JSON.stringify(pilotQaJson)}`);
+    throw new Error(`Pilot QA fallback did not fail closed: ${JSON.stringify(pilotQaJson)}`);
   }
 
   const chatCreatedSpaceName = `Chat virtual space ${randomUUID()}`;
@@ -3376,18 +3355,14 @@ try {
   if (
     createSpaceChat.status !== 200 ||
     createSpaceChatJson.intent !== "source_management" ||
-    createSpaceChatJson.result_type !== "safe_action" ||
-    createSpaceChatJson.source_action_result?.status !== "created" ||
-    createSpaceChatJson.source_action_result?.space_name !== chatCreatedSpaceName ||
-    !chatCreatedSpace ||
-    chatCreatedSpace.sources.length !== 0 ||
-    !String(createSpaceChatJson.answer).includes("project files, sources, secrets")
+    createSpaceChatJson.result_type !== "needs_clarification" ||
+    createSpaceChatJson.source_action_result !== undefined ||
+    chatCreatedSpace !== undefined ||
+    createSpaceChatJson.proposed_actions.length !== 0 ||
+    !createSpaceChatJson.clarification_context?.missing?.includes("unambiguous request intent")
   ) {
     throw new Error(
-      `Chat memory-space create failed: ${JSON.stringify({
-        createSpaceChatJson,
-        chatCreatedSpace
-      })}`
+      `Chat memory-space fallback did not fail closed: ${JSON.stringify({ createSpaceChatJson, chatCreatedSpace })}`
     );
   }
 
@@ -3472,15 +3447,9 @@ try {
   const destructiveChatFormHtml = await destructiveChatForm.text();
   if (
     destructiveChatForm.status !== 200 ||
-    !destructiveChatFormHtml.includes("Перед рискованным действием требуется подтверждение.") ||
-    !destructiveChatFormHtml.includes("Результат: сначала dry-run") ||
-    !destructiveChatFormHtml.includes("Предложенный следующий шаг") ||
-    !destructiveChatFormHtml.includes("Запустить dry-run в интерфейсе") ||
-    !destructiveChatFormHtml.includes('action="/project-sanitize#ask-recallant"') ||
-    !destructiveChatFormHtml.includes('name="mode" value="detach"') ||
-    !destructiveChatFormHtml.includes('name="detach_mode" value="sandbox"') ||
-    !destructiveChatFormHtml.includes(sandboxProjectId) ||
-    destructiveChatFormHtml.includes("Confirmation required before any risky action can run.")
+    !destructiveChatFormHtml.includes("Результат: нужно уточнение") ||
+    !destructiveChatFormHtml.includes("Я не буду выполнять потенциально чувствительное действие") ||
+    destructiveChatFormHtml.includes("Запустить dry-run в интерфейсе")
   ) {
     throw new Error(
       `Management chat destructive form smoke failed: ${destructiveChatForm.status} ${destructiveChatFormHtml}`

@@ -95,14 +95,10 @@ and prints the private Workbench outcome.
 
 ### Required owner step for automatic Codex capture
 
-Onboarding installs the hook, but Codex will not run a new project command until the owner trusts
-it. Complete this short security step after onboarding:
-
-1. Open Codex in the project and enter `/hooks`.
-2. Find **Recallant command hook** (the command is `recallant codex-hook`), review it, and choose
-   **Trust**.
-3. Perform one normal Codex action.
-4. Confirm the result:
+Onboarding installs the hook, but Codex will not run a new project command until the owner approves
+it through the project trust or command-approval surface presented by the actual Codex client.
+Codex Desktop does not guarantee a `/hooks` slash command; if the composer says `No commands`, that
+route is unavailable. Perform one normal Codex action and confirm the result:
 
    ```bash
    recallant doctor --project-dir /path/to/project --require-capture --format json

@@ -43,6 +43,7 @@ export class RemoteMcpCallError extends Error {
   readonly retryable: boolean;
   readonly httpStatus: number | null;
   readonly rpcCode: number | null;
+  readonly traceId: string | null;
 
   constructor(
     code: RemoteMcpFailureCode,
@@ -51,6 +52,7 @@ export class RemoteMcpCallError extends Error {
       retryable?: boolean;
       httpStatus?: number | null;
       rpcCode?: number | null;
+      traceId?: string | null;
       cause?: unknown;
     } = {}
   ) {
@@ -60,6 +62,7 @@ export class RemoteMcpCallError extends Error {
     this.retryable = options.retryable ?? false;
     this.httpStatus = options.httpStatus ?? null;
     this.rpcCode = options.rpcCode ?? null;
+    this.traceId = options.traceId ?? null;
   }
 }
 
@@ -116,7 +119,8 @@ export function remoteMcpFailure(error: unknown) {
       message: error.message,
       retryable: error.retryable,
       http_status: error.httpStatus,
-      rpc_code: error.rpcCode
+      rpc_code: error.rpcCode,
+      trace_id: error.traceId
     };
   }
   return {
@@ -181,6 +185,7 @@ export async function callRecallantRemoteMcp(
   }
 
   const text = await response.text();
+  const traceId = response.headers.get("x-recallant-audit-trace-id");
   let payload: Record<string, unknown> | null = null;
   try {
     payload = objectValue(JSON.parse(text));
@@ -189,7 +194,7 @@ export async function callRecallantRemoteMcp(
       throw new RemoteMcpCallError(
         "REMOTE_MCP_HTTP_ERROR",
         `Remote MCP returned HTTP ${response.status}.`,
-        { retryable: response.status >= 500, httpStatus: response.status }
+        { retryable: response.status >= 500, httpStatus: response.status, traceId }
       );
     }
   }
@@ -219,7 +224,8 @@ export async function callRecallantRemoteMcp(
       {
         retryable: response.status >= 500 || rpcCode === -32053,
         httpStatus: response.status,
-        rpcCode
+        rpcCode,
+        traceId
       }
     );
   }
@@ -234,7 +240,7 @@ export async function callRecallantRemoteMcp(
     throw new RemoteMcpCallError(
       "REMOTE_MCP_INVALID_RESPONSE",
       `Remote MCP ${method} response is missing result.`,
-      { retryable: false, httpStatus: response.status }
+      { retryable: false, httpStatus: response.status, traceId }
     );
   }
   return (payload as JsonRpcSuccess).result;

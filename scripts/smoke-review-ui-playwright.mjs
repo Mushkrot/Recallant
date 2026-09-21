@@ -1785,7 +1785,13 @@ async function run() {
       desktop.locator('#ask-recallant .chat-form button[type="submit"]').click()
     ]);
     await desktop.getByText("Ответ Recallant").waitFor();
-    await desktop.getByText("Перед рискованным действием требуется подтверждение.").waitFor();
+    await desktop.getByText("Результат: нужно уточнение").waitFor();
+    await desktop
+      .getByText("Я не буду выполнять потенциально чувствительное действие")
+      .waitFor();
+    await desktop
+      .getByText("Перед рискованным действием требуется подтверждение.")
+      .waitFor({ state: "detached" });
     await noHorizontalScroll(desktop, "desktop chat answer");
     const chatBox = await visibleBox(
       desktop.locator("#ask-recallant .chat-answer"),

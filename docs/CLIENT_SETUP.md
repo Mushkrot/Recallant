@@ -167,12 +167,10 @@ and unrelated hook handlers are preserved; changed files are backed up under `.r
 It also installs fail-soft helper scripts for compatibility. The dry-run previews every file without
 writing it.
 
-After connect, open `/hooks` in Codex and complete the one required owner step for automatic
-capture:
-
-1. Open `/hooks` in Codex while the connected project is active.
-2. Find **Recallant command hook**, review the command `recallant codex-hook`, and choose **Trust**.
-3. Perform one normal Codex action so the hook can send a fresh event.
+After connect, complete the one required owner step for automatic capture through the project trust
+or command-approval surface presented by the actual Codex client. Codex Desktop does not guarantee a
+`/hooks` slash command; if the composer shows `No commands`, that route is unavailable. Perform one
+normal Codex action so the hook can send a fresh event.
 
 Codex treats project commands as a security boundary. Recallant writes the hook configuration, but
 it cannot approve or bypass Codex trust on the owner's behalf. Until this approval is made, Recallant
@@ -187,9 +185,9 @@ recallant doctor --project-dir . --require-capture --format json
 ```
 
 The result should show `capture_active: true` and a recent automatic capture timestamp. If it shows
-`configured_unobserved` or `capture_active: false`, return to `/hooks`, make sure the Recallant hook
-is trusted, perform one normal Codex action, and run the check again. Recallant cannot complete this
-approval automatically because the decision belongs to Codex and the project owner.
+`configured_unobserved` or `capture_active: false`, use the Codex client's project trust or
+command-approval surface, perform one normal Codex action, and run the check again. Recallant cannot
+complete this approval automatically because the decision belongs to Codex and the project owner.
 
 This step applies only to native automatic Codex capture. Manual MCP use and other clients do not
 require a Codex hook; they simply do not provide `capture_active` evidence. The advanced

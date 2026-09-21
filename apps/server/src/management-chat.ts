@@ -37,7 +37,31 @@ type ChatTargetProject = {
   ambiguous: boolean;
 };
 
-export type ManagementChatLanguage = "en" | "ru";
+export type ManagementChatLanguage = "en" | "ru" | "mixed";
+
+const MANAGEMENT_CHAT_BASELINE_MODEL = "mistral-small3.2:24b";
+const MANAGEMENT_CHAT_CRITICAL_INTENTS: ManagementChatIntent[] = [
+  "cleanup",
+  "global_rule",
+  "source_management",
+  "project_onboarding",
+  "pilot_qa"
+];
+
+type ManagementChatFailureReason =
+  "ai_disabled" | "ai_unavailable" | "timeout" | "invalid_json" | "schema_violation";
+
+type ManagementChatTelemetry = {
+  source: "local_ai" | "rules";
+  model?: string;
+  intent: ManagementChatIntent;
+  language: ManagementChatLanguage;
+  confidence: number;
+  result_type: ManagementChatResultType;
+  destructive_or_sensitive: boolean;
+  failure_reason?: ManagementChatFailureReason;
+  classification_latency_ms: number;
+};
 
 export type ManagementChatIntent =
   | "status"
@@ -57,6 +81,30 @@ export type ManagementChatIntent =
   | "memory_summary"
   | "rule_diagnostics"
   | "general";
+
+const MANAGEMENT_CHAT_INTENTS = [
+  "status",
+  "next_steps",
+  "cleanup",
+  "settings",
+  "cost",
+  "context_pack",
+  "cross_project",
+  "source_management",
+  "provenance",
+  "review",
+  "global_rule",
+  "project_onboarding",
+  "pilot_qa",
+  "connection_check",
+  "memory_summary",
+  "rule_diagnostics",
+  "general"
+] as const satisfies readonly ManagementChatIntent[];
+
+function isCriticalManagementChatIntent(intent: ManagementChatIntent) {
+  return MANAGEMENT_CHAT_CRITICAL_INTENTS.includes(intent);
+}
 
 export type ManagementChatAction = {
   label: string;
@@ -82,7 +130,6 @@ export type ManagementChatResponse = {
     model?: string;
     confidence: number;
     summary: string;
-    error?: string;
   };
   answer: string;
   confirmation_required: boolean;
@@ -148,6 +195,7 @@ export type ManagementChatResponse = {
     selected_source_name: string;
   };
   proposed_actions: ManagementChatAction[];
+  telemetry?: ManagementChatTelemetry;
 };
 
 type ChatInterpretation = {
@@ -162,7 +210,9 @@ type ChatInterpretation = {
   global_rule_request: boolean;
   rule_text?: string;
   answer?: string;
-  error?: string;
+  requiresClarification?: boolean;
+  failureReason?: ManagementChatFailureReason;
+  attemptedModel?: string;
 };
 
 type SourceRequestAnalysis = {
@@ -328,6 +378,7 @@ export async function buildManagementChatResponse(input: {
   database?: RecallantDb;
   clarification_context?: Partial<ClarificationContext> | null;
 }): Promise<ManagementChatResponse> {
+  const classificationStartedAt = Date.now();
   const dashboard = input.dashboard;
   const rawMessage = input.message.trim();
   const continuation = resolveClarificationContinuation(
@@ -355,7 +406,7 @@ export async function buildManagementChatResponse(input: {
     isDestructiveOrSensitive(message, intent) ||
     interpretation.destructive_or_sensitive;
   const globalRuleResult =
-    intent === "global_rule" && !policyBlockReason
+    intent === "global_rule" && !policyBlockReason && !interpretation.requiresClarification
       ? await maybeCreateGlobalRule({
           message,
           dashboard,
@@ -365,67 +416,87 @@ export async function buildManagementChatResponse(input: {
         })
       : undefined;
   const sourceActionResult =
-    intent === "source_management" && !policyBlockReason
+    intent === "source_management" && !policyBlockReason && !interpretation.requiresClarification
       ? await maybeRunSafeSourceAction({
           sourceRequest,
           database: input.database
         })
       : undefined;
-  const memoryLookupResult = !policyBlockReason
-    ? await maybeLookupMemories({
-        message,
-        intent,
-        dashboard,
-        database: input.database
-      })
-    : undefined;
+  const memoryLookupResult =
+    !policyBlockReason && !interpretation.requiresClarification
+      ? await maybeLookupMemories({
+          message,
+          intent,
+          dashboard,
+          database: input.database
+        })
+      : undefined;
   const confirmationRequired =
-    !policyBlockReason && (destructiveOrSensitive || globalRuleResult?.status === "needs_review");
+    !policyBlockReason &&
+    !interpretation.requiresClarification &&
+    (destructiveOrSensitive || globalRuleResult?.status === "needs_review");
   const resultType = resultTypeForIntent({
     intent,
     targetProject,
     destructiveOrSensitive,
     confirmationRequired,
+    requiresClarification: interpretation.requiresClarification,
     policyBlockReason,
     globalRuleResult,
     sourceActionResult,
     sourceRequest,
     workflowRequest
   });
-  const proposedActions = actionsForIntent(
-    intent,
-    dashboard,
-    facts,
-    targetProject,
-    language,
-    destructiveOrSensitive,
-    globalRuleResult,
-    policyBlockReason,
-    sourceActionResult,
-    sourceRequest,
-    workflowRequest
-  );
-  const answer = answerForIntent(
-    intent,
-    facts,
-    language,
-    destructiveOrSensitive,
-    interpretation,
-    globalRuleResult,
-    policyBlockReason,
-    sourceActionResult,
-    sourceRequest,
-    memoryLookupResult,
-    workflowRequest
-  );
+  const proposedActions = interpretation.requiresClarification
+    ? []
+    : actionsForIntent(
+        intent,
+        dashboard,
+        facts,
+        targetProject,
+        language,
+        destructiveOrSensitive,
+        globalRuleResult,
+        policyBlockReason,
+        sourceActionResult,
+        sourceRequest,
+        workflowRequest
+      );
+  const answer = interpretation.requiresClarification
+    ? clarificationAnswer(language)
+    : answerForIntent(
+        intent,
+        facts,
+        language,
+        destructiveOrSensitive,
+        interpretation,
+        globalRuleResult,
+        policyBlockReason,
+        sourceActionResult,
+        sourceRequest,
+        memoryLookupResult,
+        workflowRequest
+      );
   const clarificationContext = clarificationContextForResult({
     resultType,
     intent,
     message,
     targetProject,
     sourceRequest,
-    workflowRequest
+    workflowRequest,
+    requiresClarification: interpretation.requiresClarification
   });
+  const telemetry: ManagementChatTelemetry = {
+    source: interpretation.source,
+    model: interpretation.attemptedModel ?? interpretation.model,
+    intent,
+    language,
+    confidence: interpretation.confidence,
+    result_type: resultType,
+    destructive_or_sensitive: destructiveOrSensitive,
+    ...(interpretation.failureReason ? { failure_reason: interpretation.failureReason } : {}),
+    classification_latency_ms: Date.now() - classificationStartedAt
+  };
   return {
     language,
     intent,
@@ -434,8 +505,7 @@ export async function buildManagementChatResponse(input: {
       source: interpretation.source,
       model: interpretation.model,
       confidence: interpretation.confidence,
-      summary: interpretation.summary,
-      error: interpretation.error
+      summary: interpretation.summary
     },
     answer,
     confirmation_required: confirmationRequired,
@@ -446,12 +516,22 @@ export async function buildManagementChatResponse(input: {
     memory_lookup_result: memoryLookupResult,
     facts,
     proposed_actions: proposedActions,
-    clarification_context: clarificationContext
+    clarification_context: clarificationContext,
+    telemetry
   };
 }
 
+function clarificationAnswer(language: ManagementChatLanguage) {
+  return language === "en"
+    ? "I will not perform this potentially sensitive action until the intent is unambiguous. Please state exactly what should be checked or changed and which project or source it concerns."
+    : "Я не буду выполнять потенциально чувствительное действие, пока намерение не станет однозначным. Уточни, что именно нужно проверить или изменить и какого проекта или источника это касается.";
+}
+
 function detectLanguage(message: string): ManagementChatLanguage {
-  return /[а-яё]/iu.test(message) ? "ru" : "en";
+  const hasCyrillic = /[а-яё]/iu.test(message);
+  const hasLatin = /[a-z]/iu.test(message);
+  if (hasCyrillic && hasLatin) return "mixed";
+  return hasCyrillic ? "ru" : "en";
 }
 
 function includesAny(message: string, words: string[]) {
@@ -686,43 +766,59 @@ function aiEnabled() {
 }
 
 function parseJsonObject(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("AI response did not contain JSON");
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as Record<string, unknown>;
+    parsed = JSON.parse(trimmed) as unknown;
   } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("AI response did not contain JSON");
-    return JSON.parse(match[0]) as Record<string, unknown>;
+    throw new Error("AI response did not contain JSON");
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("AI response schema violation: root must be an object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
-function normalizeIntent(value: unknown, fallback: ManagementChatIntent): ManagementChatIntent {
-  const candidate = String(value ?? "");
-  const allowed: ManagementChatIntent[] = [
-    "status",
-    "next_steps",
-    "cleanup",
-    "settings",
-    "cost",
-    "context_pack",
-    "cross_project",
-    "source_management",
-    "provenance",
-    "review",
-    "global_rule",
-    "project_onboarding",
-    "pilot_qa",
-    "connection_check",
-    "memory_summary",
-    "rule_diagnostics",
-    "general"
-  ];
-  return allowed.includes(candidate as ManagementChatIntent)
-    ? (candidate as ManagementChatIntent)
-    : fallback;
-}
-
-function normalizeLanguage(value: unknown, fallback: ManagementChatLanguage) {
-  return value === "ru" || value === "en" ? value : fallback;
+function validateModelResponse(parsed: Record<string, unknown>) {
+  if (!MANAGEMENT_CHAT_INTENTS.includes(parsed.intent as ManagementChatIntent)) {
+    throw new Error("AI response schema violation: intent is not allowed");
+  }
+  if (parsed.language !== "ru" && parsed.language !== "en" && parsed.language !== "mixed") {
+    throw new Error("AI response schema violation: language is not allowed");
+  }
+  if (
+    typeof parsed.confidence !== "number" ||
+    !Number.isFinite(parsed.confidence) ||
+    parsed.confidence < 0 ||
+    parsed.confidence > 1
+  ) {
+    throw new Error("AI response schema violation: confidence must be a number from 0 to 1");
+  }
+  if (typeof parsed.summary !== "string" || !parsed.summary.trim()) {
+    throw new Error("AI response schema violation: summary must be a non-empty string");
+  }
+  if (typeof parsed.destructive_or_sensitive !== "boolean") {
+    throw new Error("AI response schema violation: destructive_or_sensitive must be boolean");
+  }
+  if (
+    parsed.target_hint != null &&
+    parsed.target_hint !== "current" &&
+    parsed.target_hint !== "sandbox" &&
+    parsed.target_hint !== "none" &&
+    parsed.target_hint !== "ambiguous"
+  ) {
+    throw new Error("AI response schema violation: target_hint is not allowed");
+  }
+  if (parsed.global_rule_request != null && typeof parsed.global_rule_request !== "boolean") {
+    throw new Error("AI response schema violation: global_rule_request must be boolean");
+  }
+  if (parsed.rule_text != null && typeof parsed.rule_text !== "string") {
+    throw new Error("AI response schema violation: rule_text must be string");
+  }
+  if (parsed.answer != null && typeof parsed.answer !== "string") {
+    throw new Error("AI response schema violation: answer must be string");
+  }
 }
 
 function normalizeTargetHint(value: unknown, fallback: ChatInterpretation["target_hint"]) {
@@ -734,22 +830,17 @@ function normalizeTargetHint(value: unknown, fallback: ChatInterpretation["targe
 function policyGuardedIntent(
   aiIntent: ManagementChatIntent,
   deterministicIntent: ManagementChatIntent
-): ManagementChatIntent {
-  if (aiIntent === deterministicIntent) return aiIntent;
-  const policyControlledIntents: ManagementChatIntent[] = [
-    "cleanup",
-    "global_rule",
-    "project_onboarding",
-    "source_management",
-    "pilot_qa"
-  ];
-  if (
-    policyControlledIntents.includes(deterministicIntent) ||
-    policyControlledIntents.includes(aiIntent)
-  ) {
-    return deterministicIntent;
+): { intent: ManagementChatIntent; requiresClarification: boolean } {
+  if (aiIntent === deterministicIntent) {
+    return { intent: aiIntent, requiresClarification: false };
   }
-  return aiIntent;
+  if (
+    isCriticalManagementChatIntent(aiIntent) ||
+    isCriticalManagementChatIntent(deterministicIntent)
+  ) {
+    return { intent: deterministicIntent, requiresClarification: true };
+  }
+  return { intent: aiIntent, requiresClarification: false };
 }
 
 async function interpretMessage(
@@ -757,122 +848,133 @@ async function interpretMessage(
   dashboard: DashboardLike
 ): Promise<ChatInterpretation> {
   const fallback = fallbackInterpretation(message);
-  if (!message || !aiEnabled()) return fallback;
-
   const configuredModel =
-    process.env.RECALLANT_MANAGEMENT_CHAT_MODEL ?? process.env.RECALLANT_CHAT_MODEL;
-  const models = Array.from(
-    new Set(
-      [configuredModel, "mistral-small:24b", "qwen2.5-coder:14b", "qwen2.5-coder:7b"].filter(
-        (item): item is string => Boolean(item)
-      )
-    )
-  );
-  const url = process.env.RECALLANT_OLLAMA_URL ?? "http://127.0.0.1:11434";
-  const timeoutMs = Number(process.env.RECALLANT_MANAGEMENT_CHAT_AI_TIMEOUT_MS ?? 65_000);
-  let lastError: string | undefined;
-  try {
-    const projects = asRows(dashboard.projects)
-      .slice(0, 20)
-      .map((project) => ({
-        project_id: projectId(project, ""),
-        name: projectName(project, ""),
-        primary_path: stringValue(project.primary_path)
-      }));
-    for (const model of models) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(new URL("/api/chat", url), {
-          method: "POST",
-          signal: controller.signal,
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            model,
-            stream: false,
-            format: "json",
-            keep_alive: process.env.RECALLANT_MANAGEMENT_CHAT_KEEP_ALIVE ?? "10m",
-            messages: [
-              {
-                role: "system",
-                content: [
-                  "You are Recallant's local intent interpreter for a private memory-management UI.",
-                  "Return strict JSON only.",
-                  "Do not execute actions.",
-                  "Classify the owner's message by meaning, including Russian text and typos.",
-                  "Use these intents only: status,next_steps,cleanup,settings,cost,context_pack,cross_project,source_management,provenance,review,global_rule,project_onboarding,pilot_qa,connection_check,memory_summary,rule_diagnostics,general.",
-                  "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
-                  "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
-                  "target_hint should be current,sandbox,none,or ambiguous.",
-                  "If this is a global rule request, extract rule_text as the instruction that should apply across projects.",
-                  "Keep answer short and factual. Safety policy will be enforced by deterministic code."
-                ].join(" ")
-              },
-              {
-                role: "user",
-                content: JSON.stringify({
-                  message,
-                  current_project: dashboard.current_project ?? null,
-                  projects
-                })
-              }
-            ]
-          })
-        });
-        if (!response.ok) throw new Error(`Ollama ${model} HTTP ${response.status}`);
-        const payload = (await response.json()) as { message?: { content?: string } };
-        const parsed = parseJsonObject(String(payload.message?.content ?? ""));
-        const aiIntent = normalizeIntent(parsed.intent, fallback.intent);
-        const intent = policyGuardedIntent(aiIntent, fallback.intent);
-        const language = normalizeLanguage(parsed.language, fallback.language);
-        const confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.7)));
-        const guardedByPolicy = intent !== aiIntent;
-        return {
-          source: "local_ai",
-          model,
-          language,
-          intent,
-          confidence,
-          summary:
-            stringValue(parsed.summary) ||
-            (guardedByPolicy
-              ? language === "ru"
-                ? "Понято локальной AI-моделью; безопасная политика уточнила тип запроса."
-                : "Understood by local AI; safety policy refined the request type."
-              : language === "ru"
-                ? "Понято локальной AI-моделью."
-                : "Understood by the local AI model."),
-          target_hint: normalizeTargetHint(parsed.target_hint, fallback.target_hint),
-          destructive_or_sensitive:
-            Boolean(parsed.destructive_or_sensitive) ||
-            fallback.destructive_or_sensitive ||
-            isDestructiveOrSensitive(message, intent),
-          global_rule_request:
-            Boolean(parsed.global_rule_request) ||
-            fallback.global_rule_request ||
-            intent === "global_rule",
-          rule_text:
-            typeof parsed.rule_text === "string" && parsed.rule_text.trim()
-              ? parsed.rule_text.trim()
-              : fallback.rule_text,
-          answer:
-            typeof parsed.answer === "string" && parsed.answer.trim()
-              ? parsed.answer.trim()
-              : undefined
-        };
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-    throw new Error(lastError ?? "No local chat model succeeded");
-  } catch (error) {
+    process.env.RECALLANT_MANAGEMENT_CHAT_MODEL?.trim() ||
+    process.env.RECALLANT_CHAT_MODEL?.trim() ||
+    MANAGEMENT_CHAT_BASELINE_MODEL;
+  if (!message) return fallback;
+  if (!aiEnabled()) {
     return {
       ...fallback,
-      error: error instanceof Error ? error.message : String(error)
+      failureReason: "ai_disabled",
+      attemptedModel: configuredModel,
+      requiresClarification: isCriticalManagementChatIntent(fallback.intent)
     };
   }
+
+  const url = process.env.RECALLANT_OLLAMA_URL ?? "http://127.0.0.1:11434";
+  const timeoutMs = Number(process.env.RECALLANT_MANAGEMENT_CHAT_AI_TIMEOUT_MS ?? 65_000);
+  const projects = asRows(dashboard.projects)
+    .slice(0, 20)
+    .map((project) => ({
+      project_id: projectId(project, ""),
+      name: projectName(project, ""),
+      primary_path: stringValue(project.primary_path)
+    }));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(new URL("/api/chat", url), {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: configuredModel,
+        stream: false,
+        format: "json",
+        keep_alive: process.env.RECALLANT_MANAGEMENT_CHAT_KEEP_ALIVE ?? "10m",
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are Recallant's local intent interpreter for a private memory-management UI.",
+              "Return one strict JSON object only; do not wrap it in markdown or explanatory text.",
+              "Do not execute actions.",
+              "Classify the owner's message by meaning, including Russian, English, mixed-language text, and typos.",
+              `The required fields are intent, language, confidence, summary, and destructive_or_sensitive. intent must be one of: ${MANAGEMENT_CHAT_INTENTS.join(", ")}. language must be ru, en, or mixed. confidence must be a JSON number from 0 to 1. summary must be a string. destructive_or_sensitive must be a JSON boolean.`,
+              "Optional fields are target_hint (current, sandbox, none, or ambiguous), global_rule_request (boolean), rule_text (string), and answer (string).",
+              "Set global_rule_request=true only when the owner asks to save a rule for all projects/everywhere/developer-wide.",
+              "Set destructive_or_sensitive=true for delete/detach/erase/secrets/public access/paid API/deploy/security/model-provider changes.",
+              "If this is a global rule request, extract rule_text as the instruction that should apply across projects.",
+              "Keep answer short and factual. Safety policy is enforced by deterministic code."
+            ].join(" ")
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              message,
+              current_project: dashboard.current_project ?? null,
+              projects
+            })
+          }
+        ]
+      })
+    });
+    if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
+    const payload = (await response.json()) as { message?: { content?: string } };
+    const parsed = parseJsonObject(String(payload.message?.content ?? ""));
+    validateModelResponse(parsed);
+    const aiIntent = parsed.intent as ManagementChatIntent;
+    const guarded = policyGuardedIntent(aiIntent, fallback.intent);
+    const language = parsed.language as ManagementChatLanguage;
+    const confidence = parsed.confidence as number;
+    const declaredDestructive = parsed.destructive_or_sensitive as boolean;
+    const deterministicDestructive = isDestructiveOrSensitive(message, fallback.intent);
+    const destructiveConflict = declaredDestructive !== deterministicDestructive;
+    return {
+      source: "local_ai",
+      model: configuredModel,
+      attemptedModel: configuredModel,
+      language,
+      intent: guarded.intent,
+      confidence,
+      summary: parsed.summary as string,
+      target_hint: normalizeTargetHint(parsed.target_hint, fallback.target_hint),
+      destructive_or_sensitive:
+        declaredDestructive ||
+        fallback.destructive_or_sensitive ||
+        isDestructiveOrSensitive(message, guarded.intent),
+      global_rule_request:
+        parsed.global_rule_request === true ||
+        fallback.global_rule_request ||
+        guarded.intent === "global_rule",
+      rule_text:
+        typeof parsed.rule_text === "string" && parsed.rule_text.trim()
+          ? parsed.rule_text.trim()
+          : fallback.rule_text,
+      answer:
+        typeof parsed.answer === "string" && parsed.answer.trim()
+          ? parsed.answer.trim()
+          : undefined,
+      requiresClarification: guarded.requiresClarification || destructiveConflict
+    };
+  } catch (error) {
+    const failureReason = classifyManagementChatFailure(error);
+    return {
+      ...fallback,
+      attemptedModel: configuredModel,
+      failureReason,
+      requiresClarification: isCriticalManagementChatIntent(fallback.intent)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function classifyManagementChatFailure(error: unknown): ManagementChatFailureReason {
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || /aborted|timeout/i.test(error.message))
+  ) {
+    return "timeout";
+  }
+  if (error instanceof Error && error.message === "AI response did not contain JSON") {
+    return "invalid_json";
+  }
+  if (error instanceof Error && error.message.startsWith("AI response schema violation")) {
+    return "schema_violation";
+  }
+  return "ai_unavailable";
 }
 
 function isDestructiveOrSensitive(message: string, intent: ManagementChatIntent) {
@@ -1015,7 +1117,7 @@ function blockedByPolicyReason(message: string, language: ManagementChatLanguage
         "раскрой"
       ]));
   if (!asksToRevealSecret) return undefined;
-  return language === "ru"
+  return language !== "en"
     ? "Recallant не раскрывает секреты, пароли, токены или API keys из памяти или настроек. Можно проверить, что ссылка на секрет существует, но не показывать значение."
     : "Recallant does not reveal secrets, passwords, tokens, or API keys from memory or settings. It can verify that a secret reference exists, but it must not show the value.";
 }
@@ -1025,6 +1127,7 @@ function resultTypeForIntent(input: {
   targetProject: ChatTargetProject;
   destructiveOrSensitive: boolean;
   confirmationRequired: boolean;
+  requiresClarification?: boolean;
   policyBlockReason?: string;
   globalRuleResult?: ManagementChatResponse["global_rule_result"];
   sourceActionResult?: ManagementChatResponse["source_action_result"];
@@ -1032,6 +1135,7 @@ function resultTypeForIntent(input: {
   workflowRequest?: WorkflowRequestAnalysis;
 }): ManagementChatResultType {
   if (input.policyBlockReason) return "blocked_by_policy";
+  if (input.requiresClarification) return "needs_clarification";
   if (input.targetProject.ambiguous && input.destructiveOrSensitive) return "needs_clarification";
   if (input.intent === "source_management" && input.sourceRequest?.missing.length) {
     return "needs_clarification";
@@ -1063,8 +1167,16 @@ function clarificationContextForResult(input: {
   targetProject: ChatTargetProject;
   sourceRequest?: SourceRequestAnalysis;
   workflowRequest?: WorkflowRequestAnalysis;
+  requiresClarification?: boolean;
 }): ClarificationContext | undefined {
   if (input.resultType !== "needs_clarification") return undefined;
+  if (input.requiresClarification) {
+    return {
+      intent: input.intent,
+      original_message: input.message,
+      missing: ["unambiguous request intent"]
+    };
+  }
   if (input.targetProject.ambiguous) {
     return {
       intent: input.intent,
@@ -1927,7 +2039,7 @@ function answerForIntent(
   memoryLookupResult?: MemoryLookupResult,
   workflowRequest?: WorkflowRequestAnalysis
 ) {
-  if (language === "ru")
+  if (language !== "en")
     return answerRu(
       intent,
       facts,

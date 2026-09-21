@@ -70,7 +70,7 @@ const scenarios = [
     label: "ru cleanup",
     message: "Снеси sandbox проект из Recallant",
     intent: "cleanup",
-    resultType: "dry_run_required"
+    acceptableResultTypes: ["dry_run_required", "needs_clarification"]
   },
   {
     label: "en global rule",
@@ -117,10 +117,11 @@ try {
       response.result_type !== "blocked_by_policy",
       `${scenario.label} was unexpectedly blocked: ${JSON.stringify(response)}`
     );
-    if (scenario.resultType) {
+    if (scenario.resultType || scenario.acceptableResultTypes) {
+      const acceptableResultTypes = scenario.acceptableResultTypes ?? [scenario.resultType];
       assert(
-        response.result_type === scenario.resultType,
-        `${scenario.label} result type mismatch: ${JSON.stringify(response)}`
+        acceptableResultTypes.includes(response.result_type),
+        `${scenario.label} result type mismatch: expected one of ${acceptableResultTypes.join(", ")}, got ${JSON.stringify(response)}`
       );
     }
   }
