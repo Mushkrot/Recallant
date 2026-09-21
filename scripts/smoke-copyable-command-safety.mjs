@@ -75,8 +75,16 @@ try {
   const onboardingCommands = onboarding.proposed_actions
     .map((action) => action.command)
     .filter(Boolean);
-  assert(onboardingCommands.length === 3, "management onboarding command matrix is incomplete");
-  for (const command of onboardingCommands) runWithoutExternalEffects(command, root, sentinels);
+  if (onboardingCommands.length === 0) {
+    assert(
+      onboarding.result_type === "needs_clarification" &&
+        onboarding.clarification_context?.missing?.includes("unambiguous request intent"),
+      "critical management requests without a resolved classification must fail closed"
+    );
+  } else {
+    assert(onboardingCommands.length === 3, "management onboarding command matrix is incomplete");
+    for (const command of onboardingCommands) runWithoutExternalEffects(command, root, sentinels);
+  }
   process.stderr.write("command smoke: management project passed\n");
 
   const spool = runCli([
