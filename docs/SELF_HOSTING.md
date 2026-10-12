@@ -124,15 +124,15 @@ recallant doctor
 ```
 
 `recallant --version` should print the shared release version with git build metadata, for example
-`recallant 0.1.0-dev.3+<git-sha>` from a checkout install. The root and private workspace manifests,
+`recallant 0.1.0-dev.4+<git-sha>` from a checkout install. The root and private workspace manifests,
 runtime contract, and CLI use the same prerelease identity; the Git suffix identifies the exact
 installed checkout.
 
 For a published pinned prerelease, fetch the bootstrap script and source checkout from the same tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.3
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.4/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.4
 ```
 
 Onboarding leaves that tagged checkout pinned. Switching it to the moving development channel is an

@@ -108,6 +108,7 @@ const publicDocs = [
   "docs/research/REFERENCE_PROJECTS.md",
   "docs/research/JARVIS_OBSIDIAN_COMPARISON.md",
   "docs/releases/v0.1.0-dev.3.md",
+  "docs/releases/v0.1.0-dev.4.md",
   "docs/MANAGEMENT_CHAT_ROUTING.md",
   "docs/WORKBENCH_UI.md",
   "docs/GRAPH_TREE_CONTRACT.md",
@@ -256,8 +257,8 @@ mustInclude(
     "It is not the primary beginner remote UX",
     "short-lived and one-time",
     "git clone https://github.com/Mushkrot/Recallant.git recallant",
-    "raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh",
-    "--ref v0.1.0-dev.3",
+    "raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.4/scripts/install-recallant-bootstrap.sh",
+    "--ref v0.1.0-dev.4",
     "stays pinned to the prerelease tag",
     "explicitly reinstall with `--ref main`",
     "recallant onboard /path/to/project",
@@ -318,7 +319,7 @@ mustInclude(
     "Recallant is pre-release",
     "What Works Now",
     "Release Position",
-    "v0.1.0-dev.3",
+    "v0.1.0-dev.4",
     "production_readiness.ready: true",
     "Required Verification",
     "Codex Desktop does",
@@ -1107,7 +1108,7 @@ for (const [label, text] of remoteProofDocs) {
 }
 
 const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-assert(packageJson.version === "0.1.0-dev.3", "Root package must carry prerelease identity");
+assert(packageJson.version === "0.1.0-dev.4", "Root package must carry prerelease identity");
 assert(
   packageJson.scripts?.["release-identity:smoke"] === "node scripts/smoke-release-identity.mjs",
   "package.json must expose release-identity:smoke"
@@ -1151,7 +1152,8 @@ assert(
   "smoke:core must include documentation-posture:smoke"
 );
 assert(
-  packageJson.scripts?.["remote-connect-cli:smoke"] === "node scripts/smoke-remote-connect-cli.mjs",
+  packageJson.scripts?.["remote-connect-cli:smoke"] ===
+    "node scripts/smoke-remote-connect-cli.mjs && node scripts/smoke-connect-approval-ux.mjs",
   "package.json must expose remote-connect-cli:smoke"
 );
 assert(

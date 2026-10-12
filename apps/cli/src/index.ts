@@ -72,6 +72,7 @@ import {
 import { applyRemoteAgentReadyFiles, planRemoteAgentReadyFiles } from "./starter-docs.js";
 import { runAttach, validateExistingProjectBinding } from "./attach.js";
 import { deliveryQaGuidance } from "./agent-guidance.js";
+import { connectApprovalGuidance, openConnectApprovalPage } from "./connect-approval.js";
 import {
   inspectCodexHookConfig,
   recallantCodexHookCommand,
@@ -11129,7 +11130,15 @@ async function runConnectCloud(argv: readonly string[]) {
   const skipAgentFiles = argv.includes("--skip-agent-files");
   const dryRun = argv.includes("--dry-run");
   const proofLevel = parseRemoteConnectProofLevel(argv);
-  const pollTimeoutMs = parsePositiveInt(parseFlag(argv, "--poll-timeout-ms"), 120_000);
+  const interactiveApproval =
+    format === "text" &&
+    process.stdin.isTTY === true &&
+    process.stdout.isTTY === true &&
+    !argv.includes("--non-interactive");
+  const pollTimeoutMs = parsePositiveInt(
+    parseFlag(argv, "--poll-timeout-ms"),
+    interactiveApproval ? 300_000 : 120_000
+  );
   const pollIntervalMs = parsePositiveInt(parseFlag(argv, "--poll-interval-ms"), 2_000);
   const documentationPosture = skipAgentFiles
     ? null
@@ -11210,6 +11219,7 @@ async function runConnectCloud(argv: readonly string[]) {
     typeof startTrustedDevice?.status === "string" ? startTrustedDevice.status : null;
   const trustedDeviceFallbackReason =
     typeof startTrustedDevice?.reason === "string" ? startTrustedDevice.reason : null;
+  const approvalGuidance = connectApprovalGuidance(trustedDeviceFallbackReason);
   const bootstrapTokenStatus =
     typeof startBootstrapToken?.status === "string" ? startBootstrapToken.status : null;
   const bootstrapTokenPrefix =
@@ -11228,24 +11238,19 @@ async function runConnectCloud(argv: readonly string[]) {
         `Project: ${projectDir}`,
         `Server: ${serverUrl}`,
         "",
-        trustedDevice ? `Trusted device: ${trustedDevice.state.device_name}` : null,
-        trustedDevice
-          ? `Trusted device status: ${trustedDevice.created ? "created" : "reused"}`
-          : null,
-        trustedDeviceReconnectStatus
+        trustedDevice ? `Computer: ${trustedDevice.state.device_name}` : null,
+        trustedDeviceReconnectStatus && !browserApprovalRequired
           ? `Trusted reconnect: ${trustedDeviceReconnectStatus}${trustedDeviceFallbackReason ? ` (${trustedDeviceFallbackReason})` : ""}`
           : null,
-        trustedDevice ? `Trusted device store: ${trustedDevice.path}` : null,
         bootstrapToken ? `Bootstrap token: ${bootstrapTokenStatus ?? "submitted"}` : null,
-        bootstrapTokenPrefix ? `Bootstrap token prefix: ${bootstrapTokenPrefix}` : null,
-        `Local confirmation: ${localConfirmation}`,
         "",
         browserApprovalRequired
-          ? "Approve this project in your browser:"
+          ? approvalGuidance.message
           : startApprovalMode === "bootstrap_token"
             ? "Bootstrap token approved this project; browser approval is not required."
             : "Trusted device approved this project; browser approval is not required.",
-        browserApprovalRequired ? `  ${approveUrl}` : null,
+        browserApprovalRequired ? approvalGuidance.explanation : null,
+        browserApprovalRequired ? `Approval page: ${approveUrl}` : null,
         "",
         browserApprovalRequired
           ? `Waiting for approval for up to ${Math.round(pollTimeoutMs / 1000)} seconds...`
@@ -11338,6 +11343,81 @@ async function runConnectCloud(argv: readonly string[]) {
     return;
   }
 
+  const finishApproval = (
+    status: "approval_required" | "approval_denied" | "approval_expired" | "cancelled"
+  ) => {
+    const nextCommand = formatCommandHint([
+      "recallant",
+      "onboard",
+      projectDir,
+      "--server-url",
+      serverUrl
+    ]);
+    const connectionPending = status === "approval_required" && !browserApprovalRequired;
+    const message = connectionPending
+      ? "The server approved this computer, but the project connection is not ready yet. Run the command again to retry."
+      : status === "approval_required"
+        ? `${approvalGuidance.message} Approval has not been completed yet. Finish it on the approval page, then run the command again.`
+        : status === "approval_denied"
+          ? "This connection was declined. No project connection was installed. Request access from the server owner before trying again."
+          : status === "approval_expired"
+            ? "The approval page has expired. Run the command again to get a new approval page."
+            : "Connection cancelled. Run the command again when you are ready to approve it.";
+    const result = {
+      ok: false,
+      action: "connect_cloud",
+      status: connectionPending ? "connection_pending" : status,
+      project_dir: projectDir,
+      server_url: serverUrl,
+      message,
+      approval: {
+        reason: connectionPending ? "project_connection_pending" : approvalGuidance.reason,
+        next_action: connectionPending
+          ? "retry_connection"
+          : status === "approval_required"
+            ? "approve_in_browser"
+            : status === "approval_denied"
+              ? "request_access"
+              : "restart_connection",
+        approve_url: status === "approval_required" && browserApprovalRequired ? approveUrl : null,
+        expires_at: typeof start.expires_at === "string" ? start.expires_at : null,
+        browser_approval_required: browserApprovalRequired
+      },
+      trusted_device: {
+        reconnect_status: trustedDeviceReconnectStatus,
+        fallback_reason: trustedDeviceFallbackReason,
+        private_key_printed: false
+      },
+      writes_files: false,
+      next_command: nextCommand
+    };
+    process.stdout.write(
+      format === "json"
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : `\n${message}\n${status === "approval_required" && browserApprovalRequired ? `Approval page: ${approveUrl}\n` : ""}Next command: ${nextCommand}\n`
+    );
+    process.exitCode = 2;
+  };
+
+  if (browserApprovalRequired && interactiveApproval) {
+    const answer = (await promptLine("Open approval page now? [Y/n/cancel]: ")).toLowerCase();
+    if (process.stdin.readableEnded || ["c", "cancel"].includes(answer)) {
+      finishApproval("cancelled");
+      return;
+    }
+    if (["", "y", "yes"].includes(answer)) {
+      process.stdout.write(
+        openConnectApprovalPage(approveUrl)
+          ? "Approval page opened. Sign in and select Approve; this command will continue automatically.\n"
+          : "Your browser could not be opened. Open the approval page above and select Approve.\n"
+      );
+    } else {
+      process.stdout.write(
+        "Open the approval page above and select Approve; this command will continue automatically.\n"
+      );
+    }
+  }
+
   const deadline = Date.now() + pollTimeoutMs;
   let approved: Record<string, unknown> | null = null;
   while (Date.now() <= deadline) {
@@ -11347,15 +11427,22 @@ async function runConnectCloud(argv: readonly string[]) {
       approved = poll;
       break;
     }
-    if (status === "denied" || status === "expired" || status === "redeemed") {
-      throw new Error(`VALIDATION_ERROR: remote connect request is ${status}`);
+    if (status === "denied" || status === "expired") {
+      finishApproval(status === "denied" ? "approval_denied" : "approval_expired");
+      return;
+    }
+    if (status === "redeemed") {
+      throw new Error("VALIDATION_ERROR: remote connect request is redeemed");
     }
     if (status !== "pending")
       throw new Error(`VALIDATION_ERROR: unsupported poll status ${status}`);
     if (format === "text") process.stdout.write(".");
     await sleep(pollIntervalMs);
   }
-  if (!approved) throw new Error("VALIDATION_ERROR: remote connect approval timed out");
+  if (!approved) {
+    finishApproval("approval_required");
+    return;
+  }
   const approvalReceivedLabel =
     startApprovalMode === "trusted_device"
       ? "Trusted device approval received"

@@ -1709,7 +1709,10 @@ for (const mode of ["denied", "expired"]) {
       { env: { HOME: home } }
     );
     assert(result.status !== 0, `${mode} flow unexpectedly succeeded`);
-    assert(result.stderr.includes(`remote connect request is ${mode}`), `${mode} error unclear`);
+    const outcome = JSON.parse(result.stdout);
+    assert(outcome.status === `approval_${mode}`, `${mode} outcome unclear`);
+    assert(outcome.next_command.includes("recallant onboard"), `${mode} missing recovery command`);
+    assert(result.stderr === "", `${mode} emitted a generic validation error`);
   } finally {
     await closeServer(server.server);
     await rm(temp, { recursive: true, force: true });
@@ -1738,7 +1741,10 @@ try {
     { env: { HOME: pendingHome } }
   );
   assert(timeout.status !== 0, "pending timeout unexpectedly succeeded");
-  assert(timeout.stderr.includes("approval timed out"), "timeout error unclear");
+  const outcome = JSON.parse(timeout.stdout);
+  assert(outcome.status === "approval_required", "timeout outcome unclear");
+  assert(outcome.approval.next_action === "approve_in_browser", "timeout missing next action");
+  assert(timeout.stderr === "", "timeout emitted a generic validation error");
 } finally {
   await closeServer(pendingServer.server);
   await rm(pendingTemp, { recursive: true, force: true });
