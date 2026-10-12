@@ -2876,6 +2876,7 @@ function remoteConnectServerUrlFromEnv() {
     normalizeRemoteConnectServerUrl(process.env.RECALLANT_CONNECT_SERVER_URL) ??
     normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_CONNECT_SERVER_URL) ??
     normalizeRemoteConnectServerUrl(process.env.RECALLANT_REMOTE_MCP_URL) ??
+    normalizeRemoteConnectServerUrl(process.env.RECALLANT_PUBLIC_SERVER_URL) ??
     normalizeRemoteConnectServerUrl(process.env.RECALLANT_PUBLIC_WORKBENCH_URL)
   );
 }
@@ -2910,6 +2911,7 @@ function universalOnboardServerUrl(input: {
   if (explicitDefaultEnv) return explicitDefaultEnv;
   const candidates = [
     input.projectConfig?.recallant_server_url,
+    process.env.RECALLANT_PUBLIC_SERVER_URL,
     process.env.RECALLANT_REMOTE_MCP_URL,
     process.env.RECALLANT_PUBLIC_WORKBENCH_URL,
     process.env.RECALLANT_SERVER_URL

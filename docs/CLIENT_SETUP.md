@@ -34,8 +34,10 @@ recallant onboard <project>
 ```
 
 The same command works on macOS, arbitrary servers, and a Recallant host. It selects reachable local
-storage or a central server supplied through project configuration, deployment environment, or
-`--server-url`. If neither is configured, it stops before changing project files and shows both
+storage or a central server supplied through project configuration, the deployment environment,
+or `--server-url`. The standard `RECALLANT_PUBLIC_SERVER_URL` setting is recognized automatically,
+so a configured central server does not need to be repeated on the command line. If neither local
+storage nor a server is configured, onboarding stops before changing project files and shows both
 setup paths.
 
 ```bash
