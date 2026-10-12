@@ -34,8 +34,10 @@ recallant onboard <project>
 ```
 
 The same command works on macOS, arbitrary servers, and a Recallant host. It selects reachable local
-storage or a central server supplied through project configuration, deployment environment, or
-`--server-url`. If neither is configured, it stops before changing project files and shows both
+storage or a central server supplied through project configuration, the deployment environment,
+or `--server-url`. The standard `RECALLANT_PUBLIC_SERVER_URL` setting is recognized automatically,
+so a configured central server does not need to be repeated on the command line. If neither local
+storage nor a server is configured, onboarding stops before changing project files and shows both
 setup paths.
 
 ```bash
@@ -92,7 +94,7 @@ Changing channels is an explicit owner action, such as rerunning the trusted boo
 `--ref main`.
 
 After the CLI is installed or refreshed, `recallant --version` should report the CLI package version
-plus git build metadata, such as `recallant 0.1.0-dev.3+<git-sha>`. All monorepo workspace manifests
+plus git build metadata, such as `recallant 0.1.0-dev.4+<git-sha>`. All monorepo workspace manifests
 use the same prerelease identity; the Git revision identifies the exact installed checkout.
 
 When it asks for the central server URL, enter `https://memory.example.com` or the bare host name
@@ -105,6 +107,17 @@ key on the workstation. Later projects from the same trusted workstation can rec
 Cloudflare email-code browser approval. The approved flow writes remote client configuration, a
 non-secret consent receipt, and compact agent-ready files; it does not install local Recallant
 storage or import existing project history.
+
+Device trust expires after 90 days unless revoked earlier. When it expires, interactive onboarding
+explains that this computer needs approval again and offers to open the approval page. Sign in and
+select **Approve**; the command continues automatically and later projects can connect without a
+new browser confirmation while trust is valid. The interactive command waits up to five minutes.
+If you do not finish in time, it explains how to finish approval and rerun onboarding instead of
+showing a validation error. If the approval page itself has expired, rerun onboarding for a new one.
+Cancellation and denied access do not install a project connection.
+
+JSON and `--non-interactive` runs never open a browser. Unfinished approval returns unsuccessful
+exit status with `status: "approval_required"`, an approval URL, the reason, and the next command.
 
 For headless servers or CI-like hosts where no browser approval is practical, an administrator can
 create a short-lived one-time bootstrap token through the protected central server API. The remote

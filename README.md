@@ -25,8 +25,8 @@ determine which memories can become active guidance.
 Run this against a temporary project after checking the [prerelease scope and limits](#current-scope-and-limits):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.3
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.4/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.4
 ```
 
 ```bash
@@ -145,8 +145,8 @@ recallant onboard /path/to/project
 For a pinned prerelease, use the versioned command after the tag is published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.3/scripts/install-recallant-bootstrap.sh \
-  | bash -s -- --ref v0.1.0-dev.3
+curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.4/scripts/install-recallant-bootstrap.sh \
+  | bash -s -- --ref v0.1.0-dev.4
 ```
 
 Tagged installs remain on that prerelease channel during onboarding. Switching to the moving
@@ -169,9 +169,9 @@ through the project trust or command-approval surface presented by the actual Co
 Desktop does not guarantee a `/hooks` slash command; if the composer says `No commands`, that route
 is unavailable. Perform one normal Codex action, then run:
 
-   ```bash
-   recallant doctor --project-dir /path/to/project --require-capture
-   ```
+```bash
+recallant doctor --project-dir /path/to/project --require-capture
+```
 
 This approval is a Codex security boundary. Recallant can install the hook, but it cannot approve
 project commands on the owner's behalf. Until the hook is trusted, Recallant's memory tools can
@@ -182,7 +182,7 @@ calls or another client do not need a Codex hook, but they should not expect `ca
 
 ## Current Scope and Limits
 
-Recallant `v0.1.0-dev.3` is a **development prerelease**, not stable production software. It is
+Recallant `v0.1.0-dev.4` is a **development prerelease**, not stable production software. It is
 suitable for local evaluation and controlled development use. Broader project pilots, native
 cross-client parity, and stable support guarantees are still open work.
 

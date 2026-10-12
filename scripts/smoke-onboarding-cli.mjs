@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
+import { spawn, spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -38,6 +40,39 @@ function runRaw(command, args, options = {}) {
   });
   if (result.error) throw result.error;
   return result;
+}
+
+function runRawAsync(command, args, options = {}) {
+  const env = smokeEnvironment({
+    RECALLANT_DEVELOPER_ID: developerId,
+    RECALLANT_PROJECT_ID: "",
+    RECALLANT_PROJECT_PATH: "",
+    RECALLANT_EMBEDDING_PROVIDER: "deterministic",
+    RECALLANT_EMBEDDING_DIMS: "8",
+    RECALLANT_SERVER_URL: "http://127.0.0.1:3005",
+    ...(options.env ?? {})
+  });
+  if (options.omitDatabaseUrl) {
+    delete env.RECALLANT_DATABASE_URL;
+  } else {
+    env.RECALLANT_DATABASE_URL = databaseUrl;
+  }
+  if (options.omitEnvFile) {
+    delete env.RECALLANT_ENV_FILE;
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd ?? repoRoot,
+      env,
+      encoding: "utf8"
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 function run(command, args, options = {}) {
@@ -167,6 +202,7 @@ const noRemoteServerEnv = {
   RECALLANT_CONNECT_SERVER_URL: "",
   RECALLANT_REMOTE_CONNECT_SERVER_URL: "",
   RECALLANT_REMOTE_MCP_URL: "",
+  RECALLANT_PUBLIC_SERVER_URL: "",
   RECALLANT_PUBLIC_WORKBENCH_URL: "",
   RECALLANT_DEFAULT_SERVER_URL: "",
   RECALLANT_SERVER_URL: ""
@@ -259,12 +295,7 @@ const unconfiguredRemoteOnboard = runRaw(
     omitDatabaseUrl: true,
     env: {
       RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env"),
-      RECALLANT_CONNECT_SERVER_URL: "",
-      RECALLANT_REMOTE_CONNECT_SERVER_URL: "",
-      RECALLANT_REMOTE_MCP_URL: "",
-      RECALLANT_PUBLIC_WORKBENCH_URL: "",
-      RECALLANT_DEFAULT_SERVER_URL: "",
-      RECALLANT_SERVER_URL: ""
+      ...noRemoteServerEnv
     }
   }
 );
@@ -304,11 +335,7 @@ const universalMissingStorage = runRaw(
     omitDatabaseUrl: true,
     env: {
       RECALLANT_ENV_FILE: join(missingStorageProject, "missing-recallant.env"),
-      RECALLANT_CONNECT_SERVER_URL: "",
-      RECALLANT_REMOTE_CONNECT_SERVER_URL: "",
-      RECALLANT_REMOTE_MCP_URL: "",
-      RECALLANT_PUBLIC_WORKBENCH_URL: "",
-      RECALLANT_SERVER_URL: ""
+      ...noRemoteServerEnv
     }
   }
 );
@@ -333,6 +360,137 @@ assert(
     universalMissingPayload
   )}`
 );
+
+const connectStartRequests = [];
+const connectServer = createServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  if (request.method !== "POST" || request.url !== "/api/connect/start") {
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "not found" }));
+    return;
+  }
+  connectStartRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(
+    JSON.stringify({
+      approve_url: "http://127.0.0.1/approve",
+      poll_token: "smoke-poll-token",
+      approval_mode: "bootstrap_token",
+      bootstrap_token: {
+        status: "accepted",
+        token_prefix: "smoke",
+        browser_approval_required: false
+      }
+    })
+  );
+});
+await new Promise((resolve, reject) => {
+  connectServer.once("error", reject);
+  connectServer.listen(0, "127.0.0.1", resolve);
+});
+const connectAddress = connectServer.address();
+const standardServerUrl = "https://recallant-smoke.invalid";
+const standardServerEnvFile = join(smokeRoot, "standard-server.env");
+await writeFile(
+  standardServerEnvFile,
+  [
+    "RECALLANT_DATABASE_URL=postgres://recallant:fixture-password@127.0.0.1:1/recallant_agent_work",
+    `RECALLANT_PUBLIC_SERVER_URL=${standardServerUrl}`,
+    ""
+  ].join("\n")
+);
+try {
+  const standardServerOnboard = await runRawAsync(
+    recallant,
+    [
+      "onboard",
+      missingStorageProject,
+      "--yes",
+      "--dry-run",
+      "--bootstrap-token",
+      "smoke-bootstrap-token",
+      "--no-update-check",
+      "--format",
+      "json"
+    ],
+    {
+      cwd: missingStorageProject,
+      omitDatabaseUrl: true,
+      env: {
+        RECALLANT_ENV_FILE: standardServerEnvFile,
+        ...noRemoteServerEnv,
+        RECALLANT_SMOKE_FETCH_HOST: "recallant-smoke.invalid",
+        RECALLANT_SMOKE_FETCH_PORT: String(connectAddress.port),
+        NODE_OPTIONS: `--import=${join(repoRoot, "scripts", "fixtures", "onboard-fetch-shim.mjs")}`
+      }
+    }
+  );
+  assert(
+    standardServerOnboard.status === 0,
+    `onboard did not use RECALLANT_PUBLIC_SERVER_URL: ${standardServerOnboard.stderr}\n${standardServerOnboard.stdout}`
+  );
+  const standardServerPayload = JSON.parse(standardServerOnboard.stdout);
+  assert(
+    standardServerPayload.action === "connect_cloud" &&
+      standardServerPayload.status === "dry_run" &&
+      standardServerPayload.server_url === standardServerUrl &&
+      standardServerPayload.writes_files === false,
+    `onboard did not select the configured standard server: ${JSON.stringify(standardServerPayload)}`
+  );
+  assert(
+    connectStartRequests.length === 1 && connectStartRequests[0].target === "codex",
+    `onboard did not start exactly one standard remote connection: ${JSON.stringify(connectStartRequests)}`
+  );
+  assert(
+    !(await exists(join(missingStorageProject, ".recallant", "config"))),
+    "standard server dry-run wrote project config"
+  );
+  const standardServerConnect = await runRawAsync(
+    recallant,
+    [
+      "connect",
+      missingStorageProject,
+      "--yes",
+      "--dry-run",
+      "--bootstrap-token",
+      "smoke-bootstrap-token",
+      "--format",
+      "json"
+    ],
+    {
+      cwd: missingStorageProject,
+      omitDatabaseUrl: true,
+      env: {
+        RECALLANT_ENV_FILE: standardServerEnvFile,
+        ...noRemoteServerEnv,
+        RECALLANT_SMOKE_FETCH_HOST: "recallant-smoke.invalid",
+        RECALLANT_SMOKE_FETCH_PORT: String(connectAddress.port),
+        NODE_OPTIONS: `--import=${join(repoRoot, "scripts", "fixtures", "onboard-fetch-shim.mjs")}`
+      }
+    }
+  );
+  assert(
+    standardServerConnect.status === 0,
+    `connect did not use RECALLANT_PUBLIC_SERVER_URL: ${standardServerConnect.stderr}\n${standardServerConnect.stdout}`
+  );
+  const standardConnectPayload = JSON.parse(standardServerConnect.stdout);
+  assert(
+    standardConnectPayload.action === "connect_cloud" &&
+      standardConnectPayload.status === "dry_run" &&
+      standardConnectPayload.server_url === standardServerUrl,
+    `connect did not select the configured standard server: ${JSON.stringify(standardConnectPayload)}`
+  );
+  assert(
+    connectStartRequests.length === 2 &&
+      connectStartRequests.every((request) => request.target === "codex"),
+    `onboard/connect did not start exactly two standard remote connections: ${JSON.stringify(connectStartRequests)}`
+  );
+} finally {
+  await new Promise((resolve, reject) =>
+    connectServer.close((error) => (error ? reject(error) : resolve()))
+  );
+}
 
 const defaultEnvRoot = await mkdtemp(join(smokeRoot, "default-env-"));
 const defaultEnvHome = join(defaultEnvRoot, "home");
