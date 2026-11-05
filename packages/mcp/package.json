@@ -9,7 +9,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@recallant/contracts": "file:../contracts",
     "@recallant/core": "file:../core",
     "@recallant/db": "file:../db",
