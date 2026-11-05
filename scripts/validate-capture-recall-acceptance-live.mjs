@@ -160,11 +160,13 @@ async function validateLiveCaptureRecallAcceptance(evidence, rawText, evidenceFi
     assert(memoryRow.status === "accepted", "memory must be accepted");
     assert(String(memoryRow.body ?? "").includes(marker), "memory body must contain acceptance marker");
 
+    const binding = await db.getProjectBinding(firstSession.project_id);
+    assert(binding, "accepted project binding was not found");
     const dashboardDb = new RecallantDb({
       databaseUrl: process.env.RECALLANT_DATABASE_URL,
       developerId: firstSession.developer_id,
       projectId: firstSession.project_id,
-      projectPath: "remote://capture-recall-acceptance"
+      projectPath: binding.primary_path ?? undefined
     });
     let dashboard;
     try {

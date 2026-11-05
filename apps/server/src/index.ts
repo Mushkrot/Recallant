@@ -7,7 +7,7 @@ import {
 } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { getRecallantCoreInfo, parseCodexOtelLogs } from "@recallant/core";
@@ -2410,7 +2410,19 @@ async function dispatchRemoteMcpJsonRpc(input: {
       project_path: input.projectPath,
       project_dir: input.projectPath
     })) {
-      if (argumentsInput[key] != null && argumentsInput[key] !== expected) {
+      const initialWorkspacePath =
+        toolName === "memory_start_session" &&
+        input.projectPath === null &&
+        (key === "project_path" || key === "project_dir") &&
+        typeof argumentsInput[key] === "string" &&
+        isAbsolute(argumentsInput[key]);
+      // The authenticated start handler validates owner/kind and atomically initializes
+      // only an unbound remote workspace. All established scopes stay exact-match.
+      if (
+        argumentsInput[key] != null &&
+        argumentsInput[key] !== expected &&
+        !initialWorkspacePath
+      ) {
         throw new RemoteMcpRequestError(
           "VALIDATION_ERROR",
           "Tool scope differs from authenticated scope.",

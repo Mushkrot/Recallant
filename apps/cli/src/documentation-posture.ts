@@ -319,9 +319,9 @@ function starterAgents(mode: StarterDocsAgentMode = "local_storage") {
           "- This project uses a central Recallant server through remote MCP; do not set up local Postgres, Docker, or `RECALLANT_DATABASE_URL` just to work in this project.",
           "- Direct MCP startup: call `memory_start_session`, then `memory_get_context_pack` with the current task hint before making changes.",
           "- During work, write concise non-secret decisions, actions, tests, and governed memories with `memory_append_event` or `memory_create_agent_memory` when useful.",
-          "- Use `memory_set_checkpoint` only for checkpoint state; it is not semantic recall proof.",
+          "- Use `memory_set_checkpoint` with the active `session_id` for private checkpoint state; it is not semantic recall proof.",
           "- On pause or finish, call `memory_closeout`. This is the normal MCP closeout path and includes checkpoint state, searchable memory, recall verification, and next-session readiness semantics.",
-          "- If MCP is unavailable, use the CLI fallback against the configured remote project: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`. Use `recallant agent-checkpoint` only as an advanced pause/compaction state helper.",
+          "- If MCP is unavailable, use the CLI fallback against the configured remote project: `recallant agent-start --format json`, `recallant agent-event`, and `recallant agent-closeout`. Pass `--external-session-id` when a stable Codex chat ID is available. Use `recallant agent-checkpoint` only for explicit pause state.",
           "- `PROJECT_LOG.md` is a compact current-state fallback. Durable session history belongs in Recallant memory."
         ]
       : [

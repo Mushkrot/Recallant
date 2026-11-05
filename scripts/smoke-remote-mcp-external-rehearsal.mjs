@@ -27,7 +27,7 @@ const expectedScope = {
   projectId: "external-rehearsal-project",
   developerId: "external-rehearsal-developer",
   clientId: "external-rehearsal-client",
-  sessionId: "external-rehearsal-session",
+  sessionId: "11111111-1111-4111-8111-111111111111",
   traceId: "external-rehearsal-trace"
 };
 
@@ -36,10 +36,10 @@ const requiredEnv = [
   "RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL",
   "RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID",
   "RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID",
-  "RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID"
+  "RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID",
+  "RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID"
 ];
 const optionalLiveEnv = [
-  "RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID",
   "RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID",
   "RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF"
 ];
@@ -334,7 +334,7 @@ async function startHttpsFixture(cert) {
         } else {
           structuredContent = {
             ok: true,
-            echoed: args.message ?? "capture-proof-ok"
+            echoed: args.note ?? "capture-proof-ok"
           };
         }
         response.writeHead(200, { "content-type": "application/json" });
@@ -463,7 +463,14 @@ async function runBridgeRoundtrip(fixture, env, overrides = {}) {
     await client.connect(transport, { timeout: 5_000 });
     const list = await client.listTools({}, { timeout: 5_000 });
     const call = await client.callTool(
-      { name: "memory_heartbeat", arguments: { message: "hello-external" } },
+      {
+        name: "memory_heartbeat",
+        arguments: {
+          session_id: overrides.sessionId ?? expectedScope.sessionId,
+          status: "active",
+          note: "hello-external"
+        }
+      },
       undefined,
       { timeout: 5_000 }
     );
@@ -782,6 +789,8 @@ async function liveExternalRehearsalStatus() {
   const bridge = await runBridgeRoundtrip(liveTarget, liveEnv, liveOverrides);
   await bridge.client.close();
   await bridge.transport.close();
+  assert(bridge.call.isError !== true, "live remote heartbeat returned an error");
+  assert(bridge.call.structuredContent?.ok === true, "live remote heartbeat did not succeed");
   assert(!bridge.stderr.includes(credential), "live remote bridge leaked raw credential");
   return {
     status: "pass_live_external_rehearsal",

@@ -15,6 +15,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
   stat,
@@ -36,12 +37,10 @@ import {
 import {
   buildMemoryKeeperPlan,
   getRecallantCoreInfo,
-  prepareProjectLogSync,
   renderCodexOtelConfig,
   validateProjectIdentity,
   type MemoryKeeperPlan,
-  type MemoryKeeperSourceInput,
-  type ProjectLogCheckpointPayload
+  type MemoryKeeperSourceInput
 } from "@recallant/core";
 import { RecallantDb, createRecallantDbFromEnv, redactSystemActivityValue } from "@recallant/db";
 import type { JsonObject, ProjectSourceKind, RawArtifactInput } from "@recallant/db";
@@ -61,7 +60,6 @@ import {
   readImportTextForCandidate,
   redactSecretValues
 } from "./discovery.js";
-import { optionalProjectLogMirror } from "./project-log-mirror.js";
 import {
   analyzeProjectDocumentationPosture,
   summarizeDocumentationPostureForOnboard,
@@ -310,17 +308,17 @@ const memorySection = `## Memory (Recallant)
   default inside the allowed boundary. Configuration proves access; proof proves memory;
   capture-active proves Recallant is doing its job.
 - At session start: call \`memory_start_session\`. If it reports \`previous_session_recovery\` or
-  \`previous_unclosed_session\`, treat that as recovery context for this project, not an alarm and
-  not a fresh instruction. Review checkpoint/captured events before asking the owner to repeat
-  context.
+  \`previous_unclosed_session\`, treat that as recovery context for the matched chat, not an alarm
+  and not a fresh instruction. Starts without a reliable chat identity do not inherit another
+  session's checkpoint; explicitly select an interrupted session with \`recover_session_id\`.
 - Before non-trivial work after session start: call \`memory_get_context_pack\` with the current task hint.
 - Use \`memory_search\` for raw evidence/chunks only when the context pack says more evidence is needed or the task changes.
 - Use specific queries in \`memory_search\`, not broad ones. One call per session start is usually enough.
 - Automatic inside consent: session start, context read, concise decisions, actions, tests,
   checkpoints, closeout, and one synthetic proof marker when running diagnostics.
 - After meaningful progress: write concise agent-authored events/memories through
-  \`memory_append_event\` or \`memory_create_agent_memory\`. Use \`memory_set_checkpoint\` only for
-  checkpoint state; it is not semantic recall proof.
+  \`memory_append_event\` or \`memory_create_agent_memory\`. Use \`memory_set_checkpoint\` with the
+  active \`session_id\` for private checkpoint state; it is not semantic recall proof.
 - On clear pause/exit/closeout intent, or when meaningful work is complete: call
   \`memory_closeout\`. This is the normal MCP closeout path and includes checkpoint state,
   searchable memory, recall verification, and next-session readiness semantics.
@@ -779,18 +777,51 @@ async function readSpoolManifest(argv: readonly string[]) {
   };
 }
 
+async function pendingSpoolRecords(
+  argv: readonly string[],
+  records: Record<string, unknown>[],
+  manifest: Awaited<ReturnType<typeof readSpoolManifest>>
+) {
+  const content = await readOptional(join(spoolDir(argv), "local-quarantine.json"));
+  let quarantined = new Set<string>();
+  if (content) {
+    const parsed = JSON.parse(content) as { version?: unknown; local_ids?: unknown };
+    if (
+      parsed?.version !== 1 ||
+      !Array.isArray(parsed.local_ids) ||
+      !parsed.local_ids.every((id) => typeof id === "string" && id.trim().length > 0)
+    ) {
+      throw new Error("POLICY_BLOCKED: invalid local spool quarantine file");
+    }
+    quarantined = new Set(parsed.local_ids as string[]);
+  }
+  const pending = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  return {
+    unsynced: pending.filter((record) => !quarantined.has(String(record.local_id))),
+    quarantined_count: pending.filter((record) => quarantined.has(String(record.local_id))).length
+  };
+}
+
 async function getLocalSpoolStatus(argv: readonly string[]) {
   const records = await readJsonl(spoolPath(argv));
   const manifest = await readSpoolManifest(argv);
-  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  const { unsynced, quarantined_count } = await pendingSpoolRecords(argv, records, manifest);
   const lastRecord = records.at(-1) ?? null;
   const lastUnsynced = unsynced.at(-1) ?? null;
   return {
-    status: unsynced.length > 0 ? "unsynced" : records.length > 0 ? "synced" : "empty",
+    status:
+      unsynced.length > 0
+        ? "unsynced"
+        : quarantined_count > 0
+          ? "quarantined"
+          : records.length > 0
+            ? "synced"
+            : "empty",
     spool_path: spoolPath(argv),
     manifest_path: spoolManifestPath(argv),
     record_count: records.length,
     unsynced_count: unsynced.length,
+    quarantined_count,
     last_write_at:
       typeof lastRecord?.created_at === "string"
         ? lastRecord.created_at
@@ -875,6 +906,7 @@ type AgentSessionState = {
   schema_version: 1;
   status: "active" | "closed" | "offline";
   session_id: string;
+  external_session_id_hash?: string | null;
   project_id?: string | null;
   project_dir: string;
   client_kind: string;
@@ -964,12 +996,57 @@ function projectDir(argv: readonly string[]) {
   return resolve(parseFlag(argv, "--project-dir") ?? process.cwd());
 }
 
+function externalSessionId(argv: readonly string[]) {
+  const value = parseFlag(argv, "--external-session-id")?.trim();
+  if (!value) return null;
+  if (value.length > 512) {
+    throw new Error("VALIDATION_ERROR: --external-session-id must be at most 512 characters");
+  }
+  return value;
+}
+
+function externalSessionIdHash(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function recallantDir(projectDir: string) {
   return join(projectDir, ".recallant");
 }
 
-function currentSessionPathFor(projectDir: string) {
+function currentSessionPathFor(projectDir: string, sessionId?: string | null) {
+  if (sessionId) {
+    return join(recallantDir(projectDir), "sessions", `${externalSessionIdHash(sessionId)}.json`);
+  }
   return join(recallantDir(projectDir), "current-session.json");
+}
+
+function genericSessionFallbackPathFor(projectDir: string) {
+  return join(recallantDir(projectDir), "sessions", "cli-default.json");
+}
+
+function stateExternalSessionHash(state: AgentSessionState) {
+  return (
+    state.external_session_id_hash ??
+    (state.native_hook?.external_session_id
+      ? externalSessionIdHash(state.native_hook.external_session_id)
+      : null)
+  );
+}
+
+async function sessionStatePathFor(projectDir: string, state: AgentSessionState) {
+  const hash = stateExternalSessionHash(state);
+  if (hash) return join(recallantDir(projectDir), "sessions", `${hash}.json`);
+  const fallbackPath = genericSessionFallbackPathFor(projectDir);
+  const fallback = await readOptional(fallbackPath);
+  if (fallback && (JSON.parse(fallback) as AgentSessionState).session_id === state.session_id) {
+    return fallbackPath;
+  }
+  const current = await readOptional(currentSessionPathFor(projectDir));
+  if (current) {
+    const currentState = JSON.parse(current) as AgentSessionState;
+    if (stateExternalSessionHash(currentState)) return fallbackPath;
+  }
+  return currentSessionPathFor(projectDir);
 }
 
 function remoteAgentConsentReceiptPath(projectDir: string) {
@@ -1025,7 +1102,7 @@ function remoteAgentStartupContract() {
       {
         step: "start_session",
         call: "memory_start_session",
-        note: "Start or recover the Recallant agent session for this project."
+        note: "Start or resume the Recallant session matching this external chat identity when supplied."
       },
       {
         step: "read_context",
@@ -1040,7 +1117,7 @@ function remoteAgentStartupContract() {
       {
         step: "checkpoint_state",
         call: "memory_set_checkpoint",
-        note: "Checkpoint state is not semantic recall proof."
+        note: "Pass the active session_id to keep checkpoint state private to this chat; this is not semantic recall proof."
       },
       {
         step: "closeout",
@@ -1458,7 +1535,7 @@ function agentStartHumanReport(input: {
       `Do not send: ${input.consentScope.not_sent.join(", ")}.`,
       "Next: use memory_start_session then memory_get_context_pack through the configured Recallant MCP startup flow. Agent runtime uses scoped machine credentials and does not require Cloudflare browser auth.",
       "Record concise non-secret work with memory_append_event or memory_create_agent_memory; close with memory_closeout.",
-      "Use memory_set_checkpoint only for checkpoint state; it is not semantic recall proof.",
+      "Use memory_set_checkpoint with the active session_id for checkpoint state; it is not semantic recall proof.",
       "CLI fallback: recallant agent-start --format json; recallant agent-event; recallant agent-closeout. Use recallant agent-checkpoint only for pause/compaction state.",
       "PROJECT_LOG.md is a compact fallback; durable session history belongs in Recallant memory."
     );
@@ -1471,15 +1548,36 @@ function agentStartHumanReport(input: {
   return `${lines.filter((line): line is string => line !== null).join("\n")}\n`;
 }
 
-async function readAgentSessionState(projectDir: string): Promise<AgentSessionState | null> {
+async function readAgentSessionState(
+  projectDir: string,
+  externalId?: string | null
+): Promise<AgentSessionState | null> {
+  if (externalId) {
+    const hash = externalSessionIdHash(externalId);
+    const content = await readOptional(currentSessionPathFor(projectDir, externalId));
+    if (content) {
+      const state = JSON.parse(content) as AgentSessionState;
+      const storedHash = stateExternalSessionHash(state);
+      return storedHash === hash ? state : null;
+    }
+    const legacyContent = await readOptional(currentSessionPathFor(projectDir));
+    if (!legacyContent) return null;
+    const legacyState = JSON.parse(legacyContent) as AgentSessionState;
+    const legacyHash = stateExternalSessionHash(legacyState);
+    return legacyHash === hash ? legacyState : null;
+  }
+  const fallback = await readOptional(genericSessionFallbackPathFor(projectDir));
+  if (fallback) return JSON.parse(fallback) as AgentSessionState;
   const content = await readOptional(currentSessionPathFor(projectDir));
   if (!content) return null;
-  return JSON.parse(content) as AgentSessionState;
+  const state = JSON.parse(content) as AgentSessionState;
+  if (stateExternalSessionHash(state)) return null;
+  return state;
 }
 
 async function writeAgentSessionState(projectDir: string, state: AgentSessionState) {
-  await mkdir(recallantDir(projectDir), { recursive: true });
-  const target = currentSessionPathFor(projectDir);
+  const target = await sessionStatePathFor(projectDir, state);
+  await mkdir(dirname(target), { recursive: true });
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
   await rename(temporary, target);
@@ -1661,9 +1759,11 @@ function observationKindForAgentKind(kind: string) {
 }
 
 function checkpointPayloadFromFlags(argv: readonly string[], fallbackSummary?: string): JsonObject {
+  const status = parseFlag(argv, "--status") ?? "in_progress";
   return {
     schema_version: 1,
-    status: parseFlag(argv, "--status") ?? "in_progress",
+    status,
+    current_status: status,
     current_focus: parseFlag(argv, "--focus") ?? fallbackSummary ?? "Recallant-backed agent work",
     next_step: parseFlag(argv, "--next-step") ?? "Continue from Recallant context.",
     summary: parseFlag(argv, "--summary") ?? fallbackSummary ?? null,
@@ -1678,29 +1778,6 @@ function offlineProjectLogUpdate() {
     reason: "offline_spool_no_project_log_write",
     project_log_sync: null
   };
-}
-
-async function updateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
-  const projectLogPath = join(projectDir, "PROJECT_LOG.md");
-  const existing = await readOptional(projectLogPath);
-  const config = await readProjectConfig(projectDir);
-  const prepared = prepareProjectLogSync({
-    mode: config?.project_log_sync,
-    existingContent: existing ?? "",
-    payload: payload as ProjectLogCheckpointPayload
-  });
-  if (prepared.status !== "updated" || !prepared.next_content) {
-    return { ...prepared, path: projectLogPath };
-  }
-  await writeFile(projectLogPath, prepared.next_content);
-  return { ...prepared, path: projectLogPath };
-}
-
-async function safelyUpdateProjectLogCheckpoint(projectDir: string, payload: JsonObject) {
-  return optionalProjectLogMirror({
-    projectLogPath: join(projectDir, "PROJECT_LOG.md"),
-    write: () => updateProjectLogCheckpoint(projectDir, payload)
-  });
 }
 
 async function appendSpoolRecord(
@@ -3365,11 +3442,12 @@ async function runLocalDoctorSemanticProof(input: {
     updated_at: new Date().toISOString(),
     source: "recallant-doctor-semantic-proof"
   };
-  const checkpoint = await input.database.setCheckpoint(
-    started.state.project_id,
-    checkpointPayload
+  const checkpoint = await input.database.setSessionCheckpoint(
+    started.state.session_id,
+    checkpointPayload,
+    started.state.project_id
   );
-  const checkpointReadback = await input.database.getCheckpoint(started.state.project_id);
+  const checkpointReadback = await input.database.getSessionCheckpoint(started.state.session_id);
   const checkpointStateText = JSON.stringify(checkpointReadback?.payload ?? {});
   const checkpointMarkerFound = checkpointStateText.includes(marker);
   const event = await input.database.appendEvent({
@@ -6771,11 +6849,14 @@ async function startAgentSession(
   const config = await readProjectConfig(dir);
   const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
   const clientVersion = parseFlag(argv, "--client-version") ?? null;
+  const externalId = externalSessionId(argv);
   const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
   const localSpoolStatus = await getLocalSpoolStatus(argv);
   const started = await database.startSession({
     client_kind: clientKind,
     client_version: clientVersion,
+    external_session_id: externalId,
+    recover_session_id: parseFlag(argv, "--recover-session-id") ?? null,
     project_id: config?.project_id ?? null,
     project_path: dir,
     session_label: parseFlag(argv, "--session-label") ?? "recallant-agent-session",
@@ -6810,6 +6891,7 @@ async function startAgentSession(
     schema_version: 1,
     status: "active",
     session_id: sessionId,
+    external_session_id_hash: externalId ? externalSessionIdHash(externalId) : null,
     project_id: String(started.project_id),
     project_dir: dir,
     client_kind: clientKind,
@@ -6831,12 +6913,15 @@ async function startRemoteAgentSession(connection: RemoteAgentConnection, argv: 
   const clientKind = parseFlag(argv, "--client-kind") ?? "codex";
   const clientVersion = parseFlag(argv, "--client-version") ?? recallantCliVersion;
   const taskHint = parseFlag(argv, "--task-hint") ?? "Recallant-backed agent work";
+  const externalId = externalSessionId(argv);
   const started = await callRemoteAgentTool(
     connection,
     "memory_start_session",
     {
       client_kind: clientKind,
       client_version: clientVersion,
+      ...(externalId ? { external_session_id: externalId } : {}),
+      recover_session_id: parseFlag(argv, "--recover-session-id") ?? null,
       project_path: null,
       session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
       resume_policy: "normal"
@@ -6860,6 +6945,7 @@ async function startRemoteAgentSession(connection: RemoteAgentConnection, argv: 
     schema_version: 1,
     status: "offline",
     session_id: sessionId,
+    external_session_id_hash: externalId ? externalSessionIdHash(externalId) : null,
     project_id: projectId,
     project_dir: dir,
     client_kind: clientKind,
@@ -6938,7 +7024,8 @@ async function ensureOfflineAgentSession(
   projectId: string | null = null
 ) {
   const dir = projectDir(argv);
-  const existing = await readAgentSessionState(dir);
+  const externalId = externalSessionId(argv);
+  const existing = await readAgentSessionState(dir, externalId);
   if (existing?.status === "offline" || existing?.status === "active") {
     if (!existing.project_id && projectId) {
       const updated = { ...existing, project_id: projectId, updated_at: new Date().toISOString() };
@@ -6952,6 +7039,7 @@ async function ensureOfflineAgentSession(
     schema_version: 1,
     status: "offline",
     session_id: `local-${randomUUID()}`,
+    external_session_id_hash: externalId ? externalSessionIdHash(externalId) : null,
     project_id: projectId,
     project_dir: dir,
     client_kind: parseFlag(argv, "--client-kind") ?? "codex",
@@ -6988,6 +7076,8 @@ async function deferRemoteAgentStartup(
           {
             client_kind: state.client_kind,
             client_version: state.client_version,
+            ...(externalSessionId(argv) ? { external_session_id: externalSessionId(argv) } : {}),
+            recover_session_id: parseFlag(argv, "--recover-session-id") ?? null,
             project_path: null,
             session_label: parseFlag(argv, "--session-label") ?? "recallant-cli-remote-session",
             resume_policy: "normal"
@@ -7027,13 +7117,13 @@ async function deferRemoteAgentStartup(
 }
 
 async function loadActiveAgentState(argv: readonly string[]) {
-  const state = await readAgentSessionState(projectDir(argv));
+  const state = await readAgentSessionState(projectDir(argv), externalSessionId(argv));
   if (state?.status === "active") return state;
   return null;
 }
 
 async function loadClosableAgentState(argv: readonly string[]) {
-  const state = await readAgentSessionState(projectDir(argv));
+  const state = await readAgentSessionState(projectDir(argv), externalSessionId(argv));
   if (state?.status === "active" || state?.status === "offline") return state;
   return null;
 }
@@ -7057,7 +7147,7 @@ async function runAgentStart(argv: readonly string[]) {
         project_id: result.state.project_id,
         session_id: result.state.session_id,
         context_pack_id: result.state.context_pack_id,
-        state_path: currentSessionPathFor(result.state.project_dir),
+        state_path: await sessionStatePathFor(result.state.project_dir, result.state),
         previous_unclosed_session: result.start_result.previous_unclosed_session ?? null,
         previous_session_recovery: result.start_result.previous_session_recovery ?? null,
         spool_replay: spoolReplay,
@@ -7071,7 +7161,7 @@ async function runAgentStart(argv: readonly string[]) {
               projectId: result.state.project_id,
               sessionId: result.state.session_id,
               contextPackId: result.state.context_pack_id,
-              statePath: currentSessionPathFor(result.state.project_dir),
+              statePath: await sessionStatePathFor(result.state.project_dir, result.state),
               previousUnclosedSession: result.start_result.previous_unclosed_session,
               previousSessionRecovery: result.start_result.previous_session_recovery,
               consentScope,
@@ -7088,7 +7178,7 @@ async function runAgentStart(argv: readonly string[]) {
         transport: "remote_mcp",
         project_id: deferred.state.project_id,
         session_id: deferred.state.session_id,
-        state_path: currentSessionPathFor(deferred.state.project_dir),
+        state_path: await sessionStatePathFor(deferred.state.project_dir, deferred.state),
         spool_path: spoolPath(argv),
         local_id: deferred.local_id,
         remote_failure: deferred.failure,
@@ -7105,7 +7195,7 @@ async function runAgentStart(argv: readonly string[]) {
               mode: "offline_spool",
               projectId: deferred.state.project_id,
               sessionId: deferred.state.session_id,
-              statePath: currentSessionPathFor(deferred.state.project_dir),
+              statePath: await sessionStatePathFor(deferred.state.project_dir, deferred.state),
               spoolPath: spoolPath(argv),
               warning: `${output.warning} ${deferred.failure.code}`,
               consentScope
@@ -7129,7 +7219,7 @@ async function runAgentStart(argv: readonly string[]) {
       ok: true,
       action: "agent_start",
       mode: "offline_spool",
-      state_path: currentSessionPathFor(state.project_dir),
+      state_path: await sessionStatePathFor(state.project_dir, state),
       spool_path: spoolPath(argv),
       local_id: record.local_id,
       warning: "Server database is unavailable; capture records will sync later.",
@@ -7141,7 +7231,7 @@ async function runAgentStart(argv: readonly string[]) {
         : agentStartHumanReport({
             mode: "offline_spool",
             sessionId: state.session_id,
-            statePath: currentSessionPathFor(state.project_dir),
+            statePath: await sessionStatePathFor(state.project_dir, state),
             spoolPath: spoolPath(argv),
             warning: output.warning,
             consentScope
@@ -7158,7 +7248,7 @@ async function runAgentStart(argv: readonly string[]) {
       project_id: result.state.project_id,
       session_id: result.state.session_id,
       context_pack_id: result.state.context_pack_id,
-      state_path: currentSessionPathFor(result.state.project_dir),
+      state_path: await sessionStatePathFor(result.state.project_dir, result.state),
       previous_unclosed_session: result.start_result.previous_unclosed_session,
       previous_session_recovery: result.start_result.previous_session_recovery,
       recommended_next_action:
@@ -7175,7 +7265,7 @@ async function runAgentStart(argv: readonly string[]) {
             projectId: result.state.project_id,
             sessionId: result.state.session_id,
             contextPackId: result.state.context_pack_id,
-            statePath: currentSessionPathFor(result.state.project_dir),
+            statePath: await sessionStatePathFor(result.state.project_dir, result.state),
             previousUnclosedSession: result.start_result.previous_unclosed_session,
             previousSessionRecovery: result.start_result.previous_session_recovery,
             consentScope
@@ -7196,7 +7286,7 @@ async function runAgentEvent(argv: readonly string[]) {
   let spoolReplay = null;
   if (remoteConnection) {
     spoolReplay = await replayRemoteSpoolIfPending(argv, remoteConnection, "next_event");
-    state = (await readAgentSessionState(dir)) ?? state;
+    state = (await readAgentSessionState(dir, externalSessionId(argv))) ?? state;
     if (state?.status === "closed") state = null;
   }
   const title = parseFlag(argv, "--title") ?? summarizeText(text, 72);
@@ -7223,7 +7313,7 @@ async function runAgentEvent(argv: readonly string[]) {
 
   if (remoteConnection) {
     if (!state) {
-      const existing = await readAgentSessionState(dir);
+      const existing = await readAgentSessionState(dir, externalSessionId(argv));
       if (existing?.status === "offline") state = existing;
       else {
         try {
@@ -7788,6 +7878,7 @@ async function startCodexHookSession(
   const config = await readProjectConfig(dir);
   const started = await database.startSession({
     client_kind: "codex",
+    external_session_id: event.session_id,
     project_id: config?.project_id ?? null,
     project_path: dir,
     session_label: "codex-native-hook",
@@ -7798,6 +7889,7 @@ async function startCodexHookSession(
     schema_version: 1,
     status: "active",
     session_id: String(started.session_id),
+    external_session_id_hash: externalSessionIdHash(event.session_id),
     project_id: String(started.project_id),
     project_dir: dir,
     client_kind: "codex",
@@ -7817,14 +7909,33 @@ async function ensureCodexHookServerState(
   event: CodexHookEvent
 ) {
   const dir = projectDir(argv);
-  const state = await readAgentSessionState(dir);
+  const state = await readAgentSessionState(dir, event.session_id);
   if (
     state?.status === "active" &&
     state.native_hook?.client === "codex" &&
     state.native_hook.external_session_id === event.session_id
   ) {
     await assertAgentStateProjectBinding(database, state, dir);
-    return state;
+    if (event.hook_event_name !== "SessionStart") return state;
+    const started = await database.startSession({
+      client_kind: "codex",
+      external_session_id: event.session_id,
+      project_id: state.project_id ?? null,
+      project_path: dir,
+      session_label: "codex-native-hook",
+      resume_policy: "normal"
+    });
+    const sessionId = String(started.session_id);
+    if (sessionId === state.session_id) return state;
+    const resumed: AgentSessionState = {
+      ...state,
+      session_id: sessionId,
+      external_session_id_hash: externalSessionIdHash(event.session_id),
+      status: "active",
+      updated_at: new Date().toISOString()
+    };
+    await writeAgentSessionState(dir, resumed);
+    return resumed;
   }
   return startCodexHookSession(database, argv, event);
 }
@@ -7861,7 +7972,11 @@ async function persistCodexHookCheckpoint(
   state: AgentSessionState,
   action: Extract<CodexHookCaptureAction, { type: "checkpoint" }>
 ) {
-  return database.setCheckpoint(state.project_id, codexHookCheckpointPayload(action));
+  return database.setSessionCheckpoint(
+    state.session_id,
+    codexHookCheckpointPayload(action),
+    state.project_id
+  );
 }
 
 function codexHookCheckpointPayload(
@@ -7931,14 +8046,17 @@ async function ensureCodexHookOfflineState(
   transport: "local_database" | "remote_mcp" = "local_database"
 ) {
   const dir = projectDir(argv);
-  const existing = await readAgentSessionState(dir);
+  const existing = await readAgentSessionState(dir, event.session_id);
   const now = new Date().toISOString();
   const matching =
-    existing?.native_hook?.external_session_id === event.session_id ? existing : null;
+    existing && stateExternalSessionHash(existing) === externalSessionIdHash(event.session_id)
+      ? existing
+      : null;
   const state: AgentSessionState = {
     schema_version: 1,
     status: "offline",
     session_id: matching?.session_id ?? `local-${randomUUID()}`,
+    external_session_id_hash: externalSessionIdHash(event.session_id),
     project_id: matching?.project_id ?? null,
     project_dir: dir,
     client_kind: "codex",
@@ -8013,13 +8131,14 @@ async function ensureCodexHookRemoteState(
   event: CodexHookEvent
 ) {
   const dir = projectDir(argv);
-  const existing = await readAgentSessionState(dir);
+  const existing = await readAgentSessionState(dir, event.session_id);
   if (
     existing &&
     isUuid(existing.session_id) &&
     existing.native_hook?.client === "codex" &&
     existing.native_hook.external_session_id === event.session_id &&
-    existing.native_hook.transport === "remote_mcp"
+    existing.native_hook.transport === "remote_mcp" &&
+    event.hook_event_name !== "SessionStart"
   ) {
     return existing;
   }
@@ -8031,6 +8150,7 @@ async function ensureCodexHookRemoteState(
     {
       client_kind: "codex",
       client_version: recallantCliVersion,
+      external_session_id: event.session_id,
       project_path: null,
       session_label: "codex-native-hook",
       resume_policy: "normal"
@@ -8053,19 +8173,27 @@ async function ensureCodexHookRemoteState(
     );
   }
   const now = new Date().toISOString();
+  const prior =
+    existing?.client_kind === "codex" &&
+    stateExternalSessionHash(existing) === externalSessionIdHash(event.session_id)
+      ? existing
+      : null;
   const state: AgentSessionState = {
     schema_version: 1,
     status: "active",
     session_id: sessionId,
+    external_session_id_hash: externalSessionIdHash(event.session_id),
     project_id: remoteProjectId ?? identity.project_id,
     project_dir: dir,
     client_kind: "codex",
     client_version: recallantCliVersion,
     task_hint: "Automatic Codex audit capture",
-    started_at: now,
+    started_at: prior?.started_at ?? now,
     updated_at: now,
-    last_memory_write_at: now,
-    native_hook: nativeHookState(undefined, event, "server", 0, "remote_mcp")
+    last_memory_write_at: prior?.last_memory_write_at ?? now,
+    last_checkpoint_at: prior?.last_checkpoint_at ?? null,
+    last_event_id: prior?.last_event_id ?? null,
+    native_hook: nativeHookState(prior?.native_hook, event, "server", 0, "remote_mcp")
   };
   await writeAgentSessionState(dir, state);
   return state;
@@ -8085,7 +8213,8 @@ async function spoolCodexHookRemoteActions(
       action.type === "observation"
         ? codexHookObservationInput(action, state)
         : {
-            payload: codexHookCheckpointPayload(action)
+            payload: codexHookCheckpointPayload(action),
+            session_id: state.session_id
           };
     const record = await appendRemoteToolSpoolRecord(
       argv,
@@ -8128,7 +8257,10 @@ async function persistCodexHookRemoteActions(
   const pending = await getLocalSpoolStatus(argv);
   if (pending.unsynced_count > 0) {
     await spoolCodexHookRemoteActions(argv, event, actions);
-    return { mode: "offline_spool" as const, state: await readAgentSessionState(dir) };
+    return {
+      mode: "offline_spool" as const,
+      state: await readAgentSessionState(dir, event.session_id)
+    };
   }
   let state = await ensureCodexHookRemoteState(connection, argv, event);
   let lastEventId = state.last_event_id ?? null;
@@ -8150,7 +8282,7 @@ async function persistCodexHookRemoteActions(
       await callRemoteAgentTool(
         connection,
         "memory_set_checkpoint",
-        { payload },
+        { payload, session_id: state.session_id },
         state.session_id,
         codexHookConnectionTimeoutMs
       );
@@ -8338,6 +8470,105 @@ async function runCodexHook(argv: readonly string[]) {
 async function runAgentCheckpoint(argv: readonly string[]) {
   const dir = projectDir(argv);
   const payload = checkpointPayloadFromFlags(argv);
+  const remoteConnection = await readRemoteAgentConnection(dir);
+  if (remoteConnection) {
+    let state = await loadClosableAgentState(argv);
+    if (!state) {
+      try {
+        state = (await startRemoteAgentSession(remoteConnection, argv)).state;
+      } catch (error) {
+        state = (await deferRemoteAgentStartup(remoteConnection, argv, error)).state;
+      }
+    }
+    const args = {
+      session_id: state.session_id,
+      project_id: state.project_id,
+      client_kind: state.client_kind,
+      payload,
+      metadata: { capture_kind: "recallant_agent_checkpoint" }
+    };
+    try {
+      const pending = await getLocalSpoolStatus(argv);
+      if (pending.unsynced_count > 0) {
+        throw new Error("Earlier remote MCP records must replay before this checkpoint.");
+      }
+      const result = await callRemoteAgentTool(
+        remoteConnection,
+        "memory_agent_checkpoint",
+        args,
+        state.session_id
+      );
+      const now = new Date().toISOString();
+      const nextState: AgentSessionState = {
+        ...state,
+        status: "active",
+        updated_at: now,
+        last_checkpoint_at: now,
+        last_memory_write_at: now,
+        last_event_id: typeof result.event_id === "string" ? result.event_id : state.last_event_id
+      };
+      await writeAgentSessionState(dir, nextState);
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_checkpoint",
+            mode: "remote_mcp",
+            ownership: "session",
+            project_id: state.project_id,
+            session_id: state.session_id,
+            checkpoint_updated_at: result.checkpoint_updated_at,
+            event_id: result.event_id ?? null,
+            searchable_memory_created: false,
+            project_log_update: {
+              status: "skipped",
+              reason: "session_checkpoint_is_private_to_this_chat"
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+    } catch (error) {
+      const record = await appendRemoteToolSpoolRecord(
+        argv,
+        "memory_agent_checkpoint",
+        args,
+        state.session_id,
+        dedupHash("remote-agent-checkpoint", {
+          session_id: state.session_id,
+          payload,
+          created_at: new Date().toISOString()
+        })
+      );
+      const now = new Date().toISOString();
+      await writeAgentSessionState(dir, {
+        ...state,
+        status: "offline",
+        updated_at: now,
+        last_checkpoint_at: now,
+        last_memory_write_at: now,
+        last_event_id: String(record.local_id)
+      });
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: true,
+            action: "agent_checkpoint",
+            mode: "offline_spool",
+            ownership: "session",
+            session_id: state.session_id,
+            local_id: record.local_id,
+            spool_path: spoolPath(argv),
+            warning: remoteMcpFailure(error).message
+          },
+          null,
+          2
+        )}\n`
+      );
+    }
+    return;
+  }
   const database = createRecallantDbFromEnv();
   let state = await loadActiveAgentState(argv);
   if (database) {
@@ -8348,7 +8579,11 @@ async function runAgentCheckpoint(argv: readonly string[]) {
       } else {
         await assertAgentStateProjectBinding(database, state, dir);
       }
-      const checkpoint = await database.setCheckpoint(state.project_id, payload);
+      const checkpoint = await database.setSessionCheckpoint(
+        state.session_id,
+        payload,
+        state.project_id
+      );
       const event = await database.appendEvent({
         session_id: state.session_id,
         client_kind: state.client_kind,
@@ -8362,46 +8597,14 @@ async function runAgentCheckpoint(argv: readonly string[]) {
           created_at: new Date().toISOString()
         })
       });
-      const checkpointMemory = await database.createAgentMemory({
-        project_id: state.project_id,
-        project_path: dir,
-        memory_type: "checkpoint",
-        scope: "project",
-        scope_kind: "project",
-        title: summarizeText(`Checkpoint: ${String(payload.current_focus)}`, 72),
-        body: [
-          `Status: ${String(payload.status ?? "checkpoint")}`,
-          `Current focus: ${String(payload.current_focus ?? "")}`,
-          `Next step: ${String(payload.next_step ?? "")}`,
-          payload.summary ? `Summary: ${String(payload.summary)}` : null
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        confidence: 0.95,
-        created_by: "agent",
-        source_refs: [
-          {
-            source_kind: "event",
-            source_id: String(event.event_id),
-            quote: summarizeText(
-              `Checkpoint: ${String(payload.current_focus)} Next: ${String(payload.next_step)}`,
-              500
-            ),
-            metadata: { capture_kind: "agent_checkpoint" }
-          }
-        ],
-        metadata: { created_from: "recallant_agent_checkpoint" }
-      });
       const now = new Date().toISOString();
       await writeAgentSessionState(dir, {
         ...state,
         updated_at: now,
         last_checkpoint_at: now,
         last_memory_write_at: now,
-        last_event_id: String(event.event_id),
-        last_memory_id: String(checkpointMemory.memory_id)
+        last_event_id: String(event.event_id)
       });
-      const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
       process.stdout.write(
         `${JSON.stringify(
           {
@@ -8410,10 +8613,14 @@ async function runAgentCheckpoint(argv: readonly string[]) {
             mode: "server",
             project_id: state.project_id,
             session_id: state.session_id,
+            ownership: "session",
             checkpoint_updated_at: checkpoint.updated_at,
             event_id: event.event_id,
-            memory: checkpointMemory,
-            project_log_update: projectLogUpdate
+            searchable_memory_created: false,
+            project_log_update: {
+              status: "skipped",
+              reason: "session_checkpoint_is_private_to_this_chat"
+            }
           },
           null,
           2
@@ -9041,7 +9248,6 @@ async function runAgentCloseout(argv: readonly string[]) {
       last_event_id: String(event.event_id),
       last_memory_id: String(closeoutMemory.memory_id)
     });
-    const projectLogUpdate = await safelyUpdateProjectLogCheckpoint(dir, payload);
     process.stdout.write(
       `${JSON.stringify(
         {
@@ -9052,7 +9258,10 @@ async function runAgentCloseout(argv: readonly string[]) {
           session_id: state.session_id,
           closeout,
           lifecycle,
-          project_log_update: projectLogUpdate
+          project_log_update: {
+            status: "skipped",
+            reason: "session_checkpoint_is_private_to_this_chat"
+          }
         },
         null,
         2
@@ -9137,7 +9346,11 @@ async function runDemoCapture(argv: readonly string[]) {
       updated_at: new Date().toISOString(),
       source: "recallant-demo-capture"
     };
-    const checkpoint = await database.setCheckpoint(String(config.project_id), checkpointPayload);
+    const checkpoint = await database.setSessionCheckpoint(
+      sessionId,
+      checkpointPayload,
+      String(config.project_id)
+    );
     const checkpointEvent = await database.appendEvent({
       session_id: sessionId,
       client_kind: started.state.client_kind,
@@ -9151,7 +9364,6 @@ async function runDemoCapture(argv: readonly string[]) {
         checkpointPayload
       })
     });
-    await updateProjectLogCheckpoint(dir, checkpointPayload);
     const now = new Date().toISOString();
     await writeAgentSessionState(dir, {
       ...started.state,
@@ -9422,12 +9634,14 @@ async function runRemoteSpoolSync(
   const dir = projectDir(argv);
   const synced = { ...manifest.synced };
   const sessionMappings = { ...manifest.session_mappings };
-  const unsynced = records.filter((record) => !synced[String(record.local_id)]);
+  const { unsynced, quarantined_count } = await pendingSpoolRecords(argv, records, manifest);
   let syncedCount = 0;
   let failedRecord: Record<string, unknown> | null = null;
   let failure: ReturnType<typeof remoteMcpFailure> | null = null;
-  let closeoutSessionId: string | null = null;
-  let replayedContextPackId: string | null = null;
+  const closedSessionIds = new Set<string>();
+  const replayedContextPacks = new Map<string, string>();
+  const replayExternalIds = new Set<string>();
+  const affectedSessionIds = new Set<string>();
 
   const persistManifest = async () => {
     await mkdir(spoolDir(argv), { recursive: true });
@@ -9437,10 +9651,25 @@ async function runRemoteSpoolSync(
     );
   };
 
-  const ensureReplaySession = async (localSessionId: string) => {
+  const replayExternalId = (args: Record<string, unknown>) => {
+    const metadata =
+      args.metadata && typeof args.metadata === "object" && !Array.isArray(args.metadata)
+        ? (args.metadata as Record<string, unknown>)
+        : null;
+    return args.client_kind === "codex" &&
+      metadata?.adapter === "codex_native_hook" &&
+      typeof metadata.external_session_id === "string" &&
+      metadata.external_session_id.trim()
+      ? metadata.external_session_id
+      : null;
+  };
+
+  const ensureReplaySession = async (localSessionId: string, args: Record<string, unknown>) => {
     if (sessionMappings[localSessionId]) return sessionMappings[localSessionId];
+    const externalId = replayExternalId(args);
     const started = await callRemoteAgentTool(connection, "memory_start_session", {
-      client_kind: "generic",
+      client_kind: externalId ? "codex" : "generic",
+      ...(externalId ? { external_session_id: externalId } : {}),
       client_version: recallantCliVersion,
       project_path: null,
       session_label: "remote-spool-replay",
@@ -9467,6 +9696,7 @@ async function runRemoteSpoolSync(
       const localSessionId = String(
         payload.local_session_id ?? payload.session_id ?? `spool-${String(record.local_id)}`
       );
+      affectedSessionIds.add(localSessionId);
       let toolName: string;
       let args: Record<string, unknown>;
       if (record.record_kind === "remote_tool") {
@@ -9551,7 +9781,7 @@ async function runRemoteSpoolSync(
           typeof args.session_id === "string" ? args.session_id : localSessionId;
         remoteSessionId = isUuid(originalSessionId)
           ? originalSessionId
-          : await ensureReplaySession(localSessionId);
+          : await ensureReplaySession(localSessionId, args);
         if ("session_id" in args || toolName !== "memory_create_agent_memory") {
           args.session_id = remoteSessionId;
         }
@@ -9571,11 +9801,17 @@ async function runRemoteSpoolSync(
           status: typeof result.status === "string" ? result.status : "created",
           synced_at: new Date().toISOString()
         };
-        if (toolName === "memory_closeout") closeoutSessionId = remoteSessionId;
+        if (toolName === "memory_closeout") closedSessionIds.add(remoteSessionId);
         if (toolName === "memory_get_context_pack" && typeof result.context_pack_id === "string") {
-          replayedContextPackId = result.context_pack_id;
+          replayedContextPacks.set(remoteSessionId, result.context_pack_id);
         }
       }
+      const externalId =
+        toolName === "memory_start_session" && typeof args.external_session_id === "string"
+          ? args.external_session_id
+          : replayExternalId(args);
+      if (externalId) replayExternalIds.add(externalId);
+      if (remoteSessionId) affectedSessionIds.add(remoteSessionId);
       syncedCount += 1;
       await persistManifest();
     } catch (error) {
@@ -9585,14 +9821,35 @@ async function runRemoteSpoolSync(
     }
   }
 
-  const state = await readAgentSessionState(dir);
-  if (state) {
+  const sessionFiles = await readdir(join(recallantDir(dir), "sessions")).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  });
+  const states = await Promise.all([
+    readAgentSessionState(dir),
+    ...Array.from(replayExternalIds, (externalId) => readAgentSessionState(dir, externalId)),
+    ...sessionFiles
+      .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
+      .map(async (name) => {
+        const content = await readOptional(join(recallantDir(dir), "sessions", name));
+        if (!content) return null;
+        const state = JSON.parse(content) as AgentSessionState;
+        return stateExternalSessionHash(state) === name.slice(0, -5) ? state : null;
+      })
+  ]);
+  const writtenStates = new Set<string>();
+  for (const state of states) {
+    if (!state || !affectedSessionIds.has(state.session_id)) continue;
+    const stateKey = stateExternalSessionHash(state) ?? state.session_id;
+    if (writtenStates.has(stateKey)) continue;
+    writtenStates.add(stateKey);
     const mappedSessionId = sessionMappings[state.session_id] ?? state.session_id;
+    const replayedContextPackId = replayedContextPacks.get(mappedSessionId);
     await writeAgentSessionState(dir, {
       ...state,
       session_id: mappedSessionId,
       project_id: state.project_id ?? connection.scope.credential_scope.project_id,
-      status: closeoutSessionId === mappedSessionId ? "closed" : failure ? "offline" : "active",
+      status: closedSessionIds.has(mappedSessionId) ? "closed" : failure ? "offline" : "active",
       updated_at: new Date().toISOString(),
       context_pack_id: replayedContextPackId ?? state.context_pack_id,
       last_context_read_at: replayedContextPackId
@@ -9608,6 +9865,7 @@ async function runRemoteSpoolSync(
     transport: "remote_mcp" as const,
     synced_count: syncedCount,
     remaining_count: unsynced.length - syncedCount,
+    quarantined_count,
     failed_local_id: failedRecord ? String(failedRecord.local_id) : null,
     remote_failure: failure,
     manifest_path: spoolManifestPath(argv),
@@ -9629,12 +9887,13 @@ async function replayRemoteSpoolIfPending(
     const locked = await withSpoolSyncLock(argv, async () => {
       const records = await readJsonl(spoolPath(argv));
       const manifest = await readSpoolManifest(argv);
-      const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+      const { unsynced, quarantined_count } = await pendingSpoolRecords(argv, records, manifest);
       if (unsynced.length === 0) {
         return {
           attempted: false,
           trigger,
           reason: "no_pending_records" as const,
+          quarantined_count,
           synced_count: 0,
           remaining_count: 0,
           remote_failure: null
@@ -9649,6 +9908,7 @@ async function replayRemoteSpoolIfPending(
         reason: result.ok ? ("replayed" as const) : ("replay_failed" as const),
         synced_count: result.synced_count,
         remaining_count: result.remaining_count,
+        quarantined_count: result.quarantined_count,
         remote_failure: result.remote_failure
       };
     });
@@ -9681,7 +9941,7 @@ async function runSyncSpool(argv: readonly string[]) {
   const dir = projectDir(argv);
   const records = await readJsonl(spoolPath(argv));
   const manifest = await readSpoolManifest(argv);
-  const unsynced = records.filter((record) => !manifest.synced[String(record.local_id)]);
+  const { unsynced, quarantined_count } = await pendingSpoolRecords(argv, records, manifest);
   if (argv.includes("--dry-run")) {
     process.stdout.write(
       `${JSON.stringify(
@@ -9691,6 +9951,7 @@ async function runSyncSpool(argv: readonly string[]) {
           dry_run: true,
           writes_database: false,
           unsynced_count: unsynced.length,
+          quarantined_count,
           records: unsynced.map((record) => ({
             local_id: record.local_id,
             record_kind: record.record_kind,
@@ -9802,6 +10063,7 @@ async function runSyncSpool(argv: readonly string[]) {
         action: "sync_spool",
         dry_run: false,
         synced_count: unsynced.length,
+        quarantined_count,
         manifest_path: spoolManifestPath(argv),
         mappings: synced
       },

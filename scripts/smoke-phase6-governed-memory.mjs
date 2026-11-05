@@ -286,7 +286,6 @@ if (
 }
 
 const searchableCheckpoint = await callNextTool("memory_agent_checkpoint", {
-  session_id: started.session_id,
   client_kind: "codex",
   payload: {
     current_status: "phase4 searchable checkpoint smoke",

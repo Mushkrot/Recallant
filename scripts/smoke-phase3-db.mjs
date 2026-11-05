@@ -245,6 +245,7 @@ const recovery = await callTool(10, "memory_start_session", {
   client_version: "smoke",
   project_path: projectDir,
   session_label: "phase3-recovery",
+  recover_session_id: unclosed.session_id,
   resume_policy: "normal"
 });
 if (
@@ -368,9 +369,9 @@ try {
         (SELECT status FROM sessions WHERE id = $6) AS unclosed_status,
         (SELECT status FROM sessions WHERE id = $7) AS recovery_status,
         (SELECT last_heartbeat_at IS NOT NULL FROM sessions WHERE id = $1) AS has_heartbeat,
-        (SELECT count(*)::int FROM checkpoints WHERE project_id = $5) AS checkpoint_count,
-        (SELECT payload->>'current_status' FROM checkpoints WHERE project_id = $5) AS checkpoint_status,
-        (SELECT payload->>'next_step' FROM checkpoints WHERE project_id = $5) AS checkpoint_next_step,
+        (SELECT count(*)::int FROM session_checkpoints WHERE session_id = $7) AS checkpoint_count,
+        (SELECT payload->>'current_status' FROM session_checkpoints WHERE session_id = $7) AS checkpoint_status,
+        (SELECT payload->>'next_step' FROM session_checkpoints WHERE session_id = $7) AS checkpoint_next_step,
         (
           SELECT count(*)::int
           FROM agent_memories

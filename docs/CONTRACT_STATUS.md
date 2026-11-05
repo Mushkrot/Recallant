@@ -164,10 +164,11 @@ The same pilot drove the release gates now used for remote existing-project read
 - `memory_get_readiness_status` now exposes persistent bounded readiness evidence, so a repeated
   remote `agent-start` stays `configured` after checkpoint-only/capture proof and reports
   `semantic_memory_ready` only after the governed semantic marker proof;
-- the baseline checkpoint parity contract is state-only: `memory_set_checkpoint` writes checkpoint
-  state and reports no searchable memory id; normal closeout uses `memory_closeout` / CLI
-  `agent-closeout`, while searchable checkpoint memory uses the explicit
-  `memory_agent_checkpoint` / CLI `agent-checkpoint` path;
+- the checkpoint contract is session-scoped: `memory_set_checkpoint` and
+  `memory_get_checkpoint` receive the same `session_id`; the legacy project row is marked
+  ambiguous and excluded from context packs; normal closeout updates the session checkpoint and
+  keeps project-shared closeout memories; `agent-checkpoint` does not publish its private next step
+  to project memory or `PROJECT_LOG.md`;
 - remote existing-project migration needs a guided, review-first path that inventories safe docs and
   risky paths, groups entries as `summarize_to_memory`, `keep_as_reference`, `skip`, or `ask_owner`,
   then writes concise governed memories only after approval; risky output is path/class/count based
@@ -203,12 +204,12 @@ Remote existing-project readiness is a sequence of proof surfaces, not one boole
 |------|--------------------------------|---------------|-------|
 | Remote MCP ready | Yes | `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` | Confirms remote consent/config and scoped bridge guidance. |
 | Session/context ready | Yes | `memory_start_session` + `memory_get_context_pack`, or `recallant remote-doctor --capture-proof` | Proves startup context, not checkpoint state or semantic recall. |
-| Checkpoint state | Optional diagnostic | `memory_set_checkpoint` + `memory_get_checkpoint` | State-only parity check; not semantic recall proof. |
+| Checkpoint state | Optional diagnostic | `memory_set_checkpoint` + `memory_get_checkpoint` with the same `session_id` | Session-owned state-only proof; not semantic recall proof. Legacy project rows remain ambiguous. |
 | Governed semantic recall | Yes | synthetic `memory_create_agent_memory` marker + `memory_recall_agent_memories` | Must use non-secret marker content and project scope. |
 | Existing-project migration | Yes before importing old history | read-only inventory, risk classification, owner approval, concise governed memories/imports, recall verification | Risk output is path/class/count oriented and secret references are names-only. |
 | External-machine evidence | Yes before release-candidate remote claims | `recallant remote-acceptance` evidence bundle plus validator or equivalent server-side trace verification | The remote machine must not receive Postgres, `RECALLANT_DATABASE_URL`, Workbench/admin auth, raw artifacts, backups, or provider secrets. |
 | Remote live external canary | Yes before manual remote-client checks | `npm run remote-live-external-canary:smoke`, and for operator live checks `remote-live-external-canary --live --json` with server trace validation enabled or an equivalent server-side trace gate | Release pass requires `server_trace_validation: pass`, cleanup revoked/deleted, semantic marker recall, next-session recall, evidence validation, and redaction all passing. Server trace validation uses the redacted remote MCP audit envelope plus central DB facts; skipped validation is `not_release_pass`. Public docs use placeholder server URLs only. |
-| Searchable checkpoint memory | Optional checkpoint memory | `memory_agent_checkpoint` or CLI `agent-checkpoint` | Use only when the checkpoint itself should become governed searchable memory. Normal closeout uses `memory_closeout` or CLI `agent-closeout`. |
+| Project-shared checkpoint memory | Optional explicit project memory | `memory_agent_checkpoint` without `session_id` | Use only when an operator intends to share checkpoint content project-wide. A session-scoped `memory_agent_checkpoint` and CLI `agent-checkpoint` keep state private. |
 | Live central-server readiness smoke | Optional operator gate | `remote-mcp-live-readiness:smoke` / `remote-connect-live-readiness:smoke` with operator env vars | Skips safely without live inputs and must not be treated as a deterministic fixture. |
 | Local `attach --confirm` | Not a remote-next-step | explicit local/server-local attach or import path only | Do not tell remote-only clients to run local attach after `remote_mcp_ready`. |
 

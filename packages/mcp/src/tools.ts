@@ -166,7 +166,7 @@ export const safeSemanticMarkerMemoryExample = {
   scope: "project",
   audience: governedMemoryAudienceExample,
   title: "Safe Recallant semantic marker",
-  body: "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  body: "Synthetic diagnostic marker recallant_safe_semantic_marker_example for create+recall proof.",
   confidence: 1,
   source_refs: [],
   created_by: "agent",
@@ -179,8 +179,8 @@ export const safeSemanticMarkerRecallExample = {
   query: "recallant_safe_semantic_marker_example",
   scope: "project",
   memory_types: ["work_log"],
-  include_candidates: true,
-  include_needs_review: true,
+  include_candidates: false,
+  include_needs_review: false,
   top_k: 5,
   max_chars_total: 4000
 } as const;
@@ -887,7 +887,9 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
       project_path: nullableString,
       project_dir: nullableString.describe("Compatibility alias for project_path."),
       session_label: nullableString,
-      resume_policy: z.enum(["normal", "force_new", "recover_previous"]).default("normal")
+      resume_policy: z.enum(["normal", "force_new", "recover_previous"]).default("normal"),
+      external_session_id: z.string().trim().min(1).max(512).optional(),
+      recover_session_id: uuidString.nullable().optional()
     }),
     handler: async (args) => {
       const database = db();
@@ -898,6 +900,23 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           projectId: stringInput(scoped.input.project_id),
           projectPath: stringInput(scoped.input.project_path)
         });
+        const context = currentRecallantToolsContext();
+        const requestedProjectId = identity.project_id ?? stringInput(scoped.input.project_id);
+        const requestedProjectPath =
+          identity.project_path ?? stringInput(scoped.input.project_path);
+        if (
+          context.enforceProjectScope &&
+          context.projectId &&
+          context.developerId &&
+          requestedProjectId === context.projectId &&
+          requestedProjectPath
+        ) {
+          await database.initializeRemoteWorkspacePath({
+            projectId: context.projectId,
+            developerId: context.developerId,
+            projectPath: requestedProjectPath
+          });
+        }
         const started = await database.startSession({
           ...(scoped.input as StartSessionInput),
           project_id: identity.project_id ?? undefined,
@@ -1945,25 +1964,49 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
   {
     name: "memory_get_checkpoint",
     title: "Get Checkpoint",
-    description: "Fetch the current project checkpoint.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    description:
+      "Fetch a session-owned checkpoint when session_id is provided. Without it, returns legacy project checkpoint state with ambiguous ownership.",
+    inputSchema: z.object({ session_id: uuidString.nullable().optional() }),
+    handler: async (args) => {
       const database = db();
       if (database) {
-        return database.getCheckpoint(
-          currentRecallantToolsContext().projectId ?? process.env.RECALLANT_PROJECT_ID
-        );
+        if (args.session_id) {
+          const context = currentRecallantToolsContext();
+          const identity = await projectIdentityPreflight({
+            database,
+            projectId: context.projectId ?? process.env.RECALLANT_PROJECT_ID,
+            projectPath: context.projectPath ?? null
+          });
+          return {
+            ...(await database.getSessionCheckpoint(
+              args.session_id as string,
+              identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID
+            )),
+            ownership: "session",
+            session_id: args.session_id
+          };
+        }
+        return database
+          .getCheckpoint(
+            currentRecallantToolsContext().projectId ?? process.env.RECALLANT_PROJECT_ID
+          )
+          .then((checkpoint) => ({ ...checkpoint, ownership: "ambiguous_legacy_project" }));
       }
-      return stubResponse("memory_get_checkpoint", { payload: null, updated_at: null });
+      return stubResponse("memory_get_checkpoint", {
+        payload: null,
+        updated_at: null,
+        ownership: args.session_id ? "session" : "ambiguous_legacy_project"
+      });
     }
   },
   {
     name: "memory_set_checkpoint",
     title: "Set Checkpoint",
     description:
-      "Set the current project checkpoint state only. This does not create searchable governed memory; use memory_agent_checkpoint for searchable checkpoint closeout.",
+      "Set checkpoint state for session_id when provided. Without a session_id, updates the legacy project checkpoint, whose owner is ambiguous. This does not create searchable governed memory.",
     inputSchema: z.object({
-      payload: checkpointPayloadSchema
+      payload: checkpointPayloadSchema,
+      session_id: uuidString.nullable().optional()
     }),
     handler: async (args) => {
       const database = db();
@@ -1974,29 +2017,40 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
           projectId: context.projectId ?? process.env.RECALLANT_PROJECT_ID,
           projectPath: context.projectPath ?? null
         });
-        const checkpoint = await database.setCheckpoint(
-          identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID,
-          args.payload as JsonObject
-        );
+        const projectId =
+          identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID;
+        const checkpoint = args.session_id
+          ? await database.setSessionCheckpoint(
+              args.session_id as string,
+              args.payload as JsonObject,
+              projectId
+            )
+          : await database.setCheckpoint(projectId, args.payload as JsonObject);
         try {
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
+            ownership: args.session_id ? "session" : "ambiguous_legacy_project",
+            session_id: args.session_id ?? null,
             checkpoint_state_only: true,
             searchable_memory_created: false,
             memory_id: null,
-            repo_sync: await syncProjectLog(
-              args.payload as JsonObject,
-              database,
-              identity.project_id ?? context.projectId ?? process.env.RECALLANT_PROJECT_ID,
-              identity.project_path ?? context.projectPath ?? null,
-              { allowEnvironmentProjectPath: context.allowEnvironmentProjectPath }
-            )
+            repo_sync: args.session_id
+              ? { status: "skipped", reason: "session_checkpoint_is_private_to_this_chat" }
+              : await syncProjectLog(
+                  args.payload as JsonObject,
+                  database,
+                  projectId,
+                  identity.project_path ?? context.projectPath ?? null,
+                  { allowEnvironmentProjectPath: context.allowEnvironmentProjectPath }
+                )
           };
         } catch (error) {
           return {
             ok: true,
             updated_at: checkpoint?.updated_at ?? nowIso(),
+            ownership: args.session_id ? "session" : "ambiguous_legacy_project",
+            session_id: args.session_id ?? null,
             checkpoint_state_only: true,
             searchable_memory_created: false,
             memory_id: null,
@@ -2020,7 +2074,7 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     name: "memory_agent_checkpoint",
     title: "Create Agent Checkpoint",
     description:
-      "Explicit high-level checkpoint closeout: update checkpoint state, append a checkpoint event when a session_id is available, and create a searchable governed checkpoint memory.",
+      "With session_id, save a private session checkpoint and append a checkpoint event. Without session_id, update the legacy project checkpoint and create a searchable project checkpoint memory.",
     inputSchema: z.object({
       session_id: uuidString.nullable().optional(),
       client_kind: z.string().min(1).default("mcp"),
@@ -2033,14 +2087,12 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
     handler: async (args) => {
       const database = db();
       const payload = args.payload as JsonObject;
-      const context = currentRecallantToolsContext();
       const scoped = scopedProjectInputWithDiagnostics(args, {
         includeEnvironmentProjectScope: true
       });
       const projectId = stringInput(scoped.input.project_id);
       const projectPath = stringInput(scoped.input.project_path);
-      const sessionId =
-        typeof args.session_id === "string" ? args.session_id : (context.sessionId ?? null);
+      const sessionId = typeof args.session_id === "string" ? args.session_id : null;
       if (database) {
         const requestedIdentity = await projectIdentityPreflight({
           database,
@@ -2050,22 +2102,38 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         const projectContext = requestedIdentity.project_id
           ? { projectId: requestedIdentity.project_id }
           : await database.ensureProject(projectPath ?? undefined);
-        const checkpoint = await database.setCheckpoint(projectContext.projectId, payload);
+        const checkpoint = sessionId
+          ? await database.setSessionCheckpoint(sessionId, payload, projectContext.projectId)
+          : await database.setCheckpoint(projectContext.projectId, payload);
         const eventText = checkpointEventText(payload);
-        const event = sessionId
-          ? await database.appendEvent({
-              session_id: sessionId,
-              client_kind: String(args.client_kind ?? "mcp"),
-              event_kind: "checkpoint",
-              text: eventText,
-              metadata: {
-                capture_kind: "memory_agent_checkpoint",
-                checkpoint_payload: payload,
-                ...(args.metadata as JsonObject)
-              },
-              raw_artifacts: []
-            })
-          : null;
+        const event = await database.appendEvent({
+          project_id: projectContext.projectId,
+          session_id: sessionId,
+          client_kind: String(args.client_kind ?? "mcp"),
+          event_kind: "checkpoint",
+          text: eventText,
+          metadata: {
+            capture_kind: "memory_agent_checkpoint",
+            checkpoint_payload: payload,
+            ...(args.metadata as JsonObject)
+          },
+          raw_artifacts: []
+        });
+        if (sessionId) {
+          return {
+            ok: true,
+            action: "memory_agent_checkpoint",
+            ownership: "session",
+            session_id: sessionId,
+            checkpoint_updated_at: checkpoint?.updated_at ?? nowIso(),
+            checkpoint_state_only: true,
+            searchable_memory_created: false,
+            event_appended: Boolean(event),
+            event_id: event?.event_id ?? null,
+            memory_id: null,
+            ...projectScopeDiagnosticOutput(scoped)
+          };
+        }
         const sourceRefs = event
           ? [
               {
@@ -2123,12 +2191,16 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
         ok: true,
         action: "memory_agent_checkpoint",
         checkpoint_updated_at: nowIso(),
-        checkpoint_state_only: false,
-        searchable_memory_created: true,
+        ownership: sessionId ? "session" : "ambiguous_legacy_project",
+        session_id: sessionId,
+        checkpoint_state_only: Boolean(sessionId),
+        searchable_memory_created: !sessionId,
         event_appended: false,
         event_id: null,
-        memory_id: randomUUID(),
-        memory: { status: "accepted", use_policy: "recall_allowed", memory_type: "checkpoint" },
+        memory_id: sessionId ? null : randomUUID(),
+        memory: sessionId
+          ? null
+          : { status: "accepted", use_policy: "recall_allowed", memory_type: "checkpoint" },
         ...projectScopeDiagnosticOutput(scoped)
       });
     }
@@ -2638,22 +2710,10 @@ export const recallantToolsBase: readonly RecallantToolDefinition[] = [
             `Closeout created ${needsReviewIds.length} governed-memory candidate(s) requiring review.`
           );
         }
-        let projectLogUpdate: Awaited<ReturnType<typeof syncProjectLog>>;
-        try {
-          projectLogUpdate = await syncProjectLog(
-            args.checkpoint_payload as JsonObject,
-            database,
-            closeoutProjectId,
-            identity.project_path ?? context.projectPath ?? sessionBinding.primary_path,
-            { allowEnvironmentProjectPath: context.allowEnvironmentProjectPath }
-          );
-        } catch (error) {
-          projectLogUpdate = {
-            status: "failed",
-            reason: error instanceof Error ? error.message : String(error)
-          };
-          warnings.push(`Failed to update PROJECT_LOG.md: ${projectLogUpdate.reason}`);
-        }
+        const projectLogUpdate = {
+          status: "skipped",
+          reason: "session_checkpoint_is_private_to_this_chat"
+        };
         const lifecycleWarnings = [...warnings, ...recallWarnings, ...nextSessionContext.warnings];
         const lifecycle = buildAgentLifecycleCloseoutResult({
           mode: "server",

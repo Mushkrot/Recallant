@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -15,6 +15,11 @@ const remoteSessionId = randomUUID();
 const projectDir = join(tmpdir(), `recallant-r2-remote-hook-${randomUUID()}`);
 const requests = [];
 let rejectWrites = false;
+
+function sessionStatePath(externalSessionId) {
+  const hash = createHash("sha256").update(externalSessionId).digest("hex");
+  return join(projectDir, ".recallant", "sessions", `${hash}.json`);
+}
 
 function readBody(request) {
   return new Promise((resolveBody, reject) => {
@@ -140,16 +145,16 @@ try {
     prompt: `never persist api_key=${secret}`
   });
   assert.equal(second.mode, "remote_mcp");
-  assert.equal(second.actions, 2);
+  assert.equal(second.actions, 1);
 
   assert.deepEqual(
     requests.map((request) => request.body.params.name),
-    [
-      "memory_start_session",
-      "memory_append_observation",
-      "memory_append_observation",
-      "memory_set_checkpoint"
-    ]
+    ["memory_start_session", "memory_append_observation", "memory_append_observation"]
+  );
+  assert.equal(
+    requests[0].body.params.arguments.external_session_id,
+    sessionId,
+    "remote hook must pass stable Codex chat identity when starting Recallant session"
   );
   for (const request of requests) {
     assert.equal(request.authorization, `Bearer ${credential}`);
@@ -160,7 +165,7 @@ try {
   const serialized = JSON.stringify(requests);
   assert.equal(serialized.includes(secret), false, "remote hook payload leaked a secret");
   assert.equal(
-    await readFile(join(projectDir, ".recallant", "current-session.json"), "utf8").then(
+    await readFile(sessionStatePath(sessionId), "utf8").then(
       (value) => JSON.parse(value).native_hook.last_mode
     ),
     "server"
@@ -181,12 +186,12 @@ try {
   assert.equal(spool.record_kind, "remote_tool");
   assert.equal(spool.payload.tool_name, "memory_append_observation");
   const fallbackState = JSON.parse(
-    await readFile(join(projectDir, ".recallant", "current-session.json"), "utf8")
+    await readFile(sessionStatePath(sessionId), "utf8")
   );
   assert.equal(fallbackState.status, "offline");
   assert.equal(fallbackState.native_hook.transport, "remote_mcp");
   process.stdout.write(
-    `${JSON.stringify({ status: "pass", transport: "remote_mcp", observations: 2, checkpoint: "pass", redaction: "pass", local_database: "not_used", local_spool: "ordered_fallback" }, null, 2)}\n`
+    `${JSON.stringify({ status: "pass", transport: "remote_mcp", observations: 2, chat_identity: "session_scoped", compaction: "observation_only", redaction: "pass", local_database: "not_used", local_spool: "ordered_fallback" }, null, 2)}\n`
   );
 } finally {
   await new Promise((resolveClose) => server.close(resolveClose));

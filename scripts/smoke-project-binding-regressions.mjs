@@ -231,12 +231,15 @@ async function projectIdsWithMarker(database, table, marker) {
     events: "payload::text",
     chunks: "text",
     agent_memories: "body || ' ' || title || ' ' || metadata::text",
-    checkpoints: "payload::text"
+    checkpoints: "payload::text",
+    session_checkpoints: "c.payload::text"
   };
   const column = columnByTable[table];
   if (!column) throw new Error(`Unknown marker table: ${table}`);
   const rows = await database.pool.query(
-    `SELECT DISTINCT project_id FROM ${table} WHERE ${column} LIKE $1 ORDER BY project_id`,
+    table === "session_checkpoints"
+      ? `SELECT DISTINCT s.project_id FROM session_checkpoints c JOIN sessions s ON s.id = c.session_id WHERE ${column} LIKE $1 ORDER BY s.project_id`
+      : `SELECT DISTINCT project_id FROM ${table} WHERE ${column} LIKE $1 ORDER BY project_id`,
     [`%${marker}%`]
   );
   return rows.rows.map((row) => String(row.project_id));
@@ -612,7 +615,7 @@ async function runCloseoutSessionDerivedProjectCase() {
       [[candidateMemoryId, lifecycleMemoryId].filter(Boolean)]
     );
     const checkpointRows = await runtimeDb.pool.query(
-      "SELECT DISTINCT project_id FROM checkpoints WHERE project_id = ANY($1::uuid[]) ORDER BY project_id",
+      "SELECT DISTINCT s.project_id FROM session_checkpoints c JOIN sessions s ON s.id = c.session_id WHERE s.project_id = ANY($1::uuid[]) ORDER BY s.project_id",
       [[sessionProject.id, runtimeProject.id]]
     );
     const nextSessionProject = nextSessionId
@@ -684,7 +687,7 @@ async function runDemoCaptureConfigProjectIdCase() {
     const memoryProjectIds = await projectIdsWithMarker(fixture.configDb, "agent_memories", marker);
     const checkpointProjectIds = await projectIdsWithMarker(
       fixture.configDb,
-      "checkpoints",
+      "session_checkpoints",
       marker
     );
     const counts = await projectRecordCounts(fixture.configDb, [

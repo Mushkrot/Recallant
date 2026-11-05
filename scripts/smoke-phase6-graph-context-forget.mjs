@@ -151,9 +151,12 @@ const checkpointPayload = {
   open_questions: []
 };
 await callTool(3, "memory_set_checkpoint", {
+  session_id: started.session_id,
   payload: checkpointPayload
 });
-const checkpoint = await callTool(30, "memory_get_checkpoint", {});
+const checkpoint = await callTool(30, "memory_get_checkpoint", {
+  session_id: started.session_id
+});
 if (
   checkpoint.payload?.current_status !== checkpointPayload.current_status ||
   checkpoint.payload?.current_focus !== checkpointPayload.current_focus ||

@@ -22,6 +22,7 @@ type RemoteTool = {
   name: string;
   title?: string;
   description?: string;
+  inputSchema?: Record<string, unknown>;
 };
 
 const bridgeServerName = "recallant-remote-bridge";
@@ -189,9 +190,39 @@ function parseRemoteTools(result: unknown): RemoteTool[] {
     return {
       name: tool.name,
       title: typeof tool.title === "string" ? tool.title : undefined,
-      description: typeof tool.description === "string" ? tool.description : undefined
+      description: typeof tool.description === "string" ? tool.description : undefined,
+      inputSchema:
+        tool.inputSchema && typeof tool.inputSchema === "object" && !Array.isArray(tool.inputSchema)
+          ? (tool.inputSchema as Record<string, unknown>)
+          : undefined
     };
   });
+}
+
+function bridgeInputSchema(tool: RemoteTool) {
+  const properties = tool.inputSchema?.properties;
+  const typedProperties =
+    properties &&
+    typeof properties === "object" &&
+    !Array.isArray(properties) &&
+    Object.values(properties).every(
+      (property) =>
+        property &&
+        typeof property === "object" &&
+        ["type", "$ref", "anyOf", "oneOf", "allOf", "enum", "const"].some((key) => key in property)
+    );
+  if (tool.inputSchema?.type === "object" && typedProperties) {
+    try {
+      const schema = z.fromJSONSchema(tool.inputSchema as Parameters<typeof z.fromJSONSchema>[0]);
+      if (schema instanceof z.ZodObject) return schema.passthrough();
+    } catch {
+      // Older remote catalogs can omit schema details; use the matching local contract.
+    }
+  }
+  const canonical = recallantTools.find((candidate) => candidate.name === tool.name);
+  return canonical?.inputSchema instanceof z.ZodObject
+    ? canonical.inputSchema.passthrough()
+    : passthroughInputSchema;
 }
 
 export async function createRecallantRemoteBridgeServer(config: RemoteMcpBridgeConfig) {
@@ -232,17 +263,24 @@ export async function createRecallantRemoteBridgeServer(config: RemoteMcpBridgeC
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: passthroughInputSchema
+        inputSchema: bridgeInputSchema(tool)
       },
       async (args) => {
         try {
-          rejectForbiddenBridgePayload(args);
-          const { result } = await callRecallantRemoteTool(
-            config,
-            tool.name,
-            (args ?? {}) as Record<string, unknown>,
-            { id: `remote-bridge-tool-${tool.name}` }
-          );
+          const remoteArgs = { ...(args ?? {}) } as Record<string, unknown>;
+          // Typed event schemas add an empty artifact default. Omit it from the remote
+          // request so both storage-field guards still reject actual artifact payloads.
+          if (
+            tool.name === "memory_append_event" &&
+            Array.isArray(remoteArgs.raw_artifacts) &&
+            remoteArgs.raw_artifacts.length === 0
+          ) {
+            delete remoteArgs.raw_artifacts;
+          }
+          rejectForbiddenBridgePayload(remoteArgs);
+          const { result } = await callRecallantRemoteTool(config, tool.name, remoteArgs, {
+            id: `remote-bridge-tool-${tool.name}`
+          });
           return result;
         } catch (error) {
           return remoteBridgeError(tool.name, error, config);

@@ -25,6 +25,7 @@ type JsonRpcError = {
 };
 
 export type RemoteMcpFailureCode =
+  | "WORKSPACE_START_SESSION_REQUIRED"
   | "REMOTE_MCP_CONFIGURATION_ERROR"
   | "REMOTE_MCP_TIMEOUT"
   | "REMOTE_MCP_DNS_FAILURE"
@@ -163,9 +164,12 @@ export async function callRecallantRemoteMcp(
       { cause: error }
     );
   }
+  const isCloseout = method === "tools/call" && params.name === "memory_closeout";
+  const timeoutMs = options.timeoutMs ?? (isCloseout ? 30_000 : 5_000);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
+  let text: string;
   try {
     response = await fetch(config.endpointUrl, {
       method: "POST",
@@ -178,13 +182,21 @@ export async function callRecallantRemoteMcp(
       }),
       signal: controller.signal
     });
+    text = await response.text();
   } catch (error) {
-    throw classifyRemoteMcpTransportError(error);
+    const failure = classifyRemoteMcpTransportError(error);
+    if (isCloseout && failure.code === "REMOTE_MCP_TIMEOUT") {
+      throw new RemoteMcpCallError(
+        "REMOTE_MCP_TIMEOUT",
+        "Remote MCP closeout timed out; its write may already be saved. Read the existing workspace state before another closeout.",
+        { retryable: false, cause: error }
+      );
+    }
+    throw failure;
   } finally {
     clearTimeout(timeout);
   }
 
-  const text = await response.text();
   const traceId = response.headers.get("x-recallant-audit-trace-id");
   let payload: Record<string, unknown> | null = null;
   try {

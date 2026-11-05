@@ -160,6 +160,43 @@ async function startCentralMcpFixture() {
                     },
                     additionalProperties: false
                   }
+                },
+                {
+                  name: "memory_start_session",
+                  inputSchema: {
+                    type: "object",
+                    properties: { client_kind: { title: "client_kind" } },
+                    required: []
+                  }
+                },
+                {
+                  name: "memory_get_context_pack",
+                  inputSchema: {
+                    type: "object",
+                    properties: { session_id: { title: "session_id" } },
+                    required: []
+                  }
+                },
+                {
+                  name: "memory_append_event",
+                  inputSchema: {
+                    type: "object",
+                    properties: {
+                      client_kind: { type: "string" },
+                      event_kind: { type: "string" },
+                      text: { type: "string" },
+                      raw_artifacts: { type: "array", items: { type: "object" }, default: [] }
+                    },
+                    required: ["client_kind", "event_kind"]
+                  }
+                },
+                {
+                  name: "fixture_extension",
+                  inputSchema: {
+                    type: "object",
+                    properties: { label: { type: "string" } },
+                    required: ["label"]
+                  }
                 }
               ]
             }
@@ -290,7 +327,14 @@ async function expectCallFailure(label, overrides, expectedCode, expectFixtureRe
       `${label} degraded bridge did not return the known Recallant tool list`
     );
     const result = await client.callTool(
-      { name: "memory_heartbeat", arguments: { message: label } },
+      {
+        name: "memory_heartbeat",
+        arguments: {
+          message: label,
+          session_id: "00000000-0000-4000-8000-000000000001",
+          status: "active"
+        }
+      },
       undefined,
       { timeout: 5_000 }
     );
@@ -374,11 +418,99 @@ try {
   ({ bridgeServer, mcpClient } = await runBridgeRoundtrip());
 
   const list = await mcpClient.listTools({}, { timeout: 5_000 });
+  assert(
+    list.tools.find((tool) => tool.name === "memory_heartbeat")?.inputSchema?.properties?.message
+      ?.type === "string",
+    "bridge hid the remote tool argument type"
+  );
+  const startSchema = list.tools.find((tool) => tool.name === "memory_start_session").inputSchema;
+  assert(startSchema.required.includes("client_kind"), "bridge hid required client_kind");
+  assert(
+    startSchema.properties.client_kind.enum.includes("codex"),
+    "bridge hid the client kind enum"
+  );
+  const contextSchema = list.tools.find(
+    (tool) => tool.name === "memory_get_context_pack"
+  ).inputSchema;
+  assert(contextSchema.required.includes("session_id"), "bridge hid required session_id");
+  assert(
+    contextSchema.properties.session_id.type === "string" &&
+      contextSchema.properties.session_id.format === "uuid",
+    "bridge hid UUID session_id"
+  );
+  const extensionSchema = list.tools.find((tool) => tool.name === "fixture_extension").inputSchema;
+  assert(
+    extensionSchema.required.includes("label") &&
+      extensionSchema.properties.label.type === "string",
+    "bridge lost an unknown remote tool schema"
+  );
+  const callsBeforeInvalid = fixture.requests.filter(
+    (request) => request.body.method === "tools/call"
+  ).length;
+  let invalidRejected = false;
+  try {
+    const invalid = await mcpClient.callTool({ name: "memory_start_session", arguments: {} });
+    invalidRejected = invalid.isError === true;
+  } catch {
+    invalidRejected = true;
+  }
+  assert(invalidRejected, "bridge accepted missing required client_kind");
+  assert(
+    fixture.requests.filter((request) => request.body.method === "tools/call").length ===
+      callsBeforeInvalid,
+    "bridge forwarded malformed arguments"
+  );
+  const validStart = await mcpClient.callTool({
+    name: "memory_start_session",
+    arguments: { client_kind: "codex", external_session_id: "fixture-only-chat" }
+  });
+  assert(
+    validStart.structuredContent?.ok === true &&
+      fixture.requests.some(
+        (request) =>
+          request.body.method === "tools/call" &&
+          request.body.params.name === "memory_start_session" &&
+          request.body.params.arguments.client_kind === "codex"
+      ),
+    "valid canonical arguments did not round-trip"
+  );
   const call = await mcpClient.callTool(
     { name: "memory_heartbeat", arguments: { message: "hello-bridge" } },
     undefined,
     { timeout: 5_000 }
   );
+
+  for (const artifactArgs of [{}, { raw_artifacts: [] }]) {
+    const event = await mcpClient.callTool({
+      name: "memory_append_event",
+      arguments: {
+        client_kind: "codex",
+        event_kind: "system",
+        text: "Synthetic event without raw artifacts.",
+        ...artifactArgs
+      }
+    });
+    assert(event.isError !== true, "bridge rejected an event with no raw artifacts");
+  }
+  assert(
+    fixture.requests.filter((request) => request.body.params?.name === "memory_append_event")
+      .length === 2 &&
+      fixture.requests
+        .filter((request) => request.body.params?.name === "memory_append_event")
+        .every((request) => !("raw_artifacts" in request.body.params.arguments)),
+    "bridge forwarded the empty artifact default to the storage-field guard"
+  );
+  const beforeArtifacts = fixture.requests.length;
+  const artifacts = await mcpClient.callTool({
+    name: "memory_append_event",
+    arguments: {
+      client_kind: "codex",
+      event_kind: "system",
+      raw_artifacts: [{ storage_backend: "external", uri: "https://example.com/synthetic" }]
+    }
+  });
+  assert(artifacts.isError === true, "bridge forwarded populated raw artifacts");
+  assert(fixture.requests.length === beforeArtifacts, "artifact rejection made a remote call");
 
   const methods = fixture.requests.map((request) => request.body.method);
   assert(methods.includes("initialize"), "bridge did not initialize the central MCP endpoint");
@@ -401,7 +533,10 @@ try {
       name: "memory_heartbeat",
       arguments: {
         message: "blocked",
-        nested: { RECALLANT_DATABASE_URL: "postgres://example-user:example-password@127.0.0.1:5432/example-db" },
+        nested: {
+          RECALLANT_DATABASE_URL:
+            "postgres://example-user:example-password@127.0.0.1:5432/example-db"
+        },
         raw_artifacts_path: "/tmp/raw"
       }
     },

@@ -61,8 +61,13 @@ CREATE TABLE sessions (
   ended_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed', 'interrupted', 'recovered')),
   ended_reason TEXT CHECK (ended_reason IN ('closeout', 'client_exit', 'timeout', 'crash_or_unknown', 'superseded')),
+  external_session_id_hash TEXT,
   recovered_from_session_id UUID REFERENCES sessions(id) ON DELETE SET NULL
 );
+
+CREATE INDEX sessions_external_identity_idx
+  ON sessions (project_id, client_kind, external_session_id_hash, last_seen_at DESC)
+  WHERE external_session_id_hash IS NOT NULL;
 
 CREATE TABLE events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -265,6 +270,12 @@ CREATE TABLE graph_candidate_review_actions (
 
 CREATE TABLE checkpoints (
   project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE session_checkpoints (
+  session_id UUID PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
