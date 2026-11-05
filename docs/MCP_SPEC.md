@@ -135,11 +135,13 @@ it with `memory_recall_agent_memories`. The diagnostic marker body is synthetic;
 uses `memory_type: "work_log"`, `scope: "project"`, `created_by: "agent"`,
 `audience: [{ "kind": "all_agents", "id": null }]`, and `diagnostic_marker: true` metadata.
 
-`memory_start_session` reports unfinished prior work as session recovery, not checkpoint failure. The
+`memory_start_session` reports unfinished prior work as session recovery, not checkpoint failure.
+When the caller supplies `external_session_id`, Recallant matches only sessions with that external
+chat identity and reuses a fresh active session or recovers its interrupted predecessor. The
 legacy-compatible `previous_unclosed_session` field contains diagnostic details, while
-`previous_session_recovery` contains the plain guidance an agent should show or follow. The agent
-should review current-project checkpoint/events for continuity, check for fresh parallel work, and
-avoid presenting stale recovery context as an error.
+`previous_session_recovery` contains plain guidance. A start without a reliable identity does not
+adopt another session's checkpoint; `available_recovery_sessions` are marked `owner_match: "unknown"`
+and require explicit `recover_session_id` selection.
 
 Interrupted session counts are recovery debt, not capture proof failure. A later scoped cycle can
 still report `memory_loop_ready`, while a fresh automatic agent event can independently report
@@ -151,25 +153,25 @@ timestamps, and review-state counts. It must not return raw memories, raw projec
 credentials, artifacts, backups, or bulk summaries. A checkpoint-only timestamp is not semantic
 memory proof; semantic or memory-loop proof is not `capture_active` without a fresh automatic event.
 
-A `memory_set_checkpoint` / `memory_get_checkpoint` round trip proves checkpoint state, not semantic
-memory recall. The baseline checkpoint parity contract keeps `memory_set_checkpoint` state-only by
-default; its output reports `checkpoint_state_only: true` and
-`searchable_memory_created: false`. Searchable checkpoint memory requires the explicit high-level
-`memory_agent_checkpoint` tool. That tool updates checkpoint state, appends a checkpoint event when
-a `session_id` is available, creates a governed `memory_type: "checkpoint"` memory with source
-refs, and returns the generated `memory_id`. Use `memory_create_agent_memory` for ordinary governed
-facts, decisions, procedures, and work logs, not for implicit checkpoint closeout. The deterministic
-diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity proof is
+A `memory_set_checkpoint` / `memory_get_checkpoint` round trip proves session checkpoint state, not
+semantic memory recall. Pass the same `session_id` from `memory_start_session` to both tools. The
+result is state-only and reports `checkpoint_state_only: true` and
+`searchable_memory_created: false`. Calls without a session ID access legacy project checkpoint
+state; the response labels it `ambiguous_legacy_project`, and context packs do not include its
+payload as current chat state. `memory_agent_checkpoint` with a `session_id` saves private session
+state and an event. Without one, it creates an explicitly project-shared checkpoint memory. Use
+`memory_create_agent_memory` for ordinary shared facts, decisions, procedures, and work logs. The
+deterministic diagnostic coverage is `npm run remote-mcp-doctor:smoke`; the local MCP parity proof is
 `npm run phase6:smoke:governed`.
 
 When Recallant is configured and consent allows agent-authored memory, agents must use the MCP
 memory lifecycle by default: start a session, read `memory_get_context_pack`, write concise governed
 decisions/actions/tests/work logs, and close out with `memory_closeout`. `memory_closeout` is the
-normal MCP closeout path: it updates checkpoint state, creates or verifies searchable closeout
-memory, runs recall verification, and reports next-session readiness semantics. Use
-`memory_agent_checkpoint` only when the checkpoint itself should become searchable governed
-checkpoint memory. Bulk project import, raw logs, customer data, raw artifacts, database URLs,
-provider secrets, and existing-file summarization remain approval-gated.
+normal MCP closeout path: it updates the session checkpoint, creates or verifies searchable
+project-shared closeout memory, runs recall verification, and reports next-session readiness. It
+does not mirror the session's private next step into `PROJECT_LOG.md`. Bulk project import, raw logs,
+customer data, raw artifacts, database URLs, provider secrets, and existing-file summarization
+remain approval-gated.
 
 ## 3c) Governed Memory Tool UX
 
@@ -189,7 +191,7 @@ Safe semantic marker proof uses a tiny synthetic memory, not project contents:
   "scope": "project",
   "audience": [{ "kind": "all_agents", "id": null }],
   "title": "Safe Recallant semantic marker",
-  "body": "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  "body": "Synthetic diagnostic marker recallant_safe_semantic_marker_example for create+recall proof.",
   "confidence": 1,
   "source_refs": [],
   "created_by": "agent",
@@ -344,7 +346,8 @@ project/developer/client failures, and output leakage checks.
 This deterministic smoke is not a physical second-machine claim. A real external-host rehearsal is
 opt-in: provide `RECALLANT_EXTERNAL_REHEARSAL_SERVER_URL`,
 `RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL`, `RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID`,
-`RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID`, and `RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID` from the
+`RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID`, `RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID`, and
+`RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID` (a disposable session UUID) from the
 external host. With no live inputs, the smoke exits green with `skipped_live_external_rehearsal`.
 Live output remains redacted and must not include `RECALLANT_DATABASE_URL`, Postgres access,
 Workbench/admin auth, internal server paths, raw artifacts, backups, provider secrets, or private
@@ -509,3 +512,11 @@ Default profile values are contract constants:
 - hard payload limit: `8388608` bytes (`8 MB`)
 
 Payloads above the hard limit must return `PAYLOAD_TOO_LARGE` and may include a retryable hint.
+
+## Remote bridge argument schemas
+
+The remote bridge exposes typed arguments and required fields to MCP clients. It uses a complete
+remote object schema when available and the matching built-in Recallant contract when an older
+remote catalog omits field types. Unknown remote tools retain their remote schema, or passthrough
+behavior when no usable schema is supplied. Invalid required arguments are rejected before a
+remote call. Additional fields still reach the existing payload safety guard before forwarding.

@@ -190,6 +190,19 @@ const startupQueryStopWords = new Set([
   "working"
 ]);
 
+function isStartupIdentifier(term: string) {
+  return term.length >= 16 && /[-_]/.test(term);
+}
+
+function startupIdentifierScore(row: Record<string, unknown>, terms: readonly string[]) {
+  const fields = [row.memory_id, row.title, row.body].map((value) =>
+    String(value ?? "").toLowerCase()
+  );
+  return terms.filter(
+    (term) => isStartupIdentifier(term) && fields.some((value) => value.includes(term))
+  ).length;
+}
+
 function startupRelevanceTerms(query: string) {
   return Array.from(
     new Set(
@@ -198,9 +211,10 @@ function startupRelevanceTerms(query: string) {
         .split(/[^a-z0-9_-]+/i)
         .map((term) => term.trim())
         .filter((term) => term.length >= 3 && !startupQueryStopWords.has(term))
-        .slice(0, 8)
     )
-  );
+  )
+    .sort((left, right) => Number(isStartupIdentifier(right)) - Number(isStartupIdentifier(left)))
+    .slice(0, 8);
 }
 
 function startupMemoryScore(row: Record<string, unknown>, terms: readonly string[]) {
@@ -772,7 +786,7 @@ function rawSecretLikeFindings(value: unknown, path = "value"): string[] {
   const findings: string[] = [];
   if (typeof value === "string") {
     const checks = [
-      /sk-[A-Za-z0-9_-]{12,}/,
+      /\bsk-[A-Za-z0-9_-]{12,}/,
       /gh[pousr]_[A-Za-z0-9_]{20,}/,
       /xox[baprs]-[A-Za-z0-9-]{10,}/,
       /postgres:\/\/[^:\s]+:[^@\s]+@/i,
@@ -987,6 +1001,8 @@ export type StartSessionInput = {
   project_path?: string | null;
   session_label?: string | null;
   resume_policy?: string;
+  external_session_id?: string | null;
+  recover_session_id?: string | null;
 };
 
 function previousSessionRecovery(previousSession: unknown, isStale: boolean) {
@@ -994,14 +1010,18 @@ function previousSessionRecovery(previousSession: unknown, isStale: boolean) {
     return {
       status: "none",
       agent_message:
-        "No previous unfinished agent session was found for this project. Start from the context pack."
+        "No session checkpoint matched this chat. Any older project checkpoint has no reliable chat owner and is kept separate. Start from the context pack."
     };
   }
-  if (isStale) {
+  const priorStatus =
+    typeof previousSession === "object" && previousSession !== null
+      ? (previousSession as Record<string, unknown>).status
+      : null;
+  if (isStale || priorStatus === "interrupted") {
     return {
       status: "interrupted",
       agent_message:
-        "A previous agent session for this project appears interrupted. Review the latest checkpoint and captured events as recovery context, but do not treat them as current instructions unless they match the user's task."
+        "An interrupted session for this same chat was recovered. Its checkpoint and events are available as recovery context; confirm they match the current task before continuing."
     };
   }
   return {
@@ -2004,19 +2024,63 @@ function truncationMetadata(text: string | null | undefined, captured: string | 
 
 function hasInstructionSignal(value: string) {
   return (
-    /\b(always|never|default|from now on|every project|all projects|instruction|rule)\b/i.test(
+    /\b(always|never|from now on|every project|all projects)\b/i.test(value) ||
+    /(всех проектах|для всех проектов|везде|всегда|никогда)/i.test(value) ||
+    /\b(?:rule|instruction)s?\s*:/i.test(value) ||
+    /(?:правило|инструкция)\s*:/i.test(value) ||
+    /\b(?:use|set|make|apply|follow|adopt|enforce)\b[^.!?\n]{0,120}\b(?:default|rules?|instructions?)\b/i.test(
       value
-    ) || /(всех проектах|для всех проектов|везде|правило|всегда|никогда|по умолчанию)/i.test(value)
+    ) ||
+    /\b(?:default|rules?|instructions?)\b[^.!?\n]{0,120}\b(?:must|shall|should|use|apply|follow)\b/i.test(
+      value
+    ) ||
+    /(?:используй|использовать|применяй|применять|установи|установить|соблюдай|следуй)[^.!?\n]{0,120}(?:по умолчанию|правил|инструкци)/i.test(
+      value
+    ) ||
+    /(?:по умолчанию|правил|инструкци)[^.!?\n]{0,120}(?:используй|использовать|применяй|применять|установи|установить|соблюдай|следуй)/i.test(
+      value
+    )
   );
 }
 
 function hasHighRiskSignal(value: string) {
-  return (
-    /\b(secret|security|deploy|public|paid api|cost|delete|destructive|provider|model)\b/i.test(
-      value
-    ) ||
-    /(секрет|безопасност|деплой|публич|платн|стоимост|удал|разруш|провайдер|модель)/i.test(value)
-  );
+  if (
+    /\b(secret|security|deploy|paid api|cost|delete|destructive)\b/i.test(value) ||
+    /(секрет|безопасност|деплой|платн|стоимост|удал|разруш)/i.test(value)
+  ) {
+    return true;
+  }
+  const hasAmbiguousTopic = (text: string) =>
+    /\b(public|provider|model)\b/i.test(text) || /(публич|провайдер|модел[ьи])/i.test(text);
+  if (hasInstructionSignal(value) && hasAmbiguousTopic(value)) return true;
+
+  // Topic words also occur in ordinary diagnostics. Keep operational decisions gated
+  // without making every mention of a DNS control or model output require review.
+  return value.split(/[.!?\n]/u).some((sentence) => {
+    const publicExposure =
+      (/\bpublic\b/i.test(sentence) &&
+        (/\b(access|exposure|release|visibility|publish(?:ed|ing)?|expos(?:e[ds]?|ing)|upload(?:ed|ing)?|shar(?:e[ds]?|ing)|send|sent|push(?:ed|ing)?|post(?:ed|ing)?|mak(?:e|ing)|made|set(?:ting)?|allow(?:ed|ing)?|grant(?:ed|ing)?)\b/i.test(
+          sentence
+        ) ||
+          /(?:доступ|публикац|релиз|сдела|откры|разреш|отправ|выкла|опубликов|загруз|размест)/i.test(
+            sentence
+          ))) ||
+      (/публич/i.test(sentence) &&
+        /(?:доступ|публикац|релиз|сдела|откры|разреш|отправ|выкла|опубликов|загруз|размест)/i.test(
+          sentence
+        ));
+    const providerOrModelDecision =
+      (/\b(provider|model)\b/i.test(sentence) || /(провайдер|модел[ьи])/i.test(sentence)) &&
+      (/\b(switch(?:ed|ing)?|chang(?:e[ds]?|ing)|replac(?:e[ds]?|ing)|select(?:ed|ing|ion)?|choos(?:e|ing)|chosen|us(?:e[ds]?|ing)|set(?:ting)?|configur(?:e[ds]?|ing|ation)|rout(?:e[ds]?|ing)|decision)\b/i.test(
+        sentence
+      ) ||
+        /(?:смен|менять|замен|выбр|выбор|использ|настро|маршрут|решени)/i.test(sentence) ||
+        /\bdefault\s+(?:provider|model)\b|\b(?:provider|model)\s+(?:is\s+)?(?:the\s+)?default\b/i.test(
+          sentence
+        ) ||
+        /(?:провайдер|модель)\s+по умолчанию/i.test(sentence));
+    return publicExposure || providerOrModelDecision;
+  });
 }
 
 function metadataFlagIsTrue(metadata: JsonObject | undefined, key: string) {
@@ -2403,6 +2467,15 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function externalSessionIdentityHash(value?: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.length > 512) {
+    throw new Error("VALIDATION_ERROR: external_session_id must be at most 512 characters");
+  }
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 function forgetUniqueIds(values: readonly (string | null | undefined)[]) {
@@ -2875,10 +2948,12 @@ async function withTransaction<T>(pool: Pool, fn: (client: PoolClient) => Promis
 
 export class RecallantDb {
   private readonly pool: Pool;
+  private closed = false;
   private readonly fallbackDeveloperId = randomUUID();
   private projectContext?: ProjectContext;
   private agentObservationSchemaReady?: Promise<void>;
   private agentTelemetrySchemaReady?: Promise<void>;
+  private sessionCheckpointSchemaReady?: Promise<void>;
 
   constructor(private readonly config: RecallantDbConfig) {
     this.pool = new Pool({
@@ -2888,7 +2963,39 @@ export class RecallantDb {
   }
 
   async close() {
+    if (this.closed) return;
+    this.closed = true;
     await this.pool.end();
+  }
+
+  private async ensureSessionCheckpointSchema() {
+    if (!this.sessionCheckpointSchemaReady) {
+      this.sessionCheckpointSchemaReady = (async () => {
+        await this.pool.query(
+          "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS external_session_id_hash TEXT"
+        );
+        await this.pool.query(
+          `CREATE INDEX IF NOT EXISTS sessions_external_identity_idx
+           ON sessions (project_id, client_kind, external_session_id_hash, last_seen_at DESC)
+           WHERE external_session_id_hash IS NOT NULL`
+        );
+        await this.pool.query(
+          `CREATE TABLE IF NOT EXISTS session_checkpoints (
+             session_id UUID PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+             payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+           )`
+        );
+      })().catch((error) => {
+        this.sessionCheckpointSchemaReady = undefined;
+        throw error;
+      });
+    }
+    await this.sessionCheckpointSchemaReady;
+  }
+
+  isClosed() {
+    return this.closed;
   }
 
   async assertRemoteResourceScope(
@@ -5025,6 +5132,44 @@ export class RecallantDb {
     return result.rows[0] ?? null;
   }
 
+  async initializeRemoteWorkspacePath(input: {
+    projectId: string;
+    developerId: string;
+    projectPath: string;
+  }) {
+    const result = await this.pool.query<{
+      developer_id: string;
+      primary_path: string | null;
+      project_kind: string;
+    }>("SELECT developer_id, primary_path, project_kind FROM projects WHERE id = $1", [
+      input.projectId
+    ]);
+    const binding = result.rows[0];
+    if (!binding || binding.developer_id !== input.developerId) {
+      throw new Error("VALIDATION_ERROR: REMOTE_WORKSPACE_OWNER_MISMATCH");
+    }
+    // Established bindings remain immutable; startSession validates their exact path.
+    if (binding.primary_path) return;
+    if (binding.project_kind !== "workspace") {
+      throw new Error("VALIDATION_ERROR: REMOTE_WORKSPACE_KIND_REQUIRED");
+    }
+    if (!isAbsolute(input.projectPath)) {
+      throw new Error("VALIDATION_ERROR: REMOTE_WORKSPACE_ABSOLUTE_PATH_REQUIRED");
+    }
+    const projectPath = resolve(input.projectPath);
+    if (existsSync(projectPath)) {
+      throw new Error("VALIDATION_ERROR: REMOTE_WORKSPACE_PATH_IS_LOCAL");
+    }
+    // Only the first authenticated claim wins. A concurrent different path is then
+    // rejected by the unchanged startSession identity check.
+    await this.pool.query(
+      `UPDATE projects SET primary_path = $3, updated_at = now()
+       WHERE id = $1 AND developer_id = $2
+         AND primary_path IS NULL AND project_kind = 'workspace'`,
+      [input.projectId, input.developerId, projectPath]
+    );
+  }
+
   async getSessionProjectBinding(sessionId: string) {
     const result = await this.pool.query<{
       project_id: string;
@@ -6738,6 +6883,7 @@ export class RecallantDb {
   }
 
   async startSession(input: StartSessionInput) {
+    await this.ensureSessionCheckpointSchema();
     const project = input.project_id
       ? await this.contextForProject(input.project_id)
       : await this.ensureProject(input.project_path);
@@ -6751,73 +6897,254 @@ export class RecallantDb {
         );
       }
     }
+    const externalSessionHash = externalSessionIdentityHash(input.external_session_id);
     return withTransaction(this.pool, async (client) => {
-      const previous = await client.query(
-        `
-          SELECT id, last_seen_at, extract(epoch from (now() - last_seen_at)) / 60 AS age_minutes
-          FROM sessions
-          WHERE project_id = $1 AND status = 'active' AND ended_at IS NULL
-          ORDER BY last_seen_at DESC
-          LIMIT 1
-        `,
-        [project.projectId]
-      );
-      const previousSession = previous.rows[0];
       const staleThresholdMinutes = await this.resolveStaleSessionThreshold(
         client,
         project.projectId,
         project.developerId
       );
-      const ageMinutes = Number(previousSession?.age_minutes ?? 0);
-      const previousIsStale = previousSession ? ageMinutes >= staleThresholdMinutes : false;
-      if (previousSession) {
-        if (previousIsStale) {
+      let previousSession: Record<string, unknown> | null = null;
+      let previousIsStale = false;
+      let reusedSessionId: string | null = null;
+      let continuationSessionId: string | null = null;
+
+      if (externalSessionHash) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+          `${project.projectId}:${input.client_kind}:${externalSessionHash}`
+        ]);
+      }
+
+      if (input.recover_session_id) {
+        if (!externalSessionHash) {
+          const identity = await client.query(
+            `SELECT external_session_id_hash FROM sessions
+             WHERE id = $1 AND project_id = $2 AND client_kind = $3`,
+            [input.recover_session_id, project.projectId, input.client_kind]
+          );
+          const selectedHash = identity.rows[0]?.external_session_id_hash;
+          if (typeof selectedHash === "string") {
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+              `${project.projectId}:${input.client_kind}:${selectedHash}`
+            ]);
+          }
+        }
+        const selected = await client.query(
+          `SELECT id, last_seen_at, status, external_session_id_hash,
+                  extract(epoch from (now() - last_seen_at)) / 60 AS age_minutes
+           FROM sessions
+           WHERE id = $1 AND project_id = $2 AND client_kind = $3
+           FOR UPDATE`,
+          [input.recover_session_id, project.projectId, input.client_kind]
+        );
+        if (!selected.rows[0]) {
+          throw new Error(
+            "VALIDATION_ERROR: recover_session_id must identify an interrupted session in this project for this client kind"
+          );
+        }
+        const selectedSession = selected.rows[0] as Record<string, unknown>;
+        if (selectedSession.status !== "interrupted") {
+          const ageMinutes = Number(selectedSession.age_minutes ?? 0);
+          if (selectedSession.status !== "active" || ageMinutes < staleThresholdMinutes) {
+            throw new Error(
+              "VALIDATION_ERROR: recover_session_id must identify an interrupted session or a stale active session"
+            );
+          }
           await client.query(
-            `
-              UPDATE sessions
-              SET status = 'interrupted', ended_reason = 'crash_or_unknown', last_seen_at = now()
-              WHERE id = $1
-            `,
-            [previousSession.id]
+            `UPDATE sessions
+             SET status = 'interrupted', ended_reason = 'crash_or_unknown', last_seen_at = now()
+             WHERE id = $1`,
+            [selectedSession.id]
+          );
+          selectedSession.status = "interrupted";
+          previousIsStale = true;
+        }
+        previousSession = selectedSession;
+        if (
+          externalSessionHash &&
+          selectedSession.external_session_id_hash !== externalSessionHash
+        ) {
+          throw new Error(
+            "VALIDATION_ERROR: recover_session_id belongs to a different external chat"
+          );
+        }
+        const activeRecovery = await client.query(
+          `SELECT id FROM sessions
+           WHERE project_id = $1 AND client_kind = $2 AND recovered_from_session_id = $3
+             AND external_session_id_hash IS NOT DISTINCT FROM $4::text
+             AND status = 'active' AND ended_at IS NULL
+             AND last_seen_at > now() - ($5 * interval '1 minute')
+           ORDER BY last_seen_at DESC, started_at DESC, id DESC
+           LIMIT 1`,
+          [
+            project.projectId,
+            input.client_kind,
+            selectedSession.id,
+            selectedSession.external_session_id_hash,
+            staleThresholdMinutes
+          ]
+        );
+        if (activeRecovery.rows[0]) {
+          if (input.resume_policy === "force_new") {
+            throw new Error(
+              "VALIDATION_ERROR: this recovery already has an active session; end it before forcing a new session"
+            );
+          }
+          reusedSessionId = String(activeRecovery.rows[0].id);
+          await client.query("UPDATE sessions SET last_seen_at = now() WHERE id = $1", [
+            reusedSessionId
+          ]);
+          previousSession = null;
+        }
+      } else if (externalSessionHash) {
+        const latest = await client.query(
+          `SELECT id, last_seen_at, status, ended_at, external_session_id_hash,
+                  extract(epoch from (now() - last_seen_at)) / 60 AS age_minutes
+           FROM sessions
+           WHERE project_id = $1 AND client_kind = $2 AND external_session_id_hash = $3
+           ORDER BY last_seen_at DESC, started_at DESC, id DESC
+           LIMIT 1`,
+          [project.projectId, input.client_kind, externalSessionHash]
+        );
+        const latestSession = latest.rows[0] as Record<string, unknown> | undefined;
+        if (latestSession) {
+          const ageMinutes = Number(latestSession.age_minutes ?? 0);
+          const isStale = ageMinutes >= staleThresholdMinutes;
+          if (
+            latestSession.status === "active" &&
+            !latestSession.ended_at &&
+            !isStale &&
+            input.resume_policy === "force_new"
+          ) {
+            throw new Error(
+              "VALIDATION_ERROR: this Codex chat already has an active Recallant session; end it before forcing a new session"
+            );
+          }
+          if (
+            latestSession.status === "active" &&
+            !latestSession.ended_at &&
+            !isStale &&
+            input.resume_policy !== "force_new"
+          ) {
+            const touched = await client.query(
+              "UPDATE sessions SET last_seen_at = now() WHERE id = $1 RETURNING id",
+              [latestSession.id]
+            );
+            reusedSessionId = String(touched.rows[0]?.id);
+          } else {
+            if (latestSession.status === "active" && isStale) {
+              await client.query(
+                `UPDATE sessions
+                 SET status = 'interrupted', ended_reason = 'crash_or_unknown', last_seen_at = now()
+                 WHERE id = $1`,
+                [latestSession.id]
+              );
+              previousIsStale = true;
+              latestSession.status = "interrupted";
+            }
+            if (latestSession.status === "interrupted") previousSession = latestSession;
+            else if (latestSession.status === "closed") {
+              continuationSessionId = String(latestSession.id);
+            }
+          }
+        }
+      }
+
+      let sessionId = reusedSessionId;
+      if (!sessionId) {
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO sessions (
+             project_id, client_kind, client_version, recovered_from_session_id,
+             external_session_id_hash
+           )
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id`,
+          [
+            project.projectId,
+            input.client_kind,
+            input.client_version ?? null,
+            previousSession?.id ?? null,
+            externalSessionHash ??
+              (typeof previousSession?.external_session_id_hash === "string"
+                ? previousSession.external_session_id_hash
+                : null)
+          ]
+        );
+        sessionId = inserted.rows[0]?.id ?? null;
+        const checkpointSourceSessionId = previousSession?.id ?? continuationSessionId;
+        if (sessionId && checkpointSourceSessionId) {
+          await client.query(
+            `INSERT INTO session_checkpoints (session_id, payload, updated_at)
+             SELECT $1, payload, updated_at FROM session_checkpoints WHERE session_id = $2
+             ON CONFLICT (session_id) DO NOTHING`,
+            [sessionId, checkpointSourceSessionId]
           );
         }
       }
 
-      const inserted = await client.query<{ id: string }>(
-        `
-          INSERT INTO sessions (project_id, client_kind, client_version, recovered_from_session_id)
-          VALUES ($1, $2, $3, $4)
-          RETURNING id
-        `,
-        [
-          project.projectId,
-          input.client_kind,
-          input.client_version ?? null,
-          previousSession?.id ?? null
-        ]
-      );
-
       const checkpoint = await client.query(
-        "SELECT payload, updated_at FROM checkpoints WHERE project_id = $1",
+        "SELECT payload, updated_at FROM session_checkpoints WHERE session_id = $1",
+        [sessionId]
+      );
+      const legacyCheckpoint = await client.query(
+        "SELECT updated_at FROM checkpoints WHERE project_id = $1",
         [project.projectId]
       );
+      const recoverable = await client.query(
+        `SELECT s.id AS session_id, s.last_seen_at, s.status,
+                EXISTS (SELECT 1 FROM session_checkpoints c WHERE c.session_id = s.id) AS checkpoint_available
+         FROM sessions s
+         WHERE s.project_id = $1 AND s.status = 'interrupted'
+           AND $2::text IS NULL
+         ORDER BY s.last_seen_at DESC
+         LIMIT 3`,
+        [project.projectId, externalSessionHash]
+      );
+      const ageMinutes = Number(previousSession?.age_minutes ?? 0);
 
       return {
-        session_id: inserted.rows[0]?.id,
+        session_id: sessionId,
         project_id: project.projectId,
-        checkpoint: checkpoint.rows[0] ?? { payload: null, updated_at: null },
+        checkpoint: checkpoint.rows[0] ?? { payload: null, updated_at: null, ownership: "session" },
+        legacy_checkpoint: {
+          status: "ambiguous_owner",
+          current_session: false,
+          payload_included: false,
+          updated_at: legacyCheckpoint.rows[0]?.updated_at ?? null
+        },
+        session_reused: Boolean(reusedSessionId),
         previous_unclosed_session: previousSession
           ? {
               session_id: previousSession.id,
               last_seen_at: previousSession.last_seen_at,
-              last_event_id: await this.findLastEventId(client, previousSession.id),
-              recovery_status: "needs_review",
+              last_event_id: await this.findLastEventId(client, String(previousSession.id)),
+              recovery_status:
+                previousSession.status === "interrupted" || previousIsStale
+                  ? "interrupted"
+                  : "needs_review",
               is_stale: previousIsStale,
               age_minutes: ageMinutes,
               stale_after_minutes: staleThresholdMinutes
             }
           : null,
-        previous_session_recovery: previousSessionRecovery(previousSession, previousIsStale),
+        previous_session_recovery: reusedSessionId
+          ? {
+              status: "same_chat_active",
+              agent_message:
+                "This Codex chat already has an active Recallant session. Continuing that session and its checkpoint."
+            }
+          : continuationSessionId
+            ? {
+                status: "none",
+                agent_message:
+                  "Restored this chat's checkpoint after normal closeout. No interrupted session was recovered."
+              }
+            : previousSessionRecovery(previousSession, previousIsStale),
+        available_recovery_sessions: recoverable.rows.map((row) => ({
+          ...row,
+          owner_match: "unknown",
+          requires_explicit_selection: true
+        })),
         recommended_next_calls: ["memory_get_context_pack"]
       };
     });
@@ -8914,16 +9241,40 @@ export class RecallantDb {
         }
       });
     });
-    const checkpoint = await this.getCheckpoint(context.projectId);
+    await this.ensureSessionCheckpointSchema();
+    const checkpoint = await this.getSessionCheckpoint(input.session_id);
+    const legacyCheckpoint = await this.pool.query(
+      "SELECT updated_at FROM checkpoints WHERE project_id = $1",
+      [context.projectId]
+    );
+    const currentSession = await this.pool.query<{
+      external_session_id_hash: string | null;
+      recovered_from_session_id: string | null;
+      client_kind: string;
+    }>(
+      "SELECT external_session_id_hash, recovered_from_session_id, client_kind FROM sessions WHERE id = $1",
+      [input.session_id]
+    );
+    const currentIdentityHash = currentSession.rows[0]?.external_session_id_hash ?? null;
+    const recoveredFromSessionId = currentSession.rows[0]?.recovered_from_session_id ?? null;
     const recovery = await this.pool.query(
       `
         SELECT id AS session_id, last_seen_at, status
         FROM sessions
-        WHERE project_id = $1 AND status = 'interrupted'
+        WHERE project_id = $1 AND status = 'interrupted' AND client_kind = $4
+          AND (
+            ($2::text IS NOT NULL AND external_session_id_hash = $2)
+            OR id = $3::uuid
+          )
         ORDER BY last_seen_at DESC
         LIMIT 3
       `,
-      [context.projectId]
+      [
+        context.projectId,
+        currentIdentityHash,
+        recoveredFromSessionId,
+        currentSession.rows[0]?.client_kind
+      ]
     );
     const rules = await this.pool.query(
       `
@@ -9063,7 +9414,16 @@ export class RecallantDb {
         session_id: input.session_id,
         profile: "compact",
         sections: {
-          checkpoint,
+          checkpoint: {
+            ...checkpoint,
+            ownership: "session",
+            legacy_project_checkpoint: {
+              status: "ambiguous_owner",
+              current_session: false,
+              payload_included: false,
+              updated_at: legacyCheckpoint.rows[0]?.updated_at ?? null
+            }
+          },
           documentation_posture: documentationPosture,
           canon_capability_context: canonCapabilityContext,
           recovery: input.include_recovery === false ? [] : recovery.rows,
@@ -10113,11 +10473,19 @@ export class RecallantDb {
       "m.status = ANY($4::text[])",
       "m.use_policy <> 'do_not_use'"
     ];
+    const identifierRanks: string[] = [];
     if (terms.length > 0) {
       clauses.push("$3::text IS NOT NULL");
       const termClauses = terms.map((term) => {
         values.push(term);
-        return `(m.title ILIKE '%' || $${values.length} || '%' OR m.body ILIKE '%' || $${values.length} || '%' OR m.memory_type ILIKE '%' || $${values.length} || '%')`;
+        const param = `$${values.length}`;
+        const exactIdClause = input.startup_relevance ? `m.id::text = ${param} OR ` : "";
+        if (input.startup_relevance && isStartupIdentifier(term)) {
+          identifierRanks.push(
+            `CASE WHEN m.id::text = ${param} OR strpos(lower(m.title), ${param}) > 0 OR strpos(lower(m.body), ${param}) > 0 THEN 1 ELSE 0 END`
+          );
+        }
+        return `(${exactIdClause}m.title ILIKE '%' || ${param} || '%' OR m.body ILIKE '%' || ${param} || '%' OR m.memory_type ILIKE '%' || ${param} || '%')`;
       });
       clauses.push(`(${termClauses.join(" OR ")})`);
     } else {
@@ -10163,7 +10531,7 @@ export class RecallantDb {
         LEFT JOIN agent_memory_source_refs r ON r.memory_id = m.id
         WHERE ${clauses.join(" AND ")}
         GROUP BY m.id
-        ORDER BY m.updated_at DESC
+        ORDER BY ${identifierRanks.length > 0 ? `(${identifierRanks.join(" + ")}) DESC,` : ""} m.updated_at DESC
         LIMIT $${values.length + 1}::int
       `,
       [
@@ -10173,6 +10541,9 @@ export class RecallantDb {
     );
     const rankedRows = input.startup_relevance
       ? [...result.rows].sort((left, right) => {
+          const identifierScore =
+            startupIdentifierScore(right, terms) - startupIdentifierScore(left, terms);
+          if (identifierScore !== 0) return identifierScore;
           const score = startupMemoryScore(right, terms) - startupMemoryScore(left, terms);
           if (score !== 0) return score;
           return String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""));
@@ -11085,6 +11456,7 @@ export class RecallantDb {
     ingestion_approved?: boolean;
     ingestion_approval_ref?: string | null;
   }) {
+    await this.ensureSessionCheckpointSchema();
     const context = input?.project_id ? null : await this.ensureProject();
     const projectId = input?.project_id ?? context?.projectId;
     const readiness = await this.pool.query(
@@ -11110,7 +11482,12 @@ export class RecallantDb {
                 OR metadata::text ILIKE '%conflict%'
               )
           ) AS conflict_memory_count,
-          (SELECT updated_at FROM checkpoints WHERE project_id = $1) AS checkpoint_updated_at,
+          COALESCE(
+            (SELECT max(c.updated_at)
+             FROM session_checkpoints c JOIN sessions s ON s.id = c.session_id
+             WHERE s.project_id = $1),
+            (SELECT updated_at FROM checkpoints WHERE project_id = $1)
+          ) AS checkpoint_updated_at,
           (SELECT max(created_at) FROM events WHERE project_id = $1 AND payload->'metadata'->>'capture_kind' = 'context_read') AS last_context_read_at,
           (
             SELECT max(activity_at)
@@ -13394,6 +13771,40 @@ export class RecallantDb {
     return result.rows[0] ?? { payload: null, updated_at: null };
   }
 
+  async setSessionCheckpoint(
+    sessionId: string,
+    payload: JsonObject,
+    expectedProjectId?: string | null
+  ) {
+    await this.ensureSessionCheckpointSchema();
+    const context = await this.contextForSession(sessionId);
+    if (expectedProjectId && expectedProjectId !== context.projectId) {
+      throw new Error("PROJECT_ID_PATH_MISMATCH: session_id belongs to a different project");
+    }
+    const result = await this.pool.query(
+      `INSERT INTO session_checkpoints (session_id, payload)
+       VALUES ($1, $2)
+       ON CONFLICT (session_id) DO UPDATE
+       SET payload = EXCLUDED.payload, updated_at = now()
+       RETURNING updated_at`,
+      [sessionId, JSON.stringify(payload)]
+    );
+    return result.rows[0];
+  }
+
+  async getSessionCheckpoint(sessionId: string, expectedProjectId?: string | null) {
+    await this.ensureSessionCheckpointSchema();
+    const context = await this.contextForSession(sessionId);
+    if (expectedProjectId && expectedProjectId !== context.projectId) {
+      throw new Error("PROJECT_ID_PATH_MISMATCH: session_id belongs to a different project");
+    }
+    const result = await this.pool.query(
+      "SELECT payload, updated_at FROM session_checkpoints WHERE session_id = $1",
+      [sessionId]
+    );
+    return result.rows[0] ?? { payload: null, updated_at: null };
+  }
+
   async closeout(
     sessionId: string,
     checkpointPayload: JsonObject,
@@ -13402,7 +13813,7 @@ export class RecallantDb {
     closeoutDiagnostics?: JsonObject | null
   ) {
     const context = await this.contextForSession(sessionId);
-    const checkpoint = await this.setCheckpoint(context.projectId, checkpointPayload);
+    const checkpoint = await this.setSessionCheckpoint(sessionId, checkpointPayload);
     await this.pool.query(
       `
         UPDATE sessions
@@ -14283,12 +14694,14 @@ let cachedDb: RecallantDb | null | undefined;
 export function createRecallantDbFromEnv() {
   const databaseUrl = process.env.RECALLANT_DATABASE_URL;
   if (!databaseUrl) return null;
-  cachedDb ??= new RecallantDb({
-    databaseUrl,
-    developerId: process.env.RECALLANT_DEVELOPER_ID,
-    projectId: process.env.RECALLANT_PROJECT_ID,
-    projectPath: process.env.RECALLANT_PROJECT_PATH
-  });
+  if (!cachedDb || cachedDb.isClosed()) {
+    cachedDb = new RecallantDb({
+      databaseUrl,
+      developerId: process.env.RECALLANT_DEVELOPER_ID,
+      projectId: process.env.RECALLANT_PROJECT_ID,
+      projectPath: process.env.RECALLANT_PROJECT_PATH
+    });
+  }
   return cachedDb;
 }
 

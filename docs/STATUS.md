@@ -6,11 +6,18 @@ recall, Workbench review, project-scoped safety checks, production backup/restor
 required product/public smoke gates. It should not yet be treated as stable multi-client or
 team-wide infrastructure.
 
-The versioned prerelease target is `v0.1.0-dev.4`. Its annotated tag and GitHub prerelease are
-published only after the exact candidate SHA passes release gates, CodeQL, three consecutive CI
-runs, pinned installation, update-channel, rollback, security, and route verification.
+The latest tagged release is [v0.1.0-dev.4](releases/v0.1.0-dev.4.md), published October 12, 2026.
+The `main` branch also contains session-isolation, recovery and memory improvements listed in the
+[changelog](../CHANGELOG.md). A tagged install does not include unreleased changes automatically.
 
 ## What Works Now
+
+- Parallel chats have session-owned checkpoints. Recovery distinguishes the current chat, explicitly
+  selected recovery sessions and legacy state whose owner is unknown.
+- Closeout persists factual summaries for governed recall and reports readiness independently of
+  checkpoint storage. Review holds and bounded context omissions remain visible.
+- Offline replay reconciles local and remote session identity without overwriting another chat's
+  checkpoint; remote workspace binding checks the authenticated project and owner.
 
 - `recallant onboard <project>` is the primary universal project connection path.
 - Local managed installs can prove service, capture, recall, Workbench, backup, and isolated restore

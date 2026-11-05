@@ -652,7 +652,8 @@ assert(
   emptyStarterAgents.includes("memory_set_checkpoint") &&
     emptyStarterAgents.includes("checkpoint state; it is not semantic recall proof") &&
     emptyStarterAgents.includes("recallant agent-checkpoint") &&
-    emptyStarterAgents.includes("advanced pause/compaction state helper"),
+    emptyStarterAgents.includes("only for explicit pause state, not as closeout proof") &&
+    emptyStarterAgents.includes("--external-session-id"),
   `empty starter AGENTS did not keep checkpoint wording state-only: ${emptyStarterAgents}`
 );
 const emptyStarterDocsCombined = [

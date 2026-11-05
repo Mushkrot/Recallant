@@ -10,7 +10,7 @@ The normal beginner path remains:
 recallant onboard <project>
 ```
 
-The published baseline is `v0.1.0-dev.3`. It includes the pinned install path, synthetic-data
+The latest tagged baseline is `v0.1.0-dev.4`; the [changelog](../CHANGELOG.md) identifies unreleased changes. It includes the pinned install path, synthetic-data
 Workbench screenshots, release gates, CodeQL, rollback, and managed-runtime proof. The milestones
 below describe product maturity beyond that development prerelease.
 
@@ -157,13 +157,3 @@ Before a release-candidate tag, Recallant should have:
 A first release candidate may be cut after Cross-Client Continuity if the existing safety and
 operations contract is stable enough. Human Document Memory remains the next product milestone even
 if it ships in a later version.
-
-## Codex For OSS Use
-
-If selected for Codex for OSS support, Recallant will use Codex/API credits primarily to improve:
-
-- native multi-client adapters and real-client acceptance;
-- Project Continuity Pack quality and evaluation;
-- document extraction, citation, update, and deletion tests;
-- security, onboarding, recovery, and release hardening;
-- concise public documentation and reproducible product proof.

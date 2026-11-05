@@ -428,7 +428,8 @@ Safe remote existing-project sequence:
    prove the same path directly with `memory_start_session` plus `memory_get_context_pack`;
 2. independently prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`,
    or use `recallant remote-doctor --capture-proof` for the same diagnostic boundary;
-3. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`;
+3. optionally prove session checkpoint state with `memory_set_checkpoint` plus
+   `memory_get_checkpoint`, passing the same `session_id` from step 1 to both calls;
 4. prove governed semantic recall with one synthetic `memory_create_agent_memory` marker and
    `memory_recall_agent_memories`;
 5. run read-only migration inventory, classify risk, get owner approval, write concise governed
@@ -449,12 +450,18 @@ Safe remote existing-project sequence:
 - `memory_start_session` followed by `memory_get_context_pack`, or
   `recallant remote-doctor --capture-proof`, proves session/context readiness. It does not prove
   checkpoint state or governed semantic recall.
-- `memory_set_checkpoint` followed by `memory_get_checkpoint` proves the current project checkpoint
-  state can be written and read. The response is state-only and reports
+- `memory_set_checkpoint` followed by `memory_get_checkpoint` proves session checkpoint state when
+  both calls pass the same `session_id`. The response is state-only and reports
   `checkpoint_state_only: true`, `searchable_memory_created: false`, and no `memory_id`.
-- `memory_agent_checkpoint` is the explicit high-level MCP checkpoint closeout path. It updates
-  checkpoint state, appends a checkpoint event when a `session_id` is available, creates a governed
-  `memory_type: "checkpoint"` record, and returns the generated `memory_id`.
+- A checkpoint call without `session_id` reads or writes the legacy project checkpoint. Its chat
+  owner is unknown; context packs do not treat it as current session state.
+- `memory_agent_checkpoint` with `session_id` saves that session's checkpoint and appends a session
+  event. Without `session_id`, it creates a project-shared checkpoint memory explicitly.
+- Codex hooks pass the stable Codex chat ID to `memory_start_session`. CLI callers can pass
+  `--external-session-id <chat-id>` to `agent-start`, `agent-checkpoint`, and `agent-closeout`; the
+  CLI hashes the value in local state paths and Recallant stores only its hash. Starting the same
+  chat again reuses its active Recallant session or creates a new session linked to its interrupted
+  session and copies that session's checkpoint.
 - `memory_create_agent_memory` followed by `memory_recall_agent_memories` proves governed semantic
   memory can be written and recalled for the current project scope.
 
@@ -464,19 +471,19 @@ migration should therefore start with a safe governed-memory marker proof, then 
 reviewed import or summarization plan. Do not run local `attach --confirm` on a remote workstation
 unless the operator explicitly wants to switch that project to the local-storage attach flow.
 
-Session recovery is a separate surface again. `memory_start_session` may return
-`previous_unclosed_session` when a previous agent session for the same project is still active in
-storage, plus `previous_session_recovery` with user-facing guidance. Agents should treat this as a
-recovery hint for the scoped project, not as an error and not as new task instructions. If the
-previous session is stale, recover from the latest checkpoint/events only as needed; if it is fresh,
-check whether another agent is actively working before continuing.
+Session recovery is identity-scoped. A start with a matching external chat ID reuses a fresh active
+session or recovers that chat's interrupted session. Starts without a reliable chat identity do not
+inherit another session's checkpoint. `available_recovery_sessions` may list interrupted sessions
+with `owner_match: "unknown"`; pass a selected `recover_session_id` explicitly to recover one. The
+returned guidance describes the current state and keeps recovered checkpoints as context for review,
+not as new task instructions.
 
-The baseline checkpoint parity contract is state-only: `memory_set_checkpoint` updates the current
-checkpoint and `memory_get_checkpoint` reads it back. Searchable checkpoint memory requires an
-explicit high-level closeout/checkpoint action such as `memory_agent_checkpoint`, rather than
-assuming checkpoint state is semantic recall. Generic `memory_create_agent_memory` remains for
-ordinary governed facts, decisions, procedures, work logs, and references; use the dedicated
-checkpoint tool when the memory should represent session checkpoint closeout.
+The checkpoint parity contract is state-only: `memory_set_checkpoint` updates and
+`memory_get_checkpoint` reads the specified session checkpoint. Project memories remain shared;
+session checkpoint state does not become a project memory or write its private next step into
+`PROJECT_LOG.md`. Use `memory_create_agent_memory` for shared facts, decisions, procedures, work
+logs, and references. A project-shared checkpoint memory is an explicit `memory_agent_checkpoint`
+call without `session_id`.
 
 ### Provision Scoped Remote Credentials
 
@@ -721,12 +728,13 @@ RECALLANT_EXTERNAL_REHEARSAL_CREDENTIAL=<scoped-remote-mcp-credential> \
 RECALLANT_EXTERNAL_REHEARSAL_PROJECT_ID=<project-id> \
 RECALLANT_EXTERNAL_REHEARSAL_DEVELOPER_ID=<developer-id> \
 RECALLANT_EXTERNAL_REHEARSAL_CLIENT_ID=<client-id> \
+RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID=<disposable-session-uuid> \
 npm run remote-mcp-external-rehearsal:smoke
 ```
 
-Optional `RECALLANT_EXTERNAL_REHEARSAL_SESSION_ID`,
-`RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID`, and `RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF=1` add
-session/trace headers and capture proof. When live inputs are absent, the smoke exits green with
+Use an existing disposable session: the rehearsal sends a heartbeat. Optional
+`RECALLANT_EXTERNAL_REHEARSAL_TRACE_ID` adds a trace header;
+`RECALLANT_EXTERNAL_REHEARSAL_CAPTURE_PROOF=1` enables capture proof. When live inputs are absent, the smoke exits green with
 `skipped_live_external_rehearsal` so CI does not require real credentials.
 
 For the stricter central-server readiness gate, use the dedicated live smoke. It is intentionally
@@ -814,10 +822,9 @@ not visible in Recallant, the project is configured but `memory_loop_ready` is f
 capture remains a separate, freshness-based signal.
 
 When the session start response includes `previous_session_recovery`, display that guidance in plain
-language. Avoid saying "old unclosed checkpoint": the checkpoint is the latest compact project state,
-while the unfinished item is the previous agent session. This distinction keeps multi-agent work
-calm: agents can share project memory across clients and projects, but each agent still scopes
-recovery to the current project and the user's current task.
+language. Checkpoints are owned by a Recallant session; a legacy project checkpoint has no reliable
+chat owner and is not a recovery checkpoint. Agents can still share project memories, while each chat
+recovers only its own session state unless an interrupted session is selected explicitly.
 
 For remote projects, `recallant agent-start --format json` reports `mode: "remote_mcp_ready"` and
 the external Recallant consent boundary before agent work continues: destination server, HTTPS

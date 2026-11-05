@@ -560,9 +560,15 @@ async function runCapturedSession(projectDir, projectId, marker, label) {
     workingMemories.some((memory) => String(memory.body).includes(marker)),
     `${label}: later context pack did not recall captured memory`
   );
-  assert(
-    String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
-    `${label}: later context pack did not recall checkpoint`
+  assert.equal(
+    context.sections?.checkpoint?.ownership,
+    "session",
+    `${label}: later context pack did not label the session checkpoint`
+  );
+  assert.equal(
+    context.sections?.checkpoint?.legacy_project_checkpoint?.payload_included,
+    false,
+    `${label}: later session inherited an unowned legacy checkpoint`
   );
 
   await cli(projectDir, [

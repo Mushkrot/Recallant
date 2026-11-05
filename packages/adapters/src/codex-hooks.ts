@@ -604,11 +604,6 @@ export function mapCodexHookEvent(event: CodexHookEvent): CodexHookCaptureAction
       ];
     }
     case "PreCompact": {
-      const traceId = deterministicCodexHookUuid(
-        "codex-hook-trace",
-        ...eventCorrelationParts(event)
-      );
-      const checkpointId = eventSourceId(event, "checkpoint");
       return [
         observationBase(event, "pre-compact", {
           kind: "system",
@@ -619,17 +614,7 @@ export function mapCodexHookEvent(event: CodexHookEvent): CodexHookCaptureAction
           tool_name: null,
           error_code: null,
           metadata: { trigger: event.trigger }
-        }),
-        {
-          type: "checkpoint",
-          event_name: "PreCompact",
-          external_session_id: event.session_id,
-          turn_id: event.turn_id,
-          trace_id: traceId,
-          dedup_key: `codex-hook:${checkpointId}`,
-          summary: "Codex is compacting the current context.",
-          next_step: "Continue from Recallant's latest governed session state after compaction."
-        }
+        })
       ];
     }
     case "PostCompact":

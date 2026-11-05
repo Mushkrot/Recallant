@@ -276,7 +276,7 @@ assert(
   `Memory space list should include source bindings: ${JSON.stringify(listedVirtual)}`
 );
 
-const ensuredPath = `/tmp/recallant-ensure-source-${randomUUID()}`;
+const ensuredPath = `/tmp/recallant-ensure-source-${randomUUID()}/HelpDesk-AI-Assistance`;
 mkdirSync(ensuredPath, { recursive: true });
 const db = new RecallantDb({
   databaseUrl,

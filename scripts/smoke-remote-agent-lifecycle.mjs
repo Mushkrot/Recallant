@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -12,10 +12,12 @@ const execFileAsync = promisify(execFile);
 const cliPath = resolve("apps/cli/dist/index.js");
 const projectDir = await mkdtemp(join(tmpdir(), "recallant-remote-agent-lifecycle-"));
 let secondaryProjectDir = null;
+let chatProjectDir = null;
 const projectId = randomUUID();
 const developerId = randomUUID();
 const sessionId = randomUUID();
 const secondarySessionId = randomUUID();
+const chatSessionId = randomUUID();
 const contextPackId = randomUUID();
 const eventId = randomUUID();
 const memoryId = randomUUID();
@@ -74,7 +76,8 @@ function toolPayload(body) {
     );
     return {
       session_id:
-        args.session_label === "second-independent-session" ? secondarySessionId : sessionId,
+        args.external_session_id === "remote-chat-identity" ? chatSessionId :
+          args.session_label === "second-independent-session" ? secondarySessionId : sessionId,
       project_id: projectId,
       checkpoint: { payload: null, updated_at: null },
       previous_unclosed_session: null,
@@ -84,7 +87,9 @@ function toolPayload(body) {
   }
   if (name === "memory_get_context_pack") {
     assert(
-      args.session_id === sessionId || args.session_id === secondarySessionId,
+      args.session_id === sessionId ||
+        args.session_id === secondarySessionId ||
+        args.session_id === chatSessionId,
       "context pack used the wrong remote session"
     );
     return {
@@ -138,6 +143,21 @@ function toolPayload(body) {
       project_log_update: { status: "disabled", reason: "project_log_sync_disabled" }
     };
   }
+  if (name === "memory_agent_checkpoint") {
+    const checkpointSchema = createRecallantTools().find((tool) => tool.name === name).inputSchema;
+    const parsed = checkpointSchema.safeParse(args);
+    assert(parsed.success, `remote checkpoint violates the actual MCP schema: ${parsed.error?.message ?? ""}`);
+    assert(args.session_id === chatSessionId, "remote checkpoint used the wrong chat session");
+    return {
+      ok: true,
+      action: "memory_agent_checkpoint",
+      ownership: "session",
+      session_id: chatSessionId,
+      checkpoint_updated_at: "2026-10-13T00:00:00.000Z",
+      event_id: randomUUID(),
+      searchable_memory_created: false
+    };
+  }
   throw new Error(`unexpected tool ${name}`);
 }
 
@@ -145,7 +165,7 @@ const server = createServer(async (request, response) => {
   try {
     const body = JSON.parse(await readBody(request));
     const args = body.params?.arguments ?? {};
-    requests.push({
+      requests.push({
       method: body.method,
       tool: body.params?.name ?? null,
       event_text: body.params?.name === "memory_append_event" ? (args.text ?? null) : null,
@@ -157,7 +177,8 @@ const server = createServer(async (request, response) => {
       closeout_replay_sanitized:
         body.params?.name === "memory_closeout"
           ? (args.closeout_diagnostics?.replay_sanitization?.last_event_id ?? null)
-          : null
+          : null,
+      arguments: args
     });
     response.setHeader("content-type", "application/json");
     if (request.url !== "/api/mcp" || request.method !== "POST") {
@@ -809,6 +830,92 @@ try {
     "second session state was mixed with the first session"
   );
 
+  chatProjectDir = await mkdtemp(join(tmpdir(), "recallant-remote-chat-session-"));
+  await mkdir(join(chatProjectDir, ".codex"), { recursive: true });
+  await writeFile(
+    join(chatProjectDir, ".codex", "config.toml"),
+    [
+      "[mcp_servers.recallant]",
+      'command = "recallant"',
+      'args = ["remote-bridge"]',
+      `env = { RECALLANT_REMOTE_MCP_URL = "${serverUrl}", RECALLANT_PROJECT_ID = "${projectId}", RECALLANT_DEVELOPER_ID = "${developerId}", RECALLANT_REMOTE_MCP_CLIENT_ID = "remote-chat-checkpoint", RECALLANT_REMOTE_MCP_CREDENTIAL = "${credential}" }`,
+      ""
+    ].join("\n")
+  );
+  const externalChatId = "remote-chat-identity";
+  const chatStarted = await cli(
+    [
+      "agent-start",
+      "--project-dir",
+      chatProjectDir,
+      "--external-session-id",
+      externalChatId,
+      "--task-hint",
+      "remote chat recovery",
+      "--format",
+      "json"
+    ],
+    chatProjectDir
+  );
+  assert(
+    chatStarted.session_id === chatSessionId,
+    "remote agent-start did not preserve the external chat identity"
+  );
+  const chatCheckpoint = await cli(
+    [
+      "agent-checkpoint",
+      "--project-dir",
+      chatProjectDir,
+      "--external-session-id",
+      externalChatId,
+      "--focus",
+      "remote chat private focus",
+      "--next-step",
+      "resume this external chat"
+    ],
+    chatProjectDir
+  );
+  assert(
+    chatCheckpoint.mode === "remote_mcp" &&
+      chatCheckpoint.ownership === "session" &&
+      chatCheckpoint.searchable_memory_created === false,
+    `remote CLI checkpoint did not stay session-scoped: ${JSON.stringify({
+      output: chatCheckpoint,
+      checkpointRequests: requests.filter((request) => request.tool === "memory_agent_checkpoint")
+    })}`
+  );
+  const chatHash = createHash("sha256").update(externalChatId).digest("hex");
+  const chatStatePath = join(chatProjectDir, ".recallant", "sessions", `${chatHash}.json`);
+  const chatState = JSON.parse(await readFile(chatStatePath, "utf8"));
+  assert(chatState.session_id === chatSessionId, "remote chat state used the wrong session id");
+  await rm(chatStatePath);
+  const restartedChat = await cli(
+    [
+      "agent-start",
+      "--project-dir",
+      chatProjectDir,
+      "--external-session-id",
+      externalChatId,
+      "--task-hint",
+      "remote chat after process restart",
+      "--format",
+      "json"
+    ],
+    chatProjectDir
+  );
+  assert(
+    restartedChat.session_id === chatSessionId,
+    "remote CLI restart must recover the same external Codex chat identity"
+  );
+  assert(
+    requests.some(
+      (request) =>
+        request.tool === "memory_start_session" &&
+        request.arguments.external_session_id === externalChatId
+    ),
+    "remote CLI did not send external_session_id to memory_start_session"
+  );
+
   const artifactLocalId = randomUUID();
   const eventCallsBeforeArtifact = requests.filter(
     (request) => request.tool === "memory_append_event"
@@ -868,4 +975,5 @@ try {
   await new Promise((resolveClose) => server.close(resolveClose));
   await rm(projectDir, { recursive: true, force: true });
   if (secondaryProjectDir) await rm(secondaryProjectDir, { recursive: true, force: true });
+  if (chatProjectDir) await rm(chatProjectDir, { recursive: true, force: true });
 }

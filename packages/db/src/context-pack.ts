@@ -66,15 +66,6 @@ function compactProvenance(value: unknown) {
   };
 }
 
-function minimalProvenance(value: unknown) {
-  const entry = record(value);
-  return {
-    source_count: numberValue(entry.source_count) ?? 0,
-    primary_source_kind: entry.primary_source_kind ?? null,
-    summary: shorten(entry.summary, 80)
-  };
-}
-
 function compactSourceRefs(value: unknown, includeQuotes: boolean) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 8).map((item) => {
@@ -113,11 +104,15 @@ function minimalMemory(value: unknown): JsonRecord {
   const entry = record(value);
   return {
     memory_id: entry.memory_id ?? entry.id ?? null,
-    ...(entry.use_policy === "instruction_grade" ? { title: shorten(entry.title, 80) } : {}),
+    title: shorten(entry.title, 40),
+    ...(typeof entry.body === "string" ? { body: shorten(entry.body, 100) } : {}),
     use_policy: entry.use_policy ?? null,
     audience: compactAudience(entry.audience),
-    source_refs: compactSourceRefs(entry.source_refs, false),
-    provenance: minimalProvenance(entry.provenance)
+    source_refs: compactSourceRefs(entry.source_refs, false).slice(0, 1),
+    provenance: {
+      source_count: numberValue(record(entry.provenance).source_count) ?? 0,
+      primary_source_kind: record(entry.provenance).primary_source_kind ?? null
+    }
   };
 }
 
@@ -480,13 +475,18 @@ function shortenMemoryBodies(payload: ContextPackPayload, state: OmissionState) 
     const items = Array.isArray(sections[sectionName]) ? sections[sectionName] : null;
     if (!items) continue;
     const shortened = items.map(minimalMemory);
-    const removedBodies = items.filter((item) => "body" in record(item)).length;
+    const shortenedBodies = items.filter((item) => {
+      const body = record(item).body;
+      return typeof body === "string" && body.length > 100;
+    }).length;
+    const omittedRefs = items.reduce((count, item) => {
+      const refs = record(item).source_refs;
+      return count + (Array.isArray(refs) ? Math.max(0, refs.length - 1) : 0);
+    }, 0);
     sections[sectionName] = shortened;
-    if (removedBodies > 0) {
-      state.changed = true;
-      state.fields[`${sectionName}.body`] =
-        (state.fields[`${sectionName}.body`] ?? 0) + removedBodies;
-    }
+    state.changed = true;
+    addCount(state.fields, `${sectionName}.body`, shortenedBodies);
+    addCount(state.fields, `${sectionName}.source_refs`, omittedRefs);
   }
 }
 
@@ -711,6 +711,7 @@ export function boundContextPack<T extends ContextPackPayload>(
   shortenMemoryBodies(payload, state);
   if (tryFit(payload, state, maxChars)) return payload as T;
 
+  if (evictArrayItems(payload, state, "binding_rules", maxChars, 1)) return payload as T;
   if (evictArrayItems(payload, state, "working_memories", maxChars)) return payload as T;
   if (evictArrayItems(payload, state, "binding_rules", maxChars)) return payload as T;
 

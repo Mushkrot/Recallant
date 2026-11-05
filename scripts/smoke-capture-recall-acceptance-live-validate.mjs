@@ -269,6 +269,13 @@ try {
   const rawText = `${JSON.stringify(evidence, null, 2)}\n`;
   await writeFile(evidencePath, rawText);
   const report = await validateLiveCaptureRecallAcceptance(evidence, rawText, evidencePath);
+  const binding = await db.getProjectBinding(projectId);
+  assert(binding.primary_path === projectPath, "validator changed the existing project path");
+  const sources = await db.listProjectSources(projectId);
+  assert(
+    sources.length === 1 && sources[0].uri === projectPath && sources[0].is_primary,
+    "validator changed the existing workspace source"
+  );
   assert(report.status === "pass", "live capture/recall acceptance validator did not pass");
   assert(report.first_session_id === first.session_id, "first session mismatch");
   assert(report.next_session_id === next.session_id, "next session mismatch");

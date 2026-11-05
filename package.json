@@ -157,7 +157,8 @@
     "phase7:smoke": "node scripts/smoke-phase7-cli.mjs",
     "phase3:smoke": "node scripts/smoke-phase3-db.mjs",
     "test:product-gates": "npm run onboarding-temp-cleanup:smoke && npm run onboarding:smoke && npm run agent-lifecycle-gate:smoke && npm run project-binding-regressions:strict && npm run project-log-sync:smoke && npm run diagnostic-memory-conflicts:smoke && npm run codex-otel-contract:smoke && npm run codex-otel-control:smoke && npm run capture-readiness:smoke && npm run agent-observability:smoke && npm run mcp-stdio-lifecycle:smoke && npm run r5-security-governance:smoke && npm run copyable-command-safety:smoke && npm run security-hardening:smoke && npm run review-ui:smoke",
-    "test": "npm run test:product-gates"
+    "test": "npm run test:product-gates",
+    "test:continuity": "node scripts/smoke-checkpoint-storage-continuity.mjs && node scripts/smoke-precompact-checkpoint-preservation.mjs && node scripts/smoke-checkpoint-consumer-paths.mjs && node scripts/smoke-closeout-factual-memory.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

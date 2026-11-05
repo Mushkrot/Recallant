@@ -244,9 +244,15 @@ async function runLifecycle(projectDir, marker, label, options = {}) {
     ),
     `${label}: later context did not recall memory ${marker}`
   );
-  assert(
-    String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
-    `${label}: later context did not recall checkpoint ${marker}`
+  assert.equal(
+    context.sections?.checkpoint?.ownership,
+    "session",
+    `${label}: new session checkpoint did not report its ownership`
+  );
+  assert.equal(
+    context.sections?.checkpoint?.legacy_project_checkpoint?.payload_included,
+    false,
+    `${label}: new session inherited an unowned legacy checkpoint`
   );
 
   const ask = await cli(projectDir, [

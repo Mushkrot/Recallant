@@ -123,17 +123,30 @@ Agents append workflow evidence through MCP or CLI fallback commands. Recallant 
 attaches source references, chunks/indexes searchable content, and may create governed memories when
 policy allows it.
 
-Checkpoint state is deliberately separate from searchable checkpoint memory. Low-level
-`memory_set_checkpoint` updates the current project checkpoint for context-pack recovery and reports
-`checkpoint_state_only: true`; it does not create governed memory. Normal closeout uses the MCP
-`memory_closeout` tool or CLI `agent-closeout`, which return lifecycle readiness semantics for event
-write, checkpoint update, searchable closeout memory, recall proof, and next-session context.
-Searchable checkpoint memory uses the explicit high-level `memory_agent_checkpoint` MCP tool or the
-CLI `agent-checkpoint`, which update checkpoint state, attach a checkpoint event when a session is
-available, and create a governed `memory_type: "checkpoint"` record with source refs.
+Checkpoint state is deliberately separate from searchable project memory. When a `session_id` is
+provided, `memory_set_checkpoint` stores state for that Recallant session and reports
+`checkpoint_state_only: true`; it does not create governed memory. Context packs read only their
+session's checkpoint. The old `checkpoints` project row has no reliable chat owner and is left
+available only through the explicitly legacy project-level API. Normal closeout uses MCP
+`memory_closeout` or CLI `agent-closeout`; it updates that session's checkpoint and can still write
+project-shared closeout memories. `agent-checkpoint` also stores session state and does not mirror a
+private next step into `PROJECT_LOG.md`. `memory_agent_checkpoint` with a session ID appends a session
+event; without one it deliberately creates a project-shared checkpoint memory.
+
+Codex hooks pass the stable external chat ID to `memory_start_session`. Recallant hashes that ID for
+session matching; the local CLI hashes it for the per-chat state path. A repeated start for the same
+chat reuses a fresh session or links a new session to its interrupted predecessor and copies that
+session's checkpoint. Starts without an identity do not adopt another chat's checkpoint; interrupted
+sessions with unknown ownership require explicit `recover_session_id` selection.
 
 Instruction-grade rules require stronger authority than ordinary agent inference. A memory can be
 useful without becoming a binding instruction.
+
+Ordinary diagnostic facts about public DNS, provider health or model output remain recallable.
+Factual mentions of default recall or instruction/rule audits are not themselves new directives.
+Publication/access decisions, provider/model selection instructions, sensitive operations and
+low-confidence agent memories still require review. Closeout work logs use the same governance
+as other memories; successful closeout requires default recall and next-session context proof.
 
 ## Read Path
 

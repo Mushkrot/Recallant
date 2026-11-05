@@ -809,7 +809,13 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
     const setCheckpoint = await postJsonRpc(
       options,
       "tools/call",
-      { name: "memory_set_checkpoint", arguments: { payload: checkpointPayload } },
+      {
+        name: "memory_set_checkpoint",
+        arguments: {
+          payload: checkpointPayload,
+          session_id: options.sessionId ?? startedSessionId
+        }
+      },
       5
     );
     if (!setCheckpoint.ok) {
@@ -831,7 +837,10 @@ async function runProbes(options: RemoteDoctorOptions, initialStages: RemoteMcpD
       const getCheckpoint = await postJsonRpc(
         options,
         "tools/call",
-        { name: "memory_get_checkpoint", arguments: {} },
+        {
+          name: "memory_get_checkpoint",
+          arguments: { session_id: options.sessionId ?? startedSessionId }
+        },
         6
       );
       const markerFound = getCheckpoint.ok && checkpointContainsMarker(getCheckpoint, marker);

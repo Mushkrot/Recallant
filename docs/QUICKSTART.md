@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/main/scripts/ins
 That command installs the Recallant CLI and prepares private local storage for a single-user
 self-host evaluation.
 
-For an immutable prerelease install, use the versioned command after the tag is published:
+For an immutable prerelease install, use the published versioned command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mushkrot/Recallant/v0.1.0-dev.4/scripts/install-recallant-bootstrap.sh \
@@ -207,10 +207,16 @@ Expected remote readiness:
 - on sandbox network errors, CLI lifecycle commands report a classified remote failure and preserve
   the pending operation in the ordered local spool; after restoring narrow access to the configured
   host, `recallant sync-spool --project-dir .` replays it through remote MCP without local storage;
-- a checkpoint can be written and read back with `memory_set_checkpoint` and
-  `memory_get_checkpoint`;
-- `memory_set_checkpoint` remains state-only; use `memory_agent_checkpoint` when the checkpoint
-  should also become searchable governed checkpoint memory;
+- a session checkpoint can be written and read back with `memory_set_checkpoint` and
+  `memory_get_checkpoint` when both calls include the `session_id` returned by
+  `memory_start_session`;
+- project-level checkpoints without a session ID are legacy state with ambiguous chat ownership;
+  they are not injected into a session context pack;
+- session checkpoints remain private to their Recallant session. Codex hooks pass the stable
+  external chat ID automatically; the CLI accepts `--external-session-id` when that ID is available;
+  repeating the start for the same chat reuses or recovers its session;
+- `memory_agent_checkpoint` with a `session_id` stores session state and an event. Without one it
+  creates an explicitly project-shared checkpoint memory;
 - governed semantic memory is proven separately by creating a small non-secret memory through
   `memory_create_agent_memory` and recalling it through `memory_recall_agent_memories`.
 - after `recallant remote-doctor --semantic-proof`, rerun `recallant agent-start --format json`; it
@@ -221,10 +227,10 @@ Do not treat a checkpoint-only readback as semantic recall proof. Do not run loc
 --confirm` on a remote workstation unless the operator explicitly wants the local-storage attach
 path instead of the scoped remote MCP path.
 
-For baseline parity, `memory_set_checkpoint` remains state-only. Use `memory_closeout` or
-`recallant agent-closeout` for normal closeout. Use `memory_agent_checkpoint` or
-`recallant agent-checkpoint` only when the checkpoint itself should become searchable governed
-checkpoint memory.
+`memory_set_checkpoint` with `session_id` remains state-only. Use `memory_closeout` or
+`recallant agent-closeout` for normal closeout. Use `recallant agent-checkpoint` for session pause
+state. Call `memory_agent_checkpoint` without `session_id` only when the checkpoint should become
+project-shared searchable memory.
 
 For headless servers or CI-like hosts, use a short-lived one-time bootstrap token created from a
 protected admin/human surface:

@@ -256,8 +256,9 @@ For a remote existing project, prove the connection before importing history:
 5. prove session/context readiness with `memory_start_session` plus `memory_get_context_pack`, or
    `recallant remote-doctor --capture-proof`; `recallant connect-cloud` performs this context proof
    by default after approval and exposes the result under `remote_proof`;
-6. optionally prove checkpoint state with `memory_set_checkpoint` plus `memory_get_checkpoint`, but
-   keep that as checkpoint-only evidence;
+6. optionally prove session checkpoint state with `memory_set_checkpoint` plus
+   `memory_get_checkpoint`, passing the same `session_id` to both calls; keep that as
+   checkpoint-only evidence;
 7. run `recallant remote-doctor --semantic-proof`, or create one non-secret governed memory marker
    with `memory_create_agent_memory` and recall it with `memory_recall_agent_memories`;
 8. rerun `recallant agent-start --format json` and verify
@@ -274,7 +275,7 @@ The proof marker should be synthetic and concise. A safe `memory_create_agent_me
   "scope": "project",
   "audience": [{ "kind": "all_agents", "id": null }],
   "title": "Safe Recallant semantic marker",
-  "body": "Synthetic non-secret marker recallant_safe_semantic_marker_example for create+recall proof.",
+  "body": "Synthetic diagnostic marker recallant_safe_semantic_marker_example for create+recall proof.",
   "confidence": 1,
   "source_refs": [],
   "created_by": "agent",
@@ -337,8 +338,10 @@ events onto that same loop:
 - session start: `memory_start_session` then `memory_get_context_pack`;
 - meaningful work: concise `memory_append_event` or `memory_create_agent_memory` for decisions,
   actions, and tests;
-- before compaction or pause: checkpoint state only, or `memory_agent_checkpoint` if the checkpoint
-  itself should become searchable memory;
+- before compaction or pause: save state with `memory_set_checkpoint` using the active
+  `session_id`, or `recallant agent-checkpoint --external-session-id <chat-id>` when using the CLI;
+  the PreCompact hook records that compaction started and does not synthesize or overwrite a
+  checkpoint;
 - stop/closeout: `memory_closeout` with closeout summary and next step;
 - diagnostics: one synthetic non-secret marker create+recall proof.
 

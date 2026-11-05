@@ -49,6 +49,23 @@ npm run review-ui:playwright
 `npm run db:reset:integration` recreates the development database and deletes its existing data;
 use it only for a disposable test database. `npm run db:down` stops the development stack.
 
+### Session continuity regressions
+
+The continuity suite uses a separate disposable database server. It checks concurrent chat
+ownership, restart recovery, legacy migration, compaction, CLI/MCP consumers, offline replay and
+factual closeout. It creates uniquely named databases and removes only those it created.
+
+Create an empty database named `recallant_continuity_test` on your loopback test server, then set
+`RECALLANT_CONTINUITY_DATABASE_URL` to its connection URL (use the same disposable credentials as
+your development database). Run:
+
+```bash
+npm run test:continuity
+```
+
+The suite rejects a missing URL, a non-loopback host or a different database name. Never use
+production credentials or a production database server. CI provisions this target explicitly.
+
 For public documentation changes:
 
 ```bash

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline";
 
 import pg from "pg";
 
@@ -55,6 +56,81 @@ function runHook(projectPath, payload, env = onlineEnv) {
   return Date.now() - startedAt;
 }
 
+function sessionStatePath(projectPath, externalSessionId) {
+  const hash = createHash("sha256").update(externalSessionId).digest("hex");
+  return `${projectPath}/.recallant/sessions/${hash}.json`;
+}
+
+function runCli(args, env = onlineEnv) {
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: projectDir,
+    env,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(result.status, 0, `CLI failed: ${result.stderr}`);
+  assert.equal(result.signal, null, `CLI timed out: ${result.error?.message ?? ""}`);
+  return JSON.parse(result.stdout);
+}
+
+async function withMcpClient(work) {
+  const child = spawn(process.execPath, [cliPath, "mcp-server"], {
+    cwd: projectDir,
+    env: onlineEnv,
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  const responses = new Map();
+  const lines = createInterface({ input: child.stdout });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  lines.on("line", (line) => {
+    if (!line.trim()) return;
+    const message = JSON.parse(line);
+    if (message.id !== undefined) responses.set(message.id, message);
+  });
+  let nextId = 1;
+  const callRpc = async (method, params = {}) => {
+    const id = nextId++;
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (responses.has(id)) {
+        const response = responses.get(id);
+        if (response.error) throw new Error(JSON.stringify(response.error));
+        return response.result;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    throw new Error(`Timed out waiting for MCP response ${method}: ${stderr}`);
+  };
+  try {
+    await callRpc("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "checkpoint-isolation-smoke", version: "1" }
+    });
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`
+    );
+    const callTool = async (name, args) => {
+      const result = await callRpc("tools/call", { name, arguments: args });
+      const body = result.content?.[0]?.text;
+      assert.ok(body, `MCP ${name} returned no text result`);
+      return JSON.parse(body);
+    };
+    await work(callTool);
+  } finally {
+    child.stdin.end();
+    await new Promise((resolveExit) => {
+      if (child.exitCode !== null) return resolveExit();
+      child.once("exit", resolveExit);
+      setTimeout(() => child.kill("SIGTERM"), 2_000).unref();
+    });
+    lines.close();
+  }
+}
+
 function common(eventName, turnId = "turn-1") {
   return {
     session_id: "external-codex-session",
@@ -86,6 +162,63 @@ try {
       2
     )}\n`
   );
+
+  await db.setCheckpoint(project.projectId, {
+    source: "owner-reviewed-project-checkpoint",
+    next_step: "Keep project-wide guidance unchanged during Codex compaction."
+  });
+
+  await withMcpClient(async (callTool) => {
+    const mcpA = await callTool("memory_start_session", {
+      client_kind: "codex",
+      client_version: "smoke",
+      project_path: projectDir,
+      external_session_id: "mcp-chat-A"
+    });
+    const mcpB = await callTool("memory_start_session", {
+      client_kind: "codex",
+      client_version: "smoke",
+      project_path: projectDir,
+      external_session_id: "mcp-chat-B"
+    });
+    assert.notEqual(mcpA.session_id, mcpB.session_id);
+    const emptyB = await callTool("memory_get_context_pack", {
+      session_id: mcpB.session_id,
+      task_hint: "new chat has no inherited checkpoint"
+    });
+    assert.equal(emptyB.sections.checkpoint.payload.current_focus, "not_recorded");
+    assert.equal(emptyB.sections.checkpoint.legacy_project_checkpoint.payload_included, false);
+
+    const payloadA = {
+      current_status: "in_progress",
+      current_focus: "MCP chat A",
+      next_step: "Resume MCP chat A"
+    };
+    const payloadB = {
+      current_status: "in_progress",
+      current_focus: "MCP chat B",
+      next_step: "Resume MCP chat B"
+    };
+    await callTool("memory_set_checkpoint", { session_id: mcpA.session_id, payload: payloadA });
+    await callTool("memory_set_checkpoint", { session_id: mcpB.session_id, payload: payloadB });
+    const resumedA = await callTool("memory_start_session", {
+      client_kind: "codex",
+      client_version: "smoke",
+      project_path: projectDir,
+      external_session_id: "mcp-chat-A"
+    });
+    assert.equal(resumedA.session_id, mcpA.session_id);
+    const contextA = await callTool("memory_get_context_pack", {
+      session_id: mcpA.session_id,
+      task_hint: "MCP chat A resume"
+    });
+    const contextB = await callTool("memory_get_context_pack", {
+      session_id: mcpB.session_id,
+      task_hint: "MCP chat B resume"
+    });
+    assert.equal(contextA.sections.checkpoint.payload.current_focus, payloadA.current_focus);
+    assert.equal(contextB.sections.checkpoint.payload.current_focus, payloadB.current_focus);
+  });
 
   const payloads = [
     { ...common("SessionStart", null), source: "startup" },
@@ -139,7 +272,9 @@ try {
   runHook(projectDir, payloads[1]);
   runHook(projectDir, payloads[3]);
 
-  const state = JSON.parse(await readFile(`${projectDir}/.recallant/current-session.json`, "utf8"));
+  const state = JSON.parse(
+    await readFile(sessionStatePath(projectDir, "external-codex-session"), "utf8")
+  );
   assert.equal(state.status, "active");
   assert.equal(state.native_hook.external_session_id, "external-codex-session");
   assert.equal(state.native_hook.last_event_name, "PostToolUse");
@@ -207,8 +342,104 @@ try {
   assert.notEqual(childStart?.run_id, state.session_id);
 
   const checkpoint = await db.getCheckpoint(project.projectId);
-  assert.equal(checkpoint?.payload?.source, "codex-native-hook");
-  assert.equal(checkpoint?.payload?.external_session_id, "external-codex-session");
+  assert.equal(
+    checkpoint?.payload?.source,
+    "owner-reviewed-project-checkpoint",
+    "PreCompact must not replace project-wide checkpoint with chat-specific state"
+  );
+
+  const checkpointA = {
+    status: "in_progress",
+    current_focus: "Chat A private task",
+    next_step: "Resume chat A after process restart."
+  };
+  runCli([
+    "agent-checkpoint",
+    "--project-dir",
+    projectDir,
+    "--external-session-id",
+    "external-codex-session",
+    "--focus",
+    checkpointA.current_focus,
+    "--next-step",
+    checkpointA.next_step
+  ]);
+  const stateA = JSON.parse(
+    await readFile(sessionStatePath(projectDir, "external-codex-session"), "utf8")
+  );
+  const checkpointB = {
+    current_focus: "Chat B private task",
+    next_step: "Continue chat B independently."
+  };
+  runHook(projectDir, {
+    ...common("SessionStart", null),
+    session_id: "second-external-codex-session",
+    source: "startup"
+  });
+  runCli([
+    "agent-checkpoint",
+    "--project-dir",
+    projectDir,
+    "--external-session-id",
+    "second-external-codex-session",
+    "--focus",
+    checkpointB.current_focus,
+    "--next-step",
+    checkpointB.next_step
+  ]);
+  const stateB = JSON.parse(
+    await readFile(sessionStatePath(projectDir, "second-external-codex-session"), "utf8")
+  );
+  assert.notEqual(stateA.session_id, stateB.session_id, "two Codex chats shared one Recallant session");
+  assert.equal(
+    (await db.getSessionCheckpoint(stateA.session_id)).payload.current_focus,
+    checkpointA.current_focus
+  );
+  assert.equal(
+    (await db.getSessionCheckpoint(stateB.session_id)).payload.current_focus,
+    checkpointB.current_focus
+  );
+  const contextA = await db.getContextPack({ session_id: stateA.session_id, task_hint: "resume A" });
+  const contextB = await db.getContextPack({ session_id: stateB.session_id, task_hint: "resume B" });
+  assert.equal(contextA.sections.checkpoint.payload.current_focus, checkpointA.current_focus);
+  assert.equal(contextB.sections.checkpoint.payload.current_focus, checkpointB.current_focus);
+  assert.equal(contextA.sections.checkpoint.legacy_project_checkpoint.payload_included, false);
+
+  await client.query(
+    "UPDATE sessions SET last_seen_at = now() - interval '9 hours' WHERE id = $1",
+    [stateA.session_id]
+  );
+  runHook(projectDir, { ...common("SessionStart", null), source: "startup" });
+  const recoveredStateA = JSON.parse(
+    await readFile(sessionStatePath(projectDir, "external-codex-session"), "utf8")
+  );
+  assert.notEqual(recoveredStateA.session_id, stateA.session_id);
+  const recovered = await client.query(
+    "SELECT recovered_from_session_id, status FROM sessions WHERE id = $1",
+    [recoveredStateA.session_id]
+  );
+  assert.equal(recovered.rows[0].recovered_from_session_id, stateA.session_id);
+  assert.equal(recovered.rows[0].status, "active");
+  assert.equal(
+    (await db.getSessionCheckpoint(recoveredStateA.session_id)).payload.current_focus,
+    checkpointA.current_focus,
+    "new Recallant session for the same external Codex chat must recover its checkpoint"
+  );
+  const restarted = runCli([
+    "agent-start",
+    "--project-dir",
+    projectDir,
+    "--external-session-id",
+    "external-codex-session",
+    "--format",
+    "json"
+  ]);
+  assert.equal(restarted.session_id, recoveredStateA.session_id);
+  await assert.rejects(
+    readFile(`${projectDir}/.recallant/current-session.json`, "utf8"),
+    { code: "ENOENT" },
+    "chat-specific state must not create or overwrite the legacy shared state file"
+  );
 
   await writeFile(
     `${offlineDir}/.recallant/config`,
@@ -236,7 +467,7 @@ try {
   assert.equal(spool.includes(offlineSecret), false, "offline spool leaked a secret");
   assert.equal(JSON.parse(spool.trim()).record_kind, "observation");
   const offlineState = JSON.parse(
-    await readFile(`${offlineDir}/.recallant/current-session.json`, "utf8")
+    await readFile(sessionStatePath(offlineDir, "offline-codex-session"), "utf8")
   );
   assert.equal(offlineState.status, "offline");
   assert.equal(offlineState.native_hook.last_mode, "offline_spool");
@@ -287,7 +518,7 @@ try {
   );
   assert.equal(JSON.parse(remoteOnlySpool.trim()).record_kind, "observation");
   const remoteOnlyState = JSON.parse(
-    await readFile(`${remoteOnlyDir}/.recallant/current-session.json`, "utf8")
+    await readFile(sessionStatePath(remoteOnlyDir, "remote-only-codex-session"), "utf8")
   );
   assert.equal(remoteOnlyState.status, "offline");
   assert.equal(remoteOnlyState.native_hook.last_mode, "offline_spool");
@@ -304,6 +535,7 @@ try {
         error_capture: "pass",
         subagent_run: "pass",
         checkpoint: "pass",
+        mcp_session_identity: "pass",
         redaction: "pass",
         transcript_parsing: false,
         silent_stdout: true,

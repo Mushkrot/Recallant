@@ -91,9 +91,9 @@ function remoteAgentReadyAgentsSection() {
 - Start each session through the configured remote Recallant MCP/client integration. Call \`memory_start_session\`, then \`memory_get_context_pack\` with the current task hint before making changes.
 - If this Codex client was already open when \`.codex/config.toml\` was written or updated, restart Codex (or use \`Restart extension\` in the IDE) before treating direct MCP as unavailable. Then retry \`memory_start_session\` and \`memory_get_context_pack\`; an already-open client can retain the earlier MCP tool snapshot.
 - During work, write concise non-secret decisions, actions, tests, and governed memories with \`memory_append_event\` or \`memory_create_agent_memory\` when useful.
-- Use \`memory_set_checkpoint\` only for checkpoint state; it is not semantic recall proof.
+- Use \`memory_set_checkpoint\` with the active \`session_id\` for private checkpoint state; it is not semantic recall proof.
 - On pause or finish, call \`memory_closeout\`. This is the normal MCP closeout path and includes checkpoint state, searchable memory, recall verification, and next-session readiness semantics.
-- If MCP is unavailable, use the CLI fallback against the configured remote project: \`recallant agent-start --format json\`, \`recallant agent-event\`, and \`recallant agent-closeout\`. Use \`recallant agent-checkpoint\` only as an advanced pause/compaction state helper.
+- If MCP is unavailable, use the CLI fallback against the configured remote project: \`recallant agent-start --format json\`, \`recallant agent-event\`, and \`recallant agent-closeout\`. Pass \`--external-session-id\` when a stable Codex chat ID is available. Use \`recallant agent-checkpoint\` only for explicit pause state.
 - \`mode: "remote_mcp_ready"\` from a current \`recallant agent-start\` includes the remote session and context-pack ids; a classified transport failure is spooled for later remote replay.
 - If direct MCP or the CLI reports a DNS, fetch, or sandbox-network error, retry \`recallant remote-doctor --capture-proof\` through the client's narrow network-enabled or elevated execution path without asking the project owner to diagnose infrastructure. Keep the destination limited to the configured Recallant host.
 - Do not bypass an approval that the client requires for elevated execution; request only the narrow Recallant network check when approval is mandatory.
@@ -133,7 +133,7 @@ Project: ${projectName}
 
 - This project uses a central Recallant server through remote MCP.
 - Do not add local Postgres, Docker, or \`RECALLANT_DATABASE_URL\` setup just to work in this project.
-- Keep checkpoint-only state separate from semantic memory proof. Use \`memory_set_checkpoint\` or \`recallant agent-checkpoint\` only for checkpoint/pause state.
+- Keep checkpoint-only state separate from semantic memory proof. Pass the active \`session_id\` to \`memory_set_checkpoint\`; use \`recallant agent-checkpoint\` for explicit session pause state.
 - Keep this file compact. Durable session history belongs in Recallant memory.
 `;
 }

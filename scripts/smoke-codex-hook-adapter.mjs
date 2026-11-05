@@ -65,7 +65,7 @@ const expectedKinds = {
   UserPromptSubmit: ["user_prompt"],
   PreToolUse: ["tool_call"],
   PostToolUse: ["tool_result"],
-  PreCompact: ["system", "checkpoint"],
+  PreCompact: ["system"],
   PostCompact: ["system"],
   SubagentStart: ["system"],
   SubagentStop: ["assistant_response"],

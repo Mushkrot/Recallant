@@ -258,10 +258,12 @@ try {
     `context pack did not recall captured decision: ${JSON.stringify(context)}`
   );
   assertContextIncludesCloseout(context, firstCloseoutProof, "second context pack");
-  assert(
-    String(context.sections?.checkpoint?.payload?.next_step ?? "").includes(marker),
-    "context pack did not include the latest checkpoint"
+  assert.equal(
+    context.sections?.checkpoint?.legacy_project_checkpoint?.payload_included,
+    false,
+    "a new chat must not inherit the previous chat's checkpoint"
   );
+  assert.equal(context.sections?.checkpoint?.ownership, "session");
 
   const secondCloseout = await cli(onlineProject, [
     "agent-closeout",
